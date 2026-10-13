@@ -141,8 +141,13 @@ func (t *MemoryTransport) Stream(ctx context.Context, to coreconsensus.NodeID, o
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
-	return in(coreconsensus.InstallRequest{Ctx: ctx, From: peer, Offer: offer, Offset: acc.Offset, Body: rc})
+	ierr := in(coreconsensus.InstallRequest{Ctx: ctx, From: peer, Offer: offer, Offset: acc.Offset, Body: rc})
+	// The install's verdict wins; a Close failure of the stream it read is
+	// reported only when the install itself succeeded.
+	if cerr := rc.Close(); cerr != nil && ierr == nil {
+		return cerr
+	}
+	return ierr
 }
 
 // Bind implements Transport.

@@ -226,8 +226,12 @@ func newRaft(cfg Config) (*Node, error) {
 	}
 	n.canVote = st.State == coreconsensus.StampMember
 	var silentTerm, silentIndex uint64
-	if s, ok := cfg.Log.(interface{ silence() (uint64, uint64) }); ok {
-		silentTerm, silentIndex = s.silence()
+	if s, ok := cfg.Log.(interface {
+		silence() (uint64, uint64, error)
+	}); ok {
+		if silentTerm, silentIndex, err = s.silence(); err != nil {
+			return nil, storageFailed("silence condition", err)
+		}
 	}
 	seed := cfg.Seed
 	if seed == 0 {
@@ -305,7 +309,9 @@ func (n *Node) load() (raft.Start, error) {
 		// applies nothing and asks the leader for an install (D7, R6-13,
 		// R7-18).
 		n.noTable = true
-		base = noTableBase(n.cfg.Log, metas, first)
+		if base, err = noTableBase(n.cfg.Log, metas, first); err != nil {
+			return raft.Start{}, storageFailed("term", err)
+		}
 	}
 	s := base.Position.Index
 	if first > s+1 {
@@ -361,7 +367,11 @@ func (n *Node) load() (raft.Start, error) {
 // noTableBase is the base a node with no usable snapshot starts from: the
 // log's compaction point, with the configuration and chain tip the newest
 // snapshot's metadata records, which stays readable when its bytes do not.
-func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMeta, first uint64) coreconsensus.SnapshotMeta {
+//
+// The term at first-1 is the log's own compaction term, which every LogStore
+// answers; a store that cannot is one whose base this node must not guess,
+// since a wrong term there is a log-matching check answered falsely.
+func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMeta, first uint64) (coreconsensus.SnapshotMeta, error) {
 	var b coreconsensus.SnapshotMeta
 	if len(metas) > 0 {
 		b = metas[0]
@@ -372,8 +382,12 @@ func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMeta,
 		}
 	}
 	b.Position.Index = first - 1
-	b.Position.Term, _ = log.Term(first - 1)
-	return b
+	term, err := log.Term(first - 1)
+	if err != nil {
+		return coreconsensus.SnapshotMeta{}, err
+	}
+	b.Position.Term = term
+	return b, nil
 }
 
 // ---- transport callbacks ----
@@ -998,7 +1012,12 @@ func (n *Node) handOff(ctx context.Context) {
 	}
 	tctx, cancel := context.WithTimeout(ctx, n.cfg.InitialTiming.ElectionTimeoutMax)
 	defer cancel()
-	_ = n.transferLocal(tctx, to)
+	// Close goes on whatever the transfer answered: the hand-off only
+	// spares the cluster an election timeout, so a failed one is worth a
+	// line in the log and nothing more.
+	if err := n.transferLocal(tctx, to); err != nil {
+		n.obs.info("consensus: leadership hand-off at close did not complete", lattr("to", uint64(to)), lstr("error", err.Error()))
+	}
 }
 
 // HardClose stops now: no transfer, no final sync, bounded by

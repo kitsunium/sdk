@@ -66,10 +66,12 @@ func (s *FileSnapshots) Create(id string, meta coreconsensus.SnapshotMeta) (core
 		return nil, 0, origin(coreconsensus.FrameInvalid, errs.String("snapshot_id", id))
 	}
 	path := filepath.Join(s.dir, id+".spool")
+	sink := &fileSink{s: s, id: id, meta: meta}
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, 0, storageFailed("spool", err)
 	}
+	sink.f = f
 	prefix, err := io.ReadAll(f)
 	if err != nil {
 		f.Close()
@@ -84,7 +86,7 @@ func (s *FileSnapshots) Create(id string, meta coreconsensus.SnapshotMeta) (core
 		f.Close()
 		return nil, 0, storageFailed("spool", err)
 	}
-	return &fileSink{s: s, id: id, f: f, meta: meta}, off, nil
+	return sink, off, nil
 }
 
 func (k *fileSink) Write(p []byte) (int, error) { return k.f.Write(p) }
@@ -117,7 +119,10 @@ func (k *fileSink) Commit(final coreconsensus.SnapshotMeta) error {
 func (k *fileSink) release() { k.f.Close() }
 
 func (k *fileSink) Abort() error {
-	k.f.Close()
+	// The spool is being discarded: what its descriptor's Close could say
+	// about bytes no one will read changes nothing. The removal is what
+	// Abort promises, and its failure is reported.
+	abandon(k.f.Close())
 	if err := os.Remove(filepath.Join(k.s.dir, k.id+".spool")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return storageFailed("abort spool", err)
 	}
@@ -172,13 +177,16 @@ type fileHandle struct {
 func (h *fileHandle) Meta() coreconsensus.SnapshotMeta { return h.meta }
 
 func (h *fileHandle) Close() error {
+	var err error
 	h.once.Do(func() {
 		h.s.mu.Lock()
 		h.s.pins[h.meta.ID]--
 		h.s.mu.Unlock()
-		_ = h.File.Close()
+		if cerr := h.File.Close(); cerr != nil {
+			err = storageFailed("close snapshot", cerr)
+		}
 	})
-	return nil
+	return err
 }
 
 // Open implements SnapshotStore: pinned until Close.
@@ -194,14 +202,16 @@ func (s *FileSnapshots) Open(id string) (coreconsensus.SnapshotHandle, error) {
 	if err := wire.ParseSnapshotMeta(b, &m); err != nil {
 		return nil, err
 	}
+	h := &fileHandle{s: s, meta: m}
 	f, err := os.Open(filepath.Join(s.dir, id+".snap"))
 	if err != nil {
 		return nil, storageFailed("open snapshot", err)
 	}
+	h.File = f
 	s.mu.Lock()
 	s.pins[id]++
 	s.mu.Unlock()
-	return &fileHandle{File: f, s: s, meta: m}, nil
+	return h, nil
 }
 
 // Remove implements SnapshotStore: refused while a handle is open. The meta

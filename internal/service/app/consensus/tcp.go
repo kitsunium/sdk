@@ -285,14 +285,15 @@ func (t *TCPTransport) accept() {
 		t.mu.Lock()
 		if t.closed {
 			t.mu.Unlock()
-			c.Close()
+			// Accepted as the transport closed: dropped unread.
+			abandon(c.Close())
 			return
 		}
 		release, ok := t.admission.Admit(c.RemoteAddr())
 		if !ok {
 			// Refused before any TLS byte is read (R2-22, ADR 0174).
 			t.mu.Unlock()
-			c.Close()
+			abandon(c.Close())
 			continue
 		}
 		t.raw[c] = struct{}{}
@@ -305,14 +306,19 @@ func (t *TCPTransport) accept() {
 func (t *TCPTransport) serve(raw net.Conn, release func()) {
 	defer t.wg.Done()
 	defer func() {
-		raw.Close()
+		// The connection is over: whatever its Close says, nothing reads it.
+		abandon(raw.Close())
 		t.mu.Lock()
 		delete(t.raw, raw)
 		t.mu.Unlock()
 	}()
-	c := tls.Server(raw, t.id.ServerConfig(t.checkPeer(nil)))
-	_ = c.SetDeadline(time.Now().Add(t.cfg.HandshakeTimeout))
 	defer release()
+	c := tls.Server(raw, t.id.ServerConfig(t.checkPeer(nil)))
+	// No handshake runs without its deadline: a connection that cannot take
+	// one is dropped, never left to hold its slot for as long as it likes.
+	if err := c.SetDeadline(time.Now().Add(t.cfg.HandshakeTimeout)); err != nil {
+		return
+	}
 	err := c.Handshake()
 	// Authenticated or not, the connection no longer waits on its address.
 	release()
@@ -328,9 +334,16 @@ func (t *TCPTransport) serve(raw net.Conn, release func()) {
 	if _, err := io.ReadFull(c, lane[:]); err != nil {
 		return
 	}
-	_ = c.SetDeadline(time.Time{})
+	if err := c.SetDeadline(time.Time{}); err != nil {
+		return
+	}
 	spki := pid.SPKI
-	_, slot, _ := parseSAN(leaf)
+	// The handshake's verification parsed this SAN already (checkPeer); a
+	// second answer that differs is refused, never read as an empty slot.
+	_, slot, err := parseSAN(leaf)
+	if err != nil {
+		return
+	}
 	t.mu.Lock()
 	m, member := t.bySPKI[spki]
 	if member {
@@ -359,7 +372,11 @@ func (t *TCPTransport) serve(raw net.Conn, release func()) {
 	if leaf.NotAfter.Before(deadline) {
 		deadline = leaf.NotAfter
 	}
-	_ = c.SetReadDeadline(deadline)
+	// The read deadline is what ends the connection when the peer's
+	// certificate expires: a connection that cannot take it is dropped.
+	if err := c.SetReadDeadline(deadline); err != nil {
+		return
+	}
 	switch lane[0] {
 	case laneControl, laneData:
 		limit := t.cfg.MaxFrameBytes
@@ -437,7 +454,10 @@ func (t *TCPTransport) dialVerified(ctx context.Context, addr string, lane byte,
 	// The identity verifies the chain, roots and extended key usage first,
 	// then the transport's SAN and pin check runs (R2-21, ADR 0174 D1).
 	c := tls.Client(raw, t.id.ClientConfig(verify))
-	_ = c.SetDeadline(time.Now().Add(t.cfg.HandshakeTimeout))
+	if err := c.SetDeadline(time.Now().Add(t.cfg.HandshakeTimeout)); err != nil {
+		raw.Close()
+		return nil, err
+	}
 	if err := c.HandshakeContext(ctx); err != nil {
 		raw.Close()
 		return nil, err
@@ -446,7 +466,10 @@ func (t *TCPTransport) dialVerified(ctx context.Context, addr string, lane byte,
 		c.Close()
 		return nil, err
 	}
-	_ = c.SetDeadline(time.Time{})
+	if err := c.SetDeadline(time.Time{}); err != nil {
+		c.Close()
+		return nil, err
+	}
 	return c, nil
 }
 
@@ -512,7 +535,8 @@ func (t *TCPTransport) sender(k outKey, pc *peerConn) {
 	var backoff time.Time
 	defer func() {
 		if conn != nil {
-			conn.Close()
+			// The sender is stopping: nothing is left to write on it.
+			abandon(conn.Close())
 		}
 	}()
 	for {
@@ -540,7 +564,9 @@ func (t *TCPTransport) sender(k outKey, pc *peerConn) {
 		pc.bytes -= int64(size)
 		pc.mu.Unlock()
 		if conn != nil && time.Since(created) > t.cfg.MaxConnectionAge {
-			conn.Close()
+			// Retired by age, every frame of it flushed: the next batch
+			// dials a fresh one.
+			abandon(conn.Close())
 			conn = nil
 		}
 		if conn == nil {
@@ -561,18 +587,23 @@ func (t *TCPTransport) sender(k outKey, pc *peerConn) {
 			}
 			conn, w, created = c, bufio.NewWriterSize(c, 64<<10), time.Now()
 		}
-		_ = conn.SetWriteDeadline(time.Now().Add(t.cfg.WriteTimeout))
-		var err error
+		// A write without its deadline could block this sender for good,
+		// so a connection that refuses one fails like a write that missed
+		// it (D4, R2-06).
+		err := conn.SetWriteDeadline(time.Now().Add(t.cfg.WriteTimeout))
 		for _, b := range batch {
-			if _, err = w.Write(b); err != nil {
+			if err != nil {
 				break
 			}
+			_, err = w.Write(b)
 		}
 		if err == nil {
 			err = w.Flush()
 		}
 		if err != nil {
-			conn.Close()
+			// The failure is reported as the peer unreachable; the socket
+			// itself is beyond use.
+			abandon(conn.Close())
 			conn = nil
 			t.reportUnreachable(k.to)
 		}
@@ -657,7 +688,9 @@ func (t *TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []cor
 	}()
 	for c, spki := range t.in {
 		if _, ok := bySPKI[spki]; !ok {
-			c.Close()
+			// A member that left is cut (D4); its reader ends on the closed
+			// socket, which is all this Close is for.
+			abandon(c.Close())
 		}
 	}
 }
@@ -672,7 +705,9 @@ func (t *TCPTransport) Close() error {
 	t.closed = true
 	close(t.done)
 	for c := range t.raw {
-		c.Close()
+		// Unblocks the connection's reader so wg.Wait returns; the transport
+		// is closing and reads nothing more from it.
+		abandon(c.Close())
 	}
 	t.mu.Unlock()
 	err := t.ln.Close()
@@ -733,8 +768,11 @@ func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offe
 	if err != nil {
 		return err
 	}
-	defer c.Close()
-	stop := context.AfterFunc(ctx, func() { c.Close() })
+	// The stream's verdict is the receiver's install result, read before
+	// this Close; a Close of a cancelled stream unblocks its I/O and says
+	// nothing the error returned does not.
+	defer func() { abandon(c.Close()) }()
+	stop := context.AfterFunc(ctx, func() { abandon(c.Close()) })
 	defer stop()
 	if err := writeChunk(c, encodeOffer(offer)); err != nil {
 		return err
@@ -756,7 +794,9 @@ func (t *TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offe
 		return err
 	}
 	_, err = io.Copy(c, rc)
-	rc.Close()
+	if cerr := rc.Close(); cerr != nil && err == nil {
+		err = cerr
+	}
 	if err != nil {
 		return err
 	}
@@ -808,7 +848,9 @@ func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.Authenticat
 			code = coreconsensus.CodeSnapshotCorrupt
 		}
 	}
-	_ = writeChunk(c, binary.LittleEndian.AppendUint32(nil, uint32(code)))
+	// The last write of the stream: a sender that does not read it sees the
+	// connection end and treats the install as failed, which it retries.
+	abandon(writeChunk(c, binary.LittleEndian.AppendUint32(nil, uint32(code))))
 }
 
 // ---- pre-admission JOIN (D4, R7-42, R8-09) ----
@@ -843,7 +885,10 @@ func decodeJoin(b []byte) (coreconsensus.JoinRequest, bool) {
 // from the certificate, the SPKI from the handshake; join runs off the event
 // loop under a deadline (R9-06).
 func (t *TCPTransport) serveJoin(c *tls.Conn, peer coreconsensus.AuthenticatedPeer) {
-	_ = c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout))
+	// A JOIN is answered under its deadline or not at all (R9-06).
+	if err := c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout)); err != nil {
+		return
+	}
 	b, err := readChunk(c, 512)
 	if err != nil {
 		return
@@ -871,7 +916,10 @@ func (t *TCPTransport) serveJoin(c *tls.Conn, peer coreconsensus.AuthenticatedPe
 			t.mu.Unlock()
 			out = wire.AppendMembership(out, &m)
 		}
-		_ = writeChunk(c, out)
+		// The answer is the last write of a pre-admission connection: a
+		// joiner that does not read it fails its JOIN and tries the next
+		// address.
+		abandon(writeChunk(c, out))
 	}
 	if !ok {
 		reply(coreconsensus.CodeJoinRefused, coreconsensus.Position{}, "malformed JOIN")
@@ -943,9 +991,16 @@ func (t *TCPTransport) joinOne(ctx context.Context, addr string, req coreconsens
 	if derr != nil {
 		return coreconsensus.Position{}, false, derr
 	}
-	defer c.Close()
-	peer, _ := tlsid.PeerOf(c.ConnectionState())
-	_ = c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout))
+	// The answer is read, or its failure is: the socket has served.
+	defer func() { abandon(c.Close()) }()
+	peer, verified := tlsid.PeerOf(c.ConnectionState())
+	if !verified {
+		return coreconsensus.Position{}, false, peerRejected("no verified peer")
+	}
+	// A JOIN is answered under its deadline or not at all (R9-06).
+	if err := c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout)); err != nil {
+		return coreconsensus.Position{}, false, err
+	}
 	if err := writeChunk(c, encodeJoin(req)); err != nil {
 		return coreconsensus.Position{}, false, err
 	}

@@ -132,6 +132,57 @@ func TestRecoverStartsANewHistoryFromOneNode(t *testing.T) {
 	}
 }
 
+// TestOfflineReadsFailClosed pins what an offline operation does with a
+// store it cannot read. Recover decides from the old configuration which
+// voters must be attested fenced, and Inspect is what an operator decides
+// from: a snapshot directory that cannot be listed fails both, rather than
+// reading as a directory that holds no snapshot.
+func TestOfflineReadsFailClosed(t *testing.T) {
+	c, nodes := threeOnDisk(t, 10)
+	for _, dn := range nodes {
+		dn.crash(c)
+	}
+	keep := nodes[0]
+	keep.dd = openDir(t, keep.dir, 16<<10)
+	t.Cleanup(func() {
+		if err := keep.dd.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	// A file where the snapshot directory was: every listing fails, on
+	// every platform, with no permission trick.
+	snap := filepath.Join(keep.dir, "snap")
+	if err := os.RemoveAll(snap); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(snap, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Inspect(keep.dd); !errors.Is(err, coreconsensus.StorageFailed) {
+		t.Fatalf("Inspect over an unreadable snapshot directory: %v", err)
+	}
+	st, err := keep.dd.Log().Stamp()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := coreconsensus.ClusterID{7}
+	self := coreconsensus.Member{ID: keep.id, Incarnation: st.Incarnation, Slot: st.Slot, SPKI: MemorySPKI(keep.id), Voter: true}
+	opt := RecoverOptions{Confirm: next.String(), Operator: "op:recover", WitnessKeys: []ed25519.PublicKey{pub}}
+	for _, dn := range nodes[1:] {
+		opt.Fenced = append(opt.Fenced, coreconsensus.FencedAttestation{
+			Voter: dn.id, Method: "powered-off",
+			Receipts: [][]byte{ed25519.Sign(priv, ReceiptMessage(c.cid, next, dn.id))},
+		})
+	}
+	if err := Recover(keep.dd, next, []coreconsensus.Member{self}, opt); !errors.Is(err, coreconsensus.StorageFailed) {
+		t.Fatalf("Recover over an unreadable snapshot directory: %v", err)
+	}
+}
+
 func TestRestoreSnapshotIntoAnEmptyDirectory(t *testing.T) {
 	c, nodes := threeOnDisk(t, 20)
 	var buf bytes.Buffer

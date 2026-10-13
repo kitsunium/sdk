@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"encoding/hex"
+	"errors"
 	"strconv"
 	"strings"
 	"unicode"
@@ -28,6 +29,37 @@ func u64s(v uint64) string { return strconv.FormatUint(v, 10) }
 // ORIGIN, its cause kept as a field, never a wrap of the cause (R7-10).
 func origin(sentinel *errs.Error, fields ...errs.FieldValue) error {
 	return errs.Wrap(sentinel, errs.WrapParams{}, fields...)
+}
+
+// alsoFailed returns err, the failure being reported, with the failure of the
+// cleanup that followed it kept beside it. The cause stays the error a caller
+// matches on — a cleanup's failure must not replace the cause with a
+// consequence — and the cleanup's failure is still there to be read: an SDK
+// error gains a field and keeps its single line, any other error is joined,
+// so errs.HasCode still finds a STORAGE_FAILED the cleanup raised.
+func alsoFailed(err error, op string, failure error) error {
+	if failure == nil || err == nil {
+		return err
+	}
+	if _, ok := errs.CodeOf(err); ok {
+		return errs.Wrap(err, errs.WrapParams{}, errs.String(op, failure.Error()))
+	}
+	return errors.Join(err, failure)
+}
+
+// abandon is where an error with no reader goes, and the only place one may.
+// Its callers are cleanups whose outcome is already decided: closing a socket
+// the transport is dropping, writing the last reply on a connection whose
+// peer reads the failure itself, closing a temporary file no one will read
+// and recovery deletes. Each call site says which. It is never handed the
+// error of a write, a sync or a read of durable state: those stop the node
+// (D4) or reach the caller.
+func abandon(err error) {
+	if err == nil {
+		return
+	}
+	// The resource is gone whatever the error says, and nothing downstream
+	// could act on it.
 }
 
 func storageFailed(op string, cause error) error {

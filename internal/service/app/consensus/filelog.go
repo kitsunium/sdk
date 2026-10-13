@@ -613,7 +613,10 @@ func (l *FileLog) prepare(n uint64, size int64) {
 			return
 		}
 		if err := zeroFrom(f, 0, size); err != nil {
-			f.Close()
+			// A half-zeroed .tmp is never published: takePrepared then
+			// builds the segment on the writer's path, where a failure
+			// stops the node, and recovery deletes the .tmp.
+			abandon(f.Close())
 			p.err = err
 			return
 		}
@@ -632,34 +635,45 @@ func (l *FileLog) takePrepared(n uint64, size int64) *os.File {
 	<-p.done
 	if p.err != nil || p.n != n || p.size != size {
 		if p.f != nil {
-			p.f.Close()
+			// The wrong segment, or the wrong size: an unpublished .tmp
+			// nothing will read, which recovery deletes.
+			abandon(p.f.Close())
 		}
 		return nil
 	}
 	return p.f
 }
 
+// writeFileSync publishes data at path atomically and durably: written and
+// synced to path.tmp, renamed over path, and the directory synced.
 func writeFileSync(path string, data []byte) error {
 	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
+	if err := writeSynced(tmp, data); err != nil {
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		return err
 	}
 	return syncDir(filepath.Dir(path))
+}
+
+// writeSynced writes data to a fresh file at path and syncs it. The file is
+// closed before it returns, so before writeFileSync renames it, and a Close
+// failure is reported like the sync's: it is part of the write.
+func writeSynced(path string, data []byte) (err error) {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	return f.Sync()
 }
 
 // rotate seals the current segment in its own synced batch, then publishes
@@ -995,7 +1009,9 @@ func (l *FileLog) dropSegmentsLocked() error {
 				return nil
 			}
 		}
-		_ = l.segs[0].f.Close()
+		if err := l.segs[0].f.Close(); err != nil {
+			return storageFailed("close segment", err)
+		}
 		if err := os.Remove(filepath.Join(l.logDir(), segName(l.segs[0].n))); err != nil {
 			return storageFailed("remove segment", err)
 		}
@@ -1035,24 +1051,32 @@ func (l *FileLog) WriteStamp(s coreconsensus.Stamp) error {
 	return nil
 }
 
-// Close implements LogStore; the DataDir closes it.
+// Close implements LogStore; the DataDir closes it. Every segment is closed
+// whatever the one before it answered, and the first failure is reported: a
+// Close can be where a deferred write-back error surfaces, and a log that
+// swallowed it would report a clean shutdown of a disk that failed.
 func (l *FileLog) Close() error {
 	l.wmu.Lock()
 	defer l.wmu.Unlock()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	var err error
 	for _, s := range l.segs {
-		_ = s.f.Close()
+		if cerr := s.f.Close(); cerr != nil && err == nil {
+			err = storageFailed("close segment", cerr)
+		}
 	}
 	l.segs = nil
 	if p := l.prep; p != nil {
 		l.prep = nil
 		<-p.done
 		if p.f != nil {
-			_ = p.f.Close()
+			// The prepared segment was never published: a .tmp that
+			// recovery deletes.
+			abandon(p.f.Close())
 		}
 	}
-	return nil
+	return err
 }
 
 // logStats reports the bytes the segments occupy, the free bytes of their

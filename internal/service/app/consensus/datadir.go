@@ -56,18 +56,28 @@ func OpenDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return DataDir{}, storageFailed("mkdir", err)
 	}
+	d := &dataDir{dir: dir, opts: opts}
 	lf, err := os.OpenFile(filepath.Join(dir, fileLock), os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return DataDir{}, storageFailed("lock", err)
 	}
+	d.lockf = lf
 	held, err := flock.TryLock(lf)
-	if err != nil || !held {
+	if err != nil {
+		// The lock could not be asked for: a storage failure, never read as
+		// another process holding the directory.
+		lf.Close()
+		return DataDir{}, storageFailed("lock", err)
+	}
+	if !held {
 		lf.Close()
 		return DataDir{}, origin(coreconsensus.DataDirLocked, errs.String("dir", dir))
 	}
-	d := &dataDir{dir: dir, opts: opts, lockf: lf}
 	if err := d.open(); err != nil {
-		_ = flock.Unlock(lf)
+		// Closing the descriptor releases the lock too; the explicit unlock
+		// is what makes the release immediate on Windows, and its failure
+		// travels with the cause rather than in its place.
+		err = alsoFailed(err, "unlock", flock.Unlock(lf))
 		lf.Close()
 		return DataDir{}, err
 	}
@@ -112,9 +122,16 @@ func (d DataDir) Close() error {
 		return origin(coreconsensus.DataDirInUse, errs.String("dir", d.d.dir))
 	}
 	d.d.closed = true
-	_ = d.d.log.Close()
-	_ = flock.Unlock(d.d.lockf)
-	return d.d.lockf.Close()
+	// Every step runs whatever the one before it answered, so a failed log
+	// close still releases the lock; the first failure is the one reported.
+	err := d.d.log.Close()
+	if uerr := flock.Unlock(d.d.lockf); uerr != nil && err == nil {
+		err = storageFailed("unlock", uerr)
+	}
+	if cerr := d.d.lockf.Close(); cerr != nil && err == nil {
+		err = storageFailed("close lock", cerr)
+	}
+	return err
 }
 
 // offline guards an offline operation: refused while a live Node holds the
@@ -304,14 +321,24 @@ func (l *FileLog) checkMarkers() error {
 	return nil
 }
 
-func (d DataDir) audit(op coreconsensus.Operator, what string) error {
+// audit appends one line to the operator audit file and syncs it before the
+// operation it records runs. Its Close is part of the write: a failure there
+// is a storage failure like the sync's, never a detail dropped at return.
+func (d DataDir) audit(op coreconsensus.Operator, what string) (err error) {
 	f, err := os.OpenFile(filepath.Join(d.d.dir, fileAudit), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return storageFailed("audit", err)
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = storageFailed("audit", cerr)
+		}
+	}()
 	if _, err := fmt.Fprintf(f, "%s %s\n", op, what); err != nil {
 		return storageFailed("audit", err)
 	}
-	return f.Sync()
+	if err := f.Sync(); err != nil {
+		return storageFailed("audit", err)
+	}
+	return nil
 }

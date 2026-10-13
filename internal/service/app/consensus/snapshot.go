@@ -35,12 +35,18 @@ func Latest(s coreconsensus.SnapshotStore) (coreconsensus.SnapshotHandle, error)
 
 // restoreFrom verifies a snapshot's digest, then restores the state machine
 // from it, serialised with Apply.
-func (n *Node) restoreFrom(m coreconsensus.SnapshotMeta, durIdx uint64) error {
+func (n *Node) restoreFrom(m coreconsensus.SnapshotMeta, durIdx uint64) (err error) {
 	h, err := n.cfg.Snapshots.Open(m.ID)
 	if err != nil {
 		return err
 	}
-	defer h.Close()
+	defer func() {
+		// The handle is only read; its Close matters to the node only when
+		// it is the one failure there was.
+		if cerr := h.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	if err := verifySnapshot(io.NewSectionReader(h, 0, m.EncodedSize), m, n.cfg.SnapshotCodec, n.cfg.MaxSnapshotBytes); err != nil {
 		return err
 	}
@@ -79,7 +85,22 @@ func (n *Node) maybeSnapshot() {
 		ss.mu.Lock()
 		ss.inFlight = false
 		ss.mu.Unlock()
+		n.cutFailed(err)
 	}
+}
+
+// cutFailed is what a snapshot cut that published nothing does to the node.
+// A STORAGE_FAILED stops it: a failed write or sync of a snapshot is a
+// failed write or sync of this node's disk, and D4 never retries one, for
+// the page cache may now lie about the log on the same disk as well. Any
+// other failure — the machine's Snapshot, its encoding — is logged, and the
+// next cut tries again.
+func (n *Node) cutFailed(err error) {
+	if errs.HasCode(err, coreconsensus.CodeStorageFailed) {
+		n.stop(err, true)
+		return
+	}
+	n.obs.warn("consensus: snapshot cut failed", lstr("error", err.Error()))
 }
 
 func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMeta, bool) {
@@ -115,7 +136,9 @@ func (n *Node) cut(idx, term uint64, w io.Writer) error {
 	n.wg.Add(1)
 	go func() {
 		defer n.wg.Done()
-		_ = n.writeSnapshot(snap, meta, nil)
+		if err := n.writeSnapshot(snap, meta, nil); err != nil {
+			n.cutFailed(err)
+		}
 	}()
 	return nil
 }
@@ -134,7 +157,11 @@ func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.Sna
 		return err
 	}
 	if spooled > 0 {
-		_ = sink.Abort()
+		// A stale spool of that id: discarded, or the fresh cut would
+		// resume from it.
+		if err := sink.Abort(); err != nil {
+			return err
+		}
 		if sink, _, err = n.cfg.Snapshots.Create(meta.ID, meta); err != nil {
 			return err
 		}
@@ -146,12 +173,10 @@ func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.Sna
 	}
 	cw := newChunkWriter(out, n.cfg.SnapshotCodec, defaultChunkSize)
 	if _, err := snap.WriteTo(cw); err != nil {
-		_ = sink.Abort()
-		return err
+		return alsoFailed(err, "abort", sink.Abort())
 	}
 	if err := cw.Close(); err != nil {
-		_ = sink.Abort()
-		return err
+		return alsoFailed(err, "abort", sink.Abort())
 	}
 	meta.EncodedSize, meta.DecodedSize = cw.encoded, cw.decoded
 	copy(meta.SHA256[:], cw.sum.Sum(nil))
@@ -176,7 +201,11 @@ func (n *Node) afterCut() {
 		return
 	}
 	for _, m := range metas[min(2, len(metas)):] {
-		_ = n.cfg.Snapshots.Remove(m.ID) // refused while a transfer reads it
+		// Refused while a transfer reads it: kept until the next cut, which
+		// tries again. Worth a line, never a stop.
+		if err := n.cfg.Snapshots.Remove(m.ID); err != nil {
+			n.obs.info("consensus: an old snapshot is kept for now", lstr("id", m.ID), lstr("error", err.Error()))
+		}
 	}
 	older := metas[min(1, len(metas)-1)].Position.Index
 	n.am.Lock()
@@ -250,16 +279,23 @@ func (n *Node) save(req *saveReq) {
 	err := n.cut(idx, term, req.w)
 	var m coreconsensus.SnapshotMeta
 	if err == nil {
-		metas, _ := n.cfg.Snapshots.List()
-		for _, x := range metas {
-			if x.Position.Index == idx {
-				m = x
+		// The caller keeps this metadata to restore from later: a list that
+		// could not be read fails the save rather than answer a zero one.
+		var metas []coreconsensus.SnapshotMeta
+		if metas, err = n.cfg.Snapshots.List(); err == nil {
+			for _, x := range metas {
+				if x.Position.Index == idx {
+					m = x
+				}
 			}
 		}
 	} else {
 		n.snapState.mu.Lock()
 		n.snapState.inFlight = false
 		n.snapState.mu.Unlock()
+		// The operator who asked reads the error too, but a storage failure
+		// is the node's before it is the caller's.
+		n.cutFailed(err)
 	}
 	req.done <- saveRes{m, err}
 }
@@ -306,7 +342,11 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 			return io.NopCloser(io.NewSectionReader(h, off, meta.EncodedSize-off)), nil
 		})
 		cancel()
-		_ = h.Close()
+		if cerr := h.Close(); cerr != nil {
+			// The transfer is over whatever the read handle says; the pin
+			// it held is released either way.
+			n.obs.warn("consensus: snapshot handle close failed", lstr("id", meta.ID), lstr("error", cerr.Error()))
+		}
 		if errors.Is(err, coreconsensus.Compacted) {
 			// The peer's log starts past this snapshot: cut a newer one,
 			// which the next probe sends.
@@ -440,8 +480,9 @@ func (n *Node) install(req coreconsensus.InstallRequest) error {
 		return n.stoppedErr()
 	}
 	if err != nil {
-		_ = n.cfg.Snapshots.Remove(id)
-		return err
+		// The installed copy did not restore: unpublished, so a restart
+		// does not load it again, or the failure to do so travels with it.
+		return alsoFailed(err, "remove", n.cfg.Snapshots.Remove(id))
 	}
 	n.exec(func() {
 		n.r.InstallSnapshot(meta)

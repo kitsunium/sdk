@@ -3,6 +3,7 @@ package consensus
 import (
 	"crypto/ed25519"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -56,15 +57,33 @@ func Inspect(d DataDir) (Report, error) {
 	}
 	l := d.d.log
 	r := Report{Stamp: l.stamp}
-	if q, err := os.ReadFile(filepath.Join(d.d.dir, markerQuarantine)); err == nil {
+	q, err := os.ReadFile(filepath.Join(d.d.dir, markerQuarantine))
+	switch {
+	case err == nil:
 		r.Quarantine = strings.TrimSpace(string(q))
+	case !errors.Is(err, os.ErrNotExist):
+		// A report that could not read the marker must not read as a
+		// directory with no quarantine.
+		return Report{}, storageFailed("inspect quarantine", err)
 	}
 	if l.refuse == nil {
-		r.HardState, _ = l.HardState()
+		// The hard state as the log last held it, read even after a failed
+		// write: Inspect reports what is there, and the directory a failed
+		// node left behind is the one an operator inspects.
+		l.mu.RLock()
+		r.HardState = l.hs
+		l.mu.RUnlock()
 		r.First, r.Last = l.Bounds()
 	}
-	r.Snapshots, _ = d.d.snaps.List()
-	ents, _ := os.ReadDir(d.d.dir)
+	// An operator decides from this report: a list that could not be read
+	// fails it rather than reading as "no snapshot" or "no stop marker".
+	if r.Snapshots, err = d.d.snaps.List(); err != nil {
+		return Report{}, err
+	}
+	ents, err := os.ReadDir(d.d.dir)
+	if err != nil {
+		return Report{}, storageFailed("inspect markers", err)
+	}
 	for _, e := range ents {
 		if strings.HasPrefix(e.Name(), markerStopPrefix) && !strings.HasSuffix(e.Name(), ".tmp") {
 			r.Markers = append(r.Markers, e.Name())
@@ -108,13 +127,20 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) 
 	if err := d.audit(op, "clear-quarantine wipe-and-rejoin"); err != nil {
 		return err
 	}
-	_ = d.d.log.Close()
+	if err := d.d.log.Close(); err != nil {
+		return err
+	}
 	for _, name := range []string{"log", "snap"} {
 		if err := os.RemoveAll(filepath.Join(d.d.dir, name)); err != nil {
 			return storageFailed("wipe", err)
 		}
 	}
-	ents, _ := os.ReadDir(d.d.dir)
+	// A directory that could not be listed keeps its stamp and its markers:
+	// the wipe fails here rather than reopen a directory it did not clear.
+	ents, err := os.ReadDir(d.d.dir)
+	if err != nil {
+		return storageFailed("wipe", err)
+	}
 	for _, e := range ents {
 		n := e.Name()
 		if n == fileStamp || n == markerQuarantine || strings.HasPrefix(n, markerStopPrefix) {
@@ -123,7 +149,12 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) 
 			}
 		}
 	}
-	_ = os.Remove(d.d.log.runtimeMarker("STORAGE_FAILED"))
+	// The boot-scoped marker exists only after a storage failure of this
+	// boot; one that cannot be removed would refuse the next start anyway,
+	// so the wipe says so now.
+	if err := os.Remove(d.d.log.runtimeMarker("STORAGE_FAILED")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return storageFailed("wipe", err)
+	}
 	if err := syncDir(d.d.dir); err != nil {
 		return storageFailed("wipe", err)
 	}
@@ -195,8 +226,16 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 	if !self {
 		return refused("this node is not a voter of the new members")
 	}
-	hs, _ := l.HardState()
-	old := lastMembership(l, d.d.snaps, hs.Commit)
+	hs, err := l.HardState()
+	if err != nil {
+		return err
+	}
+	// The old configuration decides which voters must be attested fenced:
+	// one that could not be read fails Recover closed, never open.
+	old, err := lastMembership(l, d.d.snaps, hs.Commit)
+	if err != nil {
+		return err
+	}
 	for _, v := range old.Voters() {
 		if slices.ContainsFunc(members, func(m coreconsensus.Member) bool { return m.ID == v }) {
 			continue
@@ -231,8 +270,14 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 			return err
 		}
 		chain, termAt = es[0].ChainSum, es[0].Position.Term
-	} else if metas, _ := d.d.snaps.List(); len(metas) > 0 && metas[0].Position.Index == commit {
-		chain, termAt = metas[0].ChainTip, metas[0].Position.Term
+	} else {
+		metas, err := d.d.snaps.List()
+		if err != nil {
+			return err
+		}
+		if len(metas) > 0 && metas[0].Position.Index == commit {
+			chain, termAt = metas[0].ChainTip, metas[0].Position.Term
+		}
 	}
 	term := max(hs.Term, termAt) + 1
 	conf := coreconsensus.Membership{Members: byID(members), Retired: old.Retired}
@@ -257,15 +302,24 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 }
 
 // lastMembership is the configuration committed at index, from the log or
-// the latest snapshot.
-func lastMembership(l *FileLog, snaps *FileSnapshots, index uint64) coreconsensus.Membership {
+// the latest snapshot. A store that cannot answer fails it: a configuration
+// read from half the sources is an older one, and Recover would ask for the
+// fence of the wrong voters.
+func lastMembership(l *FileLog, snaps *FileSnapshots, index uint64) (coreconsensus.Membership, error) {
 	var m coreconsensus.Membership
-	if metas, _ := snaps.List(); len(metas) > 0 {
+	metas, err := snaps.List()
+	if err != nil {
+		return m, err
+	}
+	if len(metas) > 0 {
 		m = metas[0].Membership
 	}
 	first, last := l.Bounds()
 	if last >= first {
-		es, _ := l.Entries(first, min(last, index)+1, int(^uint(0)>>1), nil)
+		es, err := l.Entries(first, min(last, index)+1, int(^uint(0)>>1), nil)
+		if err != nil {
+			return coreconsensus.Membership{}, err
+		}
 		for _, e := range es {
 			if e.Kind == coreconsensus.EntryMembership {
 				if a, err := wire.ParseAdmin(e.Data); err == nil {
@@ -274,7 +328,7 @@ func lastMembership(l *FileLog, snaps *FileSnapshots, index uint64) coreconsensu
 			}
 		}
 	}
-	return m
+	return m, nil
 }
 
 // RestoreOptions are RestoreSnapshot's preconditions (R3-15).
@@ -350,15 +404,19 @@ func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID,
 		return coreconsensus.SnapshotMeta{}, err
 	}
 	if off != 0 {
-		_ = sink.Abort()
+		// A stale spool of that id: discarded, or the fresh one would
+		// resume from it.
+		if err := sink.Abort(); err != nil {
+			return coreconsensus.SnapshotMeta{}, err
+		}
 		if sink, _, err = d.d.snaps.Create(meta.ID, meta); err != nil {
 			return coreconsensus.SnapshotMeta{}, err
 		}
 	}
 	n, err := io.Copy(sink, io.LimitReader(r, exp.EncodedSize+1))
 	if err != nil || n != exp.EncodedSize {
-		_ = sink.Abort()
-		return refused("stream size")
+		m, rerr := refused("stream size")
+		return m, alsoFailed(rerr, "abort", sink.Abort())
 	}
 	if err := sink.Commit(meta); err != nil {
 		return coreconsensus.SnapshotMeta{}, err
@@ -368,10 +426,14 @@ func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID,
 		return coreconsensus.SnapshotMeta{}, err
 	}
 	verr := verifySnapshot(io.NewSectionReader(h, 0, meta.EncodedSize), meta, codec, opt.MaxDecoded)
-	_ = h.Close()
+	cerr := h.Close()
 	if verr != nil {
-		_ = d.d.snaps.Remove(meta.ID)
-		return coreconsensus.SnapshotMeta{}, verr
+		// The copy failed its checks: unpublished, or the failure to do
+		// so is reported with it.
+		return coreconsensus.SnapshotMeta{}, alsoFailed(verr, "remove", d.d.snaps.Remove(meta.ID))
+	}
+	if cerr != nil {
+		return coreconsensus.SnapshotMeta{}, cerr
 	}
 	if err := l.resetTo(meta.Position.Index, meta.Position.Term); err != nil {
 		return coreconsensus.SnapshotMeta{}, err
@@ -464,7 +526,9 @@ func (d DataDir) truncateAndStaySilent() error {
 				return storageFailed("truncate", err)
 			}
 			err = zeroFrom(f, off, int64(len(b)))
-			f.Close()
+			if cerr := f.Close(); cerr != nil && err == nil {
+				err = cerr
+			}
 			if err != nil {
 				return storageFailed("truncate", err)
 			}
@@ -482,7 +546,9 @@ func (d DataDir) truncateAndStaySilent() error {
 	if err := os.Remove(filepath.Join(d.d.dir, markerQuarantine)); err != nil {
 		return storageFailed("clear marker", err)
 	}
-	_ = d.d.log.Close()
+	if err := d.d.log.Close(); err != nil {
+		return err
+	}
 	if err := d.d.open(); err != nil {
 		return err
 	}
@@ -498,22 +564,29 @@ func (d DataDir) truncateAndStaySilent() error {
 // silence reads the persisted silence condition, if any. An index of 0, a
 // crash before it was filled in, is the end of the log, written back now.
 // An unreadable condition is the safe side: silent past the end.
-func (l *FileLog) silence() (term, index uint64) {
+//
+// The write-back is durable before the node starts, or the node does not
+// start (D4: a failed write stops it): a condition left at 0 would be filled
+// in again at the next start, from a log that may have grown since, and the
+// silence would end at another index than the one this start obeyed.
+func (l *FileLog) silence() (term, index uint64, err error) {
 	b, err := os.ReadFile(filepath.Join(l.dir, fileSilent))
 	if os.IsNotExist(err) {
-		return 0, 0
+		return 0, 0, nil
 	}
 	_, last := l.Bounds()
 	if err != nil || len(b) != 16 {
-		return ^uint64(0) >> 1, last + 1
+		return ^uint64(0) >> 1, last + 1, nil
 	}
 	term, index = binary.LittleEndian.Uint64(b), binary.LittleEndian.Uint64(b[8:])
 	if index == 0 {
 		index = last + 1
 		nb := binary.LittleEndian.AppendUint64(binary.LittleEndian.AppendUint64(nil, term), index)
-		_ = writeFileSync(filepath.Join(l.dir, fileSilent), nb)
+		if err := writeFileSync(filepath.Join(l.dir, fileSilent), nb); err != nil {
+			return 0, 0, err
+		}
 	}
-	return term, index
+	return term, index, nil
 }
 
 // endSilence removes the silence condition durably.
