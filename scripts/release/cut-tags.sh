@@ -1123,6 +1123,16 @@ ROOT_FLOOR="$(root_floor)"
 split=0
 if [ -n "${NEXT_VERSION[.]+set}" ] && [ -z "$(root_floor_tagged)" ] && [ -f internal/go.mod ]; then
   split=1
+  # It is a bootstrap (ADR 0009): its tags put twelve module paths on the
+  # proxy for the first time and every consumer's go.mod moves, so it is held
+  # like the root's first release — exit 3 without --allow-bootstrap, which
+  # only a maintainer's dispatch passes —, and never a patch.
+  first=1
+fi
+if [ "$split" -eq 1 ] && [ "${SIZE_OF[.]}" = "patch" ]; then
+  echo "cut-tags: refusing ${NEXT_TAG[.]} as the split's release — after ${PREVIOUS_TAG[.]:-no root tag} a patch would hide the module change every consumer makes (ADR 0171 §7)" >&2
+  echo "cut-tags:   label the pull request release:minor and re-run this job, or dispatch SDK Release with bump=minor." >&2
+  exit 65
 fi
 
 if [ "$tombstone" -eq 1 ]; then
@@ -1203,7 +1213,9 @@ fi
 # must be validated by hand first — so refuse to auto-cut it. A maintainer
 # re-runs with --allow-bootstrap once verified. Dry-run is always allowed.
 if [ "$first" -eq 1 ] && [ "$DRY_RUN" -eq 0 ] && [ "$ALLOW_BOOTSTRAP" -eq 0 ]; then
-  if [ -z "$root_last" ]; then
+  if [ "$split" -eq 1 ]; then
+    echo "cut-tags: refusing to auto-cut the split's release ($root_sem, the first root without pkg/ or internal/ — ADR 0171 §7). Dry-run it, rehearse it (proxy-rehearsal.sh), then dispatch SDK Release, which passes --allow-bootstrap." >&2
+  elif [ -z "$root_last" ]; then
     echo "cut-tags: refusing to auto-cut the FIRST release ($root_sem). Validate its go.sum + a clean-room 'go get' first (ADR 0009), then re-run with --allow-bootstrap." >&2
   else
     echo "cut-tags: refusing to auto-cut the FIRST release of the SDK module ($root_sem, after $root_last — ADR 0162). Validate its module zip + a clean-room 'go get' first (ADR 0009), then re-run with --allow-bootstrap." >&2

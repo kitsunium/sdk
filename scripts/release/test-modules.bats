@@ -374,6 +374,21 @@ monolith() {
   done
 }
 
+# I2: the split's release is a bootstrap — held without --allow-bootstrap
+# (exit 3, nothing tagged), refused as a patch (exit 65), even in a dry run.
+@test "the split's release is held without --allow-bootstrap and refused as a patch" {
+  need_toolchain
+  monolith
+  run bash -c "echo sdk | '$CT' --dry-run --bump=patch"
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"as the split's release"* ]]
+  run bash -c "echo sdk | '$CT' --bump=minor"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"refusing to auto-cut the split's release"* ]]
+  [ -z "$(g tag -l 'internal/*')" ]
+  [[ "$(remote_tags)" != *"v0.20.0"* ]]
+}
+
 # A family cut before any root holds the split has no floor to require: it
 # would publish a module a consumer on v0.19.7 cannot add. Refused, naming why.
 @test "a family cut while no root holds the split is refused" {

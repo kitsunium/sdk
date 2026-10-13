@@ -342,6 +342,11 @@ also requires `…/pkg` at its v0.18.0 tombstone, so a go.mod still on `…/pkg`
 v0.17.0 adds a family with one `go get …/pkg/v1/<family>@latest` instead of
 meeting `ambiguous import` (both measured on the file proxy).
 
+**The split's release is held like a bootstrap** (ADR 0009): an automatic run
+exits 3 on it and only a maintainer's dispatch, which passes
+`--allow-bootstrap`, cuts it; a patch is refused for it (exit 65), since it
+moves every consumer's go.mod.
+
 **The root keeps the framework and is not deprecated.** A deprecation is the
 whole module path's, read from its latest go.mod, and the root still holds
 `framework/`; marking it would tell every framework consumer to leave a module

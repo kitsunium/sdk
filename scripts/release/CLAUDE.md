@@ -59,6 +59,13 @@ maintainer's label). The tree's general rules are in `scripts/CLAUDE.md`.
   proxy knows for the path — does not lift the hold: asking "is there no
   `vX.Y.Z` yet?" instead let one through, and an automatic run cut the first
   release (seen red in the suite first).
+- **The split's release is a bootstrap too** (ADR 0171 §7): the root cut while
+  no root tag holds `internal/go.mod` — the release that puts `…/internal` and
+  the eleven families on the proxy and moves every consumer's go.mod — is held
+  (exit 3) without `--allow-bootstrap`, which only a maintainer's dispatch of
+  SDK Release passes, and refused as a patch (exit 65), even in a dry run.
+  Before this rule `echo sdk | cut-tags.sh --bump=patch` cut `v0.19.8` with
+  `internal/v0.1.0` and every family, unheld.
 - **From a `pkg/` base a patch is refused** (exit 65, like an undecided size):
   the first root tag moves every consumer to another module, which v0 says with
   a minor at least, and the proxy keeps a v0.17.1 for good. The refusal names
