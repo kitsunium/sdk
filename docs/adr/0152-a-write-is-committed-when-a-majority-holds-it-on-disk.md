@@ -997,6 +997,13 @@ open ONE control connection to any member.
   transport. The `Joiner` sibling for a custom transport. The
   `JoinAuthorizer` port for the product. All of them are in
   `design/app/consensus.yaml`.
+- **The answer is authenticated (review of PR #301, M4).** The answer
+  installs the peers the joiner admits, so a certificate of the cluster is
+  not enough to give it. `JoinConfig.Pins` carries the members' keys from
+  the operator; an empty list refuses the JOIN with
+  `TRANSPORT_MISCONFIGURED`. An answer counts only from a peer presenting
+  one of them, and only when the membership it returns lists that peer
+  under that key.
 
 **Batching on the wire, from raft-sql-poc.** Every frame queued for a peer
 on one connection during one turn of its sender leaves in one write
@@ -1951,7 +1958,7 @@ type (
 	InstallOffer   = coreconsensus.InstallOffer  // R7-08
 	InstallAccept  = coreconsensus.InstallAccept // R7-08
 	StopReason     = coreconsensus.StopReason    // ExitCode() returns errs.ExitCodeOf (R7-14, R8-35)
-	JoinConfig     = coreconsensus.JoinConfig    // the member addresses to try, the stamp, the deadline (R8-09)
+	JoinConfig     = coreconsensus.JoinConfig    // the member addresses to try, the stamp, the members' keys (R8-09, M4)
 	JoinRequest    = coreconsensus.JoinRequest   // slot and SPKI from TLS, the new NodeID and incarnation (R8-09)
 	Joiner         = coreconsensus.Joiner        // sibling for custom transports (R8-09)
 	JoinAuthorizer = coreconsensus.JoinAuthorizer // the product's port (R8-09)

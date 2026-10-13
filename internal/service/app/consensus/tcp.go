@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -410,6 +411,24 @@ func (t *TCPTransport) readFrames(c net.Conn, peer coreconsensus.AuthenticatedPe
 // ---- outbound ----
 
 func (t *TCPTransport) dial(ctx context.Context, addr string, lane byte, pin *[32]byte) (*tls.Conn, error) {
+	return t.dialVerified(ctx, addr, lane, t.checkPeer(pin))
+}
+
+// dialAny dials a peer that must present one of pins.
+func (t *TCPTransport) dialAny(ctx context.Context, addr string, lane byte, pins [][32]byte) (*tls.Conn, error) {
+	check := t.checkPeer(nil)
+	return t.dialVerified(ctx, addr, lane, func(p tlsid.PeerIdentity) error {
+		if err := check(p); err != nil {
+			return err
+		}
+		if !slices.Contains(pins, p.SPKI) {
+			return peerRejected("key is not one the joiner pins")
+		}
+		return nil
+	})
+}
+
+func (t *TCPTransport) dialVerified(ctx context.Context, addr string, lane byte, verify tlsid.Verify) (*tls.Conn, error) {
 	d := net.Dialer{Timeout: t.cfg.HandshakeTimeout}
 	raw, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
@@ -417,7 +436,7 @@ func (t *TCPTransport) dial(ctx context.Context, addr string, lane byte, pin *[3
 	}
 	// The identity verifies the chain, roots and extended key usage first,
 	// then the transport's SAN and pin check runs (R2-21, ADR 0174 D1).
-	c := tls.Client(raw, t.id.ClientConfig(t.checkPeer(pin)))
+	c := tls.Client(raw, t.id.ClientConfig(verify))
 	_ = c.SetDeadline(time.Now().Add(t.cfg.HandshakeTimeout))
 	if err := c.HandshakeContext(ctx); err != nil {
 		raw.Close()
@@ -890,14 +909,20 @@ func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (
 	if req.Cluster != t.cluster {
 		return coreconsensus.Position{}, origin(coreconsensus.ClusterMismatch)
 	}
+	if len(cfg.Pins) == 0 {
+		// The answer installs the peers the joiner admits: it is taken only
+		// from a key the operator vouched for (review M4).
+		return coreconsensus.Position{}, transportMisconfigured("JoinConfig.Pins", "empty")
+	}
 	last := error(origin(coreconsensus.JoinRefused, errs.String("why", "no address answered")))
 	var refused error
 	for _, addr := range cfg.Addresses {
-		c, err := t.dial(ctx, addr, laneJoin, nil)
+		c, err := t.dialAny(ctx, addr, laneJoin, cfg.Pins)
 		if err != nil {
 			last = err
 			continue
 		}
+		peer, _ := tlsid.PeerOf(c.ConnectionState())
 		_ = c.SetDeadline(time.Now().Add(t.cfg.JoinTimeout))
 		if err := writeChunk(c, encodeJoin(req)); err != nil {
 			c.Close()
@@ -920,6 +945,10 @@ func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (
 			last = err
 			continue
 		}
+		if !joinAnswerListsPeer(m, peer.SPKI) {
+			last = peerRejected("the answer does not list its own sender")
+			continue
+		}
 		t.SetMembership(1, m.Members)
 		return coreconsensus.Position{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, nil
 	}
@@ -927,6 +956,13 @@ func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (
 		return coreconsensus.Position{}, refused
 	}
 	return coreconsensus.Position{}, last
+}
+
+// joinAnswerListsPeer reports whether a JOIN answer's membership lists the
+// peer that sent it under the key it presented: an answer that does not is
+// not the cluster's (review M4).
+func joinAnswerListsPeer(m coreconsensus.Membership, spki [32]byte) bool {
+	return slices.ContainsFunc(m.Members, func(x coreconsensus.Member) bool { return x.SPKI == spki })
 }
 
 // joinAnswerReason reads the reason after a JOIN_REFUSED's fixed part;
