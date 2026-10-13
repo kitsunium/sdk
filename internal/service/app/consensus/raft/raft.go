@@ -728,8 +728,10 @@ func (r *Raft) PeerStats() []PeerStat {
 	var out []PeerStat
 	for _, id := range r.peers() {
 		pr := r.prs[id]
-		out = append(out, PeerStat{ID: id, Voter: r.isVoter(id), Match: pr.match, Next: pr.next, Inflight: len(pr.inflight),
-			LastHeard: pr.lastHeard, Heard: pr.heard, Probing: pr.state == stateProbe, Snapshot: pr.state == stateSnapshot})
+		out = append(out, PeerStat{
+			ID: id, Voter: r.isVoter(id), Match: pr.match, Next: pr.next, Inflight: len(pr.inflight),
+			LastHeard: pr.lastHeard, Heard: pr.heard, Probing: pr.state == stateProbe, Snapshot: pr.state == stateSnapshot,
+		})
 	}
 	return out
 }

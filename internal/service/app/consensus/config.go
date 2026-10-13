@@ -96,8 +96,10 @@ type Config struct {
 
 // TimingDefaults are D5's defaults for the RTT matrix of the three sites.
 func TimingDefaults() coreconsensus.TimingContract {
-	return coreconsensus.TimingContract{Generation: 1, HeartbeatInterval: 100 * time.Millisecond,
-		ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second}
+	return coreconsensus.TimingContract{
+		Generation: 1, HeartbeatInterval: 100 * time.Millisecond,
+		ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second,
+	}
 }
 
 func misconfigured(field, why string) error {

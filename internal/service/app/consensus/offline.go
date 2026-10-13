@@ -234,8 +234,10 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 	term := max(hs.Term, termAt) + 1
 	conf := coreconsensus.Membership{Members: slices.Clone(members), Retired: old.Retired}
 	data := wire.AppendAdmin(nil, &wire.Admin{Operator: string(opt.Operator), Change: wire.ChangeForced, Membership: conf})
-	e := coreconsensus.Entry{Position: coreconsensus.Position{Term: term, Index: commit + 1}, Kind: coreconsensus.EntryMembership,
-		BodySum: wire.BodySum(data), Data: data}
+	e := coreconsensus.Entry{
+		Position: coreconsensus.Position{Term: term, Index: commit + 1}, Kind: coreconsensus.EntryMembership,
+		BodySum: wire.BodySum(data), Data: data,
+	}
 	e.ChainSum = wire.ChainSum(chain, &e)
 	nhs := coreconsensus.HardState{Term: term, Commit: commit + 1}
 	if err := l.Append([]coreconsensus.Entry{e}, &nhs); err != nil {
@@ -244,8 +246,10 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 	if err := l.Sync(); err != nil {
 		return err
 	}
-	st.Log = coreconsensus.LogIdentity{Cluster: newCluster, Epoch: 1, Predecessor: st.Log.Cluster,
-		PredecessorEpoch: st.Log.Epoch, KeptIndex: commit}
+	st.Log = coreconsensus.LogIdentity{
+		Cluster: newCluster, Epoch: 1, Predecessor: st.Log.Cluster,
+		PredecessorEpoch: st.Log.Epoch, KeptIndex: commit,
+	}
 	return l.WriteStamp(st)
 }
 
@@ -328,8 +332,10 @@ func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID,
 	if err := d.audit(opt.Operator, "restore-snapshot "+newCluster.String()); err != nil {
 		return coreconsensus.SnapshotMeta{}, err
 	}
-	nl := coreconsensus.LogIdentity{Cluster: newCluster, Epoch: 1, Predecessor: exp.Log.Cluster,
-		PredecessorEpoch: exp.Log.Epoch, KeptIndex: exp.Position.Index}
+	nl := coreconsensus.LogIdentity{
+		Cluster: newCluster, Epoch: 1, Predecessor: exp.Log.Cluster,
+		PredecessorEpoch: exp.Log.Epoch, KeptIndex: exp.Position.Index,
+	}
 	meta := exp
 	meta.Log = nl
 	meta.Membership = coreconsensus.Membership{Index: exp.Position.Index, Members: slices.Clone(members), Retired: exp.Membership.Retired}

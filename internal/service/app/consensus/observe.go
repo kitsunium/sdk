@@ -80,9 +80,11 @@ type obs struct {
 }
 
 func newObs(cfg Config) *obs {
-	return &obs{meter: cfg.Meter, tracer: cfg.Tracer, log: cfg.Logger,
+	return &obs{
+		meter: cfg.Meter, tracer: cfg.Tracer, log: cfg.Logger,
 		group: coreotel.Int64("group", int64(cfg.Group)),
-		gauge: map[string]coremetrics.Gauge{}, count: map[string]coremetrics.Counter{}, hist: map[string]coremetrics.Histogram{}}
+		gauge: map[string]coremetrics.Gauge{}, count: map[string]coremetrics.Counter{}, hist: map[string]coremetrics.Histogram{},
+	}
 }
 
 func key(name string, attrs []coreotel.AttrValue) string {

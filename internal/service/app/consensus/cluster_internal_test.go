@@ -113,15 +113,19 @@ type cluster struct {
 }
 
 func testTimingFast() coreconsensus.TimingContract {
-	return coreconsensus.TimingContract{Generation: 1, HeartbeatInterval: 10 * time.Millisecond,
-		ElectionTimeoutMin: 100 * time.Millisecond, ElectionTimeoutMax: 200 * time.Millisecond, MaxClockDrift: 0.05}
+	return coreconsensus.TimingContract{
+		Generation: 1, HeartbeatInterval: 10 * time.Millisecond,
+		ElectionTimeoutMin: 100 * time.Millisecond, ElectionTimeoutMax: 200 * time.Millisecond, MaxClockDrift: 0.05,
+	}
 }
 
 func (c *cluster) config(tn *testNode) Config {
-	return Config{Cluster: c.cid, Machine: tn.sm, Durability: DurabilityVolatile, Log: tn.log, Snapshots: tn.snaps,
+	return Config{
+		Cluster: c.cid, Machine: tn.sm, Durability: DurabilityVolatile, Log: tn.log, Snapshots: tn.snaps,
 		Transport: c.net.Transport(tn.id), InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30,
 		SnapshotEveryBytes: 1 << 20, MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 1,
-		SnapshotEvery: c.every, SnapshotTrailing: 4, JoinAuthorizer: allowJoin{}, RecentEntriesBytes: c.recent}
+		SnapshotEvery: c.every, SnapshotTrailing: 4, JoinAuthorizer: allowJoin{}, RecentEntriesBytes: c.recent,
+	}
 }
 
 type allowJoin struct{}
@@ -147,8 +151,10 @@ func newClusterWith(t *testing.T, c *cluster) *cluster {
 		}
 		tn.id = id
 		c.nodes = append(c.nodes, tn)
-		c.members = append(c.members, coreconsensus.Member{ID: id, Incarnation: inc, Slot: fmt.Sprintf("slot-%d", i),
-			SPKI: MemorySPKI(id), Voter: true})
+		c.members = append(c.members, coreconsensus.Member{
+			ID: id, Incarnation: inc, Slot: fmt.Sprintf("slot-%d", i),
+			SPKI: MemorySPKI(id), Voter: true,
+		})
 	}
 	for _, tn := range c.nodes {
 		if err := Bootstrap(context.Background(), c.config(tn), c.members); err != nil {
@@ -662,8 +668,10 @@ func TestLongLoopTurnDropsTheLease(t *testing.T) {
 		cfg.Reads = ReadLease
 		// A 50 ms budget (1 s × 0.05): ordinary turns under -race stay
 		// below it, the 200 ms pause below does not.
-		cfg.InitialTiming = coreconsensus.TimingContract{Generation: 1, HeartbeatInterval: 50 * time.Millisecond,
-			ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second, MaxClockDrift: 0.05}
+		cfg.InitialTiming = coreconsensus.TimingContract{
+			Generation: 1, HeartbeatInterval: 50 * time.Millisecond,
+			ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second, MaxClockDrift: 0.05,
+		}
 		n, err := NewRaft(cfg)
 		if err != nil {
 			t.Fatal(err)

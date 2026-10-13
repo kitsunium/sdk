@@ -112,11 +112,13 @@ func parseRecord(b []byte) (r record, ok bool) {
 	if crc32.Checksum(body, castagnoli) != binary.LittleEndian.Uint32(b[4:]) || body[0] != recVersion {
 		return r, false
 	}
-	r = record{kind: body[1], end: body[2] != 0,
+	r = record{
+		kind: body[1], end: body[2] != 0,
 		batch: binary.LittleEndian.Uint64(body[4:]), term: binary.LittleEndian.Uint64(body[12:]),
 		index: binary.LittleEndian.Uint64(body[20:]), ekind: body[28],
 		ever: binary.LittleEndian.Uint32(body[32:]), body: binary.LittleEndian.Uint32(body[36:]),
-		chain: binary.LittleEndian.Uint32(body[40:]), data: body[recFixed:], length: align8(recHeader + n)}
+		chain: binary.LittleEndian.Uint32(body[40:]), data: body[recFixed:], length: align8(recHeader + n),
+	}
 	return r, true
 }
 
@@ -149,8 +151,10 @@ func decodeCheckpoint(b []byte) (checkpoint, bool) {
 		return checkpoint{}, false
 	}
 	u := func(i int) uint64 { return binary.LittleEndian.Uint64(b[8*i:]) }
-	return checkpoint{hs: coreconsensus.HardState{Term: u(0), Vote: coreconsensus.NodeID(u(1)), Commit: u(2)},
-		prevIndex: u(3), prevTerm: u(4), compact: u(5), compactTerm: u(6), nextBatchSeq: u(7)}, true
+	return checkpoint{
+		hs:        coreconsensus.HardState{Term: u(0), Vote: coreconsensus.NodeID(u(1)), Commit: u(2)},
+		prevIndex: u(3), prevTerm: u(4), compact: u(5), compactTerm: u(6), nextBatchSeq: u(7),
+	}, true
 }
 
 func encodeHS(hs coreconsensus.HardState) []byte {
@@ -381,8 +385,10 @@ func (l *FileLog) recover() error {
 				}
 			case recHardState:
 				if len(r.data) == 24 {
-					l.hs = coreconsensus.HardState{Term: binary.LittleEndian.Uint64(r.data),
-						Vote: coreconsensus.NodeID(binary.LittleEndian.Uint64(r.data[8:])), Commit: binary.LittleEndian.Uint64(r.data[16:])}
+					l.hs = coreconsensus.HardState{
+						Term: binary.LittleEndian.Uint64(r.data),
+						Vote: coreconsensus.NodeID(binary.LittleEndian.Uint64(r.data[8:])), Commit: binary.LittleEndian.Uint64(r.data[16:]),
+					}
 				}
 			case recCommit:
 				l.hs.Commit = max(l.hs.Commit, r.index)
@@ -744,8 +750,10 @@ func (l *FileLog) readEntry(s slot) (coreconsensus.Entry, error) {
 		// A log that cannot be read cannot be trusted to agree with itself.
 		return coreconsensus.Entry{}, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
 	}
-	return coreconsensus.Entry{Position: coreconsensus.Position{Term: r.term, Index: r.index},
-		Kind: coreconsensus.EntryKind(r.ekind), Version: r.ever, BodySum: r.body, ChainSum: r.chain, Data: r.data}, nil
+	return coreconsensus.Entry{
+		Position: coreconsensus.Position{Term: r.term, Index: r.index},
+		Kind:     coreconsensus.EntryKind(r.ekind), Version: r.ever, BodySum: r.body, ChainSum: r.chain, Data: r.data,
+	}, nil
 }
 
 // Term implements LogReader.
@@ -792,8 +800,10 @@ func (l *FileLog) Append(entries []coreconsensus.Entry, hs *coreconsensus.HardSt
 		if e.Position.Index != l.first+uint64(len(l.slots)) {
 			return storageFailed("append", errImpossible)
 		}
-		l.add(&record{kind: recEntry, batch: l.batch, term: e.Position.Term, index: e.Position.Index,
-			ekind: uint8(e.Kind), ever: e.Version, body: e.BodySum, chain: e.ChainSum, data: e.Data})
+		l.add(&record{
+			kind: recEntry, batch: l.batch, term: e.Position.Term, index: e.Position.Index,
+			ekind: uint8(e.Kind), ever: e.Version, body: e.BodySum, chain: e.ChainSum, data: e.Data,
+		})
 		l.slots = append(l.slots, slot{term: e.Position.Term, mem: &e})
 	}
 	if hs != nil {

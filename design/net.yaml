@@ -2423,7 +2423,7 @@ packages:
     path: github.com/kitsunium/sdk/internal/service/net/server
     types:
       - doc: |-
-          AdmissionConfig parameterises NewAdmission. A zero budget is clamped to
+          AdmissionConfig parameterises [NewAdmission]. A zero budget is clamped to
           its default, never read as "unlimited" (ADR 0031, clamp half).
         name: AdmissionConfig
         struct:
@@ -2443,7 +2443,7 @@ packages:
           budget of connections that have not completed their handshake, checked
           before any TLS byte is read, with a reserved budget for declared
           addresses so a flood from elsewhere never locks them out. It is safe for
-          concurrent use, and shared by a StreamGroup (PreHandshake) and by any
+          concurrent use, and shared by a [StreamGroup] ([PreHandshake]) and by any
           transport that runs its own listener.
         methods:
           - doc: |-
@@ -3044,187 +3044,184 @@ packages:
       else, delegating every validation decision to core so that in-memory and
       on-disk material are held to exactly the same standard.
     functions:
-    - doc: |-
-        Load reads the named TLS material and returns the validated identity.
+      - doc: |-
+          SPKI returns the pin of a certificate: the SHA-256 of its
+          SubjectPublicKeyInfo.
+        in:
+          - name: c
+            type: "*x509.Certificate"
+        name: SPKI
+        out:
+          - type: "[32]byte"
+      - doc: |-
+          NewIdentity builds an identity over a certificate source and its roots;
+          get is asked at every handshake. nil roots are refused: an identity that
+          trusts the platform's roots trusts everybody's CA.
+        in:
+          - name: get
+            type: func() (*tls.Certificate, error)
+          - name: roots
+            type: "*x509.CertPool"
+        name: NewIdentity
+        out:
+          - type: "*Identity"
+          - type: error
+      - doc: |-
+          LoadReloadable reads an identity from files and reloads it in place when
+          they change. A reload is refused, counted, and the old identity kept, when
+          the new certificate does not parse or match its key, or names another URI
+          SAN, or carries another key: a renewal reuses the key, so the pins hold.
+          A new roots file is added to the old roots, so a CA rollover trusts the
+          union until the process restarts.
+        in:
+          - name: f
+            type: Files
+        name: LoadReloadable
+        out:
+          - type: "*Identity"
+          - type: error
+      - doc: |-
+          PeerOf returns the verified peer of a completed handshake, false before
+          one or without a peer certificate.
+        in:
+          - name: cs
+            type: tls.ConnectionState
+        name: PeerOf
+        out:
+          - type: PeerIdentity
+          - type: bool
+      - doc: |-
+          Deadline is when a connection to peer must end: at its certificate's
+          NotAfter, or after maxAge from opened, whichever comes first, so a
+          revoked or expired identity cannot ride an old connection.
+        in:
+          - name: peer
+            type: PeerIdentity
+          - name: opened
+            type: time.Time
+          - name: maxAge
+            type: time.Duration
+        name: Deadline
+        out:
+          - type: time.Time
+      - doc: |-
+          Load reads the named TLS material and returns the validated identity.
 
-        A missing or unreadable file is TLSMaterialInvalid naming the offending
-        field, never a silently skipped one: a trust bundle that fails to load must
-        not degrade into "trust the platform", and a client keypair that fails to
-        load must not degrade into an anonymous connection.
-      in:
-      - name: p
-        type: corenet.IdentityFileParams
-      name: Load
-      out:
-      - name: id
-        type: corenet.IdentityValue
-      - name: err
-        type: error
-    - doc: |-
-        SPKI returns the pin of a certificate: the SHA-256 of its
-        SubjectPublicKeyInfo.
-      in:
-      - name: c
-        type: '*x509.Certificate'
-      name: SPKI
-      out:
-      - type: '[32]byte'
-    - doc: |-
-        NewIdentity builds an identity over a certificate source and its roots;
-        get is asked at every handshake. nil roots are refused: an identity that
-        trusts the platform's roots trusts everybody's CA.
-      in:
-      - name: get
-        type: func() (*tls.Certificate, error)
-      - name: roots
-        type: '*x509.CertPool'
-      name: NewIdentity
-      out:
-      - type: '*Identity'
-      - type: error
-    - doc: |-
-        LoadReloadable reads an identity from files and reloads it in place when
-        they change. A reload is refused, counted, and the old identity kept, when
-        the new certificate does not parse or match its key, or names another URI
-        SAN, or carries another key: a renewal reuses the key, so the pins hold.
-        A new roots file is added to the old roots, so a CA rollover trusts the
-        union until the process restarts.
-      in:
-      - name: f
-        type: Files
-      name: LoadReloadable
-      out:
-      - type: '*Identity'
-      - type: error
-    - doc: |-
-        PeerOf returns the verified peer of a completed handshake, false before
-        one or without a peer certificate.
-      in:
-      - name: cs
-        type: tls.ConnectionState
-      name: PeerOf
-      out:
-      - type: PeerIdentity
-      - type: bool
-    - doc: |-
-        Deadline is when a connection to peer must end: at its certificate's
-        NotAfter, or after maxAge from opened, whichever comes first, so a
-        revoked or expired identity cannot ride an old connection.
-      in:
-      - name: peer
-        type: PeerIdentity
-      - name: opened
-        type: time.Time
-      - name: maxAge
-        type: time.Duration
-      name: Deadline
-      out:
-      - type: time.Time
+          A missing or unreadable file is TLSMaterialInvalid naming the offending
+          field, never a silently skipped one: a trust bundle that fails to load must
+          not degrade into "trust the platform", and a client keypair that fails to
+          load must not degrade into an anonymous connection.
+        in:
+          - name: p
+            type: corenet.IdentityFileParams
+        name: Load
+        out:
+          - name: id
+            type: corenet.IdentityValue
+          - name: err
+            type: error
     imports:
       corenet: github.com/kitsunium/sdk/internal/core/net
-      errs: github.com/kitsunium/sdk/internal/kernel/errs
-      time: time
       tls: crypto/tls
       url: net/url
       x509: crypto/x509
     path: github.com/kitsunium/sdk/internal/service/net/tlsid
     types:
-    - doc: |-
-        PeerIdentity is what a handshake PROVED about the peer: its verified leaf
-        and chain, and the SHA-256 of its SubjectPublicKeyInfo, the pin a member
-        is admitted on. Nothing in it comes from a frame the peer wrote.
-      name: PeerIdentity
-      struct:
-        fields:
-        - doc: Leaf is the peer's verified certificate.
-          name: Leaf
-          type: '*x509.Certificate'
-        - doc: Chain is the verified chain, leaf first.
-          name: Chain
-          type: '[]*x509.Certificate'
-        - doc: SPKI is the SHA-256 of the leaf's SubjectPublicKeyInfo.
-          name: SPKI
-          type: '[32]byte'
-        - doc: URIs are the leaf's URI SANs.
-          name: URIs
-          type: '[]*url.URL'
-        - doc: 'NotAfter is when the leaf expires: a connection is closed by then.'
-          name: NotAfter
-          type: time.Time
-    - doc: |-
-        Verify is a caller's check of a verified peer, run on EVERY handshake,
-        after the chain, the roots and the extended key usage passed. A non-nil
-        error fails the handshake (fail-closed).
-      name: Verify
-      underlying: func(peer PeerIdentity) error
-    - doc: |-
-        Identity is a node's own TLS identity and the roots it trusts, reloadable
-        in place. It is safe for concurrent use.
-      methods:
-      - doc: Certificate returns the identity's current certificate.
-        name: Certificate
-        out:
-        - type: '*tls.Certificate'
-        - type: error
-        recv: '*Identity'
-      - doc: Leaf returns the current certificate, parsed.
-        name: Leaf
-        out:
-        - type: '*x509.Certificate'
-        - type: error
-        recv: '*Identity'
-      - doc: 'Roots returns the trusted roots: the union of every roots file read.'
-        name: Roots
-        out:
-        - type: '*x509.CertPool'
-        recv: '*Identity'
-      - doc: ReloadFailures counts the reloads refused so far.
-        name: ReloadFailures
-        out:
-        - type: int64
-        recv: '*Identity'
       - doc: |-
-          ServerConfig accepts only a client whose chain verifies against the roots
-          with clientAuth, then passes check, on every handshake.
-        in:
-        - name: check
-          type: Verify
-        name: ServerConfig
-        out:
-        - type: '*tls.Config'
-        recv: '*Identity'
+          PeerIdentity is what a handshake PROVED about the peer: its verified leaf
+          and chain, and the SHA-256 of its SubjectPublicKeyInfo, the pin a member
+          is admitted on. Nothing in it comes from a frame the peer wrote.
+        name: PeerIdentity
+        struct:
+          fields:
+            - doc: Leaf is the peer's verified certificate.
+              name: Leaf
+              type: "*x509.Certificate"
+            - doc: Chain is the verified chain, leaf first.
+              name: Chain
+              type: "[]*x509.Certificate"
+            - doc: SPKI is the SHA-256 of the leaf's SubjectPublicKeyInfo.
+              name: SPKI
+              type: "[32]byte"
+            - doc: URIs are the leaf's URI SANs.
+              name: URIs
+              type: "[]*url.URL"
+            - doc: "NotAfter is when the leaf expires: a connection is closed by then."
+              name: NotAfter
+              type: time.Time
       - doc: |-
-          ClientConfig dials only a server whose chain verifies against the roots
-          with serverAuth, then passes check, on every handshake. The standard
-          verification is replaced by this one, not skipped: it would look for a
-          DNS name, and an identity may name a URI only.
-        in:
-        - name: check
-          type: Verify
-        name: ClientConfig
-        out:
-        - type: '*tls.Config'
-        recv: '*Identity'
-      name: Identity
-      struct:
-        fields: null
-        unexported: true
-    - doc: Files names the PEM files of a reloadable identity.
-      name: Files
-      struct:
-        fields:
-        - doc: CertFile holds the certificate, its chain may follow it.
-          name: CertFile
-          type: string
-        - doc: KeyFile holds its private key.
-          name: KeyFile
-          type: string
-        - doc: RootsFile holds the roots, trusted as RootCAs AND ClientCAs.
-          name: RootsFile
-          type: string
-        - doc: Every bounds how often the files are looked at; 0 is one second.
-          name: Every
-          type: time.Duration
+          Verify is a caller's check of a verified peer, run on EVERY handshake,
+          after the chain, the roots and the extended key usage passed. A non-nil
+          error fails the handshake (fail-closed).
+        name: Verify
+        underlying: func(peer PeerIdentity) error
+      - doc: |-
+          Identity is a node's own TLS identity and the roots it trusts, reloadable
+          in place. It is safe for concurrent use.
+        methods:
+          - doc: Certificate returns the identity's current certificate.
+            name: Certificate
+            out:
+              - type: "*tls.Certificate"
+              - type: error
+            recv: pointer
+          - doc: Leaf returns the current certificate, parsed.
+            name: Leaf
+            out:
+              - type: "*x509.Certificate"
+              - type: error
+            recv: pointer
+          - doc: "Roots returns the trusted roots: the union of every roots file read."
+            name: Roots
+            out:
+              - type: "*x509.CertPool"
+            recv: pointer
+          - doc: ReloadFailures counts the reloads refused so far.
+            name: ReloadFailures
+            out:
+              - type: int64
+            recv: pointer
+          - doc: |-
+              ServerConfig accepts only a client whose chain verifies against the roots
+              with clientAuth, then passes check, on every handshake.
+            in:
+              - name: check
+                type: Verify
+            name: ServerConfig
+            out:
+              - type: "*tls.Config"
+            recv: pointer
+          - doc: |-
+              ClientConfig dials only a server whose chain verifies against the roots
+              with serverAuth, then passes check, on every handshake. The standard
+              verification is replaced by this one, not skipped: it would look for a
+              DNS name, and an identity may name a URI only.
+            in:
+              - name: check
+                type: Verify
+            name: ClientConfig
+            out:
+              - type: "*tls.Config"
+            recv: pointer
+        name: Identity
+        struct:
+          unexported: true
+      - doc: Files names the PEM files of a reloadable identity.
+        name: Files
+        struct:
+          fields:
+            - doc: CertFile holds the certificate, its chain may follow it.
+              name: CertFile
+              type: string
+            - doc: KeyFile holds its private key.
+              name: KeyFile
+              type: string
+            - doc: RootsFile holds the roots, trusted as RootCAs AND ClientCAs.
+              name: RootsFile
+              type: string
+            - doc: Every bounds how often the files are looked at; 0 is one second.
+              name: Every
+              type: time.Duration
   - constants:
       - doc: |-
           CloseCodeLen is the width of the status code that opens a Close frame's

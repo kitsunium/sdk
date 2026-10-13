@@ -2,7 +2,6 @@ package consensus
 
 import (
 	"encoding/hex"
-	"errors"
 	"strconv"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -10,8 +9,15 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
+// cause is the text of a storage failure's cause. It never travels as an
+// error of its own: storageFailed records it in a field of a
+// STORAGE_FAILED, the only error a caller matches on.
+type cause string
+
+func (c cause) Error() string { return string(c) }
+
 // errImpossible is the cause of an answer a store must never give.
-var errImpossible = errors.New("impossible answer")
+const errImpossible cause = "impossible answer"
 
 func u64s(v uint64) string { return strconv.FormatUint(v, 10) }
 
@@ -103,4 +109,4 @@ func TokenOf(err error) (coreconsensus.Token, bool) {
 }
 
 // errPinned is the cause of a Remove refused while a handle is open.
-var errPinned = errors.New("snapshot pinned by an open handle")
+const errPinned cause = "snapshot pinned by an open handle"

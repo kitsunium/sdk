@@ -229,10 +229,12 @@ func newTCPTransport(cfg TransportConfig, id *tlsid.Identity) (*TCPTransport, er
 	if err != nil {
 		return nil, transportMisconfigured("Certificate", "URI SAN")
 	}
-	t := &TCPTransport{cfg: cfg, id: id, cluster: cid, slot: slot,
+	t := &TCPTransport{
+		cfg: cfg, id: id, cluster: cid, slot: slot,
 		members: map[coreconsensus.GroupID][]coreconsensus.Member{}, byID: map[coreconsensus.NodeID]coreconsensus.Member{},
 		bySPKI: map[[32]byte]coreconsensus.Member{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{}, admission: server.NewAdmission(server.AdmissionConfig{PerAddress: cfg.MaxUnauthenticatedPerIP, Reserved: cfg.ReservedMemberSlots}), peerExpiry: map[coreconsensus.NodeID]time.Time{},
-		done: make(chan struct{})}
+		done: make(chan struct{}),
+	}
 	ln, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {
 		return nil, transportMisconfigured("ListenAddress", err.Error())
@@ -578,7 +580,8 @@ func (t *TCPTransport) Bind(_ coreconsensus.GroupID,
 	deliver func(coreconsensus.AuthenticatedPeer, []byte),
 	offer func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept,
 	install func(coreconsensus.InstallRequest) error,
-	join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code)) error {
+	join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code),
+) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.deliver, t.offer, t.install, t.join = deliver, offer, install, join
@@ -764,8 +767,10 @@ func (t *TCPTransport) serveSnapshot(c *tls.Conn, peer coreconsensus.Authenticat
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ierr := in(coreconsensus.InstallRequest{Ctx: ctx, From: peer, Offer: o, Offset: acc.Offset,
-		Body: io.LimitReader(c, o.Meta.EncodedSize-acc.Offset)})
+	ierr := in(coreconsensus.InstallRequest{
+		Ctx: ctx, From: peer, Offer: o, Offset: acc.Offset,
+		Body: io.LimitReader(c, o.Meta.EncodedSize-acc.Offset),
+	})
 	var code errs.Code
 	if ierr != nil {
 		code, _ = errs.CodeOf(ierr)
@@ -852,8 +857,10 @@ func (t *TCPTransport) serveJoin(c *tls.Conn, peer coreconsensus.AuthenticatedPe
 // Join implements Joiner: the JOIN goes to each address in turn until one
 // member answers JOIN_ACK with the position its AddLearner was appended at.
 func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.Position, error) {
-	req := coreconsensus.JoinRequest{Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
-		Slot: t.slot, Address: cfg.Address}
+	req := coreconsensus.JoinRequest{
+		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
+		Slot: t.slot, Address: cfg.Address,
+	}
 	if req.Cluster != t.cluster {
 		return coreconsensus.Position{}, origin(coreconsensus.ClusterMismatch)
 	}

@@ -47,8 +47,10 @@ func InitLog(log coreconsensus.LogStore, cluster coreconsensus.ClusterID, slot s
 	if !validSlot(slot) {
 		return 0, coreconsensus.Incarnation{}, misconfigured("slot", "not [a-z0-9-]{1,32}")
 	}
-	st = coreconsensus.Stamp{Log: coreconsensus.LogIdentity{Cluster: cluster, Epoch: 1}, ID: drawID(),
-		Incarnation: drawIncarnation(), Slot: slot, State: coreconsensus.StampJoining}
+	st = coreconsensus.Stamp{
+		Log: coreconsensus.LogIdentity{Cluster: cluster, Epoch: 1}, ID: drawID(),
+		Incarnation: drawIncarnation(), Slot: slot, State: coreconsensus.StampJoining,
+	}
 	if err := log.WriteStamp(st); err != nil {
 		return 0, coreconsensus.Incarnation{}, storageFailed("stamp", err)
 	}
@@ -179,8 +181,10 @@ func Bootstrap(_ context.Context, cfg Config, members []coreconsensus.Member) er
 		}
 		timing.Generation = 1
 		data := wire.AppendAdmin(nil, &wire.Admin{Operator: "bootstrap", Change: wire.ChangeFounding, Membership: conf, Contract: timing})
-		e := coreconsensus.Entry{Position: coreconsensus.Position{Term: 1, Index: 1}, Kind: coreconsensus.EntryMembership,
-			BodySum: wire.BodySum(data), Data: data}
+		e := coreconsensus.Entry{
+			Position: coreconsensus.Position{Term: 1, Index: 1}, Kind: coreconsensus.EntryMembership,
+			BodySum: wire.BodySum(data), Data: data,
+		}
 		e.ChainSum = wire.ChainSum(0, &e)
 		hs := coreconsensus.HardState{Term: 1, Commit: 1}
 		if err := cfg.Log.Append([]coreconsensus.Entry{e}, &hs); err != nil {
@@ -262,8 +266,10 @@ type Health struct {
 // Health returns the node's verdict, computed on the event loop.
 func (n *Node) Health() Health {
 	st := n.Status()
-	h := Health{Status: st, Stopped: n.stopped.Load(), DroppedFrames: n.droppedFrom.Load(), FailureTolerance: -1,
-		LongTurns: n.longTurns.Load(), JoinsRateLimited: n.joinRefused.Load()}
+	h := Health{
+		Status: st, Stopped: n.stopped.Load(), DroppedFrames: n.droppedFrom.Load(), FailureTolerance: -1,
+		LongTurns: n.longTurns.Load(), JoinsRateLimited: n.joinRefused.Load(),
+	}
 	if r, ok := n.StopReason(); ok {
 		h.StopReason = r
 	}

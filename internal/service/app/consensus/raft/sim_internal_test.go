@@ -156,8 +156,10 @@ func newSim(opt simOptions) *sim {
 		applied:   map[uint64]entryKey{},
 		commits:   map[uint64]entryKey{},
 		forwarded: map[[2]uint64]core.Message{},
-		timing: core.TimingContract{Generation: 1, HeartbeatInterval: 100 * time.Millisecond,
-			ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second, MaxClockDrift: 0.01},
+		timing: core.TimingContract{
+			Generation: 1, HeartbeatInterval: 100 * time.Millisecond,
+			ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second, MaxClockDrift: 0.01,
+		},
 	}
 	var conf core.Membership
 	for i := 1; i <= opt.nodes; i++ {
@@ -178,9 +180,11 @@ func newSim(opt simOptions) *sim {
 }
 
 func (s *sim) cfg(id core.NodeID) Config {
-	return Config{ID: id, Group: 1, Seed: s.opt.seed*31 + uint64(id), Timing: s.timing,
+	return Config{
+		ID: id, Group: 1, Seed: s.opt.seed*31 + uint64(id), Timing: s.timing,
 		MaxInflight: 16, MaxInflightBytes: 1 << 20, MaxBatchBytes: 64 << 10, MinVoters: 1,
-		PromoteLag: 64, Lease: s.opt.lease, CanVote: true, MaxChainRefusals: 3, mut: s.opt.mut, RecentEntriesBytes: s.opt.recent}
+		PromoteLag: 64, Lease: s.opt.lease, CanVote: true, MaxChainRefusals: 3, mut: s.opt.mut, RecentEntriesBytes: s.opt.recent,
+	}
 }
 
 func (s *sim) start(n *simNode) {

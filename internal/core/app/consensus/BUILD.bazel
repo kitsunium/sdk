@@ -1,18 +1,18 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 package(default_visibility = ["//internal/core:core_consumers"])
 
 go_library(
     name = "consensus",
     srcs = [
-        "codes.go",
+        "codes_gen.go",
+        "design_gen.go",
         "doc.go",
         "entry.go",
         "errors.go",
         "identity.go",
         "membership.go",
         "message.go",
-        "ports.go",
         "snapshot.go",
         "status.go",
     ],
@@ -38,4 +38,13 @@ filegroup(
     name = "audit_srcs",
     srcs = glob(["*.go"]),
     visibility = ["//:__pkg__"],
+)
+
+go_test(
+    name = "consensus_test",
+    srcs = ["api_gen_test.go"],
+    deps = [
+        ":consensus",
+        "//internal/kernel/errs",
+    ],
 )

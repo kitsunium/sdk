@@ -6,7 +6,7 @@ go_library(
     name = "consensus",
     srcs = [
         "doc.go",
-        "facade.go",
+        "facade_gen.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/app/consensus",
     visibility = ["//visibility:public"],
@@ -26,8 +26,13 @@ alias(
 go_test(
     name = "consensus_test",
     srcs = [
+        "api_gen_test.go",
         "consensus_external_test.go",
         "tcp_external_test.go",
     ],
-    deps = [":consensus"],
+    deps = [
+        ":consensus",
+        "//internal/core/app/consensus",
+        "//internal/service/app/consensus",
+    ],
 )

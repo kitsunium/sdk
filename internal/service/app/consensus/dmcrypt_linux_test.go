@@ -71,8 +71,10 @@ func TestDMCryptBench(t *testing.T) {
 			es := make([]coreconsensus.Entry, shape.batch)
 			for i := range es {
 				last++
-				es[i] = coreconsensus.Entry{Position: coreconsensus.Position{Term: 1, Index: last},
-					Kind: coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data}
+				es[i] = coreconsensus.Entry{
+					Position: coreconsensus.Position{Term: 1, Index: last},
+					Kind:     coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data,
+				}
 			}
 			if err := l.Append(es, nil); err != nil {
 				t.Fatal(err)
@@ -109,8 +111,10 @@ func TestDMCryptWriter(t *testing.T) {
 		for i := range es {
 			last++
 			p := payload(last)
-			es[i] = coreconsensus.Entry{Position: coreconsensus.Position{Term: 1, Index: last},
-				Kind: coreconsensus.EntryCommand, BodySum: wire.BodySum(p), Data: p}
+			es[i] = coreconsensus.Entry{
+				Position: coreconsensus.Position{Term: 1, Index: last},
+				Kind:     coreconsensus.EntryCommand, BodySum: wire.BodySum(p), Data: p,
+			}
 		}
 		hs.Term, hs.Commit = 1, last
 		if err := l.Append(es, &hs); err != nil {

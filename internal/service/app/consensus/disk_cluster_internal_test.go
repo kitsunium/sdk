@@ -19,10 +19,12 @@ type diskNode struct {
 }
 
 func diskConfig(c *cluster, dn *diskNode) Config {
-	return Config{Cluster: c.cid, Machine: dn.sm, Durability: DurabilityVolatile, Log: dn.dd.Log(), Snapshots: dn.dd.Snapshots(),
+	return Config{
+		Cluster: c.cid, Machine: dn.sm, Durability: DurabilityVolatile, Log: dn.dd.Log(), Snapshots: dn.dd.Snapshots(),
 		Transport: c.net.Transport(dn.id), InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30,
 		SnapshotEveryBytes: 1 << 20, MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 3,
-		SnapshotEvery: 50, SnapshotTrailing: 10}
+		SnapshotEvery: 50, SnapshotTrailing: 10,
+	}
 }
 
 func (dn *diskNode) open(t *testing.T, c *cluster) {

@@ -28,9 +28,11 @@ type testCA struct {
 func newTestCA(t *testing.T) *testCA {
 	t.Helper()
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	tpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "consensus test CA"},
+	tpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "consensus test CA"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true,
-		KeyUsage: x509.KeyUsageCertSign, BasicConstraintsValid: true}
+		KeyUsage: x509.KeyUsageCertSign, BasicConstraintsValid: true,
+	}
 	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
@@ -47,9 +49,11 @@ func (ca *testCA) issue(t *testing.T, san *url.URL, key *ecdsa.PrivateKey) (*tls
 		key, _ = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	}
 	serial, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
-	tpl := &x509.Certificate{SerialNumber: serial, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+	tpl := &x509.Certificate{
+		SerialNumber: serial, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		URIs: []*url.URL{san}, KeyUsage: x509.KeyUsageDigitalSignature,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth}}
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+	}
 	der, err := x509.CreateCertificate(rand.Reader, tpl, ca.cert, &key.PublicKey, ca.key)
 	if err != nil {
 		t.Fatal(err)
@@ -73,9 +77,11 @@ type tcpNode struct {
 }
 
 func tcpConfig(cid coreconsensus.ClusterID, tn *tcpNode) Config {
-	return Config{Cluster: cid, Machine: tn.sm, Durability: DurabilityVolatile, Log: tn.log, Snapshots: tn.snaps,
+	return Config{
+		Cluster: cid, Machine: tn.sm, Durability: DurabilityVolatile, Log: tn.log, Snapshots: tn.snaps,
 		Transport: tn.tr, InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30, MaxLogBytes: 1 << 30,
-		MinVoters: 3, JoinAuthorizer: allowJoin{}}
+		MinVoters: 3, JoinAuthorizer: allowJoin{},
+	}
 }
 
 func (tn *tcpNode) listen(t *testing.T, ca *testCA) {
@@ -298,8 +304,10 @@ func TestTCPCapsUnauthenticatedConnectionsPerAddress(t *testing.T) {
 	ca := newTestCA(t)
 	cid := coreconsensus.ClusterID{0xab}
 	cert, _ := ca.issue(t, SAN(cid, "a"), nil)
-	tr, err := NewTCPTransport(TransportConfig{Certificate: cert, Roots: ca.pool, ListenAddress: "127.0.0.1:0",
-		MaxUnauthenticatedPerIP: 2, ReservedMemberSlots: 5})
+	tr, err := NewTCPTransport(TransportConfig{
+		Certificate: cert, Roots: ca.pool, ListenAddress: "127.0.0.1:0",
+		MaxUnauthenticatedPerIP: 2, ReservedMemberSlots: 5,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

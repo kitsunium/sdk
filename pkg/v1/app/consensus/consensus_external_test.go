@@ -67,13 +67,17 @@ func TestFacadeThreeNodesInMemory(t *testing.T) {
 		parts = append(parts, p)
 		members = append(members, consensus.Member{ID: id, Incarnation: inc, Slot: slot, SPKI: consensus.MemorySPKI(id), Voter: true})
 	}
-	timing := consensus.TimingContract{HeartbeatInterval: 10 * time.Millisecond,
-		ElectionTimeoutMin: 100 * time.Millisecond, ElectionTimeoutMax: 200 * time.Millisecond}
+	timing := consensus.TimingContract{
+		HeartbeatInterval:  10 * time.Millisecond,
+		ElectionTimeoutMin: 100 * time.Millisecond, ElectionTimeoutMax: 200 * time.Millisecond,
+	}
 	var nodes []*consensus.Node
 	for _, p := range parts {
-		cfg := consensus.Config{Cluster: cluster, Machine: &counter{}, Durability: consensus.DurabilityVolatile,
+		cfg := consensus.Config{
+			Cluster: cluster, Machine: &counter{}, Durability: consensus.DurabilityVolatile,
 			Log: p.log, Snapshots: p.snaps, Transport: net.Transport(p.id), InitialTiming: timing,
-			MaxSnapshotBytes: 1 << 30, MaxLogBytes: 1 << 30, MinVoters: 3}
+			MaxSnapshotBytes: 1 << 30, MaxLogBytes: 1 << 30, MinVoters: 3,
+		}
 		if err := consensus.Bootstrap(context.Background(), cfg, members); err != nil {
 			t.Fatal(err)
 		}

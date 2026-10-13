@@ -137,31 +137,38 @@ func TestLinearizabilityCheckerOnKnownHistories(t *testing.T) {
 		{"stale read after a completed write", []kvOp{
 			{key: "x", write: true, val: "1", call: 0, ret: 1},
 			{key: "x", write: true, val: "2", call: 2, ret: 3},
-			{key: "x", val: "1", call: 4, ret: 5}}, false},
+			{key: "x", val: "1", call: 4, ret: 5},
+		}, false},
 		{"read concurrent with a write sees either", []kvOp{
 			{key: "x", write: true, val: "1", call: 0, ret: 1},
 			{key: "x", write: true, val: "2", call: 2, ret: 6},
-			{key: "x", val: "1", call: 3, ret: 4}}, true},
+			{key: "x", val: "1", call: 3, ret: 4},
+		}, true},
 		{"read of a value never written", []kvOp{{key: "x", val: "9", call: 0, ret: 1}}, false},
 		{"read of the initial value", []kvOp{{key: "x", val: "", call: 0, ret: 1}}, true},
 		{"lost update: two reads disagree on the order", []kvOp{
 			{key: "x", write: true, val: "1", call: 0, ret: 10},
 			{key: "x", write: true, val: "2", call: 0, ret: 10},
 			{key: "x", val: "1", call: 11, ret: 12},
-			{key: "x", val: "2", call: 13, ret: 14}}, false},
+			{key: "x", val: "2", call: 13, ret: 14},
+		}, false},
 		{"unknown write may take effect", []kvOp{
 			{key: "x", write: true, val: "1", call: 0, ret: unknown},
-			{key: "x", val: "1", call: 5, ret: 6}}, true},
+			{key: "x", val: "1", call: 5, ret: 6},
+		}, true},
 		{"unknown write may not take effect", []kvOp{
 			{key: "x", write: true, val: "1", call: 0, ret: unknown},
-			{key: "x", val: "", call: 5, ret: 6}}, true},
+			{key: "x", val: "", call: 5, ret: 6},
+		}, true},
 		{"unknown write cannot flip back", []kvOp{
 			{key: "x", write: true, val: "1", call: 0, ret: unknown},
 			{key: "x", val: "1", call: 5, ret: 6},
-			{key: "x", val: "", call: 7, ret: 8}}, false},
+			{key: "x", val: "", call: 7, ret: 8},
+		}, false},
 		{"keys are independent", []kvOp{
 			{key: "x", write: true, val: "1", call: 0, ret: 1},
-			{key: "y", val: "", call: 2, ret: 3}}, true},
+			{key: "y", val: "", call: 2, ret: 3},
+		}, true},
 	}
 	for _, c := range cases {
 		if got, _ := linearizable(c.ops); got != c.want {

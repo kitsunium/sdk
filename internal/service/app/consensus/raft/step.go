@@ -207,8 +207,10 @@ func (r *Raft) campaign(pre bool, issuer core.NodeID, issuerTerm uint64) {
 			if id == r.id {
 				continue
 			}
-			r.send(core.Message{Kind: core.MsgPreVote, To: id, Term: r.term + 1,
-				LogTerm: r.log.lastTerm(), Index: r.log.lastIndex()})
+			r.send(core.Message{
+				Kind: core.MsgPreVote, To: id, Term: r.term + 1,
+				LogTerm: r.log.lastTerm(), Index: r.log.lastIndex(),
+			})
 		}
 		return
 	}
@@ -324,8 +326,10 @@ func (r *Raft) handleAppend(m core.Message) {
 	if r.cfg.NoTable {
 		// No usable snapshot: it asks for one instead of storing entries it
 		// could never apply (D7, R7-18).
-		r.send(core.Message{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true,
-			RejectHint: r.log.lastIndex(), Flags: core.FlagNeedSnapshot})
+		r.send(core.Message{
+			Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true,
+			RejectHint: r.log.lastIndex(), Flags: core.FlagNeedSnapshot,
+		})
 		return
 	}
 	if m.Index < r.log.committed {

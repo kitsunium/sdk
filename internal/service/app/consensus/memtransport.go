@@ -32,8 +32,10 @@ func (n *MemoryNetwork) Transport(id coreconsensus.NodeID) *MemoryTransport {
 	if t, ok := n.nodes[id]; ok {
 		return t
 	}
-	t := &MemoryTransport{net: n, id: id,
-		ctrl: make(chan memFrame, 4096), data: make(chan memFrame, 4096), stop: make(chan struct{})}
+	t := &MemoryTransport{
+		net: n, id: id,
+		ctrl: make(chan memFrame, 4096), data: make(chan memFrame, 4096), stop: make(chan struct{}),
+	}
 	n.nodes[id] = t
 	return t
 }
@@ -147,7 +149,8 @@ func (t *MemoryTransport) Bind(group coreconsensus.GroupID,
 	deliver func(coreconsensus.AuthenticatedPeer, []byte),
 	offer func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept,
 	install func(coreconsensus.InstallRequest) error,
-	join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code)) error {
+	join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code),
+) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.deliver, t.offer, t.install, t.join = deliver, offer, install, join
@@ -201,8 +204,10 @@ func (t *MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig
 		}
 	}
 	t.net.mu.Unlock()
-	req := coreconsensus.JoinRequest{Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
-		Slot: cfg.Stamp.Slot, Address: cfg.Address}
+	req := coreconsensus.JoinRequest{
+		Cluster: cfg.Stamp.Log.Cluster, ID: cfg.Stamp.ID, Incarnation: cfg.Stamp.Incarnation,
+		Slot: cfg.Stamp.Slot, Address: cfg.Address,
+	}
 	var last error = origin(coreconsensus.JoinRefused, errs.String("why", "no member"))
 	for _, x := range targets {
 		x.mu.Lock()

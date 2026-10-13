@@ -11,8 +11,10 @@ import (
 // FuzzParseMessage: the frame decoder never panics, and what it accepts
 // encodes back to the same bytes (D15 fuzz targets).
 func FuzzParseMessage(f *testing.F) {
-	m := coreconsensus.Message{Version: 1, Group: 1, Kind: coreconsensus.MsgApp, From: 1, To: 2, Term: 3,
-		Entries: []coreconsensus.Entry{{Position: coreconsensus.Position{Term: 3, Index: 4}, Kind: coreconsensus.EntryCommand, Data: []byte("x")}}}
+	m := coreconsensus.Message{
+		Version: 1, Group: 1, Kind: coreconsensus.MsgApp, From: 1, To: 2, Term: 3,
+		Entries: []coreconsensus.Entry{{Position: coreconsensus.Position{Term: 3, Index: 4}, Kind: coreconsensus.EntryCommand, Data: []byte("x")}},
+	}
 	f.Add(wire.AppendMessage(nil, &m))
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, b []byte) {

@@ -29,9 +29,11 @@ type ca struct {
 func newCA(t *testing.T, name string) *ca {
 	t.Helper()
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	tpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: name}, IsCA: true,
+	tpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: name}, IsCA: true,
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageCertSign,
-		BasicConstraintsValid: true}
+		BasicConstraintsValid: true,
+	}
 	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
@@ -47,9 +49,11 @@ func (c *ca) issue(t *testing.T, san string, key *ecdsa.PrivateKey) (certPEM, ke
 	}
 	u, _ := url.Parse(san)
 	serial, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
-	tpl := &x509.Certificate{SerialNumber: serial, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+	tpl := &x509.Certificate{
+		SerialNumber: serial, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		URIs: []*url.URL{u}, KeyUsage: x509.KeyUsageDigitalSignature,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth}}
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+	}
 	der, err := x509.CreateCertificate(rand.Reader, tpl, c.cert, &key.PublicKey, c.key)
 	if err != nil {
 		t.Fatal(err)
@@ -70,8 +74,10 @@ func writeFile(t *testing.T, dir, name string, b []byte) string {
 func files(t *testing.T, c *ca, san string, key *ecdsa.PrivateKey) tlsid.Files {
 	dir := t.TempDir()
 	cp, kp := c.issue(t, san, key)
-	return tlsid.Files{CertFile: writeFile(t, dir, "cert.pem", cp), KeyFile: writeFile(t, dir, "key.pem", kp),
-		RootsFile: writeFile(t, dir, "ca.pem", c.pem), Every: time.Millisecond}
+	return tlsid.Files{
+		CertFile: writeFile(t, dir, "cert.pem", cp), KeyFile: writeFile(t, dir, "key.pem", kp),
+		RootsFile: writeFile(t, dir, "ca.pem", c.pem), Every: time.Millisecond,
+	}
 }
 
 // handshake runs one mutual handshake over a pipe and returns both errors

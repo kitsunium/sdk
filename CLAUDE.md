@@ -40,6 +40,7 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 | `resilience` | app | Retry, circuit breaker, keyed rate limit, bulkhead, timeout, fallback, hedging, and the published backoff curve | 0026, 0031, 0103 |
 | `lifecycle` | app | Ordered start and reverse stop with a per-component budget, and the supervisor that restarts a loop | 0050, 0112 |
 | `health` | app | Startup, readiness and liveness as three types, every wait bounded, and the loopback readiness probe | 0060, 0072, 0131 |
+| `consensus` | app | A write is committed when a majority holds it on disk: a Raft with PreVote and CheckQuorum always on, snapshots, single-server membership through learners, a segmented log that classifies every hole before it repairs one, an mTLS transport pinned by SPKI | 0152, 0174 |
 | `lock` | app | Named exclusive leases over one process or one machine, with fencing tokens and the guarantee that is not made said out loud | 0052, 0081, 0082, 0083, 0084, 0086 |
 | `id` | app | UUIDv4/v7, ULID, snowflake, NanoID, KSUID and TypeID | 0024, 0038 |
 | `mail` | app | MIME composition and SMTP with header injection refused, and a durable spool | 0064, 0111, 0141 |
@@ -62,9 +63,9 @@ internal/
 │                  fs/{flock, pathchain, winacl}
 ├── core/          domain interfaces + domain values — each package by its path
 │                  crypto, crypto/key/jwk, net, proc, proc/ipc,
-│                  app/{cli, config, events, health, i18n, id, lifecycle, lock,
-│                       mail, mail/spool, resilience, scheduler, statemachine,
-│                       validation, view},
+│                  app/{cli, config, consensus, events, health, i18n, id,
+│                       lifecycle, lock, mail, mail/spool, resilience,
+│                       scheduler, statemachine, validation, view},
 │                  data/{cache, codec, codec/scratch,
 │                        codec/{asn1, baseenc, bson, cbor, csv, flatbuffers,
 │                               form, json, jsonpatch, msgpack, multipart,
@@ -187,6 +188,10 @@ internal/
                              supervisor;
                            health — check registry + per-check timeouts +
                              drain latch + HTTP handler + the loopback Ask;
+                           consensus — the Raft engine (step function in
+                             raft/, wire layouts in wire/), segmented
+                             file log, snapshot store, data directory and
+                             offline operations, mTLS transport — ADR 0152;
                            lock — in-process leases + file locker over
                              flock(2) or LockFileEx + keepalive;
                            id — uuidv4, uuidv7, ulid, snowflake, nanoid,
@@ -583,5 +588,6 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0168 — a declaration is the design's, and a body is the code's — `docs/adr/0168-a-declaration-is-the-designs-and-a-body-is-the-codes.md`
 - ADR 0169 — the SDK is rebuilt from its design in a copy, and a generation is held to the whole inline set — `docs/adr/0169-the-sdk-is-rebuilt-from-its-design-in-a-copy-and-a-generation-is-held-to-the-whole-inline-set.md`
 - ADR 0173 — divergence of replicated state, proposed, split from ADR 0152 by the owner's decision Q12 and depending on it: a canonical incremental state hash compared at fixed indexes, self-proposed signed digests decided in Apply, automatic repair with guardrails (a twice-agreeing rebuild that matches a validated digest, no rebuild storm, a defined self-withdrawal), anchors on top of 0152's checksummed snapshots, a behavioural Apply fingerprint and replay gate, a stdlib determinism checker; codes keep their serials in 0152's 0.2.57 range; the open objections of 0152's challenge are the input of its own challenge, still pending; ADR 0152's R7 contract recorded (paths, code ownership in the same core package, the snapshot pin, `Message` v2 fields in the encoded frame) — `docs/adr/0173-divergence-is-prevented-by-construction-and-repaired-automatically.md`
+- ADR 0174 — TLS identity and pre-handshake admission, proposed, reserved by ADR 0152 for its two siblings outside the consensus domain: a `net/tlsid` identity checked on every handshake (fail-closed `VerifyConnection`, the verified peer and its SPKI handed to the caller, a reloadable source refusing a new key or SAN, a CA rollover trusting the union), and a `net/server` `Admission` that closes a connection over its IPv4 address's or IPv6 /64's budget before any TLS byte is read, with a reserved budget for declared member addresses — `docs/adr/0174-a-tls-identity-is-checked-on-every-handshake-and-reloaded-in-place.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

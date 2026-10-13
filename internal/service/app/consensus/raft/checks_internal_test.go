@@ -18,8 +18,10 @@ import (
 var t0 = time.Unix(1_800_000_000, 0)
 
 func testTiming() core.TimingContract {
-	return core.TimingContract{Generation: 1, HeartbeatInterval: 100 * time.Millisecond,
-		ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second, MaxClockDrift: 0.01}
+	return core.TimingContract{
+		Generation: 1, HeartbeatInterval: 100 * time.Millisecond,
+		ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second, MaxClockDrift: 0.01,
+	}
 }
 
 func testConf(ids ...core.NodeID) core.Membership {
@@ -45,8 +47,10 @@ func chainEntries(prev uint32, start uint64, terms ...uint64) []core.Entry {
 }
 
 func newTest(id core.NodeID, term uint64, commit uint64, ents []core.Entry, mut mutation, lease bool) *Raft {
-	cfg := Config{ID: id, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
-		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, Lease: lease, CanVote: true, MaxChainRefusals: 3, mut: mut}
+	cfg := Config{
+		ID: id, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
+		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, Lease: lease, CanVote: true, MaxChainRefusals: 3, mut: mut,
+	}
 	return New(cfg, Start{
 		HardState: core.HardState{Term: term, Commit: commit},
 		Snapshot:  core.SnapshotMeta{Membership: testConf(1, 2, 3)},
@@ -464,10 +468,14 @@ func TestSimulatorCatchesAckBeforeSync(t *testing.T) {
 // leader of a term at least its own rewrote its log past the truncation
 // point and committed an entry of its term.
 func TestSilentNodeStaysSilentUntilTheConditionHolds(t *testing.T) {
-	cfg := Config{ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
-		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, SilentTerm: 3, SilentIndex: 2}
-	f := New(cfg, Start{HardState: core.HardState{Term: 3}, Snapshot: core.SnapshotMeta{Membership: testConf(1, 2, 3)},
-		Entries: chainEntries(0, 1, 1), Now: t0})
+	cfg := Config{
+		ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
+		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, SilentTerm: 3, SilentIndex: 2,
+	}
+	f := New(cfg, Start{
+		HardState: core.HardState{Term: 3}, Snapshot: core.SnapshotMeta{Membership: testConf(1, 2, 3)},
+		Entries: chainEntries(0, 1, 1), Now: t0,
+	})
 	f.Step(t0.Add(5*time.Second), voteFrom(core.MsgVote, 3, 4, 9, 9))
 	if granted(f.Ready(), core.MsgVoteResp) {
 		t.Fatal("a silent node voted")

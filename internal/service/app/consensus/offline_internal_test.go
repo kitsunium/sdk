@@ -91,8 +91,10 @@ func TestRecoverStartsANewHistoryFromOneNode(t *testing.T) {
 		t.Fatalf("unattested recover: %v", err)
 	}
 	for _, dn := range nodes[1:] {
-		opt.Fenced = append(opt.Fenced, coreconsensus.FencedAttestation{Voter: dn.id, Method: "powered-off",
-			Receipts: [][]byte{ed25519.Sign(priv, ReceiptMessage(c.cid, next, dn.id))}})
+		opt.Fenced = append(opt.Fenced, coreconsensus.FencedAttestation{
+			Voter: dn.id, Method: "powered-off",
+			Receipts: [][]byte{ed25519.Sign(priv, ReceiptMessage(c.cid, next, dn.id))},
+		})
 	}
 	if err := Recover(keep.dd, next, []coreconsensus.Member{self}, opt); err != nil {
 		t.Fatal(err)

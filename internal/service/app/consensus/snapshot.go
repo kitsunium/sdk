@@ -454,8 +454,10 @@ func (n *Node) join(ctx context.Context, from coreconsensus.AuthenticatedPeer, r
 		return coreconsensus.Position{}, coreconsensus.CodeJoinRefused
 	}
 	m := coreconsensus.Member{ID: r.ID, Incarnation: r.Incarnation, Slot: r.Slot, SPKI: r.SPKI, Address: r.Address, Joining: true}
-	a := wire.Admin{Operator: string(op), Change: wire.ChangeAddLearner, Target: m.ID,
-		Membership: coreconsensus.Membership{Members: []coreconsensus.Member{m}}}
+	a := wire.Admin{
+		Operator: string(op), Change: wire.ChangeAddLearner, Target: m.ID,
+		Membership: coreconsensus.Membership{Members: []coreconsensus.Member{m}},
+	}
 	data := wire.AppendAdmin(nil, &a)
 	tok, _, err := n.submit(ctx, coreconsensus.Entry{Kind: coreconsensus.EntryMembership, BodySum: wire.BodySum(data), Data: data}, true)
 	if err != nil {

@@ -165,8 +165,10 @@ func (n *Node) forward(p *proposal, st raft.Status) {
 	if p.admin {
 		kind = coreconsensus.MsgForwardAdmin
 	}
-	m := coreconsensus.Message{Version: 1, Group: n.cfg.Group, Kind: kind, From: n.stamp.ID, To: st.Lead,
-		Term: st.Term, Context: ctx, Entries: []coreconsensus.Entry{p.entry}}
+	m := coreconsensus.Message{
+		Version: 1, Group: n.cfg.Group, Kind: kind, From: n.stamp.ID, To: st.Lead,
+		Term: st.Term, Context: ctx, Entries: []coreconsensus.Entry{p.entry},
+	}
 	n.forwards[ctx] = p
 	n.am.Lock()
 	n.keepResults++
@@ -296,8 +298,10 @@ func (n *Node) admin(ctx context.Context, kind coreconsensus.EntryKind, a wire.A
 
 // AddLearner adds a non-voting member that receives the log (D8).
 func (n *Node) AddLearner(ctx context.Context, op coreconsensus.Operator, m coreconsensus.Member) error {
-	return n.admin(ctx, coreconsensus.EntryMembership, wire.Admin{Operator: string(op), Change: wire.ChangeAddLearner,
-		Target: m.ID, Membership: coreconsensus.Membership{Members: []coreconsensus.Member{m}}})
+	return n.admin(ctx, coreconsensus.EntryMembership, wire.Admin{
+		Operator: string(op), Change: wire.ChangeAddLearner,
+		Target: m.ID, Membership: coreconsensus.Membership{Members: []coreconsensus.Member{m}},
+	})
 }
 
 // Promote makes a caught-up learner a voter (D8).
@@ -316,8 +320,10 @@ func (n *Node) Remove(ctx context.Context, op coreconsensus.Operator, id corecon
 
 // UpdateAddress changes where a member listens.
 func (n *Node) UpdateAddress(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID, addr string) error {
-	return n.admin(ctx, coreconsensus.EntryMembership, wire.Admin{Operator: string(op), Change: wire.ChangeUpdateAddress,
-		Target: id, Membership: coreconsensus.Membership{Members: []coreconsensus.Member{{ID: id, Address: addr}}}})
+	return n.admin(ctx, coreconsensus.EntryMembership, wire.Admin{
+		Operator: string(op), Change: wire.ChangeUpdateAddress,
+		Target: id, Membership: coreconsensus.Membership{Members: []coreconsensus.Member{{ID: id, Address: addr}}},
+	})
 }
 
 // DenyPin withdraws a member's SPKI pin (R9-18).

@@ -67,6 +67,7 @@ alias(
 go_test(
     name = "consensus_test",
     srcs = [
+        "api_gen_test.go",
         "cluster_internal_test.go",
         "disk_cluster_internal_test.go",
         "filelog_fuzz_internal_test.go",
@@ -79,10 +80,13 @@ go_test(
     embed = [":consensus"],
     deps = [
         "//internal/core/app/consensus",
+        "//internal/core/data/transform",
         "//internal/core/observe/logger",
         "//internal/core/observe/logger/level",
+        "//internal/core/observe/metrics",
         "//internal/core/observe/otel",
         "//internal/core/observe/trace",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
         "//internal/service/app/consensus/wire",
         "//internal/service/observe/metrics",

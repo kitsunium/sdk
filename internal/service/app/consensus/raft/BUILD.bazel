@@ -38,6 +38,7 @@ alias(
 go_test(
     name = "raft_test",
     srcs = [
+        "api_gen_test.go",
         "checks_internal_test.go",
         "lincheck_internal_test.go",
         "sim_internal_test.go",
@@ -47,6 +48,7 @@ go_test(
     embed = [":raft"],
     deps = [
         "//internal/core/app/consensus",
+        "//internal/kernel/errs",
         "//internal/service/app/consensus/wire",
     ],
 )

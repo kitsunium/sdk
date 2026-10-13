@@ -16,8 +16,10 @@ func ents(from, to, term uint64) []coreconsensus.Entry {
 	var out []coreconsensus.Entry
 	for i := from; i <= to; i++ {
 		d := []byte(fmt.Sprintf("entry-%d-%d", i, term))
-		out = append(out, coreconsensus.Entry{Position: coreconsensus.Position{Term: term, Index: i},
-			Kind: coreconsensus.EntryCommand, BodySum: wire.BodySum(d), Data: d})
+		out = append(out, coreconsensus.Entry{
+			Position: coreconsensus.Position{Term: term, Index: i},
+			Kind:     coreconsensus.EntryCommand, BodySum: wire.BodySum(d), Data: d,
+		})
 	}
 	return out
 }
@@ -86,7 +88,7 @@ func TestFileLogPersistsAcrossReopen(t *testing.T) {
 	if got, _ := l.HardState(); got != hs {
 		t.Fatalf("hard state %+v", got)
 	}
-	segs, _ := os.ReadDir(filepath.Join(dir, "log"))
+	segs, _ := filepath.Glob(filepath.Join(dir, "log", "seg-????????????????"))
 	if len(segs) < 2 {
 		t.Fatalf("no rotation with 4 KiB segments: %d segment(s)", len(segs))
 	}
@@ -105,7 +107,8 @@ func TestFileLogPersistsAcrossReopen(t *testing.T) {
 	if _, err := l.Entries(10, 11, 100, nil); !errors.Is(err, coreconsensus.Compacted) {
 		t.Fatalf("compacted read: %v", err)
 	}
-	after, _ := os.ReadDir(filepath.Join(dir, "log"))
+	// Published segments only: the next one is being prepared as a .tmp.
+	after, _ := filepath.Glob(filepath.Join(dir, "log", "seg-????????????????"))
 	if len(after) >= len(segs) {
 		t.Fatalf("no segment dropped: %d then %d", len(segs), len(after))
 	}
@@ -136,8 +139,10 @@ func tail(t *testing.T, d DataDir, b []byte, at int64) {
 }
 
 func rec(kind uint8, batch, index uint64, end bool) []byte {
-	return appendRecord(nil, &record{kind: kind, batch: batch, index: index, term: 1, end: end,
-		ekind: uint8(coreconsensus.EntryCommand), data: []byte("x")})
+	return appendRecord(nil, &record{
+		kind: kind, batch: batch, index: index, term: 1, end: end,
+		ekind: uint8(coreconsensus.EntryCommand), data: []byte("x"),
+	})
 }
 
 func reopenExpect(t *testing.T, dir string, d DataDir, quarantine bool) DataDir {
