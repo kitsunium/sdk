@@ -1,0 +1,39 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "consensus",
+    srcs = [
+        "codes.go",
+        "doc.go",
+        "entry.go",
+        "errors.go",
+        "identity.go",
+        "membership.go",
+        "message.go",
+        "ports.go",
+        "snapshot.go",
+        "status.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/app/consensus",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":consensus",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

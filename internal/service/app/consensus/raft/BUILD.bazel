@@ -1,0 +1,49 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "raft",
+    srcs = [
+        "debug.go",
+        "doc.go",
+        "leader.go",
+        "log.go",
+        "mutation.go",
+        "progress.go",
+        "raft.go",
+        "step.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/app/consensus",
+        "//internal/kernel/errs",
+        "//internal/service/app/consensus/wire",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":raft",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "raft_test",
+    srcs = [
+        "checks_internal_test.go",
+        "sim_internal_test.go",
+        "sim_scenarios_internal_test.go",
+        "soak_internal_test.go",
+    ],
+    embed = [":raft"],
+    deps = [
+        "//internal/core/app/consensus",
+        "//internal/service/app/consensus/wire",
+    ],
+)

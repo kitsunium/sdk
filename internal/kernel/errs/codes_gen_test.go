@@ -46,6 +46,7 @@ var codeRangeOwners = map[uint64]string{
 	0x00_02_24_00: "framework/internal/core/gate",
 	0x00_02_25_00: "internal/core/security/secret",
 	0x00_02_38_00: "internal/core/app/statemachine",
+	0x00_02_39_00: "internal/core/app/consensus", // ADR 0152
 	0x00_03_01_00: "internal/core/observe/logger",
 	0x00_03_02_00: "internal/core/data/codec/json",
 	0x00_03_03_00: "internal/core/data/codec/xml",
@@ -120,6 +121,7 @@ var codeRangeOwners = map[uint64]string{
 	0x00_03_59_00: "internal/core/observe/profiling",
 	0x00_03_5A_00: "internal/core/data/codec/jsonpatch",
 	0x00_03_5B_00: "internal/core/proc/ipc",        // ADR 0148
+	0x00_03_5C_00: "internal/core/app/consensus",   // ADR 0152
 	0x00_04_01_00: "framework/model/internal/core", // ADR 0147: layer 4 is the framework's
 	0x00_04_02_00: "framework/internal/kit",
 	0x00_04_03_00: "framework/telemetry", // ADR 0149

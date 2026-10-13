@@ -1,0 +1,70 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "consensus",
+    srcs = [
+        "apply.go",
+        "boot_darwin.go",
+        "boot_other.go",
+        "bootstrap.go",
+        "config.go",
+        "datadir.go",
+        "errors.go",
+        "filelog.go",
+        "filesnap.go",
+        "memlog.go",
+        "memsnap.go",
+        "memtransport.go",
+        "node.go",
+        "offline.go",
+        "ops.go",
+        "pem.go",
+        "queue.go",
+        "snapcodec.go",
+        "snapshot.go",
+        "sync_linux.go",
+        "sync_other.go",
+        "tcp.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/app/consensus",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/app/consensus",
+        "//internal/core/data/transform",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/kernel/fs/flock",
+        "//internal/service/app/consensus/raft",
+        "//internal/service/app/consensus/wire",
+        "//internal/service/data/transform",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":consensus",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "consensus_test",
+    srcs = [
+        "cluster_internal_test.go",
+        "disk_cluster_internal_test.go",
+        "filelog_internal_test.go",
+        "offline_internal_test.go",
+        "tcp_internal_test.go",
+    ],
+    embed = [":consensus"],
+    deps = [
+        "//internal/core/app/consensus",
+        "//internal/kernel/errs",
+        "//internal/service/app/consensus/wire",
+    ],
+)
