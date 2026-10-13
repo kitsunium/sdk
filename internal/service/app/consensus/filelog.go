@@ -549,14 +549,21 @@ func (l *FileLog) createSegment(n uint64, cp checkpoint) error {
 		f.Close()
 		return storageFailed("sync segment", err)
 	}
+	// Closed before the rename and opened again after: Windows refuses to
+	// rename a file a handle holds open.
+	if err := f.Close(); err != nil {
+		return storageFailed("close segment", err)
+	}
 	final := filepath.Join(l.logDir(), segName(n))
 	if err := os.Rename(tmp, final); err != nil {
-		f.Close()
 		return storageFailed("rename segment", err)
 	}
 	if err := syncDir(l.logDir()); err != nil {
-		f.Close()
 		return storageFailed("sync dir", err)
+	}
+	f, err := os.OpenFile(final, os.O_RDWR, 0)
+	if err != nil {
+		return storageFailed("open segment", err)
 	}
 	l.segs = append(l.segs, &segment{n: n, f: f, size: size})
 	l.off = int64(len(cpRec))

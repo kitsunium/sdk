@@ -28,7 +28,7 @@ func openDir(t *testing.T, dir string, seg int64) DataDir {
 	t.Helper()
 	d, err := OpenDataDirWith(dir, DataDirOptions{SegmentBytes: seg})
 	if err != nil {
-		t.Fatalf("open: %v", err)
+		t.Fatalf("open: %v %v", err, errs.FieldsOf(err))
 	}
 	return d
 }
