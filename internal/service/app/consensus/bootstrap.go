@@ -90,6 +90,13 @@ func validSlot(s string) bool {
 // foundingDigest is the digest of the founding member list, so that a rerun
 // with another list is refused.
 func foundingDigest(members []coreconsensus.Member) [32]byte {
+	return sha256.Sum256(wire.AppendMembership(nil, &coreconsensus.Membership{Members: byID(members)}))
+}
+
+// byID is the founding list in ID order: the digest AND entry 1 are built
+// from it, so founders given the same members in any order write the same
+// entry (review M1).
+func byID(members []coreconsensus.Member) []coreconsensus.Member {
 	ms := slices.Clone(members)
 	slices.SortFunc(ms, func(a, b coreconsensus.Member) int {
 		switch {
@@ -100,7 +107,7 @@ func foundingDigest(members []coreconsensus.Member) [32]byte {
 		}
 		return 0
 	})
-	return sha256.Sum256(wire.AppendMembership(nil, &coreconsensus.Membership{Members: ms}))
+	return ms
 }
 
 // Bootstrap founds a cluster on one founding node's log, in phases that are
@@ -126,6 +133,9 @@ func Bootstrap(_ context.Context, cfg Config, members []coreconsensus.Member) er
 			return origin(coreconsensus.BootstrapRefused, errs.String("why", "a member without an SPKI pin"))
 		}
 		seen[m.ID] = true
+	}
+	if sharedKey(members) {
+		return origin(coreconsensus.BootstrapRefused, errs.String("why", "two members under one key"))
 	}
 	voters := 0
 	for _, m := range members {
@@ -171,7 +181,7 @@ func Bootstrap(_ context.Context, cfg Config, members []coreconsensus.Member) er
 		}
 	}
 	if first, last := cfg.Log.Bounds(); last < first {
-		conf := coreconsensus.Membership{Members: slices.Clone(members)}
+		conf := coreconsensus.Membership{Members: byID(members)}
 		for i := range conf.Members {
 			conf.Members[i].Joining = false
 		}
@@ -302,4 +312,21 @@ func (n *Node) Health() Health {
 	h.Ready = !h.Stopped && h.HasLeader && st.Applied >= st.Commit &&
 		(h.ChainRefusals == 0 || h.ChainRefusalLeader != st.Leader)
 	return h
+}
+
+// sharedKey reports whether two members are pinned to one key. The
+// transport admits a connection by its key: two members under one key
+// could speak as each other (review M5).
+func sharedKey(members []coreconsensus.Member) bool {
+	seen := make(map[[32]byte]bool, len(members))
+	for _, m := range members {
+		if m.SPKI == ([32]byte{}) {
+			continue
+		}
+		if seen[m.SPKI] {
+			return true
+		}
+		seen[m.SPKI] = true
+	}
+	return false
 }

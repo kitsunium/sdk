@@ -7,6 +7,7 @@ import (
 	"time"
 
 	core "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
@@ -146,6 +147,47 @@ func checkAckVerifiedPrefix(mut mutation) error {
 		if x.Kind == core.MsgAppResp && x.Index != 1 {
 			return fmt.Errorf("acknowledged %d instead of the verified prefix 1", x.Index)
 		}
+	}
+	return nil
+}
+
+// checkSnapshotAckIndex installs a snapshot on a node whose log matches the
+// boundary but carries a stale suffix of another term: the install proves
+// the prefix up to the snapshot only, so the leader must not count the
+// suffix (review H1, the InstallSnapshot twin of checkAckVerifiedPrefix).
+func checkSnapshotAckIndex(mut mutation) error {
+	cfg := Config{
+		ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
+		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, MaxChainRefusals: 3, NoTable: true, mut: mut,
+	}
+	f := New(cfg, Start{
+		HardState: core.HardState{Term: 3},
+		Snapshot:  core.SnapshotMeta{Membership: testConf(1, 2, 3)},
+		Entries:   chainEntries(0, 1, 1, 1, 1, 2, 2),
+		Now:       t0,
+	})
+	f.lead = 1
+	l := leaderOf(3, 0, chainEntries(0, 1, 1, 1, 1, 3, 3), mut, false)
+	f.InstallSnapshot(core.SnapshotMeta{
+		Position: core.Position{Term: 1, Index: 3}, ChainTip: l.log.chain(3),
+		Membership: testConf(1, 2, 3), Timing: testTiming(),
+	})
+	var ack uint64
+	rd := f.Ready()
+	for _, x := range append(rd.AfterSync, rd.Messages...) {
+		if x.Kind == core.MsgAppResp {
+			ack = x.Index
+		}
+	}
+	if ack != 3 {
+		return fmt.Errorf("the install acknowledged %d instead of the snapshot index 3", ack)
+	}
+	l.prs[2].becomeSnapshot(3)
+	m := msg(core.MsgAppResp, 2, 1, l.term)
+	m.Index = ack
+	l.Step(l.now, m)
+	if l.log.committed > 3 {
+		return fmt.Errorf("the leader committed %d over a follower that holds other entries", l.log.committed)
 	}
 	return nil
 }
@@ -381,6 +423,8 @@ var checks = map[string]func(mutation) error{
 	"vote kept on same-term down":   checkVoteKeptOnSameTermStepDown,
 	"commit within verified prefix": checkCommitVerifiedPrefix,
 	"ack the verified prefix":       checkAckVerifiedPrefix,
+	"snapshot ack index":            checkSnapshotAckIndex,
+	"no-table install base":         checkNoTableBase,
 	"figure 8":                      checkFigure8,
 	"vote restriction":              checkVoteRestriction,
 	"prevote restriction":           checkPreVoteRestriction,
@@ -417,6 +461,8 @@ func TestMutationsAreCaught(t *testing.T) {
 		"same-term vote clearing":         mutSameTermVoteClear,
 		"commit beyond verified prefix":   mutCommitBeyondVerified,
 		"acknowledging lastIndex":         mutAckLastIndex,
+		"snapshot ack at lastIndex":       mutSnapshotAckLastIndex,
+		"install below the log's base":    mutInstallBelowBase,
 		"older term committed by count":   mutCommitOldTermByCount,
 		"restriction dropped (vote)":      mutNoRestrictionVote,
 		"restriction dropped (prevote)":   mutNoRestrictionPreVote,
@@ -501,4 +547,168 @@ func TestSilentNodeStaysSilentUntilTheConditionHolds(t *testing.T) {
 	if !granted(rd, core.MsgAppResp) {
 		t.Fatal("no acknowledgement once silence ended")
 	}
+}
+
+// forwardCmd is a MsgForward from node 2 carrying one command of size bytes.
+func forwardCmd(term uint64, ctx uint64, size int) core.Message {
+	d := make([]byte, size)
+	m := msg(core.MsgForward, 2, 1, term)
+	m.Context = ctx
+	m.Entries = []core.Entry{{Kind: core.EntryCommand, BodySum: wire.BodySum(d), Data: d}}
+	return m
+}
+
+// forwardAnswer is the leader's answer to the forward ctx.
+func forwardAnswer(r *Raft, ctx uint64) (core.Message, bool) {
+	rd := r.Ready()
+	for _, m := range append(rd.Messages, rd.AfterSync...) {
+		if m.Kind == core.MsgForwardResp && m.Context == ctx {
+			return m, true
+		}
+	}
+	return core.Message{}, false
+}
+
+// A forwarded command meets the bounds a local one meets: the entry size,
+// the uncommitted bytes and the apply backpressure (review M2).
+func TestForwardedCommandsAreBounded(t *testing.T) {
+	r := leaderOf(2, 0, nil, 0, false)
+	r.cfg.MaxEntryBytes, r.cfg.MaxForwardBytes = 100, 250
+	last := r.log.lastIndex()
+	r.Step(r.now, forwardCmd(2, 1, 101))
+	if a, ok := forwardAnswer(r, 1); !ok || !a.Reject || a.Code != core.CodeEntryTooLarge {
+		t.Fatalf("oversized forward: %+v", a)
+	}
+	if r.log.lastIndex() != last {
+		t.Fatal("an oversized forwarded entry was appended")
+	}
+	for ctx := uint64(2); ctx <= 3; ctx++ {
+		r.Step(r.now, forwardCmd(2, ctx, 100))
+		if a, ok := forwardAnswer(r, ctx); !ok || a.Reject {
+			t.Fatalf("forward %d: %+v", ctx, a)
+		}
+	}
+	r.Step(r.now, forwardCmd(2, 4, 100))
+	if a, ok := forwardAnswer(r, 4); !ok || !a.Reject || a.Code != core.CodeOverloaded {
+		t.Fatalf("forward past the uncommitted bound: %+v", a)
+	}
+	// Once they commit, the bound frees.
+	rd := r.Ready()
+	r.StorageDone(rd.Seq, r.log.lastIndex(), r.term)
+	ack := msg(core.MsgAppResp, 2, 1, r.term)
+	ack.Index = r.log.lastIndex()
+	r.Step(r.now, ack)
+	r.Step(r.now, forwardCmd(2, 5, 100))
+	if a, ok := forwardAnswer(r, 5); !ok || a.Reject {
+		t.Fatalf("forward after the commit: %+v", a)
+	}
+	r.SetOverloaded(true)
+	r.Step(r.now, forwardCmd(2, 6, 10))
+	if a, ok := forwardAnswer(r, 6); !ok || !a.Reject || a.Code != core.CodeOverloaded {
+		t.Fatalf("forward under apply backpressure: %+v", a)
+	}
+}
+
+// An entry kind this version does not know is never appended, acknowledged
+// or skipped: the follower appends the entries before it and asks the
+// driver to stop with VERSION_UNSUPPORTED (review M3).
+func TestUnknownEntryKindStopsTheFollower(t *testing.T) {
+	f := newTest(2, 1, 0, chainEntries(0, 1, 1), 0, false)
+	es := chainEntries(f.log.chain(1), 2, 1, 1)
+	es[1].Kind = 0x80
+	es[1].ChainSum = wire.ChainSum(es[0].ChainSum, &es[1])
+	m := msg(core.MsgApp, 1, 2, 1)
+	m.Index, m.LogTerm, m.Commit, m.Entries = 1, 1, 3, es
+	f.Step(t0, m)
+	rd := f.Ready()
+	if rd.Unsupported.Index != 3 || rd.Unsupported.Kind != 0x80 {
+		t.Fatalf("unsupported: %+v", rd.Unsupported)
+	}
+	if f.log.lastIndex() != 2 {
+		t.Fatalf("last %d, want 2: the unknown entry was appended", f.log.lastIndex())
+	}
+	for _, x := range append(rd.AfterSync, rd.Messages...) {
+		if x.Kind == core.MsgAppResp && x.Index > 2 {
+			t.Fatalf("acknowledged %d past the known entries", x.Index)
+		}
+	}
+	if f.log.committed > 2 {
+		t.Fatalf("committed %d past the known entries", f.log.committed)
+	}
+}
+
+// A cluster version above what this version speaks is refused at the
+// leader, and stops a node that finds it committed: no member of protocol
+// version 1 announces more (review M3).
+func TestClusterVersionAboveTheProtocolIsRefused(t *testing.T) {
+	r := leaderOf(2, 0, nil, 0, false)
+	data := wire.AppendAdmin(nil, &wire.Admin{Pre: core.Precondition{Log: r.cfg.Log}, ClusterVersion: ProtocolMax + 1})
+	if _, code := r.Propose(r.now, []core.Entry{{Kind: core.EntryClusterVersion, BodySum: wire.BodySum(data), Data: data}}); code != core.CodeVersionUnsupported {
+		t.Fatalf("raise above the protocol: %v", code)
+	}
+	f := newTest(2, 1, 0, chainEntries(0, 1, 1), 0, false)
+	e := core.Entry{Position: core.Position{Term: 1, Index: 2}, Kind: core.EntryClusterVersion, Data: data}
+	e.BodySum = wire.BodySum(data)
+	e.ChainSum = wire.ChainSum(f.log.chain(1), &e)
+	m := msg(core.MsgApp, 1, 2, 1)
+	m.Index, m.LogTerm, m.Commit, m.Entries = 1, 1, 2, []core.Entry{e}
+	f.Step(t0, m)
+	if u := f.Ready().Unsupported; u.Index != 2 {
+		t.Fatalf("a committed raise above the protocol: %+v", u)
+	}
+	if f.clusterVer > ProtocolMax {
+		t.Fatalf("cluster version raised to %d", f.clusterVer)
+	}
+}
+
+// A learner whose key a member already holds is refused: the transport
+// admits a connection by its key and would let it speak as that member
+// (review M5).
+func TestAddLearnerRefusesAKeyAMemberHolds(t *testing.T) {
+	r := leaderOf(2, 0, nil, 0, false)
+	rd := r.Ready()
+	r.StorageDone(rd.Seq, r.log.lastIndex(), r.term)
+	for _, id := range []core.NodeID{2, 3} {
+		ack := msg(core.MsgAppResp, id, 1, r.term)
+		ack.Index = r.log.lastIndex()
+		r.Step(r.now, ack)
+	}
+	if r.log.committed != r.log.lastIndex() {
+		t.Fatalf("setup: no-op not committed (%d/%d)", r.log.committed, r.log.lastIndex())
+	}
+	add := func(nm core.Member) errs.Code {
+		data := wire.AppendAdmin(nil, &wire.Admin{Change: wire.ChangeAddLearner, Membership: core.Membership{Members: []core.Member{nm}}})
+		_, code := r.Propose(r.now, []core.Entry{{Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}})
+		return code
+	}
+	if code := add(core.Member{ID: 9, SPKI: [32]byte{2}}); code != core.CodeMembershipInvalid {
+		t.Fatalf("a learner under member 2's key: %v", code)
+	}
+	if code := add(core.Member{ID: 9, SPKI: [32]byte{9}}); code != 0 {
+		t.Fatalf("a learner under its own key: %v", code)
+	}
+}
+
+// checkNoTableBase: a node with no table still refuses a snapshot older
+// than its own log's base. Installing it would drop durable entries the
+// node acknowledged, committed ones included, and leave its commit above
+// its log. The simulator's snapshot schedule found it (seed 3).
+func checkNoTableBase(mut mutation) error {
+	cfg := Config{
+		ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
+		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, MaxChainRefusals: 3, NoTable: true, mut: mut,
+	}
+	all := chainEntries(0, 1, 1, 1, 1, 1, 1, 1)
+	base := core.SnapshotMeta{Position: core.Position{Term: 1, Index: 4}, ChainTip: all[3].ChainSum, Membership: testConf(1, 2, 3)}
+	f := New(cfg, Start{HardState: core.HardState{Term: 1, Commit: 6}, Snapshot: base, Entries: all[4:], Applied: 4, Now: t0})
+	f.lead, f.term = 1, 1
+	old := core.SnapshotMeta{Position: core.Position{Term: 1, Index: 2}, ChainTip: all[1].ChainSum, Membership: testConf(1, 2, 3)}
+	if code := f.CheckOffer(1, core.InstallOffer{Term: 1, Meta: old}, true); code == 0 || code == core.CodeAdminPreconditionFailed {
+		return fmt.Errorf("an offer below the log's base was accepted (%v)", code)
+	}
+	f.InstallSnapshot(old)
+	if f.log.lastIndex() < 6 || f.log.committed > f.log.lastIndex() {
+		return fmt.Errorf("an older install dropped the log: last %d commit %d", f.log.lastIndex(), f.log.committed)
+	}
+	return nil
 }

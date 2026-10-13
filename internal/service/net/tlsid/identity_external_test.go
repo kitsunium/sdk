@@ -214,3 +214,67 @@ func TestIdentityReloadsInPlace(t *testing.T) {
 		t.Fatalf("the old CA is no longer trusted during the rollover: %v", serr)
 	}
 }
+
+// PeerOf never hands back an unverified chain as the verified one: under
+// VerifyConnection the standard verifier did not run, so VerifiedChains is
+// empty and Chain stays empty (review of PR #301, L1).
+func TestPeerOfNeverReturnsAnUnverifiedChain(t *testing.T) {
+	c := newCA(t, "ca")
+	cp, _ := c.issue(t, "kitsunium-consensus://aa/slot/s", nil)
+	b, _ := pem.Decode(cp)
+	leaf, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, ok := tlsid.PeerOf(tls.ConnectionState{HandshakeComplete: true, PeerCertificates: []*x509.Certificate{leaf}})
+	if !ok || p.Leaf != leaf {
+		t.Fatalf("peer: %+v %v", p, ok)
+	}
+	if len(p.Chain) != 0 {
+		t.Fatal("PeerOf returned the presented certificates as the verified chain")
+	}
+}
+
+// A renewal whose key lands after the certificate, within the same mtime
+// granularity as the refused first look, is still taken (review of PR #301,
+// L3).
+func TestIdentityRereadsARefusedRenewal(t *testing.T) {
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := newCA(t, "ca")
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	must(err)
+	f := files(t, c, "kitsunium-consensus://aa/slot/s", key)
+	id, err := tlsid.LoadReloadable(f)
+	must(err)
+	first, err := id.Leaf()
+	must(err)
+	cp, kp := c.issue(t, "kitsunium-consensus://aa/slot/s", key)
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	must(err)
+	ob, err := x509.MarshalECPrivateKey(other)
+	must(err)
+	stamp := time.Now().Add(time.Second).Truncate(time.Second)
+	time.Sleep(20 * time.Millisecond)
+	// The certificate first, with a key file that does not match it yet.
+	must(os.WriteFile(f.CertFile, cp, 0o600))
+	must(os.WriteFile(f.KeyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: ob}), 0o600))
+	must(os.Chtimes(f.CertFile, stamp, stamp))
+	must(os.Chtimes(f.KeyFile, stamp, stamp))
+	_, err = id.Certificate()
+	must(err)
+	// Then the key, within the same mtime.
+	time.Sleep(20 * time.Millisecond)
+	must(os.WriteFile(f.KeyFile, kp, 0o600))
+	must(os.Chtimes(f.KeyFile, stamp, stamp))
+	time.Sleep(20 * time.Millisecond)
+	renewed, err := id.Leaf()
+	must(err)
+	if renewed.SerialNumber.Cmp(first.SerialNumber) == 0 {
+		t.Fatal("the renewal was never read again after a refused first look")
+	}
+}

@@ -3921,8 +3921,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/app/consensus",
       "name": "JoinConfig",
-      "spelled": "struct{Addresses []string; Stamp Stamp; Address string}",
-      "canonical": "struct{Addresses []string; Stamp github.com/kitsunium/sdk/internal/core/app/consensus.Stamp; Address string}",
+      "spelled": "struct{Addresses []string; Stamp Stamp; Address string; Pins [][32]byte}",
+      "canonical": "struct{Addresses []string; Stamp github.com/kitsunium/sdk/internal/core/app/consensus.Stamp; Address string; Pins [][32]byte}",
       "fields": [
         {
           "name": "Addresses",
@@ -3938,6 +3938,11 @@
           "name": "Address",
           "type": "string",
           "doc": "Address is where the joiner listens.\n"
+        },
+        {
+          "name": "Pins",
+          "type": "[][32]byte",
+          "doc": "Pins are the SPKIs of the members the joiner trusts, from the\noperator. An answer counts only from a peer presenting one of them,\nand only when the membership it returns lists that peer under that\nkey; an empty list refuses the JOIN.\n"
         }
       ],
       "doc": "JoinConfig is what a joining node needs to send its JOIN.\n",
@@ -45333,6 +45338,7 @@
       "name": "NewTCPTransport",
       "spelled": "func(cfg TransportConfig) (*TCPTransport, error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/internal/service/app/consensus.TransportConfig) (*github.com/kitsunium/sdk/internal/service/app/consensus.TCPTransport, error)",
+      "doc": "NewTCPTransport validates the configuration, reads the cluster and slot\nfrom the certificate, and listens (D4, R3-24).\n",
       "file": "service/app/consensus/tcp.go",
       "layer": "service",
       "family": "app"
@@ -46354,8 +46360,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "Config",
-      "spelled": "struct{ID core.NodeID; Group core.GroupID; Log core.LogIdentity; Seed uint64; Timing core.TimingContract; MaxInflight int; MaxInflightBytes int; MaxBatchBytes int; MinVoters int; PromoteLag uint64; Lease bool; CanVote bool; MaxChainRefusals int; NoTable bool; SilentTerm uint64; SilentIndex uint64; RecentEntriesBytes int64}",
-      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Group github.com/kitsunium/sdk/internal/core/app/consensus.GroupID; Log github.com/kitsunium/sdk/internal/core/app/consensus.LogIdentity; Seed uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContract; MaxInflight int; MaxInflightBytes int; MaxBatchBytes int; MinVoters int; PromoteLag uint64; Lease bool; CanVote bool; MaxChainRefusals int; NoTable bool; SilentTerm uint64; SilentIndex uint64; RecentEntriesBytes int64}",
+      "spelled": "struct{ID core.NodeID; Group core.GroupID; Log core.LogIdentity; Seed uint64; Timing core.TimingContract; MaxInflight int; MaxInflightBytes int; MaxBatchBytes int; MinVoters int; PromoteLag uint64; Lease bool; CanVote bool; MaxChainRefusals int; NoTable bool; SilentTerm uint64; SilentIndex uint64; RecentEntriesBytes int64; MaxEntryBytes int; MaxForwardBytes int64}",
+      "canonical": "struct{ID github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; Group github.com/kitsunium/sdk/internal/core/app/consensus.GroupID; Log github.com/kitsunium/sdk/internal/core/app/consensus.LogIdentity; Seed uint64; Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContract; MaxInflight int; MaxInflightBytes int; MaxBatchBytes int; MinVoters int; PromoteLag uint64; Lease bool; CanVote bool; MaxChainRefusals int; NoTable bool; SilentTerm uint64; SilentIndex uint64; RecentEntriesBytes int64; MaxEntryBytes int; MaxForwardBytes int64}",
       "fields": [
         {
           "name": "ID",
@@ -46441,6 +46447,16 @@
           "name": "RecentEntriesBytes",
           "type": "int64",
           "doc": "RecentEntriesBytes bounds the payloads held in memory; 0 holds them\nall. Older ones are fetched from the store when a peer needs them.\n"
+        },
+        {
+          "name": "MaxEntryBytes",
+          "type": "int",
+          "doc": "MaxEntryBytes bounds a forwarded command's payload as the driver\nbounds a local one; 0 does not bound it.\n"
+        },
+        {
+          "name": "MaxForwardBytes",
+          "type": "int64",
+          "doc": "MaxForwardBytes bounds the payload bytes of forwarded commands this\nleader appended and has not committed yet; 0 does not bound them.\n"
         }
       ],
       "doc": "Config is what the step function needs from its driver. Every bound is\nalready clamped and validated by the engine.\n",
@@ -46532,6 +46548,19 @@
         }
       ],
       "doc": "PeerStat is the leader's view of one peer, for Health (D13).\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.ProtocolMax",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "ProtocolMax",
+      "spelled": "uint32",
+      "canonical": "uint32",
+      "value": "1",
+      "doc": "ProtocolMax is the highest protocol version this engine speaks: a cluster\nversion above it is refused, and stops a node that finds it committed.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
@@ -46848,6 +46877,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).SetOverloaded",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "SetOverloaded",
+      "recv": "Raft",
+      "spelled": "func(on bool)",
+      "canonical": "func(on bool)",
+      "doc": "SetOverloaded tells the state machine whether the driver refuses new\ncommands for apply backpressure (D6): forwarded ones are refused too.\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).SnapshotDone",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
@@ -46982,8 +47024,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
       "name": "Ready",
-      "spelled": "struct{Seq uint64; HardState *core.HardState; Commit uint64; TruncateFrom uint64; Entries []core.Entry; Messages []core.Message; AfterSync []core.Message; Apply []core.Entry; SendSnapshot []core.NodeID; ReadStates []ReadState; Forwarded []core.Message; Transfers []TransferResult; Compact uint64; SilenceEnded bool; Fetch []FetchRequest; Membership []core.Member}",
-      "canonical": "struct{Seq uint64; HardState *github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Commit uint64; TruncateFrom uint64; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.Entry; Messages []github.com/kitsunium/sdk/internal/core/app/consensus.Message; AfterSync []github.com/kitsunium/sdk/internal/core/app/consensus.Message; Apply []github.com/kitsunium/sdk/internal/core/app/consensus.Entry; SendSnapshot []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; ReadStates []github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadState; Forwarded []github.com/kitsunium/sdk/internal/core/app/consensus.Message; Transfers []github.com/kitsunium/sdk/internal/service/app/consensus/raft.TransferResult; Compact uint64; SilenceEnded bool; Fetch []github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchRequest; Membership []github.com/kitsunium/sdk/internal/core/app/consensus.Member}",
+      "spelled": "struct{Seq uint64; HardState *core.HardState; Commit uint64; TruncateFrom uint64; Entries []core.Entry; Messages []core.Message; AfterSync []core.Message; Apply []core.Entry; SendSnapshot []core.NodeID; ReadStates []ReadState; Forwarded []core.Message; Transfers []TransferResult; Compact uint64; SilenceEnded bool; Fetch []FetchRequest; Membership []core.Member; Unsupported UnsupportedEntry}",
+      "canonical": "struct{Seq uint64; HardState *github.com/kitsunium/sdk/internal/core/app/consensus.HardState; Commit uint64; TruncateFrom uint64; Entries []github.com/kitsunium/sdk/internal/core/app/consensus.Entry; Messages []github.com/kitsunium/sdk/internal/core/app/consensus.Message; AfterSync []github.com/kitsunium/sdk/internal/core/app/consensus.Message; Apply []github.com/kitsunium/sdk/internal/core/app/consensus.Entry; SendSnapshot []github.com/kitsunium/sdk/internal/core/app/consensus.NodeID; ReadStates []github.com/kitsunium/sdk/internal/service/app/consensus/raft.ReadState; Forwarded []github.com/kitsunium/sdk/internal/core/app/consensus.Message; Transfers []github.com/kitsunium/sdk/internal/service/app/consensus/raft.TransferResult; Compact uint64; SilenceEnded bool; Fetch []github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchRequest; Membership []github.com/kitsunium/sdk/internal/core/app/consensus.Member; Unsupported github.com/kitsunium/sdk/internal/service/app/consensus/raft.UnsupportedEntry}",
       "fields": [
         {
           "name": "Seq",
@@ -47064,6 +47106,11 @@
           "name": "Membership",
           "type": "[]core.Member",
           "doc": "Membership is set when the admitted set changed.\n"
+        },
+        {
+          "name": "Unsupported",
+          "type": "UnsupportedEntry",
+          "doc": "Unsupported names an entry whose kind this version does not know:\nthe driver stops the node with VERSION_UNSUPPORTED.\n"
         }
       ],
       "doc": "Ready is what the driver must do after a turn.\n",
@@ -47207,6 +47254,28 @@
         }
       ],
       "doc": "TransferResult ends a leadership transfer this node started.\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.UnsupportedEntry",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "UnsupportedEntry",
+      "spelled": "struct{Index uint64; Kind core.EntryKind}",
+      "canonical": "struct{Index uint64; Kind github.com/kitsunium/sdk/internal/core/app/consensus.EntryKind}",
+      "fields": [
+        {
+          "name": "Index",
+          "type": "uint64"
+        },
+        {
+          "name": "Kind",
+          "type": "core.EntryKind"
+        }
+      ],
+      "doc": "UnsupportedEntry is an entry a leader sent that this version cannot\napply; Index is 0 when there is none.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"
@@ -57224,7 +57293,7 @@
         {
           "name": "Chain",
           "type": "[]*x509.Certificate",
-          "doc": "Chain is the verified chain, leaf first.\n"
+          "doc": "Chain is the chain the standard verifier built, leaf first; empty\nwhen tls.ConnectionState.VerifiedChains is, as under the identity's\nown VerifyConnection, which verifies the chain itself (see PeerOf).\n"
         },
         {
           "name": "SPKI",
@@ -57254,7 +57323,7 @@
       "name": "PeerOf",
       "spelled": "func(cs tls.ConnectionState) (PeerIdentity, bool)",
       "canonical": "func(cs crypto/tls.ConnectionState) (github.com/kitsunium/sdk/internal/service/net/tlsid.PeerIdentity, bool)",
-      "doc": "PeerOf returns the verified peer of a completed handshake, false before\none or without a peer certificate.\n",
+      "doc": "PeerOf returns the peer of a completed handshake, false before one or\nwithout a peer certificate. Its Chain is set only when the standard\nverifier ran; the identity's own check sees the chain it verified.\n",
       "file": "service/net/tlsid/identity.go",
       "layer": "service",
       "family": "net"

@@ -24,6 +24,10 @@ const (
 	evStorage
 	evTick
 	evRestart
+	// evInstall carries a snapshot from a leader to a follower; evSnapDone
+	// carries the outcome back.
+	evInstall
+	evSnapDone
 )
 
 type event struct {
@@ -33,6 +37,8 @@ type event struct {
 	node core.NodeID
 	life int
 	msg  core.Message
+	meta core.SnapshotMeta
+	ok   bool
 }
 
 type eventQueue []*event
@@ -70,12 +76,20 @@ type simNode struct {
 	alive             bool
 	life              int
 	hs                core.HardState
-	ents              []core.Entry
-	writes            []simWrite
-	lastDone          time.Time
-	applied           []core.Entry
-	checked           uint64
-	maxTerm           uint64
+	// base is the durable snapshot the log continues; ents are the durable
+	// entries after it.
+	base core.SnapshotMeta
+	ents []core.Entry
+	// noTable is set while the node lost its snapshot's body: it restarts
+	// with no table and asks for an install (R7-18).
+	noTable bool
+	// appliedFrom is the index the state machine resumes after.
+	appliedFrom uint64
+	writes      []simWrite
+	lastDone    time.Time
+	applied     []core.Entry
+	checked     uint64
+	maxTerm     uint64
 }
 
 type entryKey struct {
@@ -99,6 +113,12 @@ type simOptions struct {
 	mut       mutation
 	lease     bool
 	recent    int64
+	// snapEvery cuts a snapshot on each node every snapEvery applied
+	// entries; 0 cuts none.
+	snapEvery uint64
+	// snapLoss is the chance a restart loses the snapshot's body, the node
+	// keeping its log and starting with no table.
+	snapLoss float64
 }
 
 type sim struct {
@@ -196,8 +216,11 @@ func (s *sim) start(n *simNode) {
 	n.writes = nil
 	n.lastDone = s.now
 	n.applied = nil
+	n.appliedFrom = n.base.Position.Index
 	n.checked = 0
-	n.r = New(s.cfg(n.id), Start{HardState: n.hs, Entries: slices.Clone(n.ents), Now: s.clock(n)})
+	cfg := s.cfg(n.id)
+	cfg.NoTable = n.noTable
+	n.r = New(cfg, Start{HardState: n.hs, Snapshot: n.base, Entries: slices.Clone(n.ents), Applied: n.base.Position.Index, Now: s.clock(n)})
 	s.push(&event{at: s.now.Add(time.Duration(s.rng.Int64N(int64(10 * time.Millisecond)))), kind: evTick, node: n.id, life: n.life})
 }
 
@@ -218,6 +241,7 @@ func (s *sim) setRate(id core.NodeID, rate float64) {
 
 func (s *sim) crash(id core.NodeID) {
 	n := s.nodes[id]
+	simTrace("t=%v n%d crash base=%d last=%d", s.now.Sub(time.Unix(1_700_000_000, 0)), n.id, n.base.Position.Index, n.last())
 	n.alive = false
 	n.life++
 	n.writes = nil // what was written and not synced is lost
@@ -268,15 +292,13 @@ func (s *sim) process(n *simNode) {
 			// The store read, as the driver's reader goroutine does it: the
 			// durable entries, from the disk model.
 			var out []core.Entry
-			compacted := false
-			for i := f.Lo; i < f.Hi && i <= uint64(len(n.ents)); i++ {
-				out = append(out, n.ents[i-1])
+			compacted := f.Lo <= n.base.Position.Index
+			for i := f.Lo; !compacted && i < f.Hi && i <= n.last(); i++ {
+				e, _ := n.entry(i)
+				out = append(out, e)
 				if len(out) >= 64 {
 					break
 				}
-			}
-			if f.Lo > uint64(len(n.ents)) {
-				out = nil
 			}
 			s.fetches++
 			n.r.Fetched(f.To, f.Lo, out, compacted)
@@ -289,10 +311,17 @@ func (s *sim) process(n *simNode) {
 		for _, m := range rd.Forwarded {
 			s.forwarded[[2]uint64{uint64(n.id), m.Context}] = m
 		}
+		for _, to := range rd.SendSnapshot {
+			s.sendSnapshot(n, to)
+		}
 		for i := range rd.Apply {
 			e := &rd.Apply[i]
-			if len(n.applied) > 0 && n.applied[len(n.applied)-1].Position.Index+1 != e.Position.Index {
-				s.fail("node %d applied %d after %d", n.id, e.Position.Index, n.applied[len(n.applied)-1].Position.Index)
+			prev := n.appliedFrom
+			if len(n.applied) > 0 {
+				prev = n.applied[len(n.applied)-1].Position.Index
+			}
+			if prev+1 != e.Position.Index {
+				s.fail("node %d applied %d after %d", n.id, e.Position.Index, prev)
 			}
 			n.applied = append(n.applied, *e)
 			if s.kv != nil {
@@ -305,6 +334,7 @@ func (s *sim) process(n *simNode) {
 			s.applied[e.Position.Index] = k
 		}
 	}
+	s.cutSnapshot(n, false)
 	s.checkNode(n)
 }
 
@@ -333,10 +363,20 @@ func (s *sim) checkNode(n *simNode) {
 	n.checked = max(n.checked, st.Commit)
 }
 
+// simTrace logs the disk model's steps while a failing seed is studied.
+var simTrace func(string, ...any) = func(string, ...any) {}
+
 func (s *sim) storageDone(n *simNode) {
 	w := n.writes[0]
 	n.writes = n.writes[1:]
 	rd := w.rd
+	if len(rd.Entries) > 0 || rd.TruncateFrom != 0 {
+		var lo, hi uint64
+		if len(rd.Entries) > 0 {
+			lo, hi = rd.Entries[0].Position.Index, rd.Entries[len(rd.Entries)-1].Position.Index
+		}
+		simTrace("t=%v n%d write trunc=%d ents=%d..%d base=%d last=%d", s.now.Sub(time.Unix(1_700_000_000, 0)), n.id, rd.TruncateFrom, lo, hi, n.base.Position.Index, n.last())
+	}
 	if rd.HardState != nil {
 		hs := *rd.HardState
 		if hs.Term < n.maxTerm {
@@ -352,19 +392,26 @@ func (s *sim) storageDone(n *simNode) {
 		}
 		n.hs.Term, n.hs.Vote = hs.Term, hs.Vote
 	}
-	if rd.TruncateFrom != 0 && rd.TruncateFrom <= uint64(len(n.ents)) {
-		n.ents = n.ents[:rd.TruncateFrom-1]
+	if tf := rd.TruncateFrom; tf != 0 && tf <= n.last() {
+		if tf <= n.base.Position.Index {
+			n.ents = nil
+		} else {
+			n.ents = n.ents[:tf-n.base.Position.Index-1]
+		}
 	}
 	for _, e := range rd.Entries {
-		if e.Position.Index != uint64(len(n.ents))+1 {
-			s.fail("node %d disk gap: append %d after %d", n.id, e.Position.Index, len(n.ents))
+		if e.Position.Index <= n.base.Position.Index {
+			continue // an install moved the base past a write in flight
+		}
+		if e.Position.Index != n.last()+1 {
+			s.fail("node %d disk gap: append %d after %d", n.id, e.Position.Index, n.last())
 			return
 		}
 		n.ents = append(n.ents, e)
 	}
 	if rd.Commit != 0 {
 		// A persisted commit never passes the last synced index (R7-13).
-		n.hs.Commit = min(rd.Commit, uint64(len(n.ents)))
+		n.hs.Commit = min(rd.Commit, n.last())
 	}
 	var idx, term uint64
 	if k := len(rd.Entries); k > 0 {
@@ -429,7 +476,19 @@ func (s *sim) run(until time.Time, load bool) {
 		switch e.kind {
 		case evRestart:
 			if !n.alive {
+				// A lost snapshot is a rare fault: one node at a time, so a
+				// majority keeps a table and can lead (R7-18).
+				if n.base.Position.Index > 0 && s.noTables() == 0 && s.rng.Float64() < s.opt.snapLoss {
+					n.noTable = true
+				}
 				s.start(n)
+			}
+		case evInstall:
+			s.install(n, e)
+		case evSnapDone:
+			if n.alive {
+				n.r.SnapshotDone(e.msg.From, e.ok)
+				s.process(n)
 			}
 		case evTick:
 			if !n.alive || e.life != n.life {
@@ -489,3 +548,116 @@ func (s *sim) maxCommit() uint64 {
 }
 
 func (s *sim) after(d time.Duration) time.Time { return s.now.Add(d) }
+
+// last is the index of the node's last durable entry.
+func (n *simNode) last() uint64 { return n.base.Position.Index + uint64(len(n.ents)) }
+
+// entry returns the durable entry at i, if the disk holds it.
+func (n *simNode) entry(i uint64) (core.Entry, bool) {
+	b := n.base.Position.Index
+	if i <= b || i > n.last() {
+		return core.Entry{}, false
+	}
+	return n.ents[i-b-1], true
+}
+
+// cutSnapshot snapshots what the node applied, as the driver does every
+// snapEvery entries, and compacts the log under it.
+func (s *sim) cutSnapshot(n *simNode, force bool) {
+	if s.opt.snapEvery == 0 || n.noTable || len(n.applied) == 0 {
+		return
+	}
+	c := n.applied[len(n.applied)-1].Position.Index
+	if c <= n.base.Position.Index || (!force && c < n.base.Position.Index+s.opt.snapEvery) {
+		return
+	}
+	e, ok := n.entry(c)
+	if !ok {
+		return
+	}
+	simTrace("t=%v n%d cut %d base=%d last=%d", s.now.Sub(time.Unix(1_700_000_000, 0)), n.id, c, n.base.Position.Index, n.last())
+	n.ents = slices.Clone(n.ents[c-n.base.Position.Index:])
+	n.base = core.SnapshotMeta{
+		ID: fmt.Sprintf("s-%d-%d", n.id, c), Position: e.Position, ChainTip: e.ChainSum,
+		Membership: n.r.ConfAt(c), Timing: s.timing,
+	}
+	n.r.Compact(c)
+}
+
+// sendSnapshot ships the leader's snapshot to a peer.
+func (s *sim) sendSnapshot(n *simNode, to core.NodeID) {
+	simTrace("t=%v n%d send snapshot to %d base=%d", s.now.Sub(time.Unix(1_700_000_000, 0)), n.id, to, n.base.Position.Index)
+	if n.base.Position.Index == 0 || n.noTable {
+		// A peer asks for a snapshot this leader never cut: cut one now,
+		// and the next probe sends it, as the driver does.
+		s.cutSnapshot(n, true)
+		n.r.SnapshotDone(to, false)
+		return
+	}
+	m := core.Message{From: n.id, To: to, Term: n.r.Status().Term}
+	if s.cut[[2]core.NodeID{n.id, to}] || s.rng.Float64() < s.opt.drop {
+		s.push(&event{at: s.now.Add(rtt(n.id, to)), kind: evSnapDone, node: n.id, life: n.life, msg: core.Message{From: to}})
+		return
+	}
+	s.push(&event{at: s.now.Add(rtt(n.id, to)), kind: evInstall, node: to, msg: m, meta: n.base})
+}
+
+// install is the receiver's side: the offer checked on the loop, the
+// snapshot made durable, the log moved onto it, then the answer.
+func (s *sim) install(n *simNode, e *event) {
+	ok := false
+	defer func() {
+		s.push(&event{at: s.now.Add(rtt(n.id, e.msg.From) / 2), kind: evSnapDone, node: e.msg.From, msg: core.Message{From: n.id}, ok: ok})
+	}()
+	if !n.alive {
+		return
+	}
+	// The install waits for the writes queued before it, as the storage
+	// actor serves them in order.
+	for n.alive && len(n.writes) > 0 {
+		s.storageDone(n)
+	}
+	meta := e.meta
+	code := n.r.CheckOffer(e.msg.From, core.InstallOffer{Term: e.msg.Term, SnapshotID: meta.ID, Meta: meta}, n.r.NoTable())
+	simTrace("t=%v n%d offer %d from %d: %v", s.now.Sub(time.Unix(1_700_000_000, 0)), n.id, meta.Position.Index, e.msg.From, code)
+	if code == core.CodeAdminPreconditionFailed {
+		ok = true // held: the receiver already covers it
+		return
+	}
+	if code == core.CodeCompacted {
+		// The receiver's log starts past it: the leader cuts a newer one,
+		// as the driver does.
+		if l := s.nodes[e.msg.From]; l.alive {
+			s.cutSnapshot(l, true)
+		}
+	}
+	if code != 0 {
+		return
+	}
+	idx := meta.Position.Index
+	simTrace("t=%v n%d install %d base=%d last=%d noTable=%v", s.now.Sub(time.Unix(1_700_000_000, 0)), n.id, idx, n.base.Position.Index, n.last(), n.noTable)
+	if idx == n.base.Position.Index && meta.Position.Term == n.base.Position.Term {
+		// The boundary is the base itself: the log is kept whole.
+	} else if x, has := n.entry(idx); has && x.Position.Term == meta.Position.Term {
+		n.ents = slices.Clone(n.ents[idx-n.base.Position.Index:])
+	} else {
+		n.ents = nil
+	}
+	n.base = meta
+	n.noTable = false
+	n.applied, n.appliedFrom = nil, idx
+	n.hs.Commit = max(n.hs.Commit, idx)
+	n.r.InstallSnapshot(meta)
+	s.process(n)
+	ok = true
+}
+
+func (s *sim) noTables() int {
+	k := 0
+	for _, id := range s.ids {
+		if s.nodes[id].noTable {
+			k++
+		}
+	}
+	return k
+}

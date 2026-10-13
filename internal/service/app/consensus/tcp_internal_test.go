@@ -273,7 +273,19 @@ func TestTCPJoinAddsALearner(t *testing.T) {
 	st, _ := j.log.Stamp()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	pos, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr, ns[1].addr}, Stamp: st, Address: j.addr})
+	// An answer from a peer the joiner does not pin counts for nothing,
+	// even from a valid certificate of the cluster (review M4).
+	impostor := &tcpNode{slot: "site-x"}
+	impostor.cert, _ = ca.issue(t, SAN(cid, impostor.slot), nil)
+	impostor.listen(t, ca)
+	defer impostor.tr.Close()
+	if _, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{impostor.addr}, Stamp: st, Address: j.addr, Pins: pinsOf(ns)}); err == nil {
+		t.Fatal("a JOIN answered by an unpinned peer")
+	}
+	if _, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr}, Stamp: st, Address: j.addr}); !errors.Is(err, coreconsensus.TransportMisconfigured) {
+		t.Fatalf("a JOIN with no pin: %v", err)
+	}
+	pos, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{impostor.addr, ns[0].addr, ns[1].addr}, Stamp: st, Address: j.addr, Pins: pinsOf(ns)})
 	if err != nil {
 		t.Fatalf("join: %v", err)
 	}
@@ -297,7 +309,7 @@ func TestTCPJoinAddsALearner(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	// A second JOIN for a slot with a live member is refused (R8-11).
-	if _, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr}, Stamp: st, Address: j.addr}); !errors.Is(err, coreconsensus.JoinRefused) {
+	if _, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr}, Stamp: st, Address: j.addr, Pins: pinsOf(ns)}); !errors.Is(err, coreconsensus.JoinRefused) {
 		t.Fatalf("second join: %v", err)
 	}
 }
@@ -383,7 +395,7 @@ func joinWith(t *testing.T, auth coreconsensus.JoinAuthorizer) error {
 	st, _ := j.log.Stamp()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr}, Stamp: st, Address: j.addr})
+	_, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr}, Stamp: st, Address: j.addr, Pins: pinsOf(ns)})
 	return err
 }
 
@@ -424,5 +436,45 @@ func TestJoinReasonOfAnSDKErrorIsItsPublicMessage(t *testing.T) {
 	}
 	if joinReasonOf(errors.New(" \t ")) != "" {
 		t.Fatal("blank text made a reason")
+	}
+}
+
+// A key two members share admits neither: the transport could not tell
+// which member a connection speaks for (review M5).
+func TestTCPAdmitsNoKeyTwoMembersShare(t *testing.T) {
+	ca := newTestCA(t)
+	cid := coreconsensus.ClusterID{0xc0, 0xff, 0xee}
+	tn := &tcpNode{slot: "site-0"}
+	tn.cert, tn.spki = ca.issue(t, SAN(cid, tn.slot), nil)
+	tn.listen(t, ca)
+	defer tn.tr.Close()
+	shared := [32]byte{7}
+	tn.tr.SetMembership(1, []coreconsensus.Member{{ID: 1, SPKI: shared}, {ID: 2, SPKI: shared}, {ID: 3, SPKI: [32]byte{3}}})
+	tn.tr.mu.Lock()
+	_, admitted := tn.tr.bySPKI[shared]
+	_, other := tn.tr.bySPKI[[32]byte{3}]
+	tn.tr.mu.Unlock()
+	if admitted || !other {
+		t.Fatalf("shared key admitted=%v, distinct key admitted=%v", admitted, other)
+	}
+}
+
+// pinsOf lists the members' keys, as an operator hands them to a joiner.
+func pinsOf(ns []*tcpNode) [][32]byte {
+	out := make([][32]byte, len(ns))
+	for i, tn := range ns {
+		out[i] = tn.spki
+	}
+	return out
+}
+
+// An answer whose membership does not list the responder under its key is
+// a forged one: the joiner does not install it (review M4).
+func TestJoinAnswerMustListTheResponder(t *testing.T) {
+	if joinAnswerListsPeer(coreconsensus.Membership{Members: []coreconsensus.Member{{ID: 1, SPKI: [32]byte{1}}}}, [32]byte{2}) {
+		t.Fatal("a membership without the responder's key was accepted")
+	}
+	if !joinAnswerListsPeer(coreconsensus.Membership{Members: []coreconsensus.Member{{ID: 1, SPKI: [32]byte{1}}}}, [32]byte{1}) {
+		t.Fatal("a membership listing the responder was refused")
 	}
 }

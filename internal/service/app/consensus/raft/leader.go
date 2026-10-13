@@ -416,6 +416,10 @@ func (r *Raft) validateAdmin(e *core.Entry, index uint64) (core.NodeID, errs.Cod
 		// (D9 d).
 		r.leaseDropped = true
 	case core.EntryClusterVersion:
+		if a.ClusterVersion > ProtocolMax {
+			// No member of this version announces more (D18, review M3).
+			return 0, codeVersion
+		}
 		if !a.Pre.Log.Same(r.cfg.Log) || a.Pre.Generation != r.clusterGen || a.ClusterVersion <= r.clusterVer {
 			return 0, codePrecondition
 		}
@@ -453,6 +457,10 @@ func (r *Raft) nextConf(a wire.Admin) (core.Membership, errs.Code) {
 			return cur, codeMembershipInvalid
 		}
 		if _, ok := cur.Member(nm.ID); ok {
+			return cur, codeMembershipInvalid
+		}
+		if slices.ContainsFunc(cur.Members, func(m core.Member) bool { return m.SPKI == nm.SPKI }) {
+			// One key, one member: the transport admits by key (review M5).
 			return cur, codeMembershipInvalid
 		}
 		if !r.quorumActive(r.now, r.voteWindow) {
@@ -550,12 +558,44 @@ func (r *Raft) handleForward(m core.Message) {
 		r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: codeVersion})
 		return
 	}
+	if e.Kind == core.EntryCommand {
+		if code := r.admitForward(len(e.Data)); code != 0 {
+			r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: code})
+			return
+		}
+	}
 	pos, code := r.Propose(r.now, []core.Entry{e})
 	if code != 0 {
 		r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: code, RejectHint: uint64(r.lead)})
 		return
 	}
+	if e.Kind == core.EntryCommand {
+		r.fwd = append(r.fwd, fwdEntry{index: pos[0].Index, size: int64(len(e.Data))})
+		r.fwdBytes += int64(len(e.Data))
+	}
 	r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Index: pos[0].Index, LogTerm: pos[0].Term})
+}
+
+// admitForward applies to a forwarded command the bounds the driver applies
+// to a local one before anything is appended: the entry size, the bytes
+// appended and not committed, the apply backpressure (D6, review M2).
+func (r *Raft) admitForward(size int) errs.Code {
+	if r.fwdTerm != r.term {
+		r.fwd, r.fwdBytes, r.fwdTerm = r.fwd[:0], 0, r.term
+	}
+	k := 0
+	for k < len(r.fwd) && r.fwd[k].index <= r.log.committed {
+		r.fwdBytes -= r.fwd[k].size
+		k++
+	}
+	r.fwd = r.fwd[k:]
+	switch {
+	case r.cfg.MaxEntryBytes > 0 && size > r.cfg.MaxEntryBytes:
+		return core.CodeEntryTooLarge
+	case r.overloaded, r.cfg.MaxForwardBytes > 0 && r.fwdBytes+int64(size) > r.cfg.MaxForwardBytes:
+		return core.CodeOverloaded
+	}
+	return 0
 }
 
 // ---- reads ----
@@ -742,6 +782,12 @@ func (r *Raft) CheckOffer(from core.NodeID, o core.InstallOffer, needTable bool)
 	if o.Meta.Position.Index <= r.log.committed && !needTable {
 		return codePrecondition
 	}
+	if o.Meta.Position.Index < r.log.snapIndex && !r.mutated(mutInstallBelowBase) {
+		// Even with no table: a snapshot below the log's base would drop
+		// durable entries this node acknowledged, committed ones included.
+		// The leader cuts a newer one.
+		return core.CodeCompacted
+	}
 	return 0
 }
 
@@ -750,6 +796,9 @@ func (r *Raft) CheckOffer(from core.NodeID, o core.InstallOffer, needTable bool)
 // (D7).
 func (r *Raft) InstallSnapshot(meta core.SnapshotMeta) {
 	idx, t := meta.Position.Index, meta.Position.Term
+	if idx < r.log.snapIndex && !r.mutated(mutInstallBelowBase) {
+		return // CheckOffer refuses it: never move the base back
+	}
 	if r.log.matchTerm(idx, t) && idx <= r.log.lastIndex() {
 		r.log.compactTo(idx, t, meta.ChainTip)
 		n := 0
@@ -783,7 +832,13 @@ func (r *Raft) InstallSnapshot(meta core.SnapshotMeta) {
 	r.clusterVer, r.clusterGen, r.noSpace = meta.ClusterVersion, meta.ClusterGeneration, meta.NoSpace
 	r.cfg.NoTable = false
 	r.confChanged()
+	// The install proves the prefix up to idx only: a kept suffix may be
+	// another term's, and the next append verifies it (review H1).
+	ack := idx
+	if r.mutated(mutSnapshotAckLastIndex) {
+		ack = r.log.lastIndex()
+	}
 	if r.lead != 0 {
-		r.send(core.Message{Kind: core.MsgAppResp, To: r.lead, Index: r.log.lastIndex()})
+		r.send(core.Message{Kind: core.MsgAppResp, To: r.lead, Index: ack})
 	}
 }

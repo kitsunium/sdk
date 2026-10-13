@@ -46,7 +46,13 @@ func (n *Node) applyLoop() {
 				return
 			}
 			if it.restore != nil {
-				it.restore.done <- n.restoreFrom(it.restore.meta, 0)
+				// A machine already past the snapshot is never rolled back:
+				// the entries it applied after the snapshot are committed
+				// and would not be applied again (review H3).
+				n.am.Lock()
+				applied := n.applied
+				n.am.Unlock()
+				it.restore.done <- n.restoreFrom(it.restore.meta, applied)
 				continue
 			}
 			if it.save != nil {
@@ -76,6 +82,11 @@ func (n *Node) applyEntries(es []coreconsensus.Entry) bool {
 		if skip {
 			i++
 			continue
+		}
+		if !e.Kind.Known() {
+			// Never skipped as a no-op: this version cannot apply it.
+			n.stop(unsupportedKind(e.Kind, e.Position.Index), false)
+			return false
 		}
 		if e.Kind != coreconsensus.EntryCommand {
 			n.applied1(e, nil)
@@ -208,4 +219,10 @@ func (n *Node) waitApplied(done <-chan struct{}, index uint64) bool {
 		n.acond.Wait()
 	}
 	return true
+}
+
+// unsupportedKind stops a node that meets an entry kind it does not know
+// (review M3).
+func unsupportedKind(k coreconsensus.EntryKind, index uint64) error {
+	return origin(coreconsensus.VersionUnsupported, errs.Int("kind", int(k)), errs.String("index", u64s(index)))
 }

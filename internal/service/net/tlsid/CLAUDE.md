@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:57:47Z -->
+<!-- updated: 2026-10-13T20:00:00Z -->
 # internal/service/net/tlsid/
 
 ## Purpose
@@ -23,6 +23,17 @@ Declaring the on-disk half here would have put one domain concept on both sides
 of the layer boundary and left the two free to drift.
 
 Public façade: `pkg/v1/net/tlsid`.
+
+`identity.go` adds ADR 0174's `Identity` (`NewIdentity`, `LoadReloadable`,
+`PeerOf`, `Deadline`, `SPKI`): the chain and roots verified on every
+handshake before the caller's check, and a file identity reloaded in place.
+
+- `PeerOf` sets `Chain` only from `VerifiedChains`; under the identity's own
+  `VerifyConnection` that is empty, never the presented certificates
+  (review of PR #301, L1).
+- The roots only grow until the process restarts (ADR 0174 D1, L2).
+- A refused pair is read again at every look, even under the same mtime, and
+  counted once per mtime (L3).
 
 ## Why-this-shape
 
@@ -65,12 +76,15 @@ stdlib (`os`) + `internal/kernel/errs` + `internal/core/net`. Never `pkg/*`.
 
 ## Cost — deliberately not benchmarked
 
-**This package does no work per request and none per handshake, so it ships a
-paragraph instead of a `BENCH.md`.** Its whole surface is `Load`, which calls
+**`Load` does no work per request and none per handshake, so it ships a
+paragraph instead of a `BENCH.md`.** This section is about `Load` alone; the
+`Identity` of `identity.go` is not covered by it, and does work per handshake
+(the chain and roots verified before the caller's check) and per reload (the
+files read again), which is not benchmarked here. `Load` calls
 `os.ReadFile` at most four times and hands the bytes to
 `corenet.NewIdentityValue`. It is invoked once, at wiring time; no internal
 caller reaches it on a request path, and `go build -gcflags=-m` reports not one
-heap escape in the package. The identity it produces is consumed once, to build
+heap escape in `tlsid.go` (`identity.go` has escapes; it is not on this path). The identity it produces is consumed once, to build
 a transport or a listener, and from there every handshake is `crypto/tls` over a
 config the SDK never touches again.
 

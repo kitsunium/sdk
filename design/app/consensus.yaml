@@ -1938,6 +1938,13 @@ packages:
             - doc: Address is where the joiner listens.
               name: Address
               type: string
+            - doc: |-
+                Pins are the SPKIs of the members the joiner trusts, from the
+                operator. An answer counts only from a peer presenting one of them,
+                and only when the membership it returns lists that peer under that
+                key; an empty list refuses the JOIN.
+              name: Pins
+              type: "[][32]byte"
       - doc: |-
           FencedAttestation is the operator's statement that an old voter was fenced
           before a Recover: the voter, the method that fenced it, and one signed
@@ -2385,7 +2392,10 @@ packages:
         name: SPKIOf
         out:
           - type: "[32]byte"
-      - in:
+      - doc: |-
+          NewTCPTransport validates the configuration, reads the cluster and slot
+          from the certificate, and listens (D4, R3-24).
+        in:
           - name: cfg
             type: TransportConfig
         name: NewTCPTransport
@@ -3545,7 +3555,14 @@ packages:
         name: TCPTransport
         struct:
           unexported: true
-  - doc: |-
+  - constants:
+      - doc: |-
+          ProtocolMax is the highest protocol version this engine speaks: a cluster
+          version above it is refused, and stops a node that finds it committed.
+        name: ProtocolMax
+        type: uint32
+        value: "1"
+    doc: |-
       Package raft is the consensus engine's step function (ADR 0152 D15): a
       value with no goroutine, no I/O and no clock. Every decision of the
       protocol is taken here — PreVote, elections and the election restriction,
@@ -3649,6 +3666,16 @@ packages:
                 RecentEntriesBytes bounds the payloads held in memory; 0 holds them
                 all. Older ones are fetched from the store when a peer needs them.
               name: RecentEntriesBytes
+              type: int64
+            - doc: |-
+                MaxEntryBytes bounds a forwarded command's payload as the driver
+                bounds a local one; 0 does not bound it.
+              name: MaxEntryBytes
+              type: int
+            - doc: |-
+                MaxForwardBytes bounds the payload bytes of forwarded commands this
+                leader appended and has not committed yet; 0 does not bound them.
+              name: MaxForwardBytes
               type: int64
           unexported: true
       - doc: Start is the durable state the driver loaded.
@@ -3756,6 +3783,21 @@ packages:
             - doc: Membership is set when the admitted set changed.
               name: Membership
               type: "[]core.Member"
+            - doc: |-
+                Unsupported names an entry whose kind this version does not know:
+                the driver stops the node with VERSION_UNSUPPORTED.
+              name: Unsupported
+              type: UnsupportedEntry
+      - doc: |-
+          UnsupportedEntry is an entry a leader sent that this version cannot
+          apply; Index is 0 when there is none.
+        name: UnsupportedEntry
+        struct:
+          fields:
+            - name: Index
+              type: uint64
+            - name: Kind
+              type: core.EntryKind
       - doc: FetchRequest asks for the entries [Lo, Hi) of the store for a peer.
         name: FetchRequest
         struct:
@@ -3905,6 +3947,14 @@ packages:
               - name: v
                 type: bool
             name: SetCanVote
+            recv: pointer
+          - doc: |-
+              SetOverloaded tells the state machine whether the driver refuses new
+              commands for apply backpressure (D6): forwarded ones are refused too.
+            in:
+              - name: "on"
+                type: bool
+            name: SetOverloaded
             recv: pointer
           - doc: SnapshotIndex returns the base of the in-memory log.
             name: SnapshotIndex

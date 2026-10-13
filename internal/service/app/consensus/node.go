@@ -52,6 +52,8 @@ type Node struct {
 	keepResults int
 
 	pendingBytes atomic.Int64
+	// tickEvery is the loop's current tick, for the tests.
+	tickEvery atomic.Int64
 	// applyLag is the payload bytes handed to the apply goroutine and not
 	// yet applied: the gap between commit and applied (D6, R1-14).
 	applyLag atomic.Int64
@@ -237,6 +239,7 @@ func newRaft(cfg Config) (*Node, error) {
 		MinVoters: cfg.MinVoters, PromoteLag: cfg.PromoteLag, Lease: cfg.Reads == ReadLease,
 		CanVote: n.canVote, MaxChainRefusals: 3, NoTable: n.noTable, RecentEntriesBytes: cfg.RecentEntriesBytes,
 		SilentTerm: silentTerm, SilentIndex: silentIndex,
+		MaxEntryBytes: cfg.MaxEntryBytes, MaxForwardBytes: cfg.MaxPendingBytes,
 	}, start)
 	n.publish()
 	if ur, ok := cfg.Transport.(coreconsensus.UnreachableReporter); ok {
@@ -421,7 +424,9 @@ func (n *Node) exec(f func()) bool {
 func (n *Node) loop() {
 	defer n.wg.Done()
 	defer close(n.loopDone)
-	tick := n.clk.NewTicker(n.tickInterval())
+	every := n.tickInterval()
+	n.tickEvery.Store(int64(every))
+	tick := n.clk.NewTicker(every)
 	defer tick.Stop()
 	var props []*proposal
 	for {
@@ -433,14 +438,23 @@ func (n *Node) loop() {
 		case <-tick.C():
 			turn = n.clk.Now()
 			n.r.Tick(n.clk.Now())
+			if d := n.tickInterval(); d != every {
+				// A committed contract changed the heartbeat (review of PR
+				// #301, L5).
+				every = d
+				n.tickEvery.Store(int64(d))
+				tick.Reset(d)
+			}
 			n.sweep()
 			n.observePeers()
 			n.observeResources()
 		case m := <-n.inCtrl:
 			turn = n.clk.Now()
+			n.r.SetOverloaded(n.applyLag.Load() >= n.cfg.MaxApplyLagBytes)
 			n.r.Step(n.clk.Now(), m)
 		case m := <-n.inData:
 			turn = n.clk.Now()
+			n.r.SetOverloaded(n.applyLag.Load() >= n.cfg.MaxApplyLagBytes)
 			n.r.Step(n.clk.Now(), m)
 		case d := <-n.storec:
 			turn = n.clk.Now()
@@ -533,13 +547,18 @@ func (n *Node) dropForward(ctx uint64) {
 	n.am.Unlock()
 }
 
+// tickInterval is a fifth of the committed contract's heartbeat.
 func (n *Node) tickInterval() time.Duration {
-	return max(n.cfg.InitialTiming.HeartbeatInterval/5, time.Millisecond)
+	return max(n.r.Status().Timing.HeartbeatInterval/5, time.Millisecond)
 }
 
 func (n *Node) handleReady() {
 	for n.r.HasReady() {
 		rd := n.r.Ready()
+		if u := rd.Unsupported; u.Index != 0 {
+			n.stop(unsupportedKind(u.Kind, u.Index), false)
+			return
+		}
 		for _, m := range rd.Messages {
 			n.cfg.Transport.Send(m.To, wire.AppendMessage(nil, &m))
 		}
@@ -676,7 +695,7 @@ func (n *Node) publish() {
 	s := &coreconsensus.Status{
 		ID: n.stamp.ID, Role: st.Role, Term: st.Term, Leader: st.Lead, Commit: st.Commit, Applied: applied,
 		Log: n.ident, Timing: st.Timing, NoSpace: st.NoSpace,
-		Versions: coreconsensus.Versions{ProtocolMin: 1, ProtocolMax: 1, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
+		Versions: coreconsensus.Versions{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
 	}
 	old := n.status.Load()
 	if old != nil && *old == *s {

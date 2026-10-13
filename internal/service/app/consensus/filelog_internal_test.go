@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -245,6 +246,28 @@ func TestRecoveryQuarantinesDamageInACompletedBatch(t *testing.T) {
 	nd.Close()
 }
 
+// A crash after the seal of segment N and before the rename of N+1: the
+// first restart finishes the rotation, and the log it leaves must open
+// again, then keep its entries across a third start (review H2).
+func TestRecoveryAfterASealSurvivesTwoRestarts(t *testing.T) {
+	dir, d := base(t)
+	l := d.d.log
+	tail(t, d, appendRecord(nil, &record{kind: recSeal, end: true, batch: l.batch, index: uint64(l.off)}), 0)
+	d = reopenExpect(t, dir, d, false)
+	if n := len(d.d.log.segs); n != 2 {
+		t.Fatalf("%d segments after the first restart, want 2", n)
+	}
+	if err := d.Log().Append(ents(4, 6, 1), nil); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, d.Log())
+	d = reopenExpect(t, dir, d, false)
+	checkEntries(t, d.Log(), 1, 6, 1)
+	d = reopenExpect(t, dir, d, false)
+	checkEntries(t, d.Log(), 1, 6, 1)
+	d.Close()
+}
+
 func TestDataDirLockAndStopMarkers(t *testing.T) {
 	dir := t.TempDir()
 	d := openDir(t, dir, 1<<16)
@@ -336,4 +359,81 @@ func TestPreparedSegmentIsNeverPublishedEarly(t *testing.T) {
 	if hs, _ := d.Log().HardState(); hs.Term != 3 || hs.Vote != 1 {
 		t.Fatalf("hard state %+v", hs)
 	}
+}
+
+// A crash between a snapshot's rename and its .meta leaves a .snap that is
+// not a snapshot: the next open removes it (review of PR #301, L4).
+func TestOpenRemovesASnapshotWithoutItsMeta(t *testing.T) {
+	dir := t.TempDir()
+	d := openDir(t, dir, 1<<16)
+	d.Close()
+	orphan := filepath.Join(dir, "snap", "orphan.snap")
+	if err := os.WriteFile(orphan, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d = openDir(t, dir, 1<<16)
+	defer d.Close()
+	if _, err := os.Stat(orphan); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("orphan .snap kept: %v", err)
+	}
+}
+
+// countingSink counts how often its handle is released.
+type countingSink struct {
+	coreconsensus.SnapshotSink
+	released *int
+}
+
+func (k countingSink) release() { *k.released++ }
+
+// A second offer for a spool still open releases the first handle instead
+// of leaking it; the spool itself stays, to be resumed (review of PR #301,
+// L4).
+func TestSecondOfferReleasesTheFirstSpoolHandle(t *testing.T) {
+	var n Node
+	released := 0
+	n.keepSpool("s1", countingSink{released: &released})
+	n.keepSpool("s1", countingSink{released: &released})
+	if released != 1 {
+		t.Fatalf("released %d handles, want 1", released)
+	}
+}
+
+// A reader is not held behind a batch's write and fdatasync: the entries
+// already durable, and the pending ones in memory, stay readable while the
+// sync runs (review of PR #301, L6).
+func TestReadersDoNotWaitForASync(t *testing.T) {
+	_, d := base(t)
+	defer d.Close()
+	l := d.d.log
+	if err := l.Append(ents(4, 6, 1), nil); err != nil {
+		t.Fatal(err)
+	}
+	in, out := make(chan struct{}), make(chan struct{})
+	l.duringSync = func() {
+		close(in)
+		<-out
+	}
+	done := make(chan error, 1)
+	go func() { done <- l.Sync() }()
+	<-in
+	read := make(chan error, 1)
+	go func() {
+		_, err := l.Entries(1, 7, 1<<20, nil)
+		read <- err
+	}()
+	select {
+	case err := <-read:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		close(out)
+		t.Fatal("a reader waited for the sync")
+	}
+	close(out)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	checkEntries(t, d.Log(), 1, 6, 1)
 }

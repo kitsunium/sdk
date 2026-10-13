@@ -8,6 +8,13 @@
 
 ## Context
 
+**What "by construction" covers (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), L9).** The entry body
+checksum and the chain value of ADR 0152 are CRC-32C. They catch a
+corrupted or misplaced entry; they do not stop a member that holds the
+cluster's key from forging one with a matching chain. Divergence is
+prevented by construction against faults, not against an insider; the
+signed digests of D3 are what an adversary would have to defeat.
+
 ADR 0152 adds the `consensus` domain. Its challenge ran two review runs. By
 the second, most of the defects found were concentrated in one subject:
 detecting that two replicas applied the same log and reached different

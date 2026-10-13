@@ -189,6 +189,9 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 			self = m.Incarnation == st.Incarnation
 		}
 	}
+	if sharedKey(members) {
+		return refused("two members under one key")
+	}
 	if !self {
 		return refused("this node is not a voter of the new members")
 	}
@@ -232,7 +235,7 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 		chain, termAt = metas[0].ChainTip, metas[0].Position.Term
 	}
 	term := max(hs.Term, termAt) + 1
-	conf := coreconsensus.Membership{Members: slices.Clone(members), Retired: old.Retired}
+	conf := coreconsensus.Membership{Members: byID(members), Retired: old.Retired}
 	data := wire.AppendAdmin(nil, &wire.Admin{Operator: string(opt.Operator), Change: wire.ChangeForced, Membership: conf})
 	e := coreconsensus.Entry{
 		Position: coreconsensus.Position{Term: term, Index: commit + 1}, Kind: coreconsensus.EntryMembership,
@@ -325,6 +328,9 @@ func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID,
 			return refused("a member without an SPKI pin")
 		}
 	}
+	if sharedKey(members) {
+		return refused("two members under one key")
+	}
 	codec := opt.Codec
 	if codec == nil {
 		codec = defaultCodec()
@@ -386,6 +392,8 @@ func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID,
 
 // resetTo makes an empty log start after (index, term).
 func (l *FileLog) resetTo(index, term uint64) error {
+	l.wmu.Lock()
+	defer l.wmu.Unlock()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.add(&record{kind: recCompact, batch: l.batch, index: index, term: term})

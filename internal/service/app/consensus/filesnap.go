@@ -28,6 +28,23 @@ func newFileSnapshots(dir string) (*FileSnapshots, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, storageFailed("mkdir", err)
 	}
+	// A crash between a snapshot's rename and its .meta leaves a .snap
+	// that is not a snapshot, nor resumable: it goes (review of PR #301, L4).
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, storageFailed("list snapshots", err)
+	}
+	for _, e := range ents {
+		id, ok := strings.CutSuffix(e.Name(), ".snap")
+		if !ok {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, id+".meta")); errors.Is(err, os.ErrNotExist) {
+			if err := os.Remove(filepath.Join(dir, e.Name())); err != nil {
+				return nil, storageFailed("remove orphan snapshot", err)
+			}
+		}
+	}
 	return &FileSnapshots{dir: dir, pins: map[string]int{}}, nil
 }
 
@@ -95,6 +112,9 @@ func (k *fileSink) Commit(final coreconsensus.SnapshotMeta) error {
 	}
 	return nil
 }
+
+// release closes the spool's handle and keeps the spool for a resume.
+func (k *fileSink) release() { k.f.Close() }
 
 func (k *fileSink) Abort() error {
 	k.f.Close()

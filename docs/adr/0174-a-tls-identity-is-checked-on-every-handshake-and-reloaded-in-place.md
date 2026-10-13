@@ -34,6 +34,11 @@ are not in the SDK's network domain:
    key, keeps the old identity on failure and counts the failures; during
    a CA rollover it trusts the union of the roots, and a connection is
    closed at its peer certificate's `NotAfter` and at a maximum age.
+   **The union only grows until the process restarts (review of [PR #301](https://github.com/kitsunium/sdk/pull/301),
+   L2).** Removing a compromised CA from the roots file is not enough:
+   the operator restarts every process that loaded it, after the file no
+   longer names it. A refused pair is read again at the next look, even
+   when its files keep the same modification time, and counted once (L3).
 
 The dialer verifies the chain, roots and extended key usage, before it
 reads any SAN; it never sets `InsecureSkipVerify` without doing that itself.

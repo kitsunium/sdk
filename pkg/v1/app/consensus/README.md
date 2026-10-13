@@ -1971,6 +1971,11 @@ type JoinConfig struct {
 	Stamp     Stamp
 	// Address is where the joiner listens.
 	Address   string
+	// Pins are the SPKIs of the members the joiner trusts, from the
+	// operator. An answer counts only from a peer presenting one of them,
+	// and only when the membership it returns lists that peer under that
+	// key; an empty list refuses the JOIN.
+	Pins      [][32]byte
 }
 ```
 

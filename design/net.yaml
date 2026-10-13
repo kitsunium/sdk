@@ -3081,8 +3081,9 @@ packages:
           - type: "*Identity"
           - type: error
       - doc: |-
-          PeerOf returns the verified peer of a completed handshake, false before
-          one or without a peer certificate.
+          PeerOf returns the peer of a completed handshake, false before one or
+          without a peer certificate. Its Chain is set only when the standard
+          verifier ran; the identity's own check sees the chain it verified.
         in:
           - name: cs
             type: tls.ConnectionState
@@ -3137,7 +3138,10 @@ packages:
             - doc: Leaf is the peer's verified certificate.
               name: Leaf
               type: "*x509.Certificate"
-            - doc: Chain is the verified chain, leaf first.
+            - doc: |-
+                Chain is the chain the standard verifier built, leaf first; empty
+                when tls.ConnectionState.VerifiedChains is, as under the identity's
+                own VerifyConnection, which verifies the chain itself (see PeerOf).
               name: Chain
               type: "[]*x509.Certificate"
             - doc: SPKI is the SHA-256 of the leaf's SubjectPublicKeyInfo.

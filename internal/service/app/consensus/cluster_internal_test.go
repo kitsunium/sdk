@@ -804,6 +804,20 @@ func TestApplyLagBackpressure(t *testing.T) {
 	if !overloaded {
 		t.Fatal("no OVERLOADED while apply was blocked")
 	}
+	// A command forwarded by a follower meets the same backpressure
+	// (review M2).
+	for _, tn := range c.nodes {
+		if tn == l {
+			continue
+		}
+		fctx, fcancel := context.WithTimeout(ctx, 2*time.Second)
+		_, _, err := tn.node.Propose(fctx, []byte("forwarded=1"))
+		fcancel()
+		if !errors.Is(err, coreconsensus.Overloaded) {
+			t.Fatalf("forwarded under backpressure: %v", err)
+		}
+		break
+	}
 	close(gate)
 	for {
 		_, _, err := l.node.Propose(ctx, []byte("after=1"))
@@ -859,5 +873,237 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 	c.waitApplied(tok.Index, 10*time.Second)
 	if v, _ := lag.sm.get("k199"); v != "199" {
 		t.Fatalf("after resuming the install: k199=%q", v)
+	}
+}
+
+// staleSnapshot runs a cluster until a follower applied past the leader's
+// newest snapshot, and returns that snapshot's meta and encoded body.
+func staleSnapshot(t *testing.T) (c *cluster, l, f *testNode, meta coreconsensus.SnapshotMeta, body []byte, tok coreconsensus.Token) {
+	c = newCluster(t, 3, 20)
+	l = c.leader(5 * time.Second)
+	for _, tn := range c.nodes {
+		if tn != l {
+			f = tn
+			break
+		}
+	}
+	for i := range 60 {
+		propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
+	}
+	c.waitApplied(l.node.Status().Commit, 5*time.Second)
+	metas, err := l.snaps.List()
+	if err != nil || len(metas) == 0 {
+		t.Fatalf("no leader snapshot: %v", err)
+	}
+	meta = metas[0]
+	h, err := l.snaps.Open(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = make([]byte, meta.EncodedSize)
+	if _, err := h.ReadAt(body, 0); err != nil && !errors.Is(err, io.EOF) {
+		t.Fatal(err)
+	}
+	h.Close()
+	// Entries past the snapshot that the receiver applies before the body
+	// arrives.
+	for i := 60; i < 80; i++ {
+		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
+	}
+	c.waitApplied(tok.Index, 5*time.Second)
+	if meta.Position.Index >= tok.Index {
+		t.Fatalf("setup: snapshot %d not behind the applied index %d", meta.Position.Index, tok.Index)
+	}
+	meta.ID = "h3-" + meta.ID
+	return c, l, f, meta, body, tok
+}
+
+// checkNothingLost requires every key the cluster committed on f.
+func checkNothingLost(t *testing.T, c *cluster, l, f *testNode) {
+	t.Helper()
+	tok := propose(t, l.node, "last=1")
+	c.waitApplied(tok.Index, 5*time.Second)
+	for i := range 80 {
+		if v, _ := f.sm.get(fmt.Sprintf("k%d", i)); v != fmt.Sprint(i) {
+			t.Fatalf("receiver lost the committed k%d (%q) to a stale install", i, v)
+		}
+	}
+}
+
+// An offer accepted while the receiver was behind, whose body arrives after
+// the receiver committed and applied past the snapshot through a new
+// leader's appends: the install is refused before it is published (review
+// H3).
+func TestInstallAfterTheReceiverMovedPastTheSnapshot(t *testing.T) {
+	c, l, f, meta, body, tok := staleSnapshot(t)
+	// The spool an earlier offer opened, when the receiver was behind.
+	sink, _, err := f.snaps.Create(meta.ID, meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.node.snapState.mu.Lock()
+	if f.node.snapState.spools == nil {
+		f.node.snapState.spools = map[string]coreconsensus.SnapshotSink{}
+	}
+	f.node.snapState.spools[meta.ID] = sink
+	f.node.snapState.mu.Unlock()
+	err = f.node.install(coreconsensus.InstallRequest{
+		Ctx:   context.Background(),
+		From:  coreconsensus.AuthenticatedPeer{ID: l.id},
+		Offer: coreconsensus.InstallOffer{Term: l.node.Status().Term, SnapshotID: meta.ID, Meta: meta},
+		Body:  bytes.NewReader(body),
+	})
+	if !errors.Is(err, coreconsensus.AdminPreconditionFailed) {
+		t.Fatalf("stale install: %v", err)
+	}
+	if got := f.node.Status().Applied; got < tok.Index {
+		t.Fatalf("the install moved applied back to %d from %d", got, tok.Index)
+	}
+	checkNothingLost(t, c, l, f)
+}
+
+// The last guard, on the apply goroutine: a restore queued for a snapshot
+// the machine already passed leaves the machine as it is (review H3).
+func TestRestoreNeverRollsTheMachineBack(t *testing.T) {
+	c, l, f, meta, body, tok := staleSnapshot(t)
+	sink, _, err := f.snaps.Create(meta.ID, meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sink.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Commit(meta); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	f.node.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done}})
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := f.node.Status().Applied; got < tok.Index {
+		t.Fatalf("the restore moved applied back to %d from %d", got, tok.Index)
+	}
+	checkNothingLost(t, c, l, f)
+}
+
+// smallFrames is a transport whose frames are smaller than a batch.
+type smallFrames struct{ coreconsensus.Transport }
+
+func (smallFrames) maxFrameBytes() int { return 64 << 10 }
+
+// A batch the transport cannot carry would stall every follower it is sent
+// to: the engine refuses that configuration at construction (review M2).
+func TestBatchLargerThanAFrameIsRefused(t *testing.T) {
+	c := newCluster(t, 1, 0)
+	tn := c.nodes[0]
+	c.kill(tn)
+	cfg := c.config(tn)
+	cfg.Transport = smallFrames{cfg.Transport}
+	if _, err := NewRaft(cfg); !errors.Is(err, coreconsensus.ConsensusMisconfigured) {
+		t.Fatalf("a batch above the frame limit: %v", err)
+	}
+}
+
+// An append that carries an entry kind this version does not know stops
+// the follower with VERSION_UNSUPPORTED (review M3).
+func TestUnknownEntryKindInAnAppendStopsTheNode(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	l := c.leader(5 * time.Second)
+	tok := propose(t, l.node, "a=1")
+	c.waitApplied(tok.Index, 5*time.Second)
+	var f *testNode
+	for _, tn := range c.nodes {
+		if tn != l {
+			f = tn
+			break
+		}
+	}
+	prev, err := f.log.Entries(tok.Index, tok.Index+1, 1<<20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := coreconsensus.Entry{Position: coreconsensus.Position{Term: tok.Term, Index: tok.Index + 1}, Kind: 0x80, Data: []byte("x")}
+	e.BodySum = wire.BodySum(e.Data)
+	e.ChainSum = wire.ChainSum(prev[0].ChainSum, &e)
+	m := coreconsensus.Message{
+		Version: 1, Group: 1, Kind: coreconsensus.MsgApp, From: l.id, To: f.id, Term: l.node.Status().Term,
+		Index: tok.Index, LogTerm: tok.Term, Entries: []coreconsensus.Entry{e},
+	}
+	f.node.deliver(coreconsensus.AuthenticatedPeer{ID: l.id}, appendFrame(&m))
+	deadline := time.Now().Add(5 * time.Second)
+	for !f.node.stopped.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("the node kept running after an unknown entry kind")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if r, ok := f.node.StopReason(); !ok || !errors.Is(r.Err, coreconsensus.VersionUnsupported) {
+		t.Fatalf("stop reason: %+v", r)
+	}
+}
+
+// An unknown kind already in the log, from a newer binary, stops the node
+// when it reaches apply: it is never applied as a no-op (review M3).
+func TestUnknownEntryKindInTheLogStopsTheNode(t *testing.T) {
+	c := newCluster(t, 1, 0)
+	tn := c.nodes[0]
+	c.waitApplied(1, 5*time.Second)
+	tok := propose(t, tn.node, "a=1")
+	c.waitApplied(tok.Index, 5*time.Second)
+	c.kill(tn)
+	prev, err := tn.log.Entries(tok.Index, tok.Index+1, 1<<20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := coreconsensus.Entry{Position: coreconsensus.Position{Term: tok.Term, Index: tok.Index + 1}, Kind: 0x80, Data: []byte("x")}
+	e.BodySum = wire.BodySum(e.Data)
+	e.ChainSum = wire.ChainSum(prev[0].ChainSum, &e)
+	hs, _ := tn.log.HardState()
+	hs.Commit = e.Position.Index
+	if err := tn.log.Append([]coreconsensus.Entry{e}, &hs); err != nil {
+		t.Fatal(err)
+	}
+	if err := tn.log.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	c.start(tn)
+	deadline := time.Now().Add(5 * time.Second)
+	for !tn.node.stopped.Load() {
+		if time.Now().After(deadline) {
+			t.Fatalf("applied %d: the unknown entry was skipped", tn.node.Status().Applied)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if r, ok := tn.node.StopReason(); !ok || !errors.Is(r.Err, coreconsensus.VersionUnsupported) {
+		t.Fatalf("stop reason: %+v", r)
+	}
+}
+
+// The tick follows the committed timing contract, not the one the node
+// started with: a faster contract keeps heartbeats within its fifth of the
+// election timeout (review of PR #301, L5).
+func TestTickFollowsTheCommittedContract(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	l := c.leader(5 * time.Second)
+	propose(t, l.node, "a=1")
+	st := l.node.Status()
+	next := testTimingFast()
+	next.HeartbeatInterval = 5 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	pre := coreconsensus.Precondition{Log: l.node.ident, Generation: st.Timing.Generation}
+	if err := l.node.ProposeTimingContract(ctx, "op:test", pre, next); err != nil {
+		t.Fatal(err)
+	}
+	want := next.HeartbeatInterval / 5
+	deadline := time.Now().Add(5 * time.Second)
+	for _, tn := range c.nodes {
+		for time.Duration(tn.node.tickEvery.Load()) != want {
+			if time.Now().After(deadline) {
+				t.Fatalf("node %d ticks every %v, want %v", tn.id, time.Duration(tn.node.tickEvery.Load()), want)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
 	}
 }

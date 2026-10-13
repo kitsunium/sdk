@@ -96,6 +96,12 @@ func TestRecoverStartsANewHistoryFromOneNode(t *testing.T) {
 			Receipts: [][]byte{ed25519.Sign(priv, ReceiptMessage(c.cid, next, dn.id))},
 		})
 	}
+	// Two members under one key: the transport could not tell them apart
+	// (review M5).
+	twin := coreconsensus.Member{ID: 99, Slot: "twin", SPKI: self.SPKI}
+	if err := Recover(keep.dd, next, []coreconsensus.Member{self, twin}, opt); !errors.Is(err, coreconsensus.RecoverRefused) {
+		t.Fatalf("recover with a shared key: %v", err)
+	}
 	if err := Recover(keep.dd, next, []coreconsensus.Member{self}, opt); err != nil {
 		t.Fatal(err)
 	}
@@ -147,6 +153,11 @@ func TestRestoreSnapshotIntoAnEmptyDirectory(t *testing.T) {
 	}
 	fresh.id = id
 	self := coreconsensus.Member{ID: id, Incarnation: inc, Slot: "fresh", SPKI: MemorySPKI(id), Voter: true}
+	twin := coreconsensus.Member{ID: 99, Slot: "twin", SPKI: self.SPKI}
+	if _, err := RestoreSnapshot(fresh.dd, bytes.NewReader(buf.Bytes()), next, []coreconsensus.Member{self, twin},
+		RestoreOptions{Expected: meta, Confirm: next.String(), Operator: "op:restore", MaxEncoded: 1 << 30, MaxDecoded: 1 << 30}); !errors.Is(err, coreconsensus.RestoreRefused) {
+		t.Fatalf("restore with a shared key (review M5): %v", err)
+	}
 	if _, err := RestoreSnapshot(fresh.dd, bytes.NewReader(buf.Bytes()), next, []coreconsensus.Member{self},
 		RestoreOptions{Expected: meta, Confirm: next.String(), Operator: "op:restore", MaxEncoded: 1 << 30, MaxDecoded: 1 << 30}); err != nil {
 		t.Fatal(err)
@@ -240,5 +251,60 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 		if dn.node != nil {
 			dn.crash(c)
 		}
+	}
+}
+
+// Two founders given the same members in another order write the same entry
+// 1: the guard compares the sorted list, so the entry must be sorted too,
+// or the chain refuses every append from the first leader (review M1).
+func TestBootstrapEntryOneIgnoresTheMemberOrder(t *testing.T) {
+	cl := coreconsensus.ClusterID{1, 2, 3}
+	d1 := openDir(t, t.TempDir(), 1<<16)
+	d2 := openDir(t, t.TempDir(), 1<<16)
+	defer d1.Close()
+	defer d2.Close()
+	id1, inc1, err := Init(d1, cl, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id2, inc2, err := Init(d2, cl, "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m1 := coreconsensus.Member{ID: id1, Incarnation: inc1, Slot: "a", SPKI: [32]byte{1}, Voter: true}
+	m2 := coreconsensus.Member{ID: id2, Incarnation: inc2, Slot: "b", SPKI: [32]byte{2}, Voter: true}
+	if err := Bootstrap(context.Background(), Config{Log: d1.Log(), Cluster: cl, ID: id1}, []coreconsensus.Member{m1, m2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Bootstrap(context.Background(), Config{Log: d2.Log(), Cluster: cl, ID: id2}, []coreconsensus.Member{m2, m1}); err != nil {
+		t.Fatal(err)
+	}
+	e1, err := d1.Log().Entries(1, 2, 1<<20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e2, err := d2.Log().Entries(1, 2, 1<<20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(e1[0].Data, e2[0].Data) || e1[0].ChainSum != e2[0].ChainSum {
+		t.Fatal("the same founding members in another order wrote another entry 1")
+	}
+}
+
+// Two founding members under one key are refused: the transport admits a
+// connection by its key, and could not tell them apart (review M5).
+func TestBootstrapRefusesASharedKey(t *testing.T) {
+	cl := coreconsensus.ClusterID{1, 2, 3}
+	d := openDir(t, t.TempDir(), 1<<16)
+	defer d.Close()
+	id, inc, err := Init(d, cl, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	self := coreconsensus.Member{ID: id, Incarnation: inc, Slot: "a", SPKI: [32]byte{1}, Voter: true}
+	twin := coreconsensus.Member{ID: id + 1, Incarnation: inc, Slot: "b", SPKI: self.SPKI, Voter: true}
+	if err := Bootstrap(context.Background(), Config{Log: d.Log(), Cluster: cl, ID: id}, []coreconsensus.Member{self, twin}); !errors.Is(err, coreconsensus.BootstrapRefused) {
+		t.Fatalf("bootstrap with a shared key: %v", err)
 	}
 }
