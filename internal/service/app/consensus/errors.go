@@ -19,6 +19,9 @@ const (
 
 	// errPinned is the cause of a Remove refused while a handle is open.
 	errPinned cause = "snapshot pinned by an open handle"
+	// errSilenceLength is the cause of a silence condition of a length this
+	// version never writes.
+	errSilenceLength cause = "silence condition of the wrong length"
 
 	// MaxJoinReasonBytes bounds the reason a JOIN refusal carries to the joiner.
 	MaxJoinReasonBytes int = 256

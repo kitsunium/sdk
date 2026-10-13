@@ -515,7 +515,10 @@ func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID,
 	if err := checkRestore(flog, &stamp, newCluster, members, opt); err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
-	codec := restoreCodec(opt)
+	codec, err := restoreCodec(opt)
+	if err != nil {
+		return coreconsensus.SnapshotMetaValue{}, err
+	}
 	if err := d.audit(opt.Operator, "restore-snapshot "+newCluster.String()); err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
@@ -556,11 +559,20 @@ func checkRestore(flog *fileLog, stamp *coreconsensus.StampValue, newCluster cor
 
 // restoreCodec is the codec the restored chunks are decoded with: the
 // caller's, else the default, flate.
-func restoreCodec(opt *RestoreOptions) coretransform.BoundedDecompressor {
-	if opt.Codec == nil {
-		return defaultCodec()
+func restoreCodec(opt *RestoreOptions) (coretransform.BoundedDecompressor, error) {
+	if opt.Codec != nil {
+		return opt.Codec, nil
 	}
-	return opt.Codec
+	return defaultRestoreCodec()
+}
+
+// defaultRestoreCodec is the default for a restore, refused when flate no
+// longer bounds its decompression rather than decoding without a bound.
+func defaultRestoreCodec() (coretransform.BoundedDecompressor, error) {
+	if codec, ok := defaultCodec(); ok {
+		return codec, nil
+	}
+	return nil, misconfigured("Codec", "no bounded decompressor")
 }
 
 // checkRestoreTarget is the first half of RestoreSnapshot's preconditions,
@@ -886,10 +898,6 @@ func (l *fileLog) silence() (term, index uint64, unreadable, err error) {
 	}
 	return term, index, nil, nil
 }
-
-// errSilenceLength is the cause of a silence condition of a length this
-// version never writes.
-const errSilenceLength cause = "silence condition of the wrong length"
 
 // endSilence removes the silence condition durably.
 func (l *fileLog) endSilence() error {

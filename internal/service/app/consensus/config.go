@@ -176,7 +176,10 @@ func clampDefaults(c *Config) {
 		c.HardCloseTimeout = 5 * time.Second
 	}
 	if c.SnapshotCodec == nil {
-		c.SnapshotCodec = defaultCodec()
+		// Left nil when there is no bounded default: refuseNilPorts says so.
+		if codec, ok := defaultCodec(); ok {
+			c.SnapshotCodec = codec
+		}
 	}
 }
 
@@ -224,6 +227,8 @@ func refuseNilPorts(c *Config) error {
 		return misconfigured("Snapshots", "nil")
 	case c.Transport == nil:
 		return misconfigured("Transport", "nil")
+	case c.SnapshotCodec == nil:
+		return misconfigured("SnapshotCodec", "no bounded decompressor")
 	}
 	return nil
 }
@@ -294,10 +299,13 @@ func (c *Config) MemoryBudget(peers int) int64 {
 	return c.MaxPendingBytes + c.MaxApplyLagBytes + c.RecentEntriesBytes + int64(peers)*int64(c.MaxInflightBytes)
 }
 
-// defaultCodec is flate, whose registered singleton is known to bound its
-// decompression, so the assertion cannot fail.
-func defaultCodec() coretransform.BoundedDecompressor {
-	return svctransform.FlateCompressor.(coretransform.BoundedDecompressor)
+// defaultCodec is flate, whose registered singleton bounds its
+// decompression. ok is false only if that singleton stopped implementing
+// BoundedDecompressor; the configuration is then refused rather than run
+// with a codec that could inflate a hostile snapshot without bound.
+func defaultCodec() (coretransform.BoundedDecompressor, bool) {
+	codec, ok := svctransform.FlateCompressor.(coretransform.BoundedDecompressor)
+	return codec, ok
 }
 
 // framesBelow reports whether the transport declares a frame limit below n.

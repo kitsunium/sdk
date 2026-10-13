@@ -3842,6 +3842,12 @@ packages:
                 the driver stops the node with VERSION_UNSUPPORTED.
               name: Unsupported
               type: UnsupportedEntryValue
+            - doc: |-
+                ChainRefusedBy names, once per refusal, the leader whose append this
+                follower refused for a broken chain, for D13's
+                consensus_chain_refusals_total.
+              name: ChainRefusedBy
+              type: "[]core.NodeID"
       - doc: |-
           UnsupportedEntryValue is an entry a leader sent that this version cannot
           apply; Index is 0 when there is none.

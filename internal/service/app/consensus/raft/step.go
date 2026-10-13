@@ -557,6 +557,7 @@ func (r *Raft) chainRefused(m core.MessageValue, at uint64) {
 	if r.cfg.MaxChainRefusals > 0 && r.refusals >= r.cfg.MaxChainRefusals {
 		r.refusedLead = m.From
 	}
+	r.rd.ChainRefusedBy = append(r.rd.ChainRefusedBy, m.From)
 	r.send(core.MessageValue{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: m.Index})
 }
 

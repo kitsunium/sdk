@@ -633,6 +633,12 @@ func (n *Node) loop() {
 // the turn started. It reports false on stop. The inputs are never closed;
 // were one closed, its handler reports false and the loop ends as it does
 // on stop instead of spinning on the closed channel.
+//
+// The select stays whole: every case is one call into its handler, and the
+// runtime's uniform choice among the ready inputs is the loop's fairness.
+// Splitting it to lower its cyclomatic count would let the outer inputs
+// starve the inner ones (KTN-FUNC-CYCLO counts the dispatch as eight
+// decisions: kodflow/ktn-linter#727).
 func (n *Node) turn(tick clock.Ticker, props *[]*proposal) (time.Time, bool) {
 	select {
 	case <-n.stopc:
@@ -891,12 +897,7 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 		n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
 		n.obs.info("consensus: admitted members changed", lattr("members", uint64(len(rd.Membership))))
 	}
-	if rd.SilenceEnded {
-		n.endSilence()
-	}
-	if rd.TruncateFrom != 0 {
-		n.obs.info("consensus: log truncated", lattr("from", rd.TruncateFrom))
-	}
+	n.reportNotices(rd)
 	if rd.NeedsWrite() {
 		n.sq.push(storeReq{rd: *rd})
 	}
@@ -909,6 +910,21 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 	}
 	n.answerReady(rd)
 	n.checkAdmission()
+}
+
+// reportNotices acts on the Ready's notices that change no state of the
+// loop: the end of the silence condition, the chain refusals D13 counts by
+// leader, and a truncation worth a line in the log.
+func (n *Node) reportNotices(rd *raft.ReadyValue) {
+	if rd.SilenceEnded {
+		n.endSilence()
+	}
+	for _, lead := range rd.ChainRefusedBy {
+		n.obs.inc(mChainRefusals, coreotel.String("leader", lead.String()))
+	}
+	if rd.TruncateFrom != 0 {
+		n.obs.info("consensus: log truncated", lattr("from", rd.TruncateFrom))
+	}
 }
 
 // endSilence persists the end of the silence condition; a store that

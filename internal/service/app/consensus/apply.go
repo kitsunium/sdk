@@ -20,8 +20,18 @@ type restoreReq struct {
 	done chan error
 }
 
+// newSaveReq is a SaveSnapshot request for the apply goroutine: the extra
+// writer, the operator it is recorded under, and the one-slot channel its
+// answer comes back on, so the apply goroutine never blocks on a caller
+// that left.
+func newSaveReq(w io.Writer, op coreconsensus.Operator) *saveReq {
+	return &saveReq{w: w, op: op, done: make(chan saveRes, 1)}
+}
+
 type saveReq struct {
-	w    io.Writer
+	w io.Writer
+	// op is the operator the save is recorded under.
+	op   coreconsensus.Operator
 	done chan saveRes
 }
 

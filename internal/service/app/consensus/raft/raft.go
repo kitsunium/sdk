@@ -27,12 +27,12 @@ const (
 	raftOverloaded
 )
 
-// raftFacts are the step function's own yes/no state, one bit each.
-type raftFacts uint8
-
 // ProtocolMax is the highest protocol version this engine speaks: a cluster
 // version above it is refused, and stops a node that finds it committed.
 const ProtocolMax uint32 = 1
+
+// raftFacts are the step function's own yes/no state, one bit each.
+type raftFacts uint8
 
 // Config is what the step function needs from its driver. Every bound is
 // already clamped and validated by the engine.
@@ -177,6 +177,10 @@ type ReadyValue struct {
 	// Unsupported names an entry whose kind this version does not know:
 	// the driver stops the node with VERSION_UNSUPPORTED.
 	Unsupported UnsupportedEntryValue
+	// ChainRefusedBy names, once per refusal, the leader whose append this
+	// follower refused for a broken chain, for D13's
+	// consensus_chain_refusals_total.
+	ChainRefusedBy []core.NodeID
 }
 
 // UnsupportedEntryValue is an entry a leader sent that this version cannot

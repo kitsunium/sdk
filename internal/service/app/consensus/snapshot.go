@@ -249,7 +249,7 @@ func (n *Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io
 	ss.inFlight = true
 	ss.mu.Unlock()
 	// The cut runs on the apply goroutine, serialised with Apply.
-	req := &saveReq{w: w, done: make(chan saveRes, 1)}
+	req := newSaveReq(w, op)
 	n.aq.push(applyItem{save: req})
 	select {
 	case r := <-req.done:
@@ -286,6 +286,11 @@ func (n *Node) save(req *saveReq) {
 		// The operator who asked reads the error too, but a storage failure
 		// is the node's before it is the caller's.
 		n.cutFailed(err)
+	}
+	if err == nil {
+		// An administrative operation is recorded under its operator, as
+		// the offline ones are in the audit file (D17).
+		n.obs.info("consensus: snapshot saved", lstr("operator", string(req.op)), lattr("index", idx))
 	}
 	req.done <- saveRes{m, err}
 }

@@ -151,7 +151,7 @@ func sanCluster(host string) (coreconsensus.ClusterID, error) {
 
 // SAN returns the canonical URI SAN of a node certificate.
 func SAN(cluster coreconsensus.ClusterID, slot string) *url.URL {
-	return &url.URL{Scheme: sanScheme, Host: cluster.String(), Path: "/slot/" + slot}
+	return &url.URL{Scheme: sanScheme, Host: hex.EncodeToString(cluster[:]), Path: "/slot/" + slot}
 }
 
 // spkiOf is the pin of a certificate: the SHA-256 of its
@@ -1218,7 +1218,8 @@ func (t *TCPTransport) joinOne(ctx context.Context, addr string, req coreconsens
 		return coreconsensus.PositionValue{}, false, origin(coreconsensus.FrameInvalid, errs.String("what", "join answer"))
 	}
 	if code := errs.Code(binary.LittleEndian.Uint32(b)); code != 0 {
-		return coreconsensus.PositionValue{}, true, joinRefused(code, joinAnswerReason(b[20:]))
+		reason, _ := joinAnswerReason(b[20:])
+		return coreconsensus.PositionValue{}, true, joinRefused(code, reason)
 	}
 	m, perr := wire.ParseMembership(b[20:])
 	if perr != nil {
@@ -1238,17 +1239,18 @@ func joinAnswerListsPeer(m coreconsensus.MembershipValue, spki [32]byte) bool {
 	return slices.ContainsFunc(m.Members, func(x coreconsensus.MemberValue) bool { return x.SPKI == spki })
 }
 
-// joinAnswerReason reads the reason after a JOIN_REFUSED's fixed part;
-// an answer of an older member carries none.
-func joinAnswerReason(b []byte) string {
+// joinAnswerReason reads the reason after a JOIN_REFUSED's fixed part. ok
+// is false when the answer carries none — an older member's, or one cut
+// short — which the refusal then reports without a reason.
+func joinAnswerReason(b []byte) (reason string, ok bool) {
 	if len(b) < 2 {
-		return ""
+		return "", false
 	}
 	n := int(binary.LittleEndian.Uint16(b))
 	if 2+n > len(b) {
-		return ""
+		return "", false
 	}
-	return string(b[2 : 2+n])
+	return string(b[2 : 2+n]), true
 }
 
 // BindJoinReason implements JoinReasonBinder: the JOIN callback that also
