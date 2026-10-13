@@ -41,6 +41,9 @@ type progress struct {
 	fetching bool
 }
 
+// becomeProbe restarts the peer at one append at a time from its match. Out
+// of a snapshot transfer it resumes after the snapshot it was sent, since the
+// peer's log starts there.
 func (p *progress) becomeProbe() {
 	if p.state == stateSnapshot {
 		p.next = max(p.match+1, p.pendingSnapshot+1)
@@ -53,6 +56,8 @@ func (p *progress) becomeProbe() {
 	p.freeAll()
 }
 
+// becomeReplicate pipelines appends from just after the peer's match, with
+// an empty window.
 func (p *progress) becomeReplicate() {
 	p.state = stateReplicate
 	p.next = p.match + 1
@@ -60,6 +65,8 @@ func (p *progress) becomeReplicate() {
 	p.freeAll()
 }
 
+// becomeSnapshot pauses appends to the peer until the snapshot at index has
+// been sent and answered.
 func (p *progress) becomeSnapshot(index uint64) {
 	p.state = stateSnapshot
 	p.pendingSnapshot = index
@@ -67,6 +74,7 @@ func (p *progress) becomeSnapshot(index uint64) {
 	p.freeAll()
 }
 
+// freeAll empties the inflight window, keeping its capacity.
 func (p *progress) freeAll() {
 	p.inflight = p.inflight[:0]
 	p.inflightBytes = p.inflightBytes[:0]
@@ -84,6 +92,7 @@ func (p *progress) freeTo(index uint64) {
 	p.inflightBytes = append(p.inflightBytes[:0], p.inflightBytes[n:]...)
 }
 
+// add records an append ending at last, of size bytes, in the window.
 func (p *progress) add(last uint64, size int) {
 	p.inflight = append(p.inflight, last)
 	p.inflightBytes = append(p.inflightBytes, size)
@@ -100,8 +109,25 @@ func (p *progress) paused(maxInflight, maxBytes int) bool {
 		return p.probeSent
 	case stateReplicate:
 		return len(p.inflight) >= maxInflight || p.bytes >= maxBytes
+	default:
+		// stateSnapshot: nothing is sent until the transfer ends.
+		return true
 	}
-	return true
+}
+
+// rejectCounts reports whether a rejection of the append after index still
+// answers something outstanding (R2-07): the probe in flight, or an append
+// in the window. Any other rejection is stale.
+func (p *progress) rejectCounts(index uint64) bool {
+	switch p.state {
+	case stateProbe:
+		return index == p.next-1
+	case stateReplicate:
+		return index > p.match && index < p.next
+	default:
+		// stateSnapshot: no append is outstanding during a transfer.
+		return false
+	}
 }
 
 // maybeUpdate records an acknowledgement of n; it reports whether match grew.

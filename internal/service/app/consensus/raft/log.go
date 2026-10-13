@@ -22,8 +22,12 @@ type memLog struct {
 	window  int64
 }
 
+// lastIndex is the index of the last entry held, the snapshot base when
+// none is.
 func (l *memLog) lastIndex() uint64 { return l.snapIndex + uint64(len(l.ents)) }
 
+// lastTerm is the term of the last entry held, the snapshot's term when
+// none is: what the election restriction compares.
 func (l *memLog) lastTerm() uint64 {
 	if len(l.ents) == 0 {
 		return l.snapTerm
@@ -50,8 +54,12 @@ func (l *memLog) chain(i uint64) uint32 {
 	return l.ents[i-l.snapIndex-1].ChainSum
 }
 
+// at returns the entry at i in place. The caller guarantees
+// snapIndex < i <= lastIndex; anything else panics on the slice bound.
 func (l *memLog) at(i uint64) *core.Entry { return &l.ents[i-l.snapIndex-1] }
 
+// matchTerm reports whether the log holds index i at term t: false for an
+// index it does not hold, so a compacted or missing entry never matches.
 func (l *memLog) matchTerm(i, t uint64) bool {
 	x, ok := l.term(i)
 	return ok && x == t

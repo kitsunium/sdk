@@ -60,4 +60,6 @@ const (
 	mutChainSkip
 )
 
+// mutated reports whether a test switched mutation m on; it is false in every
+// build of the engine, whose Config cannot set the field.
 func (r *Raft) mutated(m mutation) bool { return r.mut&m != 0 }

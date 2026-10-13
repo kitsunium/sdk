@@ -263,7 +263,7 @@ type Raft struct {
 
 // New builds the step function over the loaded state.
 func New(cfg Config, st Start) *Raft {
-	r := &Raft{
+	node := &Raft{
 		cfg:    cfg,
 		mut:    cfg.mut,
 		rng:    rand.New(rand.NewPCG(cfg.Seed, uint64(cfg.ID))),
@@ -276,42 +276,42 @@ func New(cfg Config, st Start) *Raft {
 		now:    st.Now,
 	}
 	sm := st.Snapshot
-	r.log = memLog{snapIndex: sm.Position.Index, snapTerm: sm.Position.Term, snapChain: sm.ChainTip}
-	r.base = sm.Membership.Clone()
-	r.base.Index = sm.Position.Index
-	if sm.Timing.Generation > r.timing.Generation {
-		r.timing = sm.Timing
+	node.log = memLog{snapIndex: sm.Position.Index, snapTerm: sm.Position.Term, snapChain: sm.ChainTip}
+	node.base = sm.Membership.Clone()
+	node.base.Index = sm.Position.Index
+	if sm.Timing.Generation > node.timing.Generation {
+		node.timing = sm.Timing
 	}
-	r.clusterVer, r.clusterGen, r.noSpace = sm.ClusterVersion, sm.ClusterGeneration, sm.NoSpace
-	r.voteWindow = r.timing.ElectionTimeoutMin
-	r.contracts = map[uint64]core.TimingContract{r.timing.Generation: r.timing}
+	node.clusterVer, node.clusterGen, node.noSpace = sm.ClusterVersion, sm.ClusterGeneration, sm.NoSpace
+	node.voteWindow = node.timing.ElectionTimeoutMin
+	node.contracts = map[uint64]core.TimingContract{node.timing.Generation: node.timing}
 	for _, e := range st.Entries {
-		if e.Position.Index <= r.log.snapIndex {
+		if e.Position.Index <= node.log.snapIndex {
 			continue
 		}
-		r.log.ents = append(r.log.ents, e)
-		r.log.window += int64(len(e.Data))
-		r.noteAppended(&e)
+		node.log.ents = append(node.log.ents, e)
+		node.log.window += int64(len(e.Data))
+		node.noteAppended(&e)
 	}
-	r.log.stable = r.log.lastIndex()
-	r.log.committed = min(max(st.HardState.Commit, r.log.snapIndex), r.log.lastIndex())
-	r.log.applied = max(st.Applied, r.log.snapIndex)
-	r.log.applied = min(r.log.applied, r.log.committed)
-	r.applyCommitEffects(r.log.snapIndex+1, r.log.committed)
-	r.hs = core.HardState{Term: r.term, Vote: r.vote, Commit: r.log.committed}
-	r.role = core.RoleFollower
-	if !r.isVoter(r.id) {
-		r.role = core.RoleLearner
+	node.log.stable = node.log.lastIndex()
+	node.log.committed = min(max(st.HardState.Commit, node.log.snapIndex), node.log.lastIndex())
+	node.log.applied = max(st.Applied, node.log.snapIndex)
+	node.log.applied = min(node.log.applied, node.log.committed)
+	node.applyCommitEffects(node.log.snapIndex+1, node.log.committed)
+	node.hs = core.HardState{Term: node.term, Vote: node.vote, Commit: node.log.committed}
+	node.role = core.RoleFollower
+	if !node.isVoter(node.id) {
+		node.role = core.RoleLearner
 	}
 	// A node that starts behaves as if it had just heard from a leader: it
 	// refuses votes for one window (D5, from raft-sql-poc).
-	r.lastLeaderContact = st.Now
-	if r.mutated(mutNoRestartRefusal) {
-		r.lastLeaderContact = time.Time{}
+	node.lastLeaderContact = st.Now
+	if node.mutated(mutNoRestartRefusal) {
+		node.lastLeaderContact = time.Time{}
 	}
-	r.resetElection(st.Now)
-	r.rd.Membership = r.admitted()
-	return r
+	node.resetElection(st.Now)
+	node.rd.Membership = node.admitted()
+	return node
 }
 
 // ---- inputs ----
@@ -333,18 +333,10 @@ func (r *Raft) Tick(now time.Time) {
 
 // StorageDone reports that the write seq is durable through (index, term).
 func (r *Raft) StorageDone(seq, index, term uint64) {
-	if r.selfVoteSeq != 0 && seq >= r.selfVoteSeq {
-		r.selfVoteSeq = 0
-		if r.role == core.RoleCandidate {
-			r.selfVoteDurable = true
-			r.votes[r.id] = true
-			r.tallyVotes()
-		}
-	}
-	if index == 0 || index <= r.log.stable {
-		return
-	}
-	if !r.mutated(mutStaleCompletion) && !r.log.matchTerm(index, term) {
+	r.noteSelfVote(seq)
+	// A completion that moves nothing, or that a truncation superseded,
+	// counts for nothing.
+	if index == 0 || index <= r.log.stable || (!r.mutated(mutStaleCompletion) && !r.log.matchTerm(index, term)) {
 		return
 	}
 	r.log.stable = min(index, r.log.lastIndex())
@@ -358,9 +350,24 @@ func (r *Raft) StorageDone(seq, index, term uint64) {
 	}
 }
 
+// noteSelfVote counts this candidate's own vote once the write seq that
+// carries it is durable (D5b), and tallies the campaign then.
+func (r *Raft) noteSelfVote(seq uint64) {
+	if r.selfVoteSeq == 0 || seq < r.selfVoteSeq {
+		return
+	}
+	r.selfVoteSeq = 0
+	if r.role == core.RoleCandidate {
+		r.selfVoteDurable = true
+		r.votes[r.id] = true
+		r.tallyVotes()
+	}
+}
+
 // Applied reports how far the state machine applied.
 func (r *Raft) Applied(index uint64) {
-	_ = index // the driver keeps applied; the step function hands out through log.applied
+	// Nothing to record: the driver keeps applied, and the step function
+	// hands entries out through log.applied.
 }
 
 // ReportUnreachable moves a peer the transport could not reach to probe.
@@ -471,10 +478,7 @@ func (r *Raft) Progress(id core.NodeID) (match uint64, lastHeard time.Time, ok b
 
 // LeaseValid reports whether the leader's lease holds at now (D9).
 func (r *Raft) LeaseValid(now time.Time) bool {
-	if !r.cfg.Lease || r.role != core.RoleLeader || r.leaseDropped || r.leaseStart.IsZero() {
-		return false
-	}
-	if r.log.committed < r.termStart {
+	if !r.cfg.Lease || r.role != core.RoleLeader || r.leaseDropped || r.leaseStart.IsZero() || r.log.committed < r.termStart {
 		return false
 	}
 	return now.Sub(r.leaseStart) < r.leaseLen
@@ -488,14 +492,25 @@ func (r *Raft) DropLease() { r.leaseDropped = true }
 func (r *Raft) HasReady() bool {
 	r.flushReads()
 	rd := &r.rd
-	if r.term != r.hs.Term || r.vote != r.hs.Vote || r.log.committed != r.hs.Commit {
+	// A hard state to write, or committed entries to apply, are work even
+	// with nothing queued (a node with no table applies nothing, D7).
+	if r.term != r.hs.Term || r.vote != r.hs.Vote || r.log.committed != r.hs.Commit ||
+		(r.log.applied < min(r.log.committed, r.log.stable) && !r.cfg.NoTable) {
 		return true
 	}
-	if r.log.applied < min(r.log.committed, r.log.stable) && !r.cfg.NoTable {
-		return true
-	}
-	return rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.Messages) != 0 || len(rd.AfterSync) != 0 ||
-		len(rd.SendSnapshot) != 0 || len(rd.ReadStates) != 0 || len(rd.Forwarded) != 0 ||
+	return rd.hasLogWork() || rd.hasNotices()
+}
+
+// hasLogWork reports whether the Ready queues a log change or a message.
+func (rd *Ready) hasLogWork() bool {
+	return rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.Messages) != 0 || len(rd.AfterSync) != 0
+}
+
+// hasNotices reports whether the Ready queues anything else for the
+// driver: snapshots to send, answers, a membership, fetches, the end of the
+// silence, an entry this version cannot apply.
+func (rd *Ready) hasNotices() bool {
+	return len(rd.SendSnapshot) != 0 || len(rd.ReadStates) != 0 || len(rd.Forwarded) != 0 ||
 		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.SilenceEnded ||
 		rd.Unsupported.Index != 0
 }
@@ -507,8 +522,7 @@ func (r *Raft) Ready() Ready {
 	r.rd = Ready{}
 	hsChanged := r.term != r.hs.Term || r.vote != r.hs.Vote
 	if hsChanged {
-		hs := core.HardState{Term: r.term, Vote: r.vote, Commit: r.log.committed}
-		rd.HardState = &hs
+		rd.HardState = new(core.HardState{Term: r.term, Vote: r.vote, Commit: r.log.committed})
 		// A request at a new term, or a reply that a new vote decided,
 		// waits for the term and the vote to be durable (D5b).
 		rd.AfterSync = append(rd.AfterSync, rd.Messages...)
@@ -524,18 +538,28 @@ func (r *Raft) Ready() Ready {
 		r.log.applied = hi
 	}
 	r.log.evict(r.cfg.RecentEntriesBytes, min(r.log.applied, r.log.stable))
-	if rd.NeedsWrite() {
-		r.seq++
-		rd.Seq = r.seq
-		if hsChanged && r.role == core.RoleCandidate && !r.selfVoteDurable {
-			r.selfVoteSeq = rd.Seq
-		}
-	}
+	r.numberWrite(&rd, hsChanged)
 	return rd
+}
+
+// numberWrite gives a Ready that asks the storage actor for anything the
+// next write sequence number, and remembers it as the write carrying a
+// candidate's own vote when this one persists that vote (D5b).
+func (r *Raft) numberWrite(rd *Ready, hsChanged bool) {
+	if !rd.NeedsWrite() {
+		return
+	}
+	r.seq++
+	rd.Seq = r.seq
+	if hsChanged && r.role == core.RoleCandidate && !r.selfVoteDurable {
+		r.selfVoteSeq = rd.Seq
+	}
 }
 
 // ---- helpers ----
 
+// conf is the latest appended configuration, which governs this node from
+// the moment it is appended (D8).
 func (r *Raft) conf() *core.Membership {
 	if n := len(r.confs); n > 0 {
 		return &r.confs[n-1].m
@@ -543,6 +567,8 @@ func (r *Raft) conf() *core.Membership {
 	return &r.base
 }
 
+// confAt is the configuration in force at index i: the latest appended at
+// or before it, else the snapshot base's.
 func (r *Raft) confAt(i uint64) *core.Membership {
 	for k := len(r.confs) - 1; k >= 0; k-- {
 		if r.confs[k].index <= i {
@@ -552,13 +578,16 @@ func (r *Raft) confAt(i uint64) *core.Membership {
 	return &r.base
 }
 
+// isVoter reports whether id votes in the current configuration.
 func (r *Raft) isVoter(id core.NodeID) bool {
 	m, ok := r.conf().Member(id)
 	return ok && m.Voter
 }
 
+// voters lists the current configuration's voters, in its order.
 func (r *Raft) voters() []core.NodeID { return r.conf().Voters() }
 
+// quorum is the size of a majority of the current voters.
 func (r *Raft) quorum() int { return len(r.voters())/2 + 1 }
 
 // promotable reports whether this node may campaign: a voter of the current
@@ -568,6 +597,8 @@ func (r *Raft) promotable() bool {
 	return ok && m.Voter && !m.Joining && r.cfg.CanVote && !r.cfg.NoTable
 }
 
+// randomTimeout draws an election timeout in [min, max) from the seeded
+// generator, one draw per call, so a run replays from its seed (D15).
 func (r *Raft) randomTimeout() time.Duration {
 	lo, hi := r.timing.ElectionTimeoutMin, r.timing.ElectionTimeoutMax
 	if hi <= lo {
@@ -576,6 +607,7 @@ func (r *Raft) randomTimeout() time.Duration {
 	return lo + time.Duration(r.rng.Int64N(int64(hi-lo)))
 }
 
+// resetElection arms the election timer at a fresh random timeout from now.
 func (r *Raft) resetElection(now time.Time) { r.electionDeadline = now.Add(r.randomTimeout()) }
 
 // admitted is the transport's admission set: the union of the latest
@@ -590,6 +622,9 @@ func (r *Raft) admitted() []core.Member {
 	return out
 }
 
+// send stamps m with this node's identity and term and queues it. An
+// acknowledgement or a vote waits in AfterSync for the write it vouches for
+// (D5b), and a silent node sends no positive acknowledgement at all.
 func (r *Raft) send(m core.Message) {
 	m.Version = 1
 	m.Group = r.cfg.Group
@@ -603,11 +638,18 @@ func (r *Raft) send(m core.Message) {
 		}
 		m.Flags |= core.FlagTruncated
 	}
-	if (m.Kind == core.MsgAppResp || m.Kind == core.MsgVoteResp) && !r.mutated(mutAckBeforeSync) {
+	if r.waitsForSync(m.Kind) {
 		r.rd.AfterSync = append(r.rd.AfterSync, m)
 		return
 	}
 	r.rd.Messages = append(r.rd.Messages, m)
+}
+
+// waitsForSync reports whether a message of kind vouches for durable state,
+// an append's acknowledgement or a granted vote, and so leaves only after
+// the write (D5b).
+func (r *Raft) waitsForSync(kind core.MessageKind) bool {
+	return (kind == core.MsgAppResp || kind == core.MsgVoteResp) && !r.mutated(mutAckBeforeSync)
 }
 
 // noteAppended records what an appended entry changes at append time: a
@@ -633,35 +675,48 @@ func (r *Raft) noteAppended(e *core.Entry) {
 				r.voteWindow = c.ElectionTimeoutMin
 			}
 		}
+	default:
+		// Every other kind acts at commit, if at all: applyCommitEffects.
 	}
 }
 
+// confChanged follows a change of the latest configuration: the admission
+// set is republished, a leader tracks exactly the new members, and a
+// follower or learner takes the role the new configuration gives it.
 func (r *Raft) confChanged() {
 	r.rd.Membership = r.admitted()
-	if r.role == core.RoleLeader {
-		conf := r.conf()
-		for _, m := range conf.Members {
-			if r.prs[m.ID] == nil {
-				pr := &progress{next: r.log.lastIndex() + 1}
-				pr.lastHeard = r.now
-				r.prs[m.ID] = pr
-			}
-		}
-		for id := range r.prs {
-			if _, ok := conf.Member(id); !ok {
-				delete(r.prs, id)
-			}
-		}
-		// A configuration change restarts every read round (R2-15).
-		for _, rd := range r.rounds {
-			rd.conf = 0
-		}
-	} else if r.role == core.RoleLearner || r.role == core.RoleFollower {
+	switch r.role {
+	case core.RoleLeader:
+		r.trackMembers()
+	case core.RoleLearner, core.RoleFollower:
 		if r.isVoter(r.id) {
 			r.role = core.RoleFollower
 		} else {
 			r.role = core.RoleLearner
 		}
+	default:
+		// A candidate keeps its role: its campaign ends by itself, and it
+		// takes its role from the configuration when it does.
+	}
+}
+
+// trackMembers gives every new member a progress, drops the progress of
+// every removed one, and restarts every read round (R2-15).
+func (r *Raft) trackMembers() {
+	conf := r.conf()
+	for _, m := range conf.Members {
+		if r.prs[m.ID] == nil {
+			r.prs[m.ID] = &progress{next: r.log.lastIndex() + 1, lastHeard: r.now}
+		}
+	}
+	for id := range r.prs {
+		if _, ok := conf.Member(id); !ok {
+			delete(r.prs, id)
+		}
+	}
+	// A configuration change restarts every read round (R2-15).
+	for _, rd := range r.rounds {
+		rd.conf = 0
 	}
 }
 
@@ -687,6 +742,8 @@ func (r *Raft) truncateFrom(i uint64) {
 	}
 }
 
+// appendEntries appends es to the log and to the Ready's write, noting what
+// each changes at append time.
 func (r *Raft) appendEntries(es []core.Entry) {
 	for i := range es {
 		r.log.ents = append(r.log.ents, es[i])
@@ -697,51 +754,101 @@ func (r *Raft) appendEntries(es []core.Entry) {
 }
 
 // applyCommitEffects applies the engine's own replicated state of the
-// entries newly committed in [lo, hi].
+// entries newly committed in [lo, hi]. It stops at the first entry this
+// version cannot apply, leaving the ones after it untouched.
 func (r *Raft) applyCommitEffects(lo, hi uint64) {
 	for i := max(lo, r.log.snapIndex+1); i <= hi && i <= r.log.lastIndex(); i++ {
-		e := r.log.at(i)
-		switch e.Kind {
-		case core.EntryTimingContract, core.EntryClusterVersion, core.EntryNoSpaceRaise, core.EntryNoSpaceClear:
-		default:
-			continue
-		}
-		a, err := wire.ParseAdmin(e.Data)
-		if err != nil {
-			continue
-		}
-		switch e.Kind {
-		case core.EntryTimingContract:
-			if a.Pre.Generation == r.timing.Generation {
-				c := a.Contract
-				c.Generation = r.timing.Generation + 1
-				r.timing = c
-				r.contracts[c.Generation] = c
-				if c.ElectionTimeoutMin > r.voteWindow {
-					r.voteWindow = c.ElectionTimeoutMin
-				}
-			}
-		case core.EntryClusterVersion:
-			if a.ClusterVersion > ProtocolMax {
-				// Unknown means stop (D18, review M3).
-				r.rd.Unsupported = UnsupportedEntry{Index: i, Kind: e.Kind}
-				return
-			}
-			if a.Pre.Generation == r.clusterGen && a.ClusterVersion > r.clusterVer {
-				r.clusterVer, r.clusterGen = a.ClusterVersion, r.clusterGen+1
-			}
-		case core.EntryNoSpaceRaise:
-			if r.noSpace == 0 {
-				r.noSpace = core.AlarmID(i)
-			}
-		case core.EntryNoSpaceClear:
-			if a.Pre.Alarm == r.noSpace {
-				r.noSpace = 0
-			}
+		if r.applyCommitEffect(i, r.log.at(i)) {
+			return
 		}
 	}
 }
 
+// applyCommitEffect applies the committed entry e at index i to the
+// engine's own replicated state. An engine entry whose payload does not
+// parse changes nothing, whatever its kind. It reports whether the walk
+// must stop because the entry is one this version cannot apply.
+func (r *Raft) applyCommitEffect(i uint64, e *core.Entry) bool {
+	if !actsAtCommit(e.Kind) {
+		return false
+	}
+	admin, err := wire.ParseAdmin(e.Data)
+	if err != nil {
+		return false
+	}
+	return r.applyAdmin(i, e.Kind, &admin)
+}
+
+// actsAtCommit reports whether an entry of kind changes the engine's own
+// replicated state when it commits.
+func actsAtCommit(kind core.EntryKind) bool {
+	switch kind {
+	case core.EntryTimingContract, core.EntryClusterVersion, core.EntryNoSpaceRaise, core.EntryNoSpaceClear:
+		return true
+	default:
+		// Commands, no-ops, memberships and transfers carry no state of
+		// the engine's own at commit.
+		return false
+	}
+}
+
+// applyAdmin applies the committed engine entry at index i, of kind, whose
+// payload is admin, and reports whether it is one this version cannot
+// apply, which stops the walk over the committed entries.
+func (r *Raft) applyAdmin(i uint64, kind core.EntryKind, admin *wire.Admin) bool {
+	switch kind {
+	case core.EntryTimingContract:
+		r.commitTimingContract(admin)
+	case core.EntryClusterVersion:
+		return r.commitClusterVersion(i, admin)
+	case core.EntryNoSpaceRaise:
+		if r.noSpace == 0 {
+			r.noSpace = core.AlarmID(i)
+		}
+	case core.EntryNoSpaceClear:
+		if admin.Pre.Alarm == r.noSpace {
+			r.noSpace = 0
+		}
+	default:
+		// actsAtCommit admits no other kind.
+	}
+	return false
+}
+
+// commitTimingContract makes a committed contract the current one when it
+// was proposed against the current generation, and widens the vote-refusal
+// window to it.
+func (r *Raft) commitTimingContract(admin *wire.Admin) {
+	if admin.Pre.Generation != r.timing.Generation {
+		return
+	}
+	c := admin.Contract
+	c.Generation = r.timing.Generation + 1
+	r.timing = c
+	r.contracts[c.Generation] = c
+	if c.ElectionTimeoutMin > r.voteWindow {
+		r.voteWindow = c.ElectionTimeoutMin
+	}
+}
+
+// commitClusterVersion raises the cluster version a committed entry at
+// index i proposed against the current generation, never lowering it. A
+// version above ProtocolMax is not applied: it is named in the Ready for the
+// driver to stop the node, and true stops the walk there.
+func (r *Raft) commitClusterVersion(i uint64, admin *wire.Admin) bool {
+	if admin.ClusterVersion > ProtocolMax {
+		// Unknown means stop (D18, review M3).
+		r.rd.Unsupported = UnsupportedEntry{Index: i, Kind: core.EntryClusterVersion}
+		return true
+	}
+	if admin.Pre.Generation == r.clusterGen && admin.ClusterVersion > r.clusterVer {
+		r.clusterVer, r.clusterGen = admin.ClusterVersion, r.clusterGen+1
+	}
+	return false
+}
+
+// commitTo advances the commit to i, never back, applying the engine's own
+// effects of the entries it covers and republishing the admission set.
 func (r *Raft) commitTo(i uint64) {
 	if i > r.log.committed {
 		old := r.log.committed
