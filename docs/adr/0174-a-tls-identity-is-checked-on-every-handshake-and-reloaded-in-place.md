@@ -1,7 +1,8 @@
 # ADR 0174 — a TLS identity is checked on every handshake and reloaded in place, and a connection is admitted before its handshake
 
-- **Status**: Proposed. Reserved by ADR 0152 (D2, D4, R7-00d, R7-26) for its two declared siblings outside the consensus domain. Short on purpose: the reasons are ADR 0152's and are cited, not repeated
+- **Status**: Accepted on 2026-10-13 by the owner, with ADR 0152, which required it accepted first (R3-17). Reserved by ADR 0152 (D2, D4, R7-00d, R7-26) for its two declared siblings outside the consensus domain. Short on purpose: the reasons are ADR 0152's and are cited, not repeated. Both siblings are implemented: `net/tlsid`'s identity and `net/server`'s `Admission`, which the consensus transport uses
 - **Date**: 2026-10-13
+- **Accepted**: 2026-10-13
 - **Deciders**: SDK maintainers
 - **Depends on**: [ADR 0029](0029-sdk-net-domain.md) (`net/server`, stream groups), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (siblings)
 - **Related**: [ADR 0152](0152-a-write-is-committed-when-a-majority-holds-it-on-disk.md) (the first consumer of both siblings)
@@ -55,10 +56,10 @@ have not completed their handshake, keyed on the IPv4 address or the IPv6
 
 ## Consequences
 
-- ADR 0152's transport admits with `net/server`'s `Admission`. The
-  identity sibling is not written yet: the transport carries its own
-  `VerifyConnection`, SPKI pin and PEM reload until `net/tlsid` exists,
-  then moves onto it without a change of its published surface.
+- ADR 0152's transport admits with `net/server`'s `Admission` and
+  authenticates through `net/tlsid`'s identity: its own check, the
+  canonical URI SAN and the member's pinned SPKI, runs after the
+  identity's chain verification, on every handshake.
 - `design/net.yaml` gains the admission's declarations.
 
 ## Alternatives considered
