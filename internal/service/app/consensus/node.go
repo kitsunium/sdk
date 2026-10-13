@@ -180,7 +180,9 @@ func newRaft(cfg Config) (*Node, error) {
 	case cfg.ID != 0 && st.ID != cfg.ID:
 		return nil, origin(coreconsensus.DataDirMismatch, errs.String("why", "node id"))
 	}
-	if t, ok := cfg.Transport.(interface{ Cluster() coreconsensus.ClusterID }); ok && t.Cluster() != cfg.Cluster {
+	if t, ok := cfg.Transport.(interface {
+		Cluster() coreconsensus.ClusterID
+	}); ok && t.Cluster() != cfg.Cluster {
 		// The transport took its cluster from its certificate's SAN (R3-24).
 		return nil, misconfigured("Cluster", "differs from the certificate's URI SAN")
 	}

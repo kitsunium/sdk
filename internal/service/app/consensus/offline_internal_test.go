@@ -1,0 +1,164 @@
+package consensus
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"testing"
+	"time"
+
+	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+)
+
+// threeOnDisk founds three nodes on data directories, writes n keys, and
+// stops them all.
+func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{5}}
+	var nodes []*diskNode
+	var members []coreconsensus.Member
+	for i := 0; i < 3; i++ {
+		dn := &diskNode{dir: t.TempDir()}
+		dn.dd = openDir(t, dn.dir, 16<<10)
+		slot := fmt.Sprintf("r%d", i)
+		id, inc, err := Init(dn.dd, c.cid, slot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dn.id = id
+		nodes = append(nodes, dn)
+		members = append(members, coreconsensus.Member{ID: id, Incarnation: inc, Slot: slot, SPKI: MemorySPKI(id), Voter: true})
+	}
+	for _, dn := range nodes {
+		dn.sm = newKV()
+		if err := Bootstrap(context.Background(), diskConfig(c, dn), members); err != nil {
+			t.Fatal(err)
+		}
+		_ = dn.dd.Close()
+		dn.open(t, c)
+	}
+	var l *diskNode
+	deadline := time.Now().Add(5 * time.Second)
+	for l == nil && time.Now().Before(deadline) {
+		for _, dn := range nodes {
+			if dn.node.Status().Role == coreconsensus.RoleLeader {
+				l = dn
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if l == nil {
+		t.Fatal("no leader")
+	}
+	for i := 0; i < n; i++ {
+		propose(t, l.node, fmt.Sprintf("k%d=v%d", i, i))
+	}
+	c.waitAppliedDisk(nodes)
+	return c, nodes
+}
+
+func (c *cluster) waitAppliedDisk(nodes []*diskNode) {
+	var want uint64
+	for _, dn := range nodes {
+		want = max(want, dn.node.Status().Commit)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for _, dn := range nodes {
+		for dn.node.Status().Applied < want && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
+func TestRecoverStartsANewHistoryFromOneNode(t *testing.T) {
+	c, nodes := threeOnDisk(t, 30)
+	for _, dn := range nodes {
+		dn.crash(c)
+	}
+	keep := nodes[0]
+	keep.dd = openDir(t, keep.dir, 16<<10)
+	st, _ := keep.dd.Log().Stamp()
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	next := coreconsensus.ClusterID{6}
+	self := coreconsensus.Member{ID: keep.id, Incarnation: st.Incarnation, Slot: st.Slot, SPKI: MemorySPKI(keep.id), Voter: true}
+	opt := RecoverOptions{Confirm: next.String(), Operator: "op:recover", WitnessKeys: []ed25519.PublicKey{pub}}
+	// Without a fence attestation for the two old voters, it fails closed.
+	if err := Recover(keep.dd, next, []coreconsensus.Member{self}, opt); !errors.Is(err, coreconsensus.RecoverRefused) {
+		t.Fatalf("unattested recover: %v", err)
+	}
+	for _, dn := range nodes[1:] {
+		opt.Fenced = append(opt.Fenced, coreconsensus.FencedAttestation{Voter: dn.id, Method: "powered-off",
+			Receipts: [][]byte{ed25519.Sign(priv, ReceiptMessage(c.cid, next, dn.id))}})
+	}
+	if err := Recover(keep.dd, next, []coreconsensus.Member{self}, opt); err != nil {
+		t.Fatal(err)
+	}
+	c.cid = next
+	keep.sm = newKV()
+	cfg := diskConfig(c, keep)
+	cfg.MinVoters = 1
+	n, err := NewRaft(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep.node = n
+	defer keep.crash(c)
+	tok := propose(t, n, "after=recover")
+	if tok.Cluster != next {
+		t.Fatalf("new history token %v", tok)
+	}
+	if v, _ := keep.sm.get("k29"); v != "v29" {
+		t.Fatalf("recovered state lost k29: %q", v)
+	}
+	// The old cluster's directory is refused under the new one.
+	old := nodes[1]
+	old.dd = openDir(t, old.dir, 16<<10)
+	defer old.dd.Close()
+	old.sm = newKV()
+	if _, err := NewRaft(diskConfig(c, old)); !errors.Is(err, coreconsensus.DataDirMismatch) {
+		t.Fatalf("old pair restarted under the new cluster: %v", err)
+	}
+}
+
+func TestRestoreSnapshotIntoAnEmptyDirectory(t *testing.T) {
+	c, nodes := threeOnDisk(t, 20)
+	var buf bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	meta, err := nodes[0].node.SaveSnapshot(ctx, "op:save", &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dn := range nodes {
+		dn.crash(c)
+	}
+	fresh := &diskNode{dir: t.TempDir()}
+	fresh.dd = openDir(t, fresh.dir, 16<<10)
+	next := coreconsensus.ClusterID{8}
+	id, inc, err := Init(fresh.dd, next, "fresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh.id = id
+	self := coreconsensus.Member{ID: id, Incarnation: inc, Slot: "fresh", SPKI: MemorySPKI(id), Voter: true}
+	if _, err := RestoreSnapshot(fresh.dd, bytes.NewReader(buf.Bytes()), next, []coreconsensus.Member{self},
+		RestoreOptions{Expected: meta, Confirm: next.String(), Operator: "op:restore", MaxEncoded: 1 << 30, MaxDecoded: 1 << 30}); err != nil {
+		t.Fatal(err)
+	}
+	c.cid = next
+	fresh.sm = newKV()
+	cfg := diskConfig(c, fresh)
+	cfg.MinVoters = 1
+	n, err := NewRaft(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh.node = n
+	defer fresh.crash(c)
+	if v, _ := fresh.sm.get("k19"); v != "v19" {
+		t.Fatalf("restored state: k19=%q", v)
+	}
+	propose(t, n, "after=restore")
+}

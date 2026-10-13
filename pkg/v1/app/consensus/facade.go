@@ -2,6 +2,9 @@ package consensus
 
 import (
 	"context"
+	"crypto/x509"
+	"io"
+	"net/url"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	svcconsensus "github.com/kitsunium/sdk/internal/service/app/consensus"
@@ -69,7 +72,86 @@ type (
 	MemorySnapshots = svcconsensus.MemorySnapshots
 	MemoryNetwork   = svcconsensus.MemoryNetwork
 	MemoryTransport = svcconsensus.MemoryTransport
+
+	DataDir         = svcconsensus.DataDir
+	DataDirOptions  = svcconsensus.DataDirOptions
+	Report          = svcconsensus.Report
+	QuarantineExit  = svcconsensus.QuarantineExit
+	RecoverOptions  = svcconsensus.RecoverOptions
+	RestoreOptions  = svcconsensus.RestoreOptions
+	TransportConfig = svcconsensus.TransportConfig
+	TCPTransport    = svcconsensus.TCPTransport
+	PEMIdentity     = svcconsensus.PEMIdentity
 )
+
+// The two exits of ClearQuarantine.
+const (
+	WipeAndRejoin         = svcconsensus.WipeAndRejoin
+	TruncateAndStaySilent = svcconsensus.TruncateAndStaySilent
+)
+
+// OpenDataDir takes the directory lock first, then recovers the log.
+func OpenDataDir(dir string) (DataDir, error) { return svcconsensus.OpenDataDir(dir) }
+
+// OpenDataDirWith is OpenDataDir with options.
+func OpenDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
+	return svcconsensus.OpenDataDirWith(dir, opts)
+}
+
+// Init prepares a joining node offline: a random NodeID and a joining stamp.
+func Init(d DataDir, cluster ClusterID, slot string) (NodeID, Incarnation, error) {
+	return svcconsensus.Init(d, cluster, slot)
+}
+
+// Redraw draws a new id on an empty joining directory.
+func Redraw(d DataDir) (NodeID, error) { return svcconsensus.Redraw(d) }
+
+// Inspect reads a stopped node's directory without changing it.
+func Inspect(d DataDir) (Report, error) { return svcconsensus.Inspect(d) }
+
+// ClearQuarantine clears a quarantined or stopped directory by one of its
+// two exits.
+func ClearQuarantine(d DataDir, exit QuarantineExit, op Operator) error {
+	return svcconsensus.ClearQuarantine(d, exit, op)
+}
+
+// Recover starts a new history from this node's committed log, every old
+// voter left out attested fenced by every witness.
+func Recover(d DataDir, newCluster ClusterID, members []Member, opt RecoverOptions) error {
+	return svcconsensus.Recover(d, newCluster, members, opt)
+}
+
+// ReceiptMessage returns the bytes a witness signs to attest a fenced voter.
+func ReceiptMessage(old, next ClusterID, voter NodeID) []byte {
+	return svcconsensus.ReceiptMessage(old, next, voter)
+}
+
+// RestoreSnapshot starts a new history from a saved snapshot, offline.
+func RestoreSnapshot(d DataDir, r io.Reader, newCluster ClusterID, members []Member, opt RestoreOptions) (SnapshotMeta, error) {
+	return svcconsensus.RestoreSnapshot(d, r, newCluster, members, opt)
+}
+
+// NewTCPTransport builds the shipped mTLS transport; it is also a Joiner.
+func NewTCPTransport(cfg TransportConfig) (*TCPTransport, error) {
+	return svcconsensus.NewTCPTransport(cfg)
+}
+
+// NewTCPTransportFromPEM builds it from a certificate, a key and the
+// consensus CA, as PEM files reloaded in place on renewal.
+func NewTCPTransportFromPEM(certFile, keyFile, caFile string, cfg TransportConfig) (*TCPTransport, error) {
+	return svcconsensus.NewTCPTransportFromPEM(certFile, keyFile, caFile, cfg)
+}
+
+// LoadPEMIdentity reads a node identity and the CA pool from PEM files.
+func LoadPEMIdentity(certFile, keyFile, caFile string) (*PEMIdentity, *x509.CertPool, error) {
+	return svcconsensus.LoadPEMIdentity(certFile, keyFile, caFile)
+}
+
+// SAN returns the canonical URI SAN a node certificate must carry.
+func SAN(cluster ClusterID, slot string) *url.URL { return svcconsensus.SAN(cluster, slot) }
+
+// SPKIOf returns a certificate's pin: the SHA-256 of its public key info.
+func SPKIOf(c *x509.Certificate) [32]byte { return svcconsensus.SPKIOf(c) }
 
 // The roles a Status reports.
 const (
@@ -229,10 +311,13 @@ var (
 
 // Compile-time proof that the engine implements the published ports.
 var (
-	_ Replicated        = (*Node)(nil)
-	_ LeadershipWatcher = (*Node)(nil)
-	_ LogStore          = (*MemoryLog)(nil)
-	_ SnapshotStore     = (*MemorySnapshots)(nil)
-	_ Transport         = (*MemoryTransport)(nil)
-	_ Joiner            = (*MemoryTransport)(nil)
+	_ Replicated          = (*Node)(nil)
+	_ LeadershipWatcher   = (*Node)(nil)
+	_ LogStore            = (*MemoryLog)(nil)
+	_ SnapshotStore       = (*MemorySnapshots)(nil)
+	_ Transport           = (*MemoryTransport)(nil)
+	_ Joiner              = (*MemoryTransport)(nil)
+	_ Transport           = (*TCPTransport)(nil)
+	_ Joiner              = (*TCPTransport)(nil)
+	_ UnreachableReporter = (*TCPTransport)(nil)
 )
