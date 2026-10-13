@@ -1,0 +1,57 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "raft",
+    srcs = [
+        "debug.go",
+        "doc.go",
+        "leader.go",
+        "log.go",
+        "mutation.go",
+        "progress.go",
+        "raft.go",
+        "step.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/app/consensus",
+        "//internal/kernel/errs",
+        "//internal/service/app/consensus/wire",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":raft",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "raft_test",
+    srcs = [
+        "api_gen_test.go",
+        "checks_internal_test.go",
+        "lincheck_internal_test.go",
+        "sim_internal_test.go",
+        "sim_scenarios_internal_test.go",
+        "soak_internal_test.go",
+    ],
+    embed = [":raft"],
+    # The deterministic simulations take ~90 s under race and coverage
+    # as one target, and .bazelrc caps every target at 60 s (#126).
+    shard_count = 4,
+    deps = [
+        "//internal/core/app/consensus",
+        "//internal/kernel/errs",
+        "//internal/service/app/consensus/wire",
+    ],
+)

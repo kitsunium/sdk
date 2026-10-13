@@ -1,0 +1,38 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "consensus",
+    srcs = [
+        "doc.go",
+        "facade_gen.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/app/consensus",
+        "//internal/service/app/consensus",
+        "//internal/service/app/consensus/wire",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":consensus",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "consensus_test",
+    srcs = [
+        "api_gen_test.go",
+        "consensus_external_test.go",
+        "tcp_external_test.go",
+    ],
+    deps = [
+        ":consensus",
+        "//internal/core/app/consensus",
+        "//internal/service/app/consensus",
+    ],
+)

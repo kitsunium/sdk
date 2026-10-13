@@ -1161,6 +1161,86 @@ codes:
     const: CodeTriggerUnknown
     hex: "0x00_02_38_01"
     package: internal/core/app/statemachine
+  - code: "0.2.57.1"
+    const: CodeConsensusMisconfigured
+    hex: "0x00_02_39_01"
+    package: internal/core/app/consensus
+  - code: "0.2.57.2"
+    const: CodeNotLeader
+    hex: "0x00_02_39_02"
+    package: internal/core/app/consensus
+  - code: "0.2.57.3"
+    const: CodeOutcomeUnknown
+    hex: "0x00_02_39_03"
+    package: internal/core/app/consensus
+  - code: "0.2.57.4"
+    const: CodeLeadershipUnconfirmed
+    hex: "0x00_02_39_04"
+    package: internal/core/app/consensus
+  - code: "0.2.57.5"
+    const: CodeMembershipChangePending
+    hex: "0x00_02_39_05"
+    package: internal/core/app/consensus
+  - code: "0.2.57.6"
+    const: CodeMembershipInvalid
+    hex: "0x00_02_39_06"
+    package: internal/core/app/consensus
+  - code: "0.2.57.7"
+    const: CodeTransferFailed
+    hex: "0x00_02_39_07"
+    package: internal/core/app/consensus
+  - code: "0.2.57.8"
+    const: CodeEntryTooLarge
+    hex: "0x00_02_39_08"
+    package: internal/core/app/consensus
+  - code: "0.2.57.9"
+    const: CodeCompacted
+    hex: "0x00_02_39_09"
+    package: internal/core/app/consensus
+  - code: "0.2.57.10"
+    const: CodeStateMachineFailed
+    hex: "0x00_02_39_0A"
+    package: internal/core/app/consensus
+  - code: "0.2.57.11"
+    const: CodeNodeStopped
+    hex: "0x00_02_39_0B"
+    package: internal/core/app/consensus
+  - code: "0.2.57.12"
+    const: CodeEntrySuperseded
+    hex: "0x00_02_39_0C"
+    package: internal/core/app/consensus
+  - code: "0.2.57.13"
+    const: CodeOverloaded
+    hex: "0x00_02_39_0D"
+    package: internal/core/app/consensus
+  - code: "0.2.57.15"
+    const: CodeVersionUnsupported
+    hex: "0x00_02_39_0F"
+    package: internal/core/app/consensus
+  - code: "0.2.57.16"
+    const: CodeNodeIDRetired
+    hex: "0x00_02_39_10"
+    package: internal/core/app/consensus
+  - code: "0.2.57.17"
+    const: CodeNoSpace
+    hex: "0x00_02_39_11"
+    package: internal/core/app/consensus
+  - code: "0.2.57.18"
+    const: CodeResultTypeMismatch
+    hex: "0x00_02_39_12"
+    package: internal/core/app/consensus
+  - code: "0.2.57.19"
+    const: CodePayloadVersionRefused
+    hex: "0x00_02_39_13"
+    package: internal/core/app/consensus
+  - code: "0.2.57.20"
+    const: CodeLineageMismatch
+    hex: "0x00_02_39_14"
+    package: internal/core/app/consensus
+  - code: "0.2.57.25"
+    const: CodeAdminPreconditionFailed
+    hex: "0x00_02_39_19"
+    package: internal/core/app/consensus
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"
@@ -2601,6 +2681,78 @@ codes:
     const: CodePathUnsafe
     hex: "0x00_03_5B_09"
     package: internal/core/proc/ipc
+  - code: "0.3.92.1"
+    const: CodeLogCorrupt
+    hex: "0x00_03_5C_01"
+    package: internal/core/app/consensus
+  - code: "0.3.92.2"
+    const: CodeHardStateCorrupt
+    hex: "0x00_03_5C_02"
+    package: internal/core/app/consensus
+  - code: "0.3.92.3"
+    const: CodeSnapshotCorrupt
+    hex: "0x00_03_5C_03"
+    package: internal/core/app/consensus
+  - code: "0.3.92.4"
+    const: CodeStorageFailed
+    hex: "0x00_03_5C_04"
+    package: internal/core/app/consensus
+  - code: "0.3.92.5"
+    const: CodeDataDirLocked
+    hex: "0x00_03_5C_05"
+    package: internal/core/app/consensus
+  - code: "0.3.92.6"
+    const: CodeDataDirMismatch
+    hex: "0x00_03_5C_06"
+    package: internal/core/app/consensus
+  - code: "0.3.92.7"
+    const: CodePeerRejected
+    hex: "0x00_03_5C_07"
+    package: internal/core/app/consensus
+  - code: "0.3.92.8"
+    const: CodeClusterMismatch
+    hex: "0x00_03_5C_08"
+    package: internal/core/app/consensus
+  - code: "0.3.92.9"
+    const: CodeFrameInvalid
+    hex: "0x00_03_5C_09"
+    package: internal/core/app/consensus
+  - code: "0.3.92.10"
+    const: CodeSnapshotTooLarge
+    hex: "0x00_03_5C_0A"
+    package: internal/core/app/consensus
+  - code: "0.3.92.11"
+    const: CodeBootstrapRefused
+    hex: "0x00_03_5C_0B"
+    package: internal/core/app/consensus
+  - code: "0.3.92.12"
+    const: CodeTransportMisconfigured
+    hex: "0x00_03_5C_0C"
+    package: internal/core/app/consensus
+  - code: "0.3.92.13"
+    const: CodeRecoverRefused
+    hex: "0x00_03_5C_0D"
+    package: internal/core/app/consensus
+  - code: "0.3.92.14"
+    const: CodeLogQuarantined
+    hex: "0x00_03_5C_0E"
+    package: internal/core/app/consensus
+  - code: "0.3.92.15"
+    const: CodeRestoreRefused
+    hex: "0x00_03_5C_0F"
+    package: internal/core/app/consensus
+  - code: "0.3.92.16"
+    const: CodeDataDirInUse
+    hex: "0x00_03_5C_10"
+    package: internal/core/app/consensus
+  - code: "0.3.92.17"
+    const: CodeJoinRefused
+    hex: "0x00_03_5C_11"
+    package: internal/core/app/consensus
+  - code: "0.3.92.18"
+    const: CodeStopMarkerPresent
+    hex: "0x00_03_5C_12"
+    package: internal/core/app/consensus
   - code: "0.4.1.1"
     const: CodeInvalidID
     hex: "0x00_04_01_01"

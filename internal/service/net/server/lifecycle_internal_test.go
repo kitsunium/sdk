@@ -858,7 +858,7 @@ func Test_Server_serve(t *testing.T) {
 		srv.active.Add(1)
 		srv.inFlight.Add(1)
 
-		srv.serve(socket, group, group.resolved())
+		srv.serve(socket, group, group.resolved(), nil)
 
 		//: the socket is closed whatever the handler did.
 		if socket.closes == 0 {

@@ -241,6 +241,9 @@ codes:
       owner: internal/core/security/secret
     - range: 0.2.56
       owner: internal/core/app/statemachine
+    - range: 0.2.57
+      owner: internal/core/app/consensus
+      note: ADR 0152
     - range: 0.3.1
       owner: internal/core/observe/logger
     - range: 0.3.2
@@ -391,6 +394,9 @@ codes:
     - range: 0.3.91
       owner: internal/core/proc/ipc
       note: ADR 0148
+    - range: 0.3.92
+      owner: internal/core/app/consensus
+      note: ADR 0152, declared in the core since ADR 0160
     - range: 0.4.1
       owner: framework/model/internal/core
       note: "ADR 0147: layer 4 is the framework's"

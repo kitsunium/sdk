@@ -46,6 +46,7 @@ filegroup(
         "//framework/telemetry:audit_srcs",
         "//internal/core/app/cli:audit_srcs",
         "//internal/core/app/config:audit_srcs",
+        "//internal/core/app/consensus:audit_srcs",
         "//internal/core/app/events:audit_srcs",
         "//internal/core/app/health:audit_srcs",
         "//internal/core/app/i18n:audit_srcs",

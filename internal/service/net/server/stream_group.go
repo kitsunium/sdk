@@ -37,6 +37,9 @@ type StreamGroup struct {
 	limiter *connLimiter
 	// adopt names inherited sockets to take over instead of binding.
 	adopt []string
+	// admission counts connections against their address before their
+	// handshake; nil when the group has none (ADR 0174).
+	admission *Admission
 }
 
 // Name returns the group's name.
