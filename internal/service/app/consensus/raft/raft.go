@@ -43,6 +43,12 @@ type Config struct {
 	// NoTable is set while the node holds no usable snapshot: it votes and
 	// stores the log but never campaigns, and asks for a snapshot (R7-18).
 	NoTable bool
+	// SilentTerm and SilentIndex are the silence condition
+	// TruncateAndStaySilent persisted (R3-09, R4-03): while SilentIndex is
+	// not 0 the node grants no vote and acknowledges no append, until a
+	// leader of a term at least SilentTerm has rewritten its log past
+	// SilentIndex and committed an entry of its own term.
+	SilentTerm, SilentIndex uint64
 	// RecentEntriesBytes bounds the payloads held in memory; 0 holds them
 	// all. Older ones are fetched from the store when a peer needs them.
 	RecentEntriesBytes int64
@@ -108,6 +114,9 @@ type Ready struct {
 	// Compact drops the log's prefix through that index, which a durable
 	// snapshot covers.
 	Compact uint64
+	// SilenceEnded is set once the silence condition held: the driver
+	// removes it durably.
+	SilenceEnded bool
 	// Fetch asks the driver to read entries the step function no longer
 	// holds, off the event loop, and hand them back with Fetched.
 	Fetch []FetchRequest
@@ -448,7 +457,7 @@ func (r *Raft) HasReady() bool {
 	}
 	return rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.Messages) != 0 || len(rd.AfterSync) != 0 ||
 		len(rd.SendSnapshot) != 0 || len(rd.ReadStates) != 0 || len(rd.Forwarded) != 0 ||
-		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0
+		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.SilenceEnded
 }
 
 // Ready returns the work of the turns since the last call and resets it.
@@ -547,6 +556,12 @@ func (r *Raft) send(m core.Message) {
 	m.From = r.id
 	if m.Term == 0 && m.Kind != core.MsgPreVote && m.Kind != core.MsgPreVoteResp {
 		m.Term = r.term
+	}
+	if m.Kind == core.MsgAppResp && r.cfg.SilentIndex != 0 {
+		if !m.Reject {
+			return // a silent node acknowledges nothing
+		}
+		m.Flags |= core.FlagTruncated
 	}
 	if (m.Kind == core.MsgAppResp || m.Kind == core.MsgVoteResp) && !r.mutated(mutAckBeforeSync) {
 		r.rd.AfterSync = append(r.rd.AfterSync, m)

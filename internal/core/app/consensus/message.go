@@ -65,6 +65,10 @@ const (
 	// FlagNoLease marks a read the follower wants confirmed by a round, never
 	// by a lease.
 	FlagNoLease MessageFlags = 1 << 2
+	// FlagTruncated marks an append rejection from a node that truncated
+	// acknowledged entries through TruncateAndStaySilent: the leader lowers
+	// its match to the node's log, the one exception to "match only grows".
+	FlagTruncated MessageFlags = 1 << 3
 )
 
 // Message is one protocol message: a plain value, encoded by the service's

@@ -218,6 +218,10 @@ func newRaft(cfg Config) (*Node, error) {
 		return nil, err
 	}
 	n.canVote = st.State == coreconsensus.StampMember
+	var silentTerm, silentIndex uint64
+	if s, ok := cfg.Log.(interface{ silence() (uint64, uint64) }); ok {
+		silentTerm, silentIndex = s.silence()
+	}
 	seed := cfg.Seed
 	if seed == 0 {
 		seed = newSubEpoch() | uint64(st.ID)
@@ -227,6 +231,7 @@ func newRaft(cfg Config) (*Node, error) {
 		MaxInflight: cfg.MaxInflight, MaxInflightBytes: cfg.MaxInflightBytes, MaxBatchBytes: cfg.MaxBatchBytes,
 		MinVoters: cfg.MinVoters, PromoteLag: cfg.PromoteLag, Lease: cfg.Reads == ReadLease,
 		CanVote: n.canVote, MaxChainRefusals: 3, NoTable: n.noTable, RecentEntriesBytes: cfg.RecentEntriesBytes,
+		SilentTerm: silentTerm, SilentIndex: silentIndex,
 	}, start)
 	n.publish()
 	if ur, ok := cfg.Transport.(coreconsensus.UnreachableReporter); ok {
@@ -515,6 +520,14 @@ func (n *Node) handleReady() {
 		if len(rd.Membership) > 0 {
 			n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
 			n.obs.info("consensus: admitted members changed", lattr("members", uint64(len(rd.Membership))))
+		}
+		if rd.SilenceEnded {
+			if s, ok := n.cfg.Log.(interface{ endSilence() error }); ok {
+				if err := s.endSilence(); err != nil {
+					n.stop(storageFailed("end silence", err), true)
+				}
+			}
+			n.obs.info("consensus: silence condition met, the node votes and acknowledges again")
 		}
 		if rd.TruncateFrom != 0 {
 			n.obs.info("consensus: log truncated", lattr("from", rd.TruncateFrom))

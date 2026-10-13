@@ -453,3 +453,38 @@ func TestSimulatorCatchesAckBeforeSync(t *testing.T) {
 		t.Fatal("the simulator's oracles found nothing with acks before sync and Figure 8")
 	}
 }
+
+// R3-09: a silent node grants no vote and acknowledges no append until a
+// leader of a term at least its own rewrote its log past the truncation
+// point and committed an entry of its term.
+func TestSilentNodeStaysSilentUntilTheConditionHolds(t *testing.T) {
+	cfg := Config{ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
+		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, SilentTerm: 3, SilentIndex: 2}
+	f := New(cfg, Start{HardState: core.HardState{Term: 3}, Snapshot: core.SnapshotMeta{Membership: testConf(1, 2, 3)},
+		Entries: chainEntries(0, 1, 1), Now: t0})
+	f.Step(t0.Add(5*time.Second), voteFrom(core.MsgVote, 3, 4, 9, 9))
+	if granted(f.Ready(), core.MsgVoteResp) {
+		t.Fatal("a silent node voted")
+	}
+	ents := chainEntries(0, 1, 1, 4, 4)
+	m := msg(core.MsgApp, 1, 2, 4)
+	m.Entries, m.Commit = ents[1:2], 1
+	m.Index, m.LogTerm = 1, 1
+	f.Step(t0.Add(5*time.Second), m)
+	rd := f.Ready()
+	for _, x := range append(rd.AfterSync, rd.Messages...) {
+		if x.Kind == core.MsgAppResp && !x.Reject {
+			t.Fatal("a silent node acknowledged before the leader committed in its term")
+		}
+	}
+	m = msg(core.MsgApp, 1, 2, 4)
+	m.Index, m.LogTerm, m.Entries, m.Commit = 2, 4, ents[2:3], 3
+	f.Step(t0.Add(5*time.Second), m)
+	rd = f.Ready()
+	if !rd.SilenceEnded || f.cfg.SilentIndex != 0 {
+		t.Fatal("the silence condition held and the node stayed silent")
+	}
+	if !granted(rd, core.MsgAppResp) {
+		t.Fatal("no acknowledgement once silence ended")
+	}
+}

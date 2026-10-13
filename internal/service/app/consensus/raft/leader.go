@@ -290,6 +290,15 @@ func (r *Raft) handleAppResp(pr *progress, m core.Message) {
 			r.rd.SendSnapshot = append(r.rd.SendSnapshot, m.From)
 			return
 		}
+		if m.Flags&core.FlagTruncated != 0 && m.RejectHint < pr.match {
+			// The peer lost acknowledged entries to a truncation it reports;
+			// its log is the truth now.
+			pr.match = m.RejectHint
+			pr.becomeProbe()
+			pr.next = m.RejectHint + 1
+			r.sendAppend(m.From, true)
+			return
+		}
 		// Rejections are handled per state (R2-07): only one answering the
 		// outstanding probe, or an append still in the window, counts.
 		switch pr.state {

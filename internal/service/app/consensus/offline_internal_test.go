@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -161,4 +163,71 @@ func TestRestoreSnapshotIntoAnEmptyDirectory(t *testing.T) {
 		t.Fatalf("restored state: k19=%q", v)
 	}
 	propose(t, n, "after=restore")
+}
+
+// TruncateAndStaySilent: a node quarantined for damage to synced data
+// truncates at the damage, stays silent, and votes again only once a leader
+// rewrote its log and committed in its own term (R3-09, R4-03).
+func TestTruncateAndStaySilentRejoins(t *testing.T) {
+	c, nodes := threeOnDisk(t, 40)
+	victim := nodes[2]
+	victim.crash(c)
+	segs, _ := os.ReadDir(filepath.Join(victim.dir, "log"))
+	last := filepath.Join(victim.dir, "log", segs[len(segs)-1].Name())
+	b, err := os.ReadFile(last)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Flip a payload byte of the second record: synced data, a complete
+	// batch, valid records after it.
+	r0, _ := parseRecord(b)
+	r1, _ := parseRecord(b[r0.length:])
+	b[r0.length+recHeader+recFixed] ^= 0xff
+	_ = r1
+	if err := os.WriteFile(last, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	victim.dd = openDir(t, victim.dir, 16<<10)
+	victim.sm = newKV()
+	if _, err := NewRaft(diskConfig(c, victim)); !errors.Is(err, coreconsensus.LogQuarantined) {
+		t.Fatalf("damaged log: %v", err)
+	}
+	if err := ClearQuarantine(victim.dd, TruncateAndStaySilent, "op:silent"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(victim.dir, fileSilent)); err != nil {
+		t.Fatal("no silence condition persisted")
+	}
+	n, err := NewRaft(diskConfig(c, victim))
+	if err != nil {
+		t.Fatal(err)
+	}
+	victim.node = n
+	var l *diskNode
+	for l == nil {
+		for _, dn := range nodes[:2] {
+			if dn.node != nil && dn.node.Status().Role == coreconsensus.RoleLeader {
+				l = dn
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	tok := propose(t, l.node, "after=silence")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		_, statErr := os.Stat(filepath.Join(victim.dir, fileSilent))
+		if v, _ := victim.sm.get("after"); v == "silence" && os.IsNotExist(statErr) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the silent node never rejoined (status %+v, silent file %v)", victim.node.Status(), statErr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_ = tok
+	for _, dn := range nodes {
+		if dn.node != nil {
+			dn.crash(c)
+		}
+	}
 }

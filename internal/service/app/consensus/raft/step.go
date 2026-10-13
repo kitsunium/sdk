@@ -135,7 +135,7 @@ func (r *Raft) handleVote(now time.Time, m core.Message) {
 	case m.Flags&core.FlagTransfer != 0 && r.mutated(mutRestrictionUnderTransfer):
 		restricted = false
 	}
-	ok := canVote && r.cfg.CanVote && (!restricted || r.upToDate(m))
+	ok := canVote && r.cfg.CanVote && r.cfg.SilentIndex == 0 && (!restricted || r.upToDate(m))
 	if !ok {
 		r.send(core.Message{Kind: resp, To: m.From, Term: r.term, Reject: true})
 		return
@@ -291,6 +291,7 @@ func (r *Raft) stepFollower(now time.Time, m core.Message) {
 		r.lastLeaderContact = now
 		r.resetElection(now)
 		r.handleAppend(m)
+		r.maybeEndSilence(m)
 	case core.MsgHeartbeat:
 		r.lead = m.From
 		r.lastLeaderContact = now
@@ -401,4 +402,20 @@ func (r *Raft) chainRefused(m core.Message, at uint64) {
 		r.refusedLead = m.From
 	}
 	r.send(core.Message{Kind: core.MsgAppResp, To: m.From, Index: m.Index, Reject: true, RejectHint: m.Index})
+}
+
+// maybeEndSilence lifts the silence condition once a leader of a term at
+// least the node's own has rewritten its log past the truncation point and
+// committed an entry of its current term (R3-09).
+func (r *Raft) maybeEndSilence(m core.Message) {
+	if r.cfg.SilentIndex == 0 || m.Term < r.cfg.SilentTerm || r.log.lastIndex() < r.cfg.SilentIndex {
+		return
+	}
+	if t, ok := r.log.term(r.log.committed); !ok || t != m.Term || r.log.committed < r.cfg.SilentIndex {
+		return
+	}
+	r.cfg.SilentIndex, r.cfg.SilentTerm = 0, 0
+	r.rd.SilenceEnded = true
+	// The committed prefix is verified: acknowledging it is safe.
+	r.send(core.Message{Kind: core.MsgAppResp, To: m.From, Index: r.log.committed})
 }

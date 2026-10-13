@@ -3,6 +3,7 @@ package consensus
 import (
 	"crypto/ed25519"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -97,9 +98,10 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op coreconsensus.Operator) 
 	switch exit {
 	case WipeAndRejoin:
 	case TruncateAndStaySilent:
-		// Not shipped yet: the persisted silence condition and its gate in
-		// the step function are not written. Refused, never approximated.
-		return origin(coreconsensus.RecoverRefused, errs.String("why", "TruncateAndStaySilent is not implemented"))
+		if err := d.audit(op, "clear-quarantine truncate-and-stay-silent"); err != nil {
+			return err
+		}
+		return d.truncateAndStaySilent()
 	default:
 		return misconfigured("exit", "unknown")
 	}
@@ -385,4 +387,125 @@ func (l *FileLog) resetTo(index, term uint64) error {
 	l.first, l.prevTerm = index+1, term
 	l.compact, l.compactTerm = index, term
 	return nil
+}
+
+const fileSilent = "SILENT"
+
+// truncateAndStaySilent truncates the log at the quarantined damage and
+// PERSISTS, before it returns, the silence condition: the highest term any
+// readable record of the log names, and the truncation point (R3-09,
+// R4-03). Its cost is stated in the ADR: with one of the two other nodes
+// down, no leader can exist and the node stays silent until the third
+// returns.
+func (d DataDir) truncateAndStaySilent() error {
+	q, err := os.ReadFile(filepath.Join(d.d.dir, markerQuarantine))
+	if err != nil {
+		return origin(coreconsensus.RecoverRefused, errs.String("why", "no quarantine marker"))
+	}
+	var segN uint64
+	var off int64
+	if _, err := fmt.Sscanf(string(q), "seg-%016x %d", &segN, &off); err != nil {
+		return origin(coreconsensus.RecoverRefused, errs.String("why", "unreadable quarantine marker"))
+	}
+	logDir := filepath.Join(d.d.dir, "log")
+	ents, err := os.ReadDir(logDir)
+	if err != nil {
+		return storageFailed("readdir", err)
+	}
+	var maxTerm uint64
+	for _, e := range ents {
+		var n uint64
+		if _, err := fmt.Sscanf(e.Name(), "seg-%016x", &n); err != nil || e.Name() != segName(n) {
+			continue
+		}
+		path := filepath.Join(logDir, e.Name())
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return storageFailed("read segment", err)
+		}
+		// The highest term of every readable record, before and after the
+		// damage: a vote the truncation drops is still never repeated.
+		for o := 0; o+recHeader+recFixed <= len(b); o += 8 {
+			if r, ok := parseRecord(b[o:]); ok {
+				maxTerm = max(maxTerm, r.term)
+				if r.kind == recHardState && len(r.data) == 24 {
+					maxTerm = max(maxTerm, binary.LittleEndian.Uint64(r.data))
+				}
+				if r.kind == recCheckpt {
+					if cp, ok := decodeCheckpoint(r.data); ok {
+						maxTerm = max(maxTerm, cp.hs.Term)
+					}
+				}
+				o += r.length - 8
+			}
+		}
+		switch {
+		case n > segN || (n == segN && off == 0):
+			if err := os.Remove(path); err != nil {
+				return storageFailed("truncate", err)
+			}
+		case n == segN:
+			f, err := os.OpenFile(path, os.O_RDWR, 0)
+			if err != nil {
+				return storageFailed("truncate", err)
+			}
+			err = zeroFrom(f, off, int64(len(b)))
+			f.Close()
+			if err != nil {
+				return storageFailed("truncate", err)
+			}
+		}
+	}
+	if err := syncDir(logDir); err != nil {
+		return storageFailed("truncate", err)
+	}
+	// The condition is durable BEFORE the marker goes: a crash in between
+	// leaves a silent node, never a voting one. Its index is filled in
+	// once the truncated log is read (0 means "the end of the log").
+	if err := writeFileSync(filepath.Join(d.d.dir, fileSilent), binary.LittleEndian.AppendUint64(binary.LittleEndian.AppendUint64(nil, maxTerm), 0)); err != nil {
+		return storageFailed("silence condition", err)
+	}
+	if err := os.Remove(filepath.Join(d.d.dir, markerQuarantine)); err != nil {
+		return storageFailed("clear marker", err)
+	}
+	_ = d.d.log.Close()
+	if err := d.d.open(); err != nil {
+		return err
+	}
+	_, last := d.d.log.Bounds()
+	b := binary.LittleEndian.AppendUint64(nil, maxTerm)
+	b = binary.LittleEndian.AppendUint64(b, last+1)
+	if err := writeFileSync(filepath.Join(d.d.dir, fileSilent), b); err != nil {
+		return storageFailed("silence condition", err)
+	}
+	return syncDir(d.d.dir)
+}
+
+// silence reads the persisted silence condition, if any. An index of 0, a
+// crash before it was filled in, is the end of the log, written back now.
+// An unreadable condition is the safe side: silent past the end.
+func (l *FileLog) silence() (term, index uint64) {
+	b, err := os.ReadFile(filepath.Join(l.dir, fileSilent))
+	if os.IsNotExist(err) {
+		return 0, 0
+	}
+	_, last := l.Bounds()
+	if err != nil || len(b) != 16 {
+		return ^uint64(0) >> 1, last + 1
+	}
+	term, index = binary.LittleEndian.Uint64(b), binary.LittleEndian.Uint64(b[8:])
+	if index == 0 {
+		index = last + 1
+		nb := binary.LittleEndian.AppendUint64(binary.LittleEndian.AppendUint64(nil, term), index)
+		_ = writeFileSync(filepath.Join(l.dir, fileSilent), nb)
+	}
+	return term, index
+}
+
+// endSilence removes the silence condition durably.
+func (l *FileLog) endSilence() error {
+	if err := os.Remove(filepath.Join(l.dir, fileSilent)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return syncDir(l.dir)
 }
