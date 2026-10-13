@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net"
 	"net/url"
 	"testing"
 	"time"
@@ -288,5 +289,49 @@ func TestTCPJoinAddsALearner(t *testing.T) {
 	// A second JOIN for a slot with a live member is refused (R8-11).
 	if _, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr}, Stamp: st, Address: j.addr}); !errors.Is(err, coreconsensus.JoinRefused) {
 		t.Fatalf("second join: %v", err)
+	}
+}
+
+// R2-22: unauthenticated connections are capped per address before any TLS
+// byte is read; a member's address keeps its reserved slots.
+func TestTCPCapsUnauthenticatedConnectionsPerAddress(t *testing.T) {
+	ca := newTestCA(t)
+	cid := coreconsensus.ClusterID{0xab}
+	cert, _ := ca.issue(t, SAN(cid, "a"), nil)
+	tr, err := NewTCPTransport(TransportConfig{Certificate: cert, Roots: ca.pool, ListenAddress: "127.0.0.1:0",
+		MaxUnauthenticatedPerIP: 2, ReservedMemberSlots: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Close()
+	open := func(n int) []net.Conn {
+		var cs []net.Conn
+		for i := 0; i < n; i++ {
+			c, err := net.Dial("tcp", tr.Addr())
+			if err != nil {
+				t.Fatal(err)
+			}
+			cs = append(cs, c)
+		}
+		time.Sleep(50 * time.Millisecond)
+		return cs
+	}
+	closeAll := func(cs []net.Conn) {
+		for _, c := range cs {
+			c.Close()
+		}
+	}
+	cs := open(4)
+	if got := tr.RefusedBeforeHandshake(); got != 2 {
+		t.Fatalf("refused %d of 4 over a cap of 2", got)
+	}
+	closeAll(cs)
+	time.Sleep(1200 * time.Millisecond) // the handshake timeout frees the slots
+	tr.SetMembership(1, []coreconsensus.Member{{ID: 1, SPKI: [32]byte{1}, Address: tr.Addr()}})
+	before := tr.RefusedBeforeHandshake()
+	cs = open(4)
+	defer closeAll(cs)
+	if got := tr.RefusedBeforeHandshake() - before; got != 0 {
+		t.Fatalf("a member's address lost %d of its reserved slots", got)
 	}
 }

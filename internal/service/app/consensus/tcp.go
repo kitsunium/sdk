@@ -37,6 +37,14 @@ type TransportConfig struct {
 	// addresses rule afterwards.
 	Seeds map[coreconsensus.NodeID]string
 
+	// MaxUnauthenticatedPerIP caps the connections an IPv4 address, or an
+	// IPv6 /64, may hold before their handshake completes; the addresses
+	// the admitted members' addresses resolve to get ReservedMemberSlots
+	// instead, so a flood never locks a member out (R2-22). It runs before
+	// any TLS byte is read.
+	MaxUnauthenticatedPerIP int
+	ReservedMemberSlots     int
+
 	MaxFrameBytes        int
 	MaxControlFrameBytes int
 	HandshakeTimeout     time.Duration
@@ -123,6 +131,9 @@ type TCPTransport struct {
 	out         map[outKey]*peerConn
 	in          map[net.Conn][32]byte
 	raw         map[net.Conn]struct{}
+	pending     map[string]int
+	memberIPs   map[string]bool
+	refusedPre  int64
 	deliver     func(coreconsensus.AuthenticatedPeer, []byte)
 	offer       func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept
 	install     func(coreconsensus.InstallRequest) error
@@ -162,6 +173,12 @@ func NewTCPTransport(cfg TransportConfig) (*TCPTransport, error) {
 	if cfg.JoinTimeout <= 0 {
 		cfg.JoinTimeout = 10 * time.Second
 	}
+	if cfg.MaxUnauthenticatedPerIP <= 0 {
+		cfg.MaxUnauthenticatedPerIP = 4
+	}
+	if cfg.ReservedMemberSlots <= 0 {
+		cfg.ReservedMemberSlots = 8
+	}
 	switch {
 	case cfg.Roots == nil:
 		return nil, transportMisconfigured("Roots", "nil")
@@ -188,7 +205,7 @@ func NewTCPTransport(cfg TransportConfig) (*TCPTransport, error) {
 	}
 	t := &TCPTransport{cfg: cfg, cluster: cid, slot: slot,
 		members: map[coreconsensus.GroupID][]coreconsensus.Member{}, byID: map[coreconsensus.NodeID]coreconsensus.Member{},
-		bySPKI: map[[32]byte]coreconsensus.Member{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{},
+		bySPKI: map[[32]byte]coreconsensus.Member{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{}, pending: map[string]int{}, memberIPs: map[string]bool{},
 		done: make(chan struct{})}
 	ln, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {
@@ -270,6 +287,19 @@ func (t *TCPTransport) accept() {
 			c.Close()
 			return
 		}
+		ip := ipKey(c.RemoteAddr())
+		limit := t.cfg.MaxUnauthenticatedPerIP
+		if t.memberIPs[ip] {
+			limit = t.cfg.ReservedMemberSlots
+		}
+		if t.pending[ip] >= limit {
+			// Refused before any TLS byte is read (R2-22).
+			t.refusedPre++
+			t.mu.Unlock()
+			c.Close()
+			continue
+		}
+		t.pending[ip]++
 		t.raw[c] = struct{}{}
 		t.wg.Add(1)
 		t.mu.Unlock()
@@ -296,7 +326,21 @@ func (t *TCPTransport) serve(raw net.Conn) {
 	}
 	c := tls.Server(raw, cfg)
 	_ = c.SetDeadline(time.Now().Add(t.cfg.HandshakeTimeout))
-	if err := c.Handshake(); err != nil {
+	ip := ipKey(raw.RemoteAddr())
+	authenticated := false
+	defer func() {
+		if !authenticated {
+			t.mu.Lock()
+			t.pending[ip]--
+			t.mu.Unlock()
+		}
+	}()
+	err := c.Handshake()
+	t.mu.Lock()
+	t.pending[ip]--
+	t.mu.Unlock()
+	authenticated = true
+	if err != nil {
 		return
 	}
 	var lane [1]byte
@@ -591,6 +635,23 @@ func (t *TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []cor
 		}
 	}
 	t.byID, t.bySPKI = byID, bySPKI
+	ips := map[string]bool{}
+	for _, m := range byID {
+		host, _, err := net.SplitHostPort(m.Address)
+		if err != nil {
+			continue
+		}
+		// A member address that does not resolve is refused a reserved
+		// slot, never given an unkeyed one.
+		addrs, err := net.LookupIP(host)
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ips[ipKeyOf(a)] = true
+		}
+	}
+	t.memberIPs = ips
 	for c, spki := range t.in {
 		if _, ok := bySPKI[spki]; !ok {
 			c.Close()
@@ -858,4 +919,28 @@ func (t *TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (
 		return coreconsensus.Position{Term: binary.LittleEndian.Uint64(b[4:]), Index: binary.LittleEndian.Uint64(b[12:])}, nil
 	}
 	return coreconsensus.Position{}, last
+}
+
+// ipKey is the admission key of a remote address: the IPv4 address, or the
+// IPv6 /64.
+func ipKey(a net.Addr) string {
+	if ta, ok := a.(*net.TCPAddr); ok {
+		return ipKeyOf(ta.IP)
+	}
+	return a.String()
+}
+
+func ipKeyOf(ip net.IP) string {
+	if v4 := ip.To4(); v4 != nil {
+		return v4.String()
+	}
+	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
+}
+
+// RefusedBeforeHandshake counts the connections refused by the
+// pre-handshake admission.
+func (t *TCPTransport) RefusedBeforeHandshake() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.refusedPre
 }
