@@ -75,6 +75,7 @@ go_test(
         "offline_internal_test.go",
         "tcp_internal_test.go",
     ],
+    data = glob(["testdata/**"]),
     embed = [":consensus"],
     deps = [
         "//internal/core/app/consensus",
