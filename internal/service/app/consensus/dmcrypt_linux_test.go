@@ -96,9 +96,18 @@ func TestDMCryptBench(t *testing.T) {
 // index of each batch once its Sync returned: what it acknowledges.
 func TestDMCryptWriter(t *testing.T) {
 	dir := dmDir(t)
-	d, err := OpenDataDir(dir + "/crash")
+	// Small segments so the cut often lands near a rotation.
+	d, err := OpenDataDirWith(dir+"/crash", DataDirOptions{SegmentBytes: 256 << 10})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if os.Getenv("DMCRYPT_STOP_AT_SEAL") == "1" {
+		// The cut lands between a durable seal and the next segment's
+		// publication: the window of review H2.
+		d.d.log.afterSeal = func() {
+			fmt.Fprintln(os.Stdout, "SEALED")
+			select {}
+		}
 	}
 	l := d.Log()
 	_, last := l.Bounds()
@@ -137,18 +146,26 @@ func TestDMCryptWriter(t *testing.T) {
 }
 
 // TestDMCryptVerify reopens the log after a power cut: it must not be
-// quarantined, must hold every acknowledged entry, each one intact.
+// quarantined, must hold every acknowledged entry, each one intact. It opens
+// the log twice: a repair the first open made must leave a log the second
+// open accepts (review H2).
 func TestDMCryptVerify(t *testing.T) {
 	dir := dmDir(t)
 	acked, _ := strconv.ParseUint(os.Getenv("DMCRYPT_ACKED"), 10, 64)
-	d, err := OpenDataDir(dir + "/crash")
-	if err != nil {
-		t.Fatalf("open: %v", err)
+	var d DataDir
+	for pass := 1; pass <= 2; pass++ {
+		if pass > 1 {
+			d.Close()
+		}
+		var err error
+		if d, err = OpenDataDirWith(dir+"/crash", DataDirOptions{SegmentBytes: 256 << 10}); err != nil {
+			t.Fatalf("open %d: %v", pass, err)
+		}
+		if err := d.d.log.checkMarkers(); err != nil {
+			t.Fatalf("open %d after the cut: %v", pass, err)
+		}
 	}
 	defer d.Close()
-	if err := d.d.log.checkMarkers(); err != nil {
-		t.Fatalf("after the cut: %v", err)
-	}
 	first, last := d.Log().Bounds()
 	if last < acked {
 		t.Fatalf("lost acknowledged entries: last %d < acked %d", last, acked)

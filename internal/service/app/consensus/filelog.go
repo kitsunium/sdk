@@ -211,6 +211,10 @@ type FileLog struct {
 	// a field, not a constant, so a test can point it at a directory an
 	// unprivileged process may create: /run is root's.
 	runDir string
+	// afterSeal runs once a rotation's seal is durable and before the next
+	// segment is published. Only the dm-crypt lane sets it, to cut power in
+	// that window; it is nil otherwise.
+	afterSeal func()
 }
 
 func segName(n uint64) string { return fmt.Sprintf("seg-%016x", n) }
@@ -440,8 +444,10 @@ func (l *FileLog) recover() error {
 	l.batch++
 	l.markDurable()
 	if last.sealed {
-		// Crash after the seal and before the next segment's rename.
-		return l.rotate(0)
+		// Crash after the seal and before the next segment's rename: the
+		// seal is durable, so only the publication is left. Sealing again
+		// would spend a batch number no reader sees (review H2).
+		return l.publishNext(0)
 	}
 	l.prepare(tail.n+1, l.segBytes)
 	return nil
@@ -664,7 +670,17 @@ func (l *FileLog) rotate(need int) error {
 			return storageFailed("sync seal", err)
 		}
 		l.batch++
+		if l.afterSeal != nil {
+			l.afterSeal()
+		}
 	}
+	return l.publishNext(need)
+}
+
+// publishNext publishes the segment after the current one, whose seal is
+// durable, with the CURRENT hard state and the next batch number.
+func (l *FileLog) publishNext(need int) error {
+	cur := l.segs[len(l.segs)-1]
 	cp := l.dur
 	cp.nextBatchSeq = l.batch
 	saved := l.segBytes

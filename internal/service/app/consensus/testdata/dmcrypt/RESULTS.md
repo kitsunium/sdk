@@ -41,3 +41,19 @@ quarantined, must hold every acknowledged entry, each byte-identical.
 The log grew to 372 239 entries over the 30 cuts on one directory. In one
 iteration 16 entries past the last acknowledgement survived: a batch whose
 sync returned before the cut but whose acknowledgement line did not.
+
+## Cut after a rotation's seal (review of PR #301, H2)
+
+Since 2026-10-13 the writer uses 256 KiB segments, so cuts often land near a
+rotation. Every third iteration stops the writer right after a seal is
+durable and before the next segment is published, then cuts there. The
+verifier opens the log twice: the first open finishes the rotation, and the
+second must accept what the first one wrote.
+
+| Run | Iterations | At a seal | Passed |
+|---|---|---|---|
+| fixed log (`publishNext` after a durable seal) | 9 | 3 | 9 |
+| control: recovery seals again (`rotate(0)`, the bug) | 3 | 1 | 1 (2 quarantined at the second open) |
+
+The control quarantined at a random cut too: with small segments a cut in
+that window is common.

@@ -245,6 +245,28 @@ func TestRecoveryQuarantinesDamageInACompletedBatch(t *testing.T) {
 	nd.Close()
 }
 
+// A crash after the seal of segment N and before the rename of N+1: the
+// first restart finishes the rotation, and the log it leaves must open
+// again, then keep its entries across a third start (review H2).
+func TestRecoveryAfterASealSurvivesTwoRestarts(t *testing.T) {
+	dir, d := base(t)
+	l := d.d.log
+	tail(t, d, appendRecord(nil, &record{kind: recSeal, end: true, batch: l.batch, index: uint64(l.off)}), 0)
+	d = reopenExpect(t, dir, d, false)
+	if n := len(d.d.log.segs); n != 2 {
+		t.Fatalf("%d segments after the first restart, want 2", n)
+	}
+	if err := d.Log().Append(ents(4, 6, 1), nil); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, d.Log())
+	d = reopenExpect(t, dir, d, false)
+	checkEntries(t, d.Log(), 1, 6, 1)
+	d = reopenExpect(t, dir, d, false)
+	checkEntries(t, d.Log(), 1, 6, 1)
+	d.Close()
+}
+
 func TestDataDirLockAndStopMarkers(t *testing.T) {
 	dir := t.TempDir()
 	d := openDir(t, dir, 1<<16)

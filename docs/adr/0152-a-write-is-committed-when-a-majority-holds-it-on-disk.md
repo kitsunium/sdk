@@ -722,6 +722,11 @@ R7's rules contradicted each other.
   between batches, after the previous batch's sync-done. The seal record of
   segment N is written and synced in N before the first write to N+1. A
   crash test at rotation persists a random subset of the unsynced pages.
+  Recovery that finds N sealed and no N+1 only publishes N+1, whose
+  checkpoint takes the batch after the seal's: it never seals N again,
+  because a second seal is invisible to the next recovery and leaves a hole
+  in the batch sequence (review of PR #301, H2; the dm-crypt lane cuts in
+  that window and reopens twice).
 - **Nothing else changes.** D5b's sync-done still means "data durable", and
   D16 keeps one `fsync` per side.
 - *Tests:* crashes between a batch's write, its sync, the next batch's write
