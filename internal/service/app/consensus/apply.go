@@ -72,6 +72,7 @@ func (n *Node) applyEntries(es []coreconsensus.Entry) bool {
 		n.am.Lock()
 		skip := e.Position.Index <= n.applied
 		n.am.Unlock()
+		n.applyLag.Add(-int64(len(e.Data)))
 		if skip {
 			i++
 			continue

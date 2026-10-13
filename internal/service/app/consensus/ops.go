@@ -98,7 +98,13 @@ func (n *Node) handleProposals(ps []*proposal) {
 	for _, p := range ps {
 		if !p.admin && n.pendingBytes.Load()+int64(len(p.entry.Data)) > n.cfg.MaxPendingBytes {
 			// Refused before anything is appended (D6, from IWFS).
-			p.done <- propResult{err: origin(coreconsensus.Overloaded)}
+			p.done <- propResult{err: origin(coreconsensus.Overloaded, errs.String("why", "pending bytes"))}
+			continue
+		}
+		if !p.admin && n.applyLag.Load() >= n.cfg.MaxApplyLagBytes {
+			// Apply backpressure: no new proposal until apply catches up
+			// (D6, R1-14).
+			p.done <- propResult{err: origin(coreconsensus.Overloaded, errs.String("why", "apply lag"))}
 			continue
 		}
 		if p.admin {

@@ -52,6 +52,9 @@ type Node struct {
 	keepResults int
 
 	pendingBytes atomic.Int64
+	// applyLag is the payload bytes handed to the apply goroutine and not
+	// yet applied: the gap between commit and applied (D6, R1-14).
+	applyLag atomic.Int64
 
 	// loop-owned
 	forwards  map[uint64]*proposal
@@ -536,6 +539,11 @@ func (n *Node) handleReady() {
 			n.sq.push(storeReq{rd: rd})
 		}
 		if len(rd.Apply) > 0 {
+			var b int64
+			for i := range rd.Apply {
+				b += int64(len(rd.Apply[i].Data))
+			}
+			n.obs.setGauge(mApplyLagBytes, float64(n.applyLag.Add(b)))
 			n.aq.push(applyItem{entries: rd.Apply})
 		}
 		for _, f := range rd.Fetch {

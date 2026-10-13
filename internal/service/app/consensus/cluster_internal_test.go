@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -709,5 +710,64 @@ func TestJoinIsRateLimitedPerSlot(t *testing.T) {
 	}
 	if l.node.Health().JoinsRateLimited != 1 {
 		t.Fatal("rate-limited join not counted")
+	}
+}
+
+// gatedKV blocks Apply until released, so the apply lag grows.
+type gatedKV struct {
+	*kv
+	gate chan struct{}
+}
+
+func (g gatedKV) Apply(e coreconsensus.Entry) any {
+	<-g.gate
+	return g.kv.Apply(e)
+}
+
+// D6, R1-14: once the gap between commit and applied reaches
+// MaxApplyLagBytes, the leader refuses new proposals with OVERLOADED, and
+// accepts them again once apply catches up.
+func TestApplyLagBackpressure(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	gate := make(chan struct{})
+	for _, tn := range c.nodes {
+		_ = tn.node.HardClose()
+		_ = c.net.Transport(tn.id).Close()
+	}
+	for _, tn := range c.nodes {
+		tn.sm = newKV()
+		cfg := c.config(tn)
+		cfg.Machine = gatedKV{kv: tn.sm, gate: gate}
+		cfg.MaxApplyLagBytes = 2048
+		n, err := NewRaft(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tn.node = n
+	}
+	l := c.leader(5 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	payload := strings.Repeat("x", 300)
+	overloaded := false
+	for i := 0; i < 100 && !overloaded; i++ {
+		pctx, pcancel := context.WithTimeout(ctx, 30*time.Millisecond)
+		_, _, err := l.node.Propose(pctx, []byte(fmt.Sprintf("k%d=%s", i, payload)))
+		pcancel()
+		overloaded = errors.Is(err, coreconsensus.Overloaded)
+	}
+	if !overloaded {
+		t.Fatal("no OVERLOADED while apply was blocked")
+	}
+	close(gate)
+	for {
+		_, _, err := l.node.Propose(ctx, []byte("after=1"))
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, coreconsensus.Overloaded) {
+			t.Fatalf("after apply caught up: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

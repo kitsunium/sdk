@@ -28,6 +28,7 @@ const (
 	mBatchEntries     = "consensus_batch_entries"
 	mBatchBytes       = "consensus_batch_bytes"
 	mApplyLagEntries  = "consensus_apply_lag_entries"
+	mApplyLagBytes    = "consensus_apply_lag_bytes"
 	mPeerMatchLag     = "consensus_peer_match_lag_entries"
 	mPeerInflight     = "consensus_peer_inflight"
 	mPeerUnreachable  = "consensus_peer_unreachable"
