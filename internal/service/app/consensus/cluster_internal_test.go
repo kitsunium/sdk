@@ -504,46 +504,62 @@ func TestEngineDropsAFrameWhoseFromIsNotThePeer(t *testing.T) {
 func appendFrame(m *coreconsensus.Message) []byte { return wire.AppendMessage(nil, m) }
 
 // A transfer submitted on a follower succeeds, or fails with TRANSFER_FAILED
-// and the old leader resumes; never OUTCOME_UNKNOWN (D8).
+// and the old leader resumes; never OUTCOME_UNKNOWN (D8). NOT_LEADER is the
+// other answer the design allows: a transfer refuses new proposals from the
+// moment it starts, and nothing was appended, so it is retried (ADR 0152,
+// "A transfer loses nothing in flight"). Every round must still end with the
+// leadership on its target, within a bounded number of attempts.
 func TestClusterTransferSubmittedOnAFollower(t *testing.T) {
 	c := newCluster(t, 3, 0)
 	for round := 0; round < 10; round++ {
-		l := c.leader(5 * time.Second)
-		propose(t, l.node, fmt.Sprintf("r=%d", round))
-		var f, to *testNode
-		for _, tn := range c.nodes {
-			if tn == l {
+		for attempt := 0; ; attempt++ {
+			if attempt == 5 {
+				t.Fatalf("round %d: no transfer from a follower completed in %d attempts", round, attempt)
+			}
+			l := c.leader(5 * time.Second)
+			propose(t, l.node, fmt.Sprintf("r=%d", round))
+			var f, to *testNode
+			for _, tn := range c.nodes {
+				if tn == l {
+					continue
+				}
+				if f == nil {
+					f = tn
+				} else {
+					to = tn
+				}
+			}
+			if round%2 == 1 {
+				to = f // the follower moves leadership to itself
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err := f.node.TransferLeadership(ctx, "op:test", to.id)
+			cancel()
+			if errors.Is(err, coreconsensus.TransferFailed) || errors.Is(err, coreconsensus.NotLeader) {
+				// Allowed and retryable; the cluster must still have a
+				// leader, which c.leader fails the test without.
+				c.leader(5 * time.Second)
 				continue
 			}
-			if f == nil {
-				f = tn
-			} else {
-				to = tn
+			if err != nil {
+				t.Fatalf("round %d: transfer from a follower: %v", round, err)
 			}
-		}
-		if round%2 == 1 {
-			to = f // the follower moves leadership to itself
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err := f.node.TransferLeadership(ctx, "op:test", to.id)
-		cancel()
-		if err != nil {
-			t.Fatalf("round %d: transfer from a follower: %v", round, err)
-		}
-		// The transfer returned once f SAW `to` lead; each node's Status is
-		// its view after its own last turn, so the old leader may still
-		// publish its old term's leadership for a turn after `to` won. The
-		// new leader must be `to` once the views settle, never another node.
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			nl := c.leader(5 * time.Second)
-			if nl == to {
-				break
+			// The transfer returned once f SAW `to` lead; each node's Status
+			// is its view after its own last turn, so the old leader may
+			// still publish its old term's leadership for a turn after `to`
+			// won. The leader must be `to` once the views settle.
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				nl := c.leader(5 * time.Second)
+				if nl == to {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("round %d: leader is %d, want %d", round, nl.id, to.id)
+				}
+				time.Sleep(5 * time.Millisecond)
 			}
-			if time.Now().After(deadline) {
-				t.Fatalf("round %d: leader is %d, want %d", round, nl.id, to.id)
-			}
-			time.Sleep(5 * time.Millisecond)
+			break
 		}
 	}
 }
