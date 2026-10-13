@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"hash/crc32"
 	"math"
+	"slices"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -15,13 +16,22 @@ import (
 // counts the bytes AFTER the length field. The two high bits of type are the
 // lane.
 const (
-	frameHeaderLen  = 14
-	frameVersion1   = 1
-	tokenVersion1   = 1
-	tokenLen        = 41
-	metaVersion1    = 1
-	entryFixedLen   = 8 + 8 + 1 + 4 + 4 + 4 + 4
-	messageFixedLen = 1 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 8 + 8 + 8 + 8 + 8 + 4 + 4
+	// frameHeaderLen is the frozen header: length, version, type, group.
+	frameHeaderLen int = 14
+	// frameVersion1 is the only frame version this node writes and parses.
+	frameVersion1 byte = 1
+	// tokenVersion1 is the leading byte of every token this node mints.
+	tokenVersion1 byte = 1
+	// tokenLen is a token's whole length: version, ClusterID, three uint64.
+	tokenLen int = 41
+	// metaVersion1 is the leading byte of an encoded SnapshotMeta.
+	metaVersion1 byte = 1
+	// entryFixedLen is an entry's header before its data: term, index,
+	// kind, version, body sum, chain sum and data length.
+	entryFixedLen = 8 + 8 + 1 + 4 + 4 + 4 + 4
+	// messageFixedLen is a message body's fixed part after the frame
+	// header, up to and including its entry count.
+	messageFixedLen int = 1 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 8 + 8 + 8 + 8 + 8 + 4 + 4
 )
 
 // castagnoli is the CRC-32C table every checksum of the domain uses.
@@ -114,11 +124,11 @@ func ParseMessage(frame []byte, m *coreconsensus.Message) error {
 		return errs.Wrap(coreconsensus.VersionUnsupported, errs.WrapParams{},
 			errs.Int("message_kind", int(kind)))
 	}
-	b := frame[frameHeaderLen:]
-	if len(b) < messageFixedLen {
+	body := frame[frameHeaderLen:]
+	if len(body) < messageFixedLen {
 		return frameInvalid("short body", len(frame))
 	}
-	if b[49] > 1 {
+	if body[49] > 1 {
 		// One encoding per value: a non-canonical bool is refused, so an
 		// accepted frame always encodes back to its own bytes.
 		return frameInvalid("reject flag", len(frame))
@@ -128,35 +138,35 @@ func ParseMessage(frame []byte, m *coreconsensus.Message) error {
 		Version:        frame[4],
 		Kind:           kind,
 		Group:          coreconsensus.GroupID(binary.LittleEndian.Uint64(frame[6:])),
-		Flags:          coreconsensus.MessageFlags(b[0]),
-		From:           coreconsensus.NodeID(binary.LittleEndian.Uint64(b[1:])),
-		To:             coreconsensus.NodeID(binary.LittleEndian.Uint64(b[9:])),
-		Term:           binary.LittleEndian.Uint64(b[17:]),
-		LogTerm:        binary.LittleEndian.Uint64(b[25:]),
-		Index:          binary.LittleEndian.Uint64(b[33:]),
-		Commit:         binary.LittleEndian.Uint64(b[41:]),
-		Reject:         b[49] != 0,
-		RejectHint:     binary.LittleEndian.Uint64(b[50:]),
-		Context:        binary.LittleEndian.Uint64(b[58:]),
-		TransferIssuer: coreconsensus.NodeID(binary.LittleEndian.Uint64(b[66:])),
-		TransferTerm:   binary.LittleEndian.Uint64(b[74:]),
-		Contract:       binary.LittleEndian.Uint64(b[82:]),
-		Code:           errs.Code(binary.LittleEndian.Uint32(b[90:])),
+		Flags:          coreconsensus.MessageFlags(body[0]),
+		From:           coreconsensus.NodeID(binary.LittleEndian.Uint64(body[1:])),
+		To:             coreconsensus.NodeID(binary.LittleEndian.Uint64(body[9:])),
+		Term:           binary.LittleEndian.Uint64(body[17:]),
+		LogTerm:        binary.LittleEndian.Uint64(body[25:]),
+		Index:          binary.LittleEndian.Uint64(body[33:]),
+		Commit:         binary.LittleEndian.Uint64(body[41:]),
+		Reject:         body[49] != 0,
+		RejectHint:     binary.LittleEndian.Uint64(body[50:]),
+		Context:        binary.LittleEndian.Uint64(body[58:]),
+		TransferIssuer: coreconsensus.NodeID(binary.LittleEndian.Uint64(body[66:])),
+		TransferTerm:   binary.LittleEndian.Uint64(body[74:]),
+		Contract:       binary.LittleEndian.Uint64(body[82:]),
+		Code:           errs.Code(binary.LittleEndian.Uint32(body[90:])),
 	}
-	n := binary.LittleEndian.Uint32(b[94:])
-	b = b[messageFixedLen:]
-	if uint64(n)*entryFixedLen > uint64(len(b)) {
+	n := binary.LittleEndian.Uint32(body[94:])
+	body = body[messageFixedLen:]
+	if uint64(n)*entryFixedLen > uint64(len(body)) {
 		return frameInvalid("entry count", len(frame))
 	}
-	for i := uint32(0); i < n; i++ {
+	for range n {
 		var e coreconsensus.Entry
 		var err error
-		if b, err = parseEntry(b, &e); err != nil {
+		if body, err = parseEntry(body, &e); err != nil {
 			return err
 		}
 		entries = append(entries, e)
 	}
-	if len(b) != 0 {
+	if len(body) != 0 {
 		return frameInvalid("trailing bytes", len(frame))
 	}
 	m.Entries = entries
@@ -255,7 +265,11 @@ func ParseSnapshotMeta(b []byte, m *coreconsensus.SnapshotMeta) error {
 	out.ClusterVersion = r.u32()
 	out.ClusterGeneration = r.u64()
 	out.NoSpace = coreconsensus.AlarmID(r.u64())
-	out.Reserved = append([]byte(nil), r.bytes()...)
+	// An empty field stays nil, as the decoder always produced it, so a
+	// decoded meta compares equal to the one that was encoded.
+	if reserved := r.bytes(); len(reserved) != 0 {
+		out.Reserved = slices.Clone(reserved)
+	}
 	if r.err == nil && len(r.b) != 0 {
 		r.err = frameInvalid("snapshot meta trailing bytes", len(b))
 	}
@@ -374,6 +388,7 @@ func (r *reader) n(k int) []byte {
 	return out
 }
 
+// u8 reads one byte, 0 once a read failed.
 func (r *reader) u8() uint8 {
 	if b := r.n(1); b != nil {
 		return b[0]
@@ -390,6 +405,7 @@ func (r *reader) flag() bool {
 	return v == 1
 }
 
+// u32 reads a little-endian uint32, 0 once a read failed.
 func (r *reader) u32() uint32 {
 	if b := r.n(4); b != nil {
 		return binary.LittleEndian.Uint32(b)
@@ -397,6 +413,7 @@ func (r *reader) u32() uint32 {
 	return 0
 }
 
+// u64 reads a little-endian uint64, 0 once a read failed.
 func (r *reader) u64() uint64 {
 	if b := r.n(8); b != nil {
 		return binary.LittleEndian.Uint64(b)
@@ -404,6 +421,8 @@ func (r *reader) u64() uint64 {
 	return 0
 }
 
+// bytes reads a u32-length-prefixed field; the result aliases the input,
+// and a length past the end fails the reader rather than allocating.
 func (r *reader) bytes() []byte {
 	n := r.u32()
 	if uint64(n) > uint64(len(r.b)) {
@@ -413,8 +432,10 @@ func (r *reader) bytes() []byte {
 	return r.n(int(n))
 }
 
+// str reads a u32-length-prefixed string, copying it out of the input.
 func (r *reader) str() string { return string(r.bytes()) }
 
+// logIdentity reads the layout appendLogIdentity writes.
 func (r *reader) logIdentity() coreconsensus.LogIdentity {
 	var l coreconsensus.LogIdentity
 	copy(l.Cluster[:], r.n(16))
@@ -425,6 +446,7 @@ func (r *reader) logIdentity() coreconsensus.LogIdentity {
 	return l
 }
 
+// timing reads the layout AppendTimingContract writes.
 func (r *reader) timing() coreconsensus.TimingContract {
 	var c coreconsensus.TimingContract
 	c.Generation = r.u64()
@@ -435,6 +457,9 @@ func (r *reader) timing() coreconsensus.TimingContract {
 	return c
 }
 
+// membership reads the layout AppendMembership writes. Both counts are
+// bounded by the bytes left before anything is allocated, so a forged count
+// fails the frame instead of reserving memory for it.
 func (r *reader) membership() coreconsensus.Membership {
 	var m coreconsensus.Membership
 	m.Index = r.u64()
@@ -461,7 +486,7 @@ func (r *reader) membership() coreconsensus.Membership {
 		r.err = frameInvalid("retired count", len(r.b))
 		return m
 	}
-	for i := uint32(0); i < k; i++ {
+	for range k {
 		m.Retired = append(m.Retired, coreconsensus.NodeID(r.u64()))
 	}
 	return m
