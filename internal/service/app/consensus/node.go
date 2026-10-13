@@ -64,6 +64,7 @@ type Node struct {
 	lastRole      coreconsensus.Role
 	readSeq       uint64
 	canVote       bool
+	noTable       bool
 	snapState     snapState
 
 	watchMu  sync.Mutex
@@ -215,7 +216,7 @@ func newRaft(cfg Config) (*Node, error) {
 		ID: st.ID, Group: cfg.Group, Log: st.Log, Seed: seed, Timing: cfg.InitialTiming,
 		MaxInflight: cfg.MaxInflight, MaxInflightBytes: cfg.MaxInflightBytes, MaxBatchBytes: cfg.MaxBatchBytes,
 		MinVoters: cfg.MinVoters, PromoteLag: cfg.PromoteLag, Lease: cfg.Reads == ReadLease,
-		CanVote: n.canVote, MaxChainRefusals: 3,
+		CanVote: n.canVote, MaxChainRefusals: 3, NoTable: n.noTable,
 	}, start)
 	n.publish()
 	if ur, ok := cfg.Transport.(coreconsensus.UnreachableReporter); ok {
@@ -264,15 +265,21 @@ func (n *Node) load() (raft.Start, error) {
 		base = m
 		break
 	}
-	if len(metas) > 0 && base.Position.Index == 0 {
-		return raft.Start{}, origin(coreconsensus.SnapshotCorrupt, errs.String("why", "no snapshot passes its checksums"))
-	}
 	n.snapState.last = base.Position.Index
 	hs, err := n.cfg.Log.HardState()
 	if err != nil {
 		return raft.Start{}, origin(coreconsensus.HardStateCorrupt, errs.String("cause", err.Error()))
 	}
 	first, last := n.cfg.Log.Bounds()
+	if base.Position.Index == 0 && (len(metas) > 0 || first > 1) {
+		// Every snapshot fails its checksums, or none is left where the
+		// log needs one: the node starts with NO table. It keeps its term,
+		// vote and commit index, votes and keeps its log, never campaigns,
+		// applies nothing and asks the leader for an install (D7, R6-13,
+		// R7-18).
+		n.noTable = true
+		base = noTableBase(n.cfg.Log, metas, first)
+	}
 	s := base.Position.Index
 	if first > s+1 {
 		return raft.Start{}, origin(coreconsensus.LogCorrupt, errs.String("why", "gap after the snapshot"))
@@ -301,7 +308,28 @@ func (n *Node) load() (raft.Start, error) {
 	if applied == s {
 		n.appliedTerm = base.Position.Term
 	}
+	if n.noTable && durIdx < s {
+		n.applied, n.appliedTerm = 0, 0 // nothing is applied until an install
+	}
 	return raft.Start{HardState: hs, Snapshot: base, Entries: ents, Applied: applied, Now: n.clk.Now()}, nil
+}
+
+// noTableBase is the base a node with no usable snapshot starts from: the
+// log's compaction point, with the configuration and chain tip the newest
+// snapshot's metadata records, which stays readable when its bytes do not.
+func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMeta, first uint64) coreconsensus.SnapshotMeta {
+	var b coreconsensus.SnapshotMeta
+	if len(metas) > 0 {
+		b = metas[0]
+		for _, m := range metas {
+			if m.Position.Index == first-1 {
+				b = m
+			}
+		}
+	}
+	b.Position.Index = first - 1
+	b.Position.Term, _ = log.Term(first - 1)
+	return b
 }
 
 // ---- transport callbacks ----

@@ -563,3 +563,54 @@ func TestHealthReportsFailureToleranceAndPeers(t *testing.T) {
 	})
 	c.net.Isolate(f.id, false)
 }
+
+// R7-18: every snapshot of a node fails its checksum. It starts with no
+// table, never campaigns, asks for an install and catches up through it.
+func TestClusterNodeWithoutAValidSnapshotAsksForAnInstall(t *testing.T) {
+	c := newCluster(t, 3, 20)
+	l := c.leader(5 * time.Second)
+	var tok coreconsensus.Token
+	for i := 0; i < 120; i++ {
+		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
+	}
+	c.waitApplied(tok.Index, 5*time.Second)
+	var f *testNode
+	for _, tn := range c.nodes {
+		if tn != l {
+			f = tn
+			break
+		}
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		first, _ := f.log.Bounds()
+		metas, _ := f.snaps.List()
+		if first > 1 && len(metas) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the follower never compacted")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	c.kill(f)
+	f.snaps.mu.Lock()
+	for _, s := range f.snaps.done {
+		s.data[len(s.data)/2] ^= 0xff
+	}
+	f.snaps.mu.Unlock()
+	c.start(f)
+	if !f.node.r.NoTable() && f.node.Status().Applied == 0 {
+		t.Fatal("setup: the node did not start without a table")
+	}
+	for i := 120; i < 130; i++ {
+		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
+	}
+	c.waitApplied(tok.Index, 10*time.Second)
+	if v, _ := f.sm.get("k5"); v != "5" {
+		t.Fatalf("the install did not restore the table: k5=%q", v)
+	}
+	if v, _ := f.sm.get("k129"); v != "129" {
+		t.Fatalf("no catch-up after the install: k129=%q", v)
+	}
+}

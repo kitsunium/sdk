@@ -243,7 +243,7 @@ func (r *Raft) stepLeader(now time.Time, m core.Message) {
 
 func (r *Raft) handleAppResp(pr *progress, m core.Message) {
 	if m.Reject {
-		if m.Flags&core.FlagNeedSnapshot != 0 && r.log.snapIndex > 0 && pr.state != stateSnapshot {
+		if m.Flags&core.FlagNeedSnapshot != 0 && pr.state != stateSnapshot {
 			pr.becomeSnapshot(r.log.snapIndex)
 			r.rd.SendSnapshot = append(r.rd.SendSnapshot, m.From)
 			return

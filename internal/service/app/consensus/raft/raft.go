@@ -336,6 +336,9 @@ func (r *Raft) Compact(index uint64) {
 	r.confs = append(r.confs[:0], r.confs[n:]...)
 }
 
+// NoTable reports whether the node still waits for a snapshot install.
+func (r *Raft) NoTable() bool { return r.cfg.NoTable }
+
 // SetCanVote changes whether the node may vote: a joining directory may once
 // its admission is appended.
 func (r *Raft) SetCanVote(v bool) { r.cfg.CanVote = v }
@@ -422,7 +425,7 @@ func (r *Raft) HasReady() bool {
 	if r.term != r.hs.Term || r.vote != r.hs.Vote || r.log.committed != r.hs.Commit {
 		return true
 	}
-	if r.log.applied < min(r.log.committed, r.log.stable) {
+	if r.log.applied < min(r.log.committed, r.log.stable) && !r.cfg.NoTable {
 		return true
 	}
 	return rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.Messages) != 0 || len(rd.AfterSync) != 0 ||
@@ -448,7 +451,8 @@ func (r *Raft) Ready() Ready {
 		rd.Commit = r.log.committed
 	}
 	r.hs = core.HardState{Term: r.term, Vote: r.vote, Commit: r.log.committed}
-	if hi := min(r.log.committed, r.log.stable); r.log.applied < hi {
+	// A node with no table applies nothing until an install (D7).
+	if hi := min(r.log.committed, r.log.stable); r.log.applied < hi && !r.cfg.NoTable {
 		rd.Apply = slices.Clone(r.log.ents[r.log.applied-r.log.snapIndex : hi-r.log.snapIndex])
 		r.log.applied = hi
 	}

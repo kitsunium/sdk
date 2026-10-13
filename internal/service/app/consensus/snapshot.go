@@ -187,6 +187,16 @@ func (n *Node) afterCut() {
 	})
 }
 
+// requestCut asks the apply goroutine for a cut, unless one is in flight.
+func (n *Node) requestCut() {
+	n.snapState.mu.Lock()
+	busy := n.snapState.inFlight
+	n.snapState.mu.Unlock()
+	if !busy {
+		n.aq.push(applyItem{cut: true})
+	}
+}
+
 // SaveSnapshot cuts a snapshot now and copies its encoded stream to w.
 func (n *Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io.Writer) (coreconsensus.SnapshotMeta, error) {
 	if !op.Valid() {
@@ -256,6 +266,9 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 	}
 	metas, err := n.cfg.Snapshots.List()
 	if err != nil || len(metas) == 0 {
+		// A peer asks for a snapshot this leader never cut: cut one now,
+		// and the next probe sends it.
+		n.requestCut()
 		n.r.SnapshotDone(to, false)
 		return
 	}
@@ -301,7 +314,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 func (n *Node) offer(from coreconsensus.AuthenticatedPeer, o coreconsensus.InstallOffer) coreconsensus.InstallAccept {
 	acc := coreconsensus.InstallAccept{SnapshotID: o.SnapshotID}
 	ok := n.exec(func() {
-		if code := n.r.CheckOffer(from.ID, o, false); code != 0 {
+		if code := n.r.CheckOffer(from.ID, o, n.r.NoTable()); code != 0 {
 			acc.Refused = code
 			return
 		}
@@ -319,8 +332,17 @@ func (n *Node) offer(from coreconsensus.AuthenticatedPeer, o coreconsensus.Insta
 			return
 		}
 		for _, m := range metas {
-			if m.ID == o.SnapshotID {
+			if m.ID != o.SnapshotID {
+				continue
+			}
+			if !n.r.NoTable() {
 				acc.Held = true
+				return
+			}
+			// A node with no table holds that id only as a copy that failed
+			// its checksums: it is replaced, never answered as held.
+			if err := n.cfg.Snapshots.Remove(m.ID); err != nil {
+				acc.Refused = coreconsensus.CodeStorageFailed
 				return
 			}
 		}

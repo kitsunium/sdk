@@ -11,6 +11,7 @@ type applyItem struct {
 	entries []coreconsensus.Entry
 	restore *restoreReq
 	save    *saveReq
+	cut     bool
 }
 
 type restoreReq struct {
@@ -50,6 +51,10 @@ func (n *Node) applyLoop() {
 			}
 			if it.save != nil {
 				n.save(it.save)
+				continue
+			}
+			if it.cut {
+				n.forceCut()
 				continue
 			}
 			if !n.applyEntries(it.entries) {
@@ -96,6 +101,26 @@ func (n *Node) applyEntries(es []coreconsensus.Entry) bool {
 		i = j
 	}
 	return true
+}
+
+// forceCut cuts a snapshot at the applied index whatever SnapshotEvery says.
+func (n *Node) forceCut() {
+	n.am.Lock()
+	idx, term := n.applied, n.appliedTerm
+	n.am.Unlock()
+	ss := &n.snapState
+	ss.mu.Lock()
+	if ss.inFlight || idx == 0 || idx <= ss.last {
+		ss.mu.Unlock()
+		return
+	}
+	ss.inFlight = true
+	ss.mu.Unlock()
+	if err := n.cut(idx, term, nil); err != nil {
+		ss.mu.Lock()
+		ss.inFlight = false
+		ss.mu.Unlock()
+	}
 }
 
 // safeApply calls the state machine; a panic stops the node with
