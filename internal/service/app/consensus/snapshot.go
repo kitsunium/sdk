@@ -389,6 +389,11 @@ func (n *Node) install(req coreconsensus.InstallRequest) error {
 	if err := sink.Commit(meta); err != nil {
 		return err
 	}
+	if n.crashAfterPublish.Load() {
+		// Test-only: a crash right after the commit point of the install.
+		go n.HardClose()
+		return n.stoppedErr()
+	}
 	done := make(chan error, 1)
 	n.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done}})
 	select {

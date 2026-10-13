@@ -94,6 +94,8 @@ type Node struct {
 	// trustFrom is set by the package's own tests only: the engine then
 	// trusts a frame's From over the transport's peer (R7-05 mutation).
 	trustFrom bool
+	// crashAfterPublish is set by the package's own tests only.
+	crashAfterPublish atomic.Bool
 }
 
 type applyResult struct {
@@ -303,13 +305,30 @@ func (n *Node) load() (raft.Start, error) {
 	if first > s+1 {
 		return raft.Start{}, origin(coreconsensus.LogCorrupt, errs.String("why", "gap after the snapshot"))
 	}
-	if s >= first && s <= last {
-		if t, terr := n.cfg.Log.Term(s); terr != nil || t != base.Position.Term {
-			// The suffix is kept only when the boundary entry matches (D7).
-			if err := n.cfg.Log.TruncateSuffix(s + 1); err != nil {
+	// A published snapshot is the commit point of an install (D7): a crash
+	// after it, before the log was moved onto it, is finished here. The
+	// suffix is kept only when the boundary entry matches; otherwise the
+	// whole log is replaced, and a log that ends below the snapshot is
+	// compacted to it, so the next append continues at s+1.
+	if s >= first {
+		match := false
+		if s <= last {
+			t, terr := n.cfg.Log.Term(s)
+			match = terr == nil && t == base.Position.Term
+		}
+		if !match {
+			if err := n.cfg.Log.TruncateSuffix(first); err != nil {
 				return raft.Start{}, storageFailed("truncate", err)
 			}
-			last = s
+		}
+		if !match || s > last {
+			if err := n.cfg.Log.CompactPrefix(s); err != nil {
+				return raft.Start{}, storageFailed("compact", err)
+			}
+			if err := n.cfg.Log.Sync(); err != nil {
+				return raft.Start{}, storageFailed("sync", err)
+			}
+			first, last = n.cfg.Log.Bounds()
 		}
 	}
 	var ents []coreconsensus.Entry

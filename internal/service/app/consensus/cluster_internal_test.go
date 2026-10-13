@@ -771,3 +771,48 @@ func TestApplyLagBackpressure(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// A crash right after an installed snapshot is published, before the
+// state machine is restored and the log moved onto it: the restart finishes
+// the install from the published snapshot (D7).
+func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
+	c := newCluster(t, 3, 20)
+	l := c.leader(5 * time.Second)
+	var lag *testNode
+	for _, tn := range c.nodes {
+		if tn != l {
+			lag = tn
+			break
+		}
+	}
+	c.kill(lag)
+	var tok coreconsensus.Token
+	for i := 0; i < 200; i++ {
+		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for first, _ := l.log.Bounds(); first <= 10; first, _ = l.log.Bounds() {
+		if time.Now().After(deadline) {
+			t.Fatal("leader never compacted")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	c.start(lag)
+	lag.node.crashAfterPublish.Store(true)
+	deadline = time.Now().Add(10 * time.Second)
+	for !lag.node.stopped.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("no install reached publication")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if metas, _ := lag.snaps.List(); len(metas) == 0 {
+		t.Fatal("nothing was published before the crash")
+	}
+	c.kill(lag)
+	c.start(lag)
+	c.waitApplied(tok.Index, 10*time.Second)
+	if v, _ := lag.sm.get("k199"); v != "199" {
+		t.Fatalf("after resuming the install: k199=%q", v)
+	}
+}
