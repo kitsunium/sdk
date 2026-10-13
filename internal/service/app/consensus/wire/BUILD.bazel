@@ -1,4 +1,4 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 package(default_visibility = ["//internal/service:service_consumers"])
 
@@ -26,5 +26,15 @@ alias(
     visibility = [
         "//:__subpackages__",
         "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "wire_test",
+    srcs = ["fuzz_external_test.go"],
+    data = glob(["testdata/**"]),
+    deps = [
+        ":wire",
+        "//internal/core/app/consensus",
     ],
 )

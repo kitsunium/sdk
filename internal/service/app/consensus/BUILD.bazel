@@ -68,6 +68,7 @@ go_test(
     srcs = [
         "cluster_internal_test.go",
         "disk_cluster_internal_test.go",
+        "filelog_fuzz_internal_test.go",
         "filelog_internal_test.go",
         "observe_internal_test.go",
         "offline_internal_test.go",

@@ -118,6 +118,11 @@ func ParseMessage(frame []byte, m *coreconsensus.Message) error {
 	if len(b) < messageFixedLen {
 		return frameInvalid("short body", len(frame))
 	}
+	if b[49] > 1 {
+		// One encoding per value: a non-canonical bool is refused, so an
+		// accepted frame always encodes back to its own bytes.
+		return frameInvalid("reject flag", len(frame))
+	}
 	entries := m.Entries[:0]
 	*m = coreconsensus.Message{
 		Version:        frame[4],
@@ -376,6 +381,15 @@ func (r *reader) u8() uint8 {
 	return 0
 }
 
+// flag reads a canonical bool: 0 or 1, anything else a failure.
+func (r *reader) flag() bool {
+	v := r.u8()
+	if v > 1 && r.err == nil {
+		r.err = frameInvalid("bool", int(v))
+	}
+	return v == 1
+}
+
 func (r *reader) u32() uint32 {
 	if b := r.n(4); b != nil {
 		return binary.LittleEndian.Uint32(b)
@@ -436,8 +450,8 @@ func (r *reader) membership() coreconsensus.Membership {
 		x.Slot = r.str()
 		copy(x.SPKI[:], r.n(32))
 		x.Address = r.str()
-		x.Voter = r.u8() != 0
-		x.Joining = r.u8() != 0
+		x.Voter = r.flag()
+		x.Joining = r.flag()
 		x.PayloadMax = r.u32()
 		x.MaxSnapshotBytes = int64(r.u64())
 		m.Members = append(m.Members, x)
