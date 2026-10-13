@@ -46,7 +46,13 @@ func (n *Node) applyLoop() {
 				return
 			}
 			if it.restore != nil {
-				it.restore.done <- n.restoreFrom(it.restore.meta, 0)
+				// A machine already past the snapshot is never rolled back:
+				// the entries it applied after the snapshot are committed
+				// and would not be applied again (review H3).
+				n.am.Lock()
+				applied := n.applied
+				n.am.Unlock()
+				it.restore.done <- n.restoreFrom(it.restore.meta, applied)
 				continue
 			}
 			if it.save != nil {

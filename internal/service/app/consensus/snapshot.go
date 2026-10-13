@@ -394,6 +394,17 @@ func (n *Node) install(req coreconsensus.InstallRequest) error {
 		// The spool stays: the next offer resumes from its last chunk.
 		return snapshotCorrupt("stream ended early")
 	}
+	// Freshness again, on the event loop, right before the install is
+	// accepted (D7): the receiver may have committed past the snapshot
+	// through a new leader's appends while the body streamed (review H3).
+	var code errs.Code
+	if !n.exec(func() { code = n.r.CheckOffer(req.From.ID, req.Offer, n.r.NoTable()) }) {
+		return n.stoppedErr()
+	}
+	if code != 0 {
+		_ = sink.Abort()
+		return origin(coreconsensus.AdminPreconditionFailed, errs.String("why", "the offer is no longer fresh"))
+	}
 	if err := sink.Commit(meta); err != nil {
 		return err
 	}

@@ -1339,7 +1339,11 @@ written.
   - **freshness is checked again on the event loop, right before the install
     is accepted.** A snapshot whose index is not beyond the receiver's commit
     index is refused, even from the same leader in the same term. Then the
-    sender's term, the SHA-256 and the size are checked;
+    sender's term, the SHA-256 and the size are checked. The check runs at
+    the offer AND again once the body has arrived, before the snapshot is
+    published: a new leader may have moved the receiver past it meanwhile.
+    The apply goroutine never restores a snapshot the machine has already
+    applied past (review of PR #301, H3);
   - `Restore` is serialised with `Apply`;
   - **the install is recorded durably, step by step.** An installation record
     names the snapshot and the step reached: spooled and synced, published,

@@ -861,3 +861,116 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 		t.Fatalf("after resuming the install: k199=%q", v)
 	}
 }
+
+// staleSnapshot runs a cluster until a follower applied past the leader's
+// newest snapshot, and returns that snapshot's meta and encoded body.
+func staleSnapshot(t *testing.T) (*cluster, *testNode, *testNode, coreconsensus.SnapshotMeta, []byte, coreconsensus.Token) {
+	c := newCluster(t, 3, 20)
+	l := c.leader(5 * time.Second)
+	var f *testNode
+	for _, tn := range c.nodes {
+		if tn != l {
+			f = tn
+			break
+		}
+	}
+	for i := 0; i < 60; i++ {
+		propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
+	}
+	c.waitApplied(l.node.Status().Commit, 5*time.Second)
+	metas, err := l.snaps.List()
+	if err != nil || len(metas) == 0 {
+		t.Fatalf("no leader snapshot: %v", err)
+	}
+	meta := metas[0]
+	h, err := l.snaps.Open(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := make([]byte, meta.EncodedSize)
+	if _, err := h.ReadAt(body, 0); err != nil && !errors.Is(err, io.EOF) {
+		t.Fatal(err)
+	}
+	h.Close()
+	// Entries past the snapshot that the receiver applies before the body
+	// arrives.
+	var tok coreconsensus.Token
+	for i := 60; i < 80; i++ {
+		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
+	}
+	c.waitApplied(tok.Index, 5*time.Second)
+	if meta.Position.Index >= tok.Index {
+		t.Fatalf("setup: snapshot %d not behind the applied index %d", meta.Position.Index, tok.Index)
+	}
+	meta.ID = "h3-" + meta.ID
+	return c, l, f, meta, body, tok
+}
+
+// checkNothingLost requires every key the cluster committed on f.
+func checkNothingLost(t *testing.T, c *cluster, l, f *testNode) {
+	t.Helper()
+	tok := propose(t, l.node, "last=1")
+	c.waitApplied(tok.Index, 5*time.Second)
+	for i := 0; i < 80; i++ {
+		if v, _ := f.sm.get(fmt.Sprintf("k%d", i)); v != fmt.Sprint(i) {
+			t.Fatalf("receiver lost the committed k%d (%q) to a stale install", i, v)
+		}
+	}
+}
+
+// An offer accepted while the receiver was behind, whose body arrives after
+// the receiver committed and applied past the snapshot through a new
+// leader's appends: the install is refused before it is published (review
+// H3).
+func TestInstallAfterTheReceiverMovedPastTheSnapshot(t *testing.T) {
+	c, l, f, meta, body, tok := staleSnapshot(t)
+	// The spool an earlier offer opened, when the receiver was behind.
+	sink, _, err := f.snaps.Create(meta.ID, meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.node.snapState.mu.Lock()
+	if f.node.snapState.spools == nil {
+		f.node.snapState.spools = map[string]coreconsensus.SnapshotSink{}
+	}
+	f.node.snapState.spools[meta.ID] = sink
+	f.node.snapState.mu.Unlock()
+	err = f.node.install(coreconsensus.InstallRequest{
+		Ctx:   context.Background(),
+		From:  coreconsensus.AuthenticatedPeer{ID: l.id},
+		Offer: coreconsensus.InstallOffer{Term: l.node.Status().Term, SnapshotID: meta.ID, Meta: meta},
+		Body:  bytes.NewReader(body),
+	})
+	if !errors.Is(err, coreconsensus.AdminPreconditionFailed) {
+		t.Fatalf("stale install: %v", err)
+	}
+	if got := f.node.Status().Applied; got < tok.Index {
+		t.Fatalf("the install moved applied back to %d from %d", got, tok.Index)
+	}
+	checkNothingLost(t, c, l, f)
+}
+
+// The last guard, on the apply goroutine: a restore queued for a snapshot
+// the machine already passed leaves the machine as it is (review H3).
+func TestRestoreNeverRollsTheMachineBack(t *testing.T) {
+	c, l, f, meta, body, tok := staleSnapshot(t)
+	sink, _, err := f.snaps.Create(meta.ID, meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sink.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Commit(meta); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	f.node.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done}})
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := f.node.Status().Applied; got < tok.Index {
+		t.Fatalf("the restore moved applied back to %d from %d", got, tok.Index)
+	}
+	checkNothingLost(t, c, l, f)
+}
