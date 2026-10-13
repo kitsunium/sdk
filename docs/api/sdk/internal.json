@@ -766,7 +766,8 @@
       "name": "consensus",
       "dir": "service/app/consensus",
       "layer": "service",
-      "family": "app"
+      "family": "app",
+      "doc": "Package consensus is the Raft engine of ADR 0152 and everything it ships\naround the step function of package raft: the event loop that drives it,\nthe storage actor that makes a write durable before any reply that depends\non it leaves, the apply goroutine, and snapshots cut, sent and installed in\nchecksummed chunks.\n\nA [Node] is built by [NewRaft] over a [Config]: a state machine, a log, a\nsnapshot store and a transport. The shipped storage is a [DataDir] — a\nlock, a stamp, the segmented [FileLog], the [FileSnapshots] and the stop\nmarkers — and the shipped transport is the mutual-TLS [TCPTransport];\n[MemoryLog], [MemorySnapshots] and [MemoryNetwork] stand in for them in\ntests.\n\nA failed write or sync stops the node with STORAGE_FAILED and is never\nretried (D4). The offline operations [Init], [Recover], [RestoreSnapshot],\n[Inspect] and [ClearQuarantine] work on a stopped node's directory only.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",

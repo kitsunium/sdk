@@ -11,6 +11,7 @@ go_library(
         "bootstrap.go",
         "config.go",
         "datadir.go",
+        "doc.go",
         "errors.go",
         "filelog.go",
         "filesnap.go",
