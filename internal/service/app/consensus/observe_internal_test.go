@@ -117,3 +117,68 @@ func TestObservability(t *testing.T) {
 		}
 	}
 }
+
+// D13: certificate expiry over the TCP transport, log bytes, quota and free
+// space over the data directory.
+func TestResourceMetrics(t *testing.T) {
+	ca, cid, ns := newTCPCluster(t)
+	tcpLeader(t, ns)
+	tn := ns[0]
+	_ = tn.node.HardClose()
+	meter := svcmetrics.NewMeter()
+	tn.sm = newKV()
+	cfg := tcpConfig(cid, tn)
+	cfg.Meter = meter
+	n, err := NewRaft(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tn.node = n
+	_ = ca
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		snap := meter.Collect()
+		_, own := snap.Gauges[mCertExpiry]
+		_, peer := snap.Gauges[mPeerCertExpiry]
+		_, quota := snap.Gauges[mLogQuota]
+		if own && peer && quota {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("certificate gauges missing: own %v peer %v quota %v", own, peer, quota)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	c, nodes := threeOnDisk(t, 5)
+	dn := nodes[0]
+	dn.crash(c)
+	dn.dd = openDir(t, dn.dir, 16<<10)
+	dn.sm = newKV()
+	dcfg := diskConfig(c, dn)
+	dm := svcmetrics.NewMeter()
+	dcfg.Meter = dm
+	if dn.node, err = NewRaft(dcfg); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for _, x := range nodes {
+			if x.node != nil {
+				x.crash(c)
+			}
+		}
+	}()
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		snap := dm.Collect()
+		lb, ok1 := snap.Gauges[mLogBytes]
+		_, ok2 := snap.Gauges[mFsFree]
+		if ok1 && ok2 && len(lb.Points) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("log gauges missing: %v %v", ok1, ok2)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}

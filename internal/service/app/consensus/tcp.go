@@ -134,6 +134,8 @@ type TCPTransport struct {
 	pending     map[string]int
 	memberIPs   map[string]bool
 	refusedPre  int64
+	peerExpiry  map[coreconsensus.NodeID]time.Time
+	reloads     func() int
 	deliver     func(coreconsensus.AuthenticatedPeer, []byte)
 	offer       func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept
 	install     func(coreconsensus.InstallRequest) error
@@ -205,7 +207,7 @@ func NewTCPTransport(cfg TransportConfig) (*TCPTransport, error) {
 	}
 	t := &TCPTransport{cfg: cfg, cluster: cid, slot: slot,
 		members: map[coreconsensus.GroupID][]coreconsensus.Member{}, byID: map[coreconsensus.NodeID]coreconsensus.Member{},
-		bySPKI: map[[32]byte]coreconsensus.Member{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{}, pending: map[string]int{}, memberIPs: map[string]bool{},
+		bySPKI: map[[32]byte]coreconsensus.Member{}, out: map[outKey]*peerConn{}, in: map[net.Conn][32]byte{}, raw: map[net.Conn]struct{}{}, pending: map[string]int{}, memberIPs: map[string]bool{}, peerExpiry: map[coreconsensus.NodeID]time.Time{},
 		done: make(chan struct{})}
 	ln, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {
@@ -371,6 +373,9 @@ func (t *TCPTransport) serve(raw net.Conn) {
 		return
 	}
 	peer := coreconsensus.AuthenticatedPeer{ID: m.ID, Incarnation: m.Incarnation, Slot: slot, SPKI: spki}
+	t.mu.Lock()
+	t.peerExpiry[m.ID] = leaf.NotAfter
+	t.mu.Unlock()
 	deadline := time.Now().Add(t.cfg.MaxConnectionAge)
 	if leaf.NotAfter.Before(deadline) {
 		deadline = leaf.NotAfter
@@ -943,4 +948,39 @@ func (t *TCPTransport) RefusedBeforeHandshake() int64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.refusedPre
+}
+
+// CertExpiry returns when the transport's own certificate expires.
+func (t *TCPTransport) CertExpiry() time.Time {
+	c, err := t.certificate()
+	if err != nil || len(c.Certificate) == 0 {
+		return time.Time{}
+	}
+	leaf := c.Leaf
+	if leaf == nil {
+		if leaf, err = x509.ParseCertificate(c.Certificate[0]); err != nil {
+			return time.Time{}
+		}
+	}
+	return leaf.NotAfter
+}
+
+// PeerCertExpiry returns when each admitted peer's last-seen certificate
+// expires.
+func (t *TCPTransport) PeerCertExpiry() map[coreconsensus.NodeID]time.Time {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make(map[coreconsensus.NodeID]time.Time, len(t.peerExpiry))
+	for k, v := range t.peerExpiry {
+		out[k] = v
+	}
+	return out
+}
+
+// ReloadFailures counts the refused reloads of a PEM identity, 0 without one.
+func (t *TCPTransport) ReloadFailures() int {
+	if t.reloads == nil {
+		return 0
+	}
+	return t.reloads()
 }

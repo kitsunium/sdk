@@ -194,10 +194,12 @@ type FileLog struct {
 	stamp       coreconsensus.Stamp
 	// dur is the state the synced records describe: a rotation's checkpoint
 	// is written from it, never from the pending batch it precedes.
-	dur    checkpoint
-	failed error
-	refuse error
-	dd     *dataDir
+	dur checkpoint
+	// tailsTruncated counts the torn tails recovery truncated.
+	tailsTruncated int64
+	failed         error
+	refuse         error
+	dd             *dataDir
 }
 
 func segName(n uint64) string { return fmt.Sprintf("seg-%016x", n) }
@@ -333,6 +335,7 @@ func (l *FileLog) recover() error {
 		}
 		last.recs = last.recs[:k]
 		last.trimmed = trim
+		l.tailsTruncated++
 	}
 	// Build the effective log: apply truncate records in order, then judge
 	// continuity on the result (R8-01).
@@ -925,4 +928,15 @@ func (l *FileLog) Close() error {
 	}
 	l.segs = nil
 	return nil
+}
+
+// logStats reports the bytes the segments occupy, the free bytes of their
+// filesystem, and the torn tails truncated at open, for D13's gauges.
+func (l *FileLog) logStats() (bytes, free, tails int64) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	for _, s := range l.segs {
+		bytes += s.size
+	}
+	return bytes, fsFree(l.dir), l.tailsTruncated
 }

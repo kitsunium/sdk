@@ -48,6 +48,13 @@ const (
 	mChainRefusals    = "consensus_chain_refusals_total"
 	mStopped          = "consensus_stopped"
 	mJoinsRateLimited = "consensus_joins_rate_limited_total"
+	mLogBytes         = "consensus_log_bytes"
+	mLogQuota         = "consensus_log_quota_bytes"
+	mFsFree           = "consensus_fs_free_bytes"
+	mTailTruncated    = "consensus_tail_truncated_total"
+	mCertExpiry       = "consensus_tls_cert_expiry_seconds"
+	mPeerCertExpiry   = "consensus_tls_peer_cert_expiry_seconds"
+	mReloadFailures   = "consensus_tls_reload_failures_total"
 )
 
 var latencyBuckets = []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}
@@ -66,6 +73,10 @@ type obs struct {
 	hist  map[string]coremetrics.Histogram
 
 	lastPeers time.Time
+	lastRes   time.Time
+	// seenTails and seenReloads are the running totals already added to
+	// their counters.
+	seenTails, seenReloads int64
 }
 
 func newObs(cfg Config) *obs {
@@ -110,6 +121,23 @@ func (o *obs) inc(name string, attrs ...coreotel.AttrValue) {
 	}
 	o.mu.Unlock()
 	c.Inc()
+}
+
+// addTo brings a counter up to a running total kept elsewhere.
+func (o *obs) addTo(name string, seen *int64, total int64) {
+	if o.meter == nil || total <= *seen {
+		return
+	}
+	k := key(name, nil)
+	o.mu.Lock()
+	c, ok := o.count[k]
+	if !ok {
+		c = o.meter.Counter(name, o.group)
+		o.count[k] = c
+	}
+	o.mu.Unlock()
+	c.Add(total - *seen)
+	*seen = total
 }
 
 func (o *obs) record(name string, v float64, attrs ...coreotel.AttrValue) {
@@ -247,5 +275,42 @@ func (n *Node) observePeers() {
 		if p.Heard {
 			o.setGauge(mPeerLastContact, now.Sub(p.LastHeard).Seconds(), peer)
 		}
+	}
+}
+
+// observeResources publishes the log, filesystem and certificate gauges and
+// the counters the stores and the transport keep, at most every second, on
+// the loop (D13).
+func (n *Node) observeResources() {
+	o := n.obs
+	if o.meter == nil {
+		return
+	}
+	now := n.clk.Now()
+	if now.Sub(o.lastRes) < time.Second {
+		return
+	}
+	o.lastRes = now
+	o.setGauge(mLogQuota, float64(n.cfg.MaxLogBytes))
+	if ls, ok := n.cfg.Log.(interface{ logStats() (int64, int64, int64) }); ok {
+		b, free, tails := ls.logStats()
+		o.setGauge(mLogBytes, float64(b))
+		if free >= 0 {
+			o.setGauge(mFsFree, float64(free), coreotel.String("fs", "data"))
+		}
+		o.addTo(mTailTruncated, &o.seenTails, tails)
+	}
+	if ct, ok := n.cfg.Transport.(interface {
+		CertExpiry() time.Time
+		PeerCertExpiry() map[coreconsensus.NodeID]time.Time
+		ReloadFailures() int
+	}); ok {
+		if e := ct.CertExpiry(); !e.IsZero() {
+			o.setGauge(mCertExpiry, e.Sub(now).Seconds())
+		}
+		for id, e := range ct.PeerCertExpiry() {
+			o.setGauge(mPeerCertExpiry, e.Sub(now).Seconds(), coreotel.String("peer", id.String()))
+		}
+		o.addTo(mReloadFailures, &o.seenReloads, int64(ct.ReloadFailures()))
 	}
 }

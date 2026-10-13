@@ -413,6 +413,7 @@ func (n *Node) loop() {
 			n.r.Tick(n.clk.Now())
 			n.sweep()
 			n.observePeers()
+			n.observeResources()
 		case m := <-n.inCtrl:
 			turn = n.clk.Now()
 			n.r.Step(n.clk.Now(), m)

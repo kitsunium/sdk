@@ -107,5 +107,10 @@ func NewTCPTransportFromPEM(certFile, keyFile, caFile string, cfg TransportConfi
 		return nil, err
 	}
 	cfg.Certificate, cfg.GetCertificate, cfg.Roots = nil, id.GetCertificate, pool
-	return NewTCPTransport(cfg)
+	t, err := NewTCPTransport(cfg)
+	if err != nil {
+		return nil, err
+	}
+	t.reloads = id.ReloadFailures
+	return t, nil
 }
