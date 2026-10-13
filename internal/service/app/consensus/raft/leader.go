@@ -94,7 +94,7 @@ func (r *Raft) quorumActive(now time.Time, window time.Duration) bool {
 
 func (r *Raft) broadcastHeartbeat(now time.Time) {
 	r.nextRound++
-	rd := &round{id: r.nextRound, sentAt: now, acks: map[core.NodeID]bool{r.id: true}, conf: r.conf().Index}
+	rd := &round{id: r.nextRound, sentAt: now, acks: map[core.NodeID]uint64{r.id: r.timing.Generation + 1}, conf: r.conf().Index}
 	r.rounds = append(r.rounds, rd)
 	if len(r.rounds) > 64 {
 		r.rounds = r.rounds[len(r.rounds)-64:]
@@ -264,7 +264,7 @@ func (r *Raft) stepLeader(now time.Time, m core.Message) {
 	case core.MsgHeartbeatResp:
 		for _, rd := range r.rounds {
 			if rd.id <= m.Context {
-				rd.acks[m.From] = true
+				rd.acks[m.From] = m.Contract + 1
 			}
 		}
 		r.confirmRounds()
@@ -596,22 +596,40 @@ func (r *Raft) flushReads() {
 	r.confirmRounds()
 }
 
+// contractWindow is the minimum election timeout of the contract a voter
+// applied; an unknown generation counts as the shortest contract known.
+func (r *Raft) contractWindow(gen uint64) time.Duration {
+	if c, ok := r.contracts[gen]; ok {
+		return c.ElectionTimeoutMin
+	}
+	w := r.timing.ElectionTimeoutMin
+	for _, c := range r.contracts {
+		w = min(w, c.ElectionTimeoutMin)
+	}
+	return w
+}
+
 func (r *Raft) confirmRounds() {
 	confIdx := r.conf().Index
 	confirmed := uint64(0)
 	var sentAt time.Time
+	var leaseLen time.Duration
 	for _, rd := range r.rounds {
 		if rd.conf != confIdx {
 			continue
 		}
 		n := 0
+		minWindow := time.Duration(0)
 		for _, id := range r.voters() {
-			if rd.acks[id] {
+			if g := rd.acks[id]; g != 0 {
 				n++
+				if w := r.contractWindow(g - 1); minWindow == 0 || w < minWindow {
+					minWindow = w
+				}
 			}
 		}
 		if n >= r.quorum() {
-			confirmed, sentAt = rd.id, rd.sentAt
+			confirmed, sentAt, leaseLen = rd.id, rd.sentAt, minWindow
 		}
 	}
 	if confirmed == 0 {
@@ -619,6 +637,10 @@ func (r *Raft) confirmRounds() {
 	}
 	if !r.leaseDropped && sentAt.After(r.leaseStart) {
 		r.leaseStart = sentAt
+		if r.mutated(mutLeaseLeaderView) {
+			leaseLen = r.timing.ElectionTimeoutMin
+		}
+		r.leaseLen = time.Duration(float64(leaseLen) * (1 - r.timing.MaxClockDrift))
 	}
 	k := 0
 	for _, q := range r.waitingReads {

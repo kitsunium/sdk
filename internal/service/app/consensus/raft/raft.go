@@ -141,7 +141,7 @@ type readReq struct {
 type round struct {
 	id     uint64
 	sentAt time.Time
-	acks   map[core.NodeID]bool
+	acks   map[core.NodeID]uint64 // the contract generation each voter applied
 	conf   uint64
 }
 
@@ -184,6 +184,11 @@ type Raft struct {
 	transferDeadline time.Time
 	leaseDropped     bool
 	leaseStart       time.Time
+	// leaseLen is the lease the last confirmed round grants: computed
+	// from the minimum timing contract over the acknowledging majority,
+	// never from the leader's newer view (D9 d).
+	leaseLen  time.Duration
+	contracts map[uint64]core.TimingContract
 	// campaignTransfer is the flag the current campaign carries.
 	campaignIssuer core.NodeID
 	campaignTerm   uint64
@@ -231,6 +236,7 @@ func New(cfg Config, st Start) *Raft {
 	}
 	r.clusterVer, r.clusterGen, r.noSpace = sm.ClusterVersion, sm.ClusterGeneration, sm.NoSpace
 	r.voteWindow = r.timing.ElectionTimeoutMin
+	r.contracts = map[uint64]core.TimingContract{r.timing.Generation: r.timing}
 	for _, e := range st.Entries {
 		if e.Position.Index <= r.log.snapIndex {
 			continue
@@ -423,8 +429,7 @@ func (r *Raft) LeaseValid(now time.Time) bool {
 	if r.log.committed < r.termStart {
 		return false
 	}
-	d := time.Duration(float64(r.timing.ElectionTimeoutMin) * (1 - r.timing.MaxClockDrift))
-	return now.Sub(r.leaseStart) < d
+	return now.Sub(r.leaseStart) < r.leaseLen
 }
 
 // DropLease drops the lease for the rest of the term: a loop turn longer than
@@ -565,8 +570,13 @@ func (r *Raft) noteAppended(e *core.Entry) {
 		r.confs = append(r.confs, confAt{index: e.Position.Index, m: m})
 		r.confChanged()
 	case core.EntryTimingContract:
-		if a, err := wire.ParseAdmin(e.Data); err == nil && a.Contract.ElectionTimeoutMin > r.voteWindow {
-			r.voteWindow = a.Contract.ElectionTimeoutMin
+		if a, err := wire.ParseAdmin(e.Data); err == nil {
+			c := a.Contract
+			c.Generation = a.Pre.Generation + 1
+			r.contracts[c.Generation] = c
+			if c.ElectionTimeoutMin > r.voteWindow {
+				r.voteWindow = c.ElectionTimeoutMin
+			}
 		}
 	}
 }
@@ -651,6 +661,7 @@ func (r *Raft) applyCommitEffects(lo, hi uint64) {
 				c := a.Contract
 				c.Generation = r.timing.Generation + 1
 				r.timing = c
+				r.contracts[c.Generation] = c
 				if c.ElectionTimeoutMin > r.voteWindow {
 					r.voteWindow = c.ElectionTimeoutMin
 				}

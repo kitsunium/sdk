@@ -81,6 +81,10 @@ type Node struct {
 	loopDone    chan struct{}
 
 	droppedFrom atomic.Int64
+	longTurns   atomic.Int64
+	joinMu      sync.Mutex
+	lastJoin    map[string]time.Time
+	joinRefused atomic.Int64
 	// trustFrom is set by the package's own tests only: the engine then
 	// trusts a frame's From over the transport's peer (R7-05 mutation).
 	trustFrom bool
@@ -386,23 +390,29 @@ func (n *Node) loop() {
 	defer tick.Stop()
 	var props []*proposal
 	for {
+		var turn time.Time
 		select {
 		case <-n.stopc:
 			n.failAllOnStop()
 			return
 		case <-tick.C():
+			turn = n.clk.Now()
 			n.r.Tick(n.clk.Now())
 			n.sweep()
 		case m := <-n.inCtrl:
+			turn = n.clk.Now()
 			n.r.Step(n.clk.Now(), m)
 		case m := <-n.inData:
+			turn = n.clk.Now()
 			n.r.Step(n.clk.Now(), m)
 		case d := <-n.storec:
+			turn = n.clk.Now()
 			n.r.StorageDone(d.seq, d.index, d.term)
 			for i, f := range d.after {
 				n.cfg.Transport.Send(d.to[i], f)
 			}
 		case p := <-n.propc:
+			turn = n.clk.Now()
 			props = append(props[:0], p)
 		drain:
 			for len(props) < 1024 {
@@ -415,8 +425,10 @@ func (n *Node) loop() {
 			}
 			n.handleProposals(props)
 		case f := <-n.execc:
+			turn = n.clk.Now()
 			f()
 		case f := <-n.fetchc:
+			turn = n.clk.Now()
 			n.r.Fetched(f.req.To, f.req.Lo, f.ents, f.compacted)
 		}
 		// Control first: a flood of entries never starves a vote (D4).
@@ -430,6 +442,22 @@ func (n *Node) loop() {
 			}
 		}
 		n.handleReady()
+		n.checkTurn(turn)
+	}
+}
+
+// checkTurn drops the lease for the rest of the term after a turn longer
+// than the drift budget, ElectionTimeoutMin × MaxClockDrift: a pause of
+// the process is exactly that (D9, R7-20, R8-37).
+func (n *Node) checkTurn(turn time.Time) {
+	if n.cfg.Reads != ReadLease {
+		return
+	}
+	t := n.r.Status().Timing
+	budget := time.Duration(float64(t.ElectionTimeoutMin) * t.MaxClockDrift)
+	if d := n.clk.Since(turn); budget > 0 && d > budget {
+		n.longTurns.Add(1)
+		n.r.DropLease()
 	}
 }
 

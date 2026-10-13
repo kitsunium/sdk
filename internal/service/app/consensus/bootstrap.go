@@ -252,12 +252,18 @@ type Health struct {
 	// DroppedFrames counts frames whose From differed from the
 	// authenticated peer (R7-05).
 	DroppedFrames int64
+	// LongTurns counts the loop turns longer than the drift budget, each of
+	// which dropped the lease (D9, R7-20).
+	LongTurns int64
+	// JoinsRateLimited counts JOINs refused by the one-per-slot rate.
+	JoinsRateLimited int64
 }
 
 // Health returns the node's verdict, computed on the event loop.
 func (n *Node) Health() Health {
 	st := n.Status()
-	h := Health{Status: st, Stopped: n.stopped.Load(), DroppedFrames: n.droppedFrom.Load(), FailureTolerance: -1}
+	h := Health{Status: st, Stopped: n.stopped.Load(), DroppedFrames: n.droppedFrom.Load(), FailureTolerance: -1,
+		LongTurns: n.longTurns.Load(), JoinsRateLimited: n.joinRefused.Load()}
 	if r, ok := n.StopReason(); ok {
 		h.StopReason = r
 	}

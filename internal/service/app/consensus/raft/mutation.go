@@ -44,6 +44,9 @@ const (
 	// mutRestrictionUnderTransfer skips the election restriction under the
 	// transfer flag.
 	mutRestrictionUnderTransfer
+	// mutLeaseLeaderView computes the lease from the leader's own contract,
+	// not the minimum over the acknowledging majority.
+	mutLeaseLeaderView
 	// mutChainSkip appends an entry whose chain value does not match.
 	mutChainSkip
 )

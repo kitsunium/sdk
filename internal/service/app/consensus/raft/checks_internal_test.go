@@ -308,6 +308,29 @@ func checkLeaseDroppedAfterTransfer(mut mutation) error {
 	return nil
 }
 
+// D9 d: a follower that still applies an older, shorter contract bounds the
+// lease, whatever the leader's newer view says.
+func checkLeaseFromAckingMinimum(mut mutation) error {
+	r := leaderOf(2, 0, nil, mut, true)
+	m := msg(core.MsgAppResp, 2, 1, 2)
+	m.Index = r.log.lastIndex()
+	r.Step(r.now, m)
+	long := r.timing
+	long.Generation, long.ElectionTimeoutMin, long.ElectionTimeoutMax = 2, 10*time.Second, 20*time.Second
+	r.contracts[2], r.timing = long, long
+	r.broadcastHeartbeat(r.now)
+	hb := msg(core.MsgHeartbeatResp, 2, 1, 2)
+	hb.Context, hb.Contract = r.nextRound, 1
+	r.Step(r.now, hb)
+	if !r.LeaseValid(r.now) {
+		return errors.New("setup: no lease")
+	}
+	if r.LeaseValid(r.now.Add(2 * time.Second)) {
+		return errors.New("the lease outlived the acknowledging majority's shorter contract")
+	}
+	return nil
+}
+
 func checkMembershipAfterNoOp(mut mutation) error {
 	r := leaderOf(2, 0, nil, mut, false)
 	nm := core.Member{ID: 9, SPKI: [32]byte{9}}
@@ -366,6 +389,7 @@ var checks = map[string]func(mutation) error{
 	"stale completion":              checkStaleCompletion,
 	"lease dropped after transfer":  checkLeaseDroppedAfterTransfer,
 	"membership after no-op":        checkMembershipAfterNoOp,
+	"lease from acking minimum":     checkLeaseFromAckingMinimum,
 	"chain verified":                checkChainVerified,
 	"simulated safety":              checkSimSafety,
 }
@@ -400,6 +424,7 @@ func TestMutationsAreCaught(t *testing.T) {
 		"live-leader refusal in prevote":  mutLiveLeaderPreVoteOnly,
 		"restriction skipped on transfer": mutRestrictionUnderTransfer,
 		"chain mismatch appended":         mutChainSkip,
+		"lease from the leader's view":    mutLeaseLeaderView,
 	}
 	for name, m := range muts {
 		caught := ""

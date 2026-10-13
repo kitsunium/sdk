@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -409,6 +410,19 @@ func (n *Node) join(ctx context.Context, from coreconsensus.AuthenticatedPeer, r
 		return coreconsensus.Position{}, coreconsensus.CodeJoinRefused
 	}
 	r.SPKI = from.SPKI
+	// One JOIN per slot per election timeout (R7-42).
+	n.joinMu.Lock()
+	if n.lastJoin == nil {
+		n.lastJoin = map[string]time.Time{}
+	}
+	now := n.clk.Now()
+	if last, ok := n.lastJoin[r.Slot]; ok && now.Sub(last) < n.Status().Timing.ElectionTimeoutMin {
+		n.joinMu.Unlock()
+		n.joinRefused.Add(1)
+		return coreconsensus.Position{}, coreconsensus.CodeJoinRefused
+	}
+	n.lastJoin[r.Slot] = now
+	n.joinMu.Unlock()
 	for _, m := range n.Membership().Members {
 		if m.Slot == r.Slot {
 			// A slot that still has a live member is refused (R8-11).

@@ -647,3 +647,64 @@ func TestClusterLaggingFollowerFedFromTheStore(t *testing.T) {
 		t.Fatalf("lagging follower: key-7=%q", v)
 	}
 }
+
+// A loop turn longer than the drift budget drops the lease (D9, R7-20).
+func TestLongLoopTurnDropsTheLease(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	for _, tn := range c.nodes {
+		_ = tn.node.HardClose()
+	}
+	for _, tn := range c.nodes {
+		_ = c.net.Transport(tn.id).Close()
+		tn.sm = newKV()
+		cfg := c.config(tn)
+		cfg.Reads = ReadLease
+		n, err := NewRaft(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tn.node = n
+	}
+	l := c.leader(5 * time.Second)
+	propose(t, l.node, "a=1")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := l.node.Barrier(ctx); err != nil {
+		t.Fatal(err)
+	}
+	valid := false
+	deadline := time.Now().Add(2 * time.Second)
+	for !valid && time.Now().Before(deadline) {
+		l.node.exec(func() { valid = l.node.r.LeaseValid(l.node.clk.Now()) })
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !valid {
+		t.Fatal("setup: no lease")
+	}
+	// A pause of 20 ms is four times the 5 ms budget of 100 ms × 0.05.
+	l.node.exec(func() { time.Sleep(20 * time.Millisecond) })
+	l.node.exec(func() { valid = l.node.r.LeaseValid(l.node.clk.Now()) })
+	if valid || l.node.Health().LongTurns == 0 {
+		t.Fatalf("the lease survived a long turn (long turns %d)", l.node.Health().LongTurns)
+	}
+}
+
+// One JOIN per slot per election timeout (R7-42).
+func TestJoinIsRateLimitedPerSlot(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	l := c.leader(5 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	peer := coreconsensus.AuthenticatedPeer{Slot: "burst", SPKI: [32]byte{7}}
+	req := coreconsensus.JoinRequest{Cluster: c.cid, ID: 991, Slot: "burst"}
+	if _, code := l.node.join(ctx, peer, req); code != 0 {
+		t.Fatalf("first join: %v", code)
+	}
+	req.ID = 992
+	if _, code := l.node.join(ctx, peer, req); code != coreconsensus.CodeJoinRefused {
+		t.Fatalf("second join within the window: %v", code)
+	}
+	if l.node.Health().JoinsRateLimited != 1 {
+		t.Fatal("rate-limited join not counted")
+	}
+}
