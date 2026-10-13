@@ -319,7 +319,15 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 func (n *Node) offer(from coreconsensus.AuthenticatedPeer, o coreconsensus.InstallOffer) coreconsensus.InstallAccept {
 	acc := coreconsensus.InstallAccept{SnapshotID: o.SnapshotID}
 	ok := n.exec(func() {
-		if code := n.r.CheckOffer(from.ID, o, n.r.NoTable()); code != 0 {
+		code := n.r.CheckOffer(from.ID, o, n.r.NoTable())
+		if code == coreconsensus.CodeAdminPreconditionFailed {
+			// The receiver already covers the offered index — it holds that
+			// snapshot, or committed past it: an idempotent success, and the
+			// leader moves the peer back to probe (D7, R3-16).
+			acc.Held = true
+			return
+		}
+		if code != 0 {
 			acc.Refused = code
 			return
 		}
