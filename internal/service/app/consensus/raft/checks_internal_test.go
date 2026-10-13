@@ -622,7 +622,7 @@ func TestForwardedCommandsAreBounded(t *testing.T) {
 // or skipped: the follower appends the entries before it and asks the
 // driver to stop with VERSION_UNSUPPORTED (review M3).
 func TestUnknownEntryKindStopsTheFollower(t *testing.T) {
-	f := newTest(2, 1, 0, chainEntries(0, 1, 1), 0, false)
+	f := newTest(2, testState{term: 1, commit: 0, ents: chainEntries(0, 1, 1)}, 0, false)
 	es := chainEntries(f.log.chain(1), 2, 1, 1)
 	es[1].Kind = 0x80
 	es[1].ChainSum = wire.ChainSum(es[0].ChainSum, &es[1])
@@ -655,7 +655,7 @@ func TestClusterVersionAboveTheProtocolIsRefused(t *testing.T) {
 	if _, code := r.Propose(r.now, []core.Entry{{Kind: core.EntryClusterVersion, BodySum: wire.BodySum(data), Data: data}}); code != core.CodeVersionUnsupported {
 		t.Fatalf("raise above the protocol: %v", code)
 	}
-	f := newTest(2, 1, 0, chainEntries(0, 1, 1), 0, false)
+	f := newTest(2, testState{term: 1, commit: 0, ents: chainEntries(0, 1, 1)}, 0, false)
 	e := core.Entry{Position: core.Position{Term: 1, Index: 2}, Kind: core.EntryClusterVersion, Data: data}
 	e.BodySum = wire.BodySum(data)
 	e.ChainSum = wire.ChainSum(f.log.chain(1), &e)
