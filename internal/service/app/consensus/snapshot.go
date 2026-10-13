@@ -364,18 +364,31 @@ func (n *Node) offer(from coreconsensus.AuthenticatedPeer, o coreconsensus.Insta
 			acc.Refused = coreconsensus.CodeStorageFailed
 			return
 		}
-		n.snapState.mu.Lock()
-		if n.snapState.spools == nil {
-			n.snapState.spools = map[string]coreconsensus.SnapshotSink{}
-		}
-		n.snapState.spools[o.SnapshotID] = sink
-		n.snapState.mu.Unlock()
+		n.keepSpool(o.SnapshotID, sink)
 		acc.Offset = off
 	})
 	if !ok {
 		acc.Refused = coreconsensus.CodeNodeStopped
 	}
 	return acc
+}
+
+// keepSpool holds the sink an accepted offer opened until its body
+// arrives. A sink an earlier offer of the same id left open is released,
+// never aborted: its spool is what the new offer resumes (review of PR
+// #301, L4).
+func (n *Node) keepSpool(id string, sink coreconsensus.SnapshotSink) {
+	n.snapState.mu.Lock()
+	defer n.snapState.mu.Unlock()
+	if n.snapState.spools == nil {
+		n.snapState.spools = map[string]coreconsensus.SnapshotSink{}
+	}
+	if old := n.snapState.spools[id]; old != nil {
+		if r, ok := old.(interface{ release() }); ok {
+			r.release()
+		}
+	}
+	n.snapState.spools[id] = sink
 }
 
 func (n *Node) install(req coreconsensus.InstallRequest) error {

@@ -359,3 +359,41 @@ func TestPreparedSegmentIsNeverPublishedEarly(t *testing.T) {
 		t.Fatalf("hard state %+v", hs)
 	}
 }
+
+// A crash between a snapshot's rename and its .meta leaves a .snap that is
+// not a snapshot: the next open removes it (review of PR #301, L4).
+func TestOpenRemovesASnapshotWithoutItsMeta(t *testing.T) {
+	dir := t.TempDir()
+	d := openDir(t, dir, 1<<16)
+	d.Close()
+	orphan := filepath.Join(dir, "snap", "orphan.snap")
+	if err := os.WriteFile(orphan, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d = openDir(t, dir, 1<<16)
+	defer d.Close()
+	if _, err := os.Stat(orphan); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("orphan .snap kept: %v", err)
+	}
+}
+
+// countingSink counts how often its handle is released.
+type countingSink struct {
+	coreconsensus.SnapshotSink
+	released *int
+}
+
+func (k countingSink) release() { *k.released++ }
+
+// A second offer for a spool still open releases the first handle instead
+// of leaking it; the spool itself stays, to be resumed (review of PR #301,
+// L4).
+func TestSecondOfferReleasesTheFirstSpoolHandle(t *testing.T) {
+	var n Node
+	released := 0
+	n.keepSpool("s1", countingSink{released: &released})
+	n.keepSpool("s1", countingSink{released: &released})
+	if released != 1 {
+		t.Fatalf("released %d handles, want 1", released)
+	}
+}
