@@ -26,8 +26,9 @@ import (
 type PeerIdentity struct {
 	// Leaf is the peer's verified certificate.
 	Leaf *x509.Certificate
-	// Chain is the verified chain, leaf first; empty when nothing verified
-	// it (see PeerOf).
+	// Chain is the chain the standard verifier built, leaf first; empty
+	// when tls.ConnectionState.VerifiedChains is, as under the identity's
+	// own VerifyConnection, which verifies the chain itself (see PeerOf).
 	Chain []*x509.Certificate
 	// SPKI is the SHA-256 of the leaf's SubjectPublicKeyInfo.
 	SPKI [32]byte

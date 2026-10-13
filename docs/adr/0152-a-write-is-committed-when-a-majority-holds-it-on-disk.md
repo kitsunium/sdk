@@ -578,7 +578,7 @@ vote or resurrecting an entry a later record truncated (`storage.js:35-37`,
 - Both checksums are CRC-32C: they detect corruption, not an adversary. A
   member that holds the cluster's key can forge an entry whose chain
   matches; the chain protects against a damaged or misplaced entry, and
-  the transport's mTLS against an outsider (review of PR #301, L9).
+  the transport's mTLS against an outsider (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), L9).
 - Both are verified when the entry is appended and again before `Apply`. A
   mismatch at append refuses the acknowledgement, and the leader resends. A
   mismatch found before `Apply` re-fetches the entry from a peer, or stops
@@ -708,7 +708,7 @@ R7's rules contradicted each other.
        not an earlier chunk of the same batch, while reporting the sync, is
        outside the crash-only model. That case is quarantined, so it loses
        availability, never data.
-     - **A second residual, stated (review of PR #301, L7):** damage to
+     - **A second residual, stated (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), L7):** damage to
        the END record of the highest batch AFTER its sync returned (bit
        rot, a misdirected write) cannot be told from a batch that never
        completed. That batch is truncated, and with it what it acknowledged,
@@ -737,7 +737,7 @@ R7's rules contradicted each other.
   Recovery that finds N sealed and no N+1 only publishes N+1, whose
   checkpoint takes the batch after the seal's: it never seals N again,
   because a second seal is invisible to the next recovery and leaves a hole
-  in the batch sequence (review of PR #301, H2; the dm-crypt lane cuts in
+  in the batch sequence (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), H2; the dm-crypt lane cuts in
   that window and reopens twice).
 - **Nothing else changes.** D5b's sync-done still means "data durable", and
   D16 keeps one `fsync` per side.
@@ -896,7 +896,7 @@ R2-21).**
     replacement, is admitted only under its own pinned key. A certificate for
     the slot with another key is `PEER_REJECTED`, even when it is valid. A
     mutation that admits a claimed ID under another key must fail.
-  - **One key, one member (review of PR #301, M5).** `AddLearner`,
+  - **One key, one member (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), M5).** `AddLearner`,
     `Bootstrap`, `Recover` and `RestoreSnapshot` refuse a member whose key
     another member already holds, and a transport given two members under
     one key admits that key for neither: admission goes by key, so two
@@ -1009,7 +1009,7 @@ open ONE control connection to any member.
   transport. The `Joiner` sibling for a custom transport. The
   `JoinAuthorizer` port for the product. All of them are in
   `design/app/consensus.yaml`.
-- **The answer is authenticated (review of PR #301, M4).** The answer
+- **The answer is authenticated (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), M4).** The answer
   installs the peers the joiner admits, so a certificate of the cluster is
   not enough to give it. `JoinConfig.Pins` carries the members' keys from
   the operator; an empty list refuses the JOIN with
@@ -1296,7 +1296,7 @@ recent entries in memory, bounded by `RecentEntriesBytes` (D14, R2-40), so
 the apply goroutine and slow followers do not read the disk for what was just
 written.
 
-**Forwarded commands meet the same bounds (review of PR #301, M2).** A
+**Forwarded commands meet the same bounds (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), M2).** A
 command a follower forwards is checked by the leader before it is appended,
 as a local one is: above the leader's `MaxEntryBytes` it is refused with
 `ENTRY_TOO_LARGE`; while the forwarded commands appended in this term and
@@ -1374,7 +1374,7 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
     the offer AND again once the body has arrived, before the snapshot is
     published: a new leader may have moved the receiver past it meanwhile.
     The apply goroutine never restores a snapshot the machine has already
-    applied past (review of PR #301, H3);
+    applied past (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), H3);
   - `Restore` is serialised with `Apply`;
   - **the install is recorded durably, step by step.** An installation record
     names the snapshot and the step reached: spooled and synced, published,
@@ -1383,7 +1383,7 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
     the new one, never a mix;
   - **a node with no table is exempt from the freshness rule, never from
     its own log (found by the simulator's snapshot schedule while fixing the
-    review of PR #301).** A snapshot below the base its log continues is
+    review of [PR #301](https://github.com/kitsunium/sdk/pull/301)).** A snapshot below the base its log continues is
     refused with `COMPACTED`, even with no table: installing it would drop
     durable entries the node acknowledged, committed ones included, and
     leave its commit above its log. The leader then cuts a newer snapshot;
@@ -1391,7 +1391,7 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
     the boundary has the snapshot's term and index. Otherwise the whole log is
     replaced. The install acknowledges the snapshot's index, never the end of
     a kept suffix: nothing has verified that suffix against the leader's log,
-    and the next append does (review of PR #301, H1).
+    and the next append does (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), H1).
   - **Resumption, exactly (R3-16).**
     - The leader streams from a `SnapshotHandle` that `Open` pins, with
       random access, until the transfer completes, so compaction cannot delete
@@ -1568,7 +1568,7 @@ one term — once before the loss, once after — and elect two leaders.
   with the IDENTICAL list `--members id:inc:slot:spki:addr,...`. The list
   is compared and written in NodeID order, so its order on the command line
   does not matter: entry 1 is byte-identical on every founder, as the chain
-  requires (review of PR #301, M1). The founders also pass the same initial
+  requires (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), M1). The founders also pass the same initial
   timing contract, which entry 1 carries.
   **`Bootstrap`, `Recover` and `RestoreSnapshot` require a non-zero SPKI for
   every member (R9-04).** An empty pin is refused, so no member is ever
@@ -2617,7 +2617,7 @@ node, under the directory lock.
     epoch (R2-09), so no node of the old cluster can talk to the recovered one
     by mistake.
   - **It keeps the log up to the commit index the node persisted (review of
-    PR #301, L8).** The commit index is written lazily, so entries this node
+    [PR #301](https://github.com/kitsunium/sdk/pull/301), L8).** The commit index is written lazily, so entries this node
     saw committed but had not yet recorded as committed are dropped. That is
     the price of a disaster recovery: the runbook picks the survivor with the
     highest persisted commit (`Inspect`) and says that the last writes before
@@ -2935,7 +2935,7 @@ The rules:
   it. The operation is refused while any member does not. Protocol version
   1 has no member announcing more than 1, so the engine refuses any raise
   above its own `ProtocolMax`, and a node that finds such a raise committed
-  stops (review of PR #301, M3). Members announce their range in the
+  stops (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), M3). Members announce their range in the
   version that first raises it.
 - **Timing contract.** It has its own committed entry and its own version (D9,
   R2-14).
@@ -2944,7 +2944,7 @@ The rules:
   `VERSION_UNSUPPORTED`. It is never skipped: skipping an entry is a fork.
   A follower appends and acknowledges the entries before an unknown kind,
   never the unknown one, and stops; an unknown kind already in the log
-  stops the node when it reaches apply (review of PR #301, M3).
+  stops the node when it reaches apply (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), M3).
 - **Apply version gate.** An entry whose `Version` is above what the local
   state machine supports stops the node the same way, before `Apply` is
   called. The entry's version SELECTS the frozen code path that applies it.

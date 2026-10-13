@@ -8,7 +8,7 @@
 
 ## Context
 
-**What "by construction" covers (review of PR #301, L9).** The entry body
+**What "by construction" covers (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), L9).** The entry body
 checksum and the chain value of ADR 0152 are CRC-32C. They catch a
 corrupted or misplaced entry; they do not stop a member that holds the
 cluster's key from forging one with a matching chain. Divergence is

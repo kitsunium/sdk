@@ -76,12 +76,15 @@ stdlib (`os`) + `internal/kernel/errs` + `internal/core/net`. Never `pkg/*`.
 
 ## Cost — deliberately not benchmarked
 
-**This package does no work per request and none per handshake, so it ships a
-paragraph instead of a `BENCH.md`.** Its whole surface is `Load`, which calls
+**`Load` does no work per request and none per handshake, so it ships a
+paragraph instead of a `BENCH.md`.** This section is about `Load` alone; the
+`Identity` of `identity.go` is not covered by it, and does work per handshake
+(the chain and roots verified before the caller's check) and per reload (the
+files read again), which is not benchmarked here. `Load` calls
 `os.ReadFile` at most four times and hands the bytes to
 `corenet.NewIdentityValue`. It is invoked once, at wiring time; no internal
 caller reaches it on a request path, and `go build -gcflags=-m` reports not one
-heap escape in the package. The identity it produces is consumed once, to build
+heap escape in `tlsid.go` (`identity.go` has escapes; it is not on this path). The identity it produces is consumed once, to build
 a transport or a listener, and from there every handshake is `crypto/tls` over a
 config the SDK never touches again.
 

@@ -57293,7 +57293,7 @@
         {
           "name": "Chain",
           "type": "[]*x509.Certificate",
-          "doc": "Chain is the verified chain, leaf first; empty when nothing verified\nit (see PeerOf).\n"
+          "doc": "Chain is the chain the standard verifier built, leaf first; empty\nwhen tls.ConnectionState.VerifiedChains is, as under the identity's\nown VerifyConnection, which verifies the chain itself (see PeerOf).\n"
         },
         {
           "name": "SPKI",
