@@ -195,6 +195,8 @@ type FileLog struct {
 	// dur is the state the synced records describe: a rotation's checkpoint
 	// is written from it, never from the pending batch it precedes.
 	dur checkpoint
+	// prep is the next segment, being prepared in the background.
+	prep *prepared
 	// tailsTruncated counts the torn tails recovery truncated.
 	tailsTruncated int64
 	failed         error
@@ -430,6 +432,7 @@ func (l *FileLog) recover() error {
 		// Crash after the seal and before the next segment's rename.
 		return l.rotate(0)
 	}
+	l.prepare(tail.n+1, l.segBytes)
 	return nil
 }
 
@@ -519,14 +522,19 @@ func (l *FileLog) createSegment(n uint64, cp checkpoint) error {
 	size := l.segBytes
 	cpRec := appendRecord(nil, &record{kind: recCheckpt, end: true, batch: cp.nextBatchSeq, data: cp.encode()})
 	tmp := filepath.Join(l.logDir(), segName(n)+".tmp")
-	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return storageFailed("create segment", err)
+	f := l.takePrepared(n, size)
+	if f == nil {
+		var err error
+		if f, err = os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600); err != nil {
+			return storageFailed("create segment", err)
+		}
+		if err := zeroFrom(f, 0, size); err != nil {
+			f.Close()
+			return storageFailed("zero-fill", err)
+		}
 	}
-	if err := zeroFrom(f, 0, size); err != nil {
-		f.Close()
-		return storageFailed("zero-fill", err)
-	}
+	// The checkpoint is written at ACTIVATION, with the current hard state,
+	// never the state of the moment the segment was prepared (R3-24, R4-01).
 	if _, err := f.WriteAt(cpRec, 0); err != nil {
 		f.Close()
 		return storageFailed("checkpoint", err)
@@ -547,7 +555,58 @@ func (l *FileLog) createSegment(n uint64, cp checkpoint) error {
 	l.segs = append(l.segs, &segment{n: n, f: f, size: size})
 	l.off = int64(len(cpRec))
 	l.batch = cp.nextBatchSeq + 1
+	l.prepare(n+1, l.segBytes)
 	return nil
+}
+
+// prepared is the next segment, zero-filled in the background as a .tmp
+// while the current one fills (R3-24, R4-01). It is never published early:
+// recovery deletes any .tmp, and its checkpoint is written at activation.
+type prepared struct {
+	n    uint64
+	size int64
+	done chan struct{}
+	f    *os.File
+	err  error
+}
+
+// prepare starts zero-filling segment n off the writer's path.
+func (l *FileLog) prepare(n uint64, size int64) {
+	p := &prepared{n: n, size: size, done: make(chan struct{})}
+	l.prep = p
+	go func() {
+		defer close(p.done)
+		tmp := filepath.Join(l.logDir(), segName(n)+".tmp")
+		f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+		if err != nil {
+			p.err = err
+			return
+		}
+		if err := zeroFrom(f, 0, size); err != nil {
+			f.Close()
+			p.err = err
+			return
+		}
+		p.f = f
+	}()
+}
+
+// takePrepared waits for the prepared segment n, when it is the one wanted
+// at that size; nil means prepare it now.
+func (l *FileLog) takePrepared(n uint64, size int64) *os.File {
+	p := l.prep
+	l.prep = nil
+	if p == nil {
+		return nil
+	}
+	<-p.done
+	if p.err != nil || p.n != n || p.size != size {
+		if p.f != nil {
+			p.f.Close()
+		}
+		return nil
+	}
+	return p.f
 }
 
 func syncDir(dir string) error {
@@ -927,6 +986,13 @@ func (l *FileLog) Close() error {
 		_ = s.f.Close()
 	}
 	l.segs = nil
+	if p := l.prep; p != nil {
+		l.prep = nil
+		<-p.done
+		if p.f != nil {
+			_ = p.f.Close()
+		}
+	}
 	return nil
 }
 

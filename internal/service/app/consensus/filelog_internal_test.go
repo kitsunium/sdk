@@ -269,3 +269,42 @@ func TestDataDirLockAndStopMarkers(t *testing.T) {
 		t.Fatalf("final stop marker: %v", err)
 	}
 }
+
+// R3-24, R4-01: the next segment is prepared in the background as a .tmp,
+// never published early; a crash with it present loses nothing and
+// publishes nothing, and the rotation that takes it writes the current
+// hard state into its checkpoint.
+func TestPreparedSegmentIsNeverPublishedEarly(t *testing.T) {
+	dir := t.TempDir()
+	d := openDir(t, dir, 4096)
+	l := d.Log()
+	if err := l.Append(ents(1, 5, 1), &coreconsensus.HardState{Term: 1, Vote: 2}); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, l)
+	fl := d.d.log
+	fl.mu.Lock()
+	p := fl.prep
+	fl.mu.Unlock()
+	if p == nil {
+		t.Fatal("no segment being prepared")
+	}
+	<-p.done
+	tmps, _ := filepath.Glob(filepath.Join(dir, "log", "*.tmp"))
+	if len(tmps) != 1 {
+		t.Fatalf("prepared files: %v", tmps)
+	}
+	// Rotate onto it with a newer hard state.
+	if err := l.Append(ents(6, 60, 3), &coreconsensus.HardState{Term: 3, Vote: 1}); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, l)
+	_ = d.Close()
+	d = openDir(t, dir, 4096)
+	defer d.Close()
+	checkEntries(t, d.Log(), 1, 5, 1)
+	checkEntries(t, d.Log(), 6, 60, 3)
+	if hs, _ := d.Log().HardState(); hs.Term != 3 || hs.Vote != 1 {
+		t.Fatalf("hard state %+v", hs)
+	}
+}

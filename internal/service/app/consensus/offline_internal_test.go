@@ -172,8 +172,8 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 	c, nodes := threeOnDisk(t, 40)
 	victim := nodes[2]
 	victim.crash(c)
-	segs, _ := os.ReadDir(filepath.Join(victim.dir, "log"))
-	last := filepath.Join(victim.dir, "log", segs[len(segs)-1].Name())
+	segs, _ := filepath.Glob(filepath.Join(victim.dir, "log", "seg-????????????????"))
+	last := segs[len(segs)-1]
 	b, err := os.ReadFile(last)
 	if err != nil {
 		t.Fatal(err)
