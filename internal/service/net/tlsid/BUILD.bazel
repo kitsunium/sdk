@@ -6,6 +6,7 @@ go_library(
     name = "tlsid",
     srcs = [
         "doc.go",
+        "identity.go",
         "tlsid.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/net/tlsid",
@@ -32,6 +33,7 @@ go_test(
     name = "tlsid_test",
     srcs = [
         "api_gen_test.go",
+        "identity_external_test.go",
         "tlsid_external_test.go",
         "tlsid_internal_test.go",
     ],
