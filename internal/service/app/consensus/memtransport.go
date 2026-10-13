@@ -34,7 +34,7 @@ func (n *MemoryNetwork) Transport(id coreconsensus.NodeID) *MemoryTransport {
 	}
 	t := &MemoryTransport{
 		net: n, id: id,
-		ctrl: make(chan memFrame, 4096), data: make(chan memFrame, 4096), stop: make(chan struct{}),
+		ctrl: make(chan memFrame, 4096), data: make(chan memFrame, 4096),
 	}
 	n.nodes[id] = t
 	return t
@@ -93,11 +93,22 @@ type MemoryTransport struct {
 	joinR   func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string)
 	ctrl    chan memFrame
 	data    chan memFrame
-	stop    chan struct{}
-	bound   bool
+	cur     *memRun
 	members []coreconsensus.Member
-	wg      sync.WaitGroup
 }
+
+// memRun is one delivery goroutine's life: Close closes stop, once, and
+// waits on done, which the goroutine closes as it returns. Each Bind after a
+// Close starts a run of its own, so a Close never waits on — or stops — a
+// run a later Bind started.
+type memRun struct {
+	stop chan struct{}
+	done chan struct{}
+	once sync.Once
+}
+
+// end stops the run; a second call is a no-op.
+func (r *memRun) end() { r.once.Do(func() { close(r.stop) }) }
 
 // Send implements Transport: it never blocks and drops when the queue is
 // full.
@@ -160,16 +171,19 @@ func (t *MemoryTransport) Bind(group coreconsensus.GroupID,
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.deliver, t.offer, t.install, t.join = deliver, offer, install, join
-	if !t.bound {
-		t.bound = true
-		t.wg.Add(1)
-		go t.run(t.stop)
+	if t.cur == nil {
+		t.cur = &memRun{stop: make(chan struct{}), done: make(chan struct{})}
+		go t.run(t.cur)
 	}
 	return nil
 }
 
-func (t *MemoryTransport) run(stop chan struct{}) {
-	defer t.wg.Done()
+// run is the background delivery goroutine Bind launches: it prefers the
+// control lane over the data lane, as the TCP transport does, and ends when
+// the stop channel of its run is closed by Close.
+func (t *MemoryTransport) run(r *memRun) {
+	defer close(r.done)
+	stop := r.stop
 	for {
 		var f memFrame
 		select {
@@ -264,17 +278,15 @@ func MemorySPKI(id coreconsensus.NodeID) [32]byte { return memSPKI(id) }
 // does.
 func (t *MemoryTransport) Close() error {
 	t.mu.Lock()
-	if !t.bound {
+	r := t.cur
+	if r == nil {
 		t.mu.Unlock()
 		return nil
 	}
-	t.bound = false
-	close(t.stop)
+	t.cur = nil
+	r.end()
 	t.deliver, t.offer, t.install, t.join, t.joinR = nil, nil, nil, nil, nil
 	t.mu.Unlock()
-	t.wg.Wait()
-	t.mu.Lock()
-	t.stop = make(chan struct{})
-	t.mu.Unlock()
+	<-r.done
 	return nil
 }
