@@ -420,6 +420,19 @@ jobs:
           # --notes, which gh documents as PREPENDED to the generated notes.
           gh release create "$primary" /tmp/release-manifest.json --generate-notes --verify-tag --title "$primary" --notes "$(cat /tmp/release-notes.md)"
 
+      - name: Check the release on the module proxy
+        # A tag on origin is not yet a version a consumer resolves: the proxy
+        # fetches it on the first request, and that can fail where every step
+        # above is green. For each tag of the manifest, modules and tombstones,
+        # proxy.golang.org must serve its .info (retried: the proxy keeps a
+        # negative answer for minutes) and `go mod download` must fetch and
+        # check it, the checksum database on. A failure is loud; the table goes
+        # to the job summary (scripts/release/check-published.sh, ADR 0171 §7).
+        # After the GitHub release, so a proxy that is slow to answer never
+        # leaves pushed tags without their release record.
+        if: steps.compute.outputs.majors != '' && steps.cut.outputs.held != 'true' && env.DRY_RUN != 'true'
+        run: bash scripts/release/check-published.sh --manifest=/tmp/release-manifest.json
+
       - name: Emit release summary artifact
         # No longer gated on a bump having been computed. A run that published
         # nothing is exactly the run nobody could account for afterwards
