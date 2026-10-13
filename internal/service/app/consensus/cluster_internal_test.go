@@ -508,13 +508,21 @@ func appendFrame(m *coreconsensus.Message) []byte { return wire.AppendMessage(ni
 // other answer the design allows: a transfer refuses new proposals from the
 // moment it starts, and nothing was appended, so it is retried (ADR 0152,
 // "A transfer loses nothing in flight"). Every round must still end with the
-// leadership on its target, within a bounded number of attempts.
+// leadership on its target, within a bounded time.
 func TestClusterTransferSubmittedOnAFollower(t *testing.T) {
 	c := newCluster(t, 3, 0)
 	for round := 0; round < 10; round++ {
+		// A follower that has not yet heard from a just-elected leader
+		// answers NOT_LEADER at once, so the bound is a deadline with a
+		// pause between attempts, not a count.
+		deadline := time.Now().Add(10 * time.Second)
+		var last error
 		for attempt := 0; ; attempt++ {
-			if attempt == 5 {
-				t.Fatalf("round %d: no transfer from a follower completed in %d attempts", round, attempt)
+			if attempt > 0 {
+				if time.Now().After(deadline) {
+					t.Fatalf("round %d: no transfer from a follower completed in %d attempts, last: %v", round, attempt, last)
+				}
+				time.Sleep(20 * time.Millisecond)
 			}
 			l := c.leader(5 * time.Second)
 			propose(t, l.node, fmt.Sprintf("r=%d", round))
@@ -536,6 +544,7 @@ func TestClusterTransferSubmittedOnAFollower(t *testing.T) {
 			err := f.node.TransferLeadership(ctx, "op:test", to.id)
 			cancel()
 			if errors.Is(err, coreconsensus.TransferFailed) || errors.Is(err, coreconsensus.NotLeader) {
+				last = err
 				// Allowed and retryable; the cluster must still have a
 				// leader, which c.leader fails the test without.
 				c.leader(5 * time.Second)
@@ -548,13 +557,13 @@ func TestClusterTransferSubmittedOnAFollower(t *testing.T) {
 			// is its view after its own last turn, so the old leader may
 			// still publish its old term's leadership for a turn after `to`
 			// won. The leader must be `to` once the views settle.
-			deadline := time.Now().Add(5 * time.Second)
+			settle := time.Now().Add(5 * time.Second)
 			for {
 				nl := c.leader(5 * time.Second)
 				if nl == to {
 					break
 				}
-				if time.Now().After(deadline) {
+				if time.Now().After(settle) {
 					t.Fatalf("round %d: leader is %d, want %d", round, nl.id, to.id)
 				}
 				time.Sleep(5 * time.Millisecond)
