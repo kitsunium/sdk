@@ -392,6 +392,8 @@ func RestoreSnapshot(d DataDir, r io.Reader, newCluster coreconsensus.ClusterID,
 
 // resetTo makes an empty log start after (index, term).
 func (l *FileLog) resetTo(index, term uint64) error {
+	l.wmu.Lock()
+	defer l.wmu.Unlock()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.add(&record{kind: recCompact, batch: l.batch, index: index, term: term})

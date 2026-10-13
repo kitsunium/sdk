@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -396,4 +397,43 @@ func TestSecondOfferReleasesTheFirstSpoolHandle(t *testing.T) {
 	if released != 1 {
 		t.Fatalf("released %d handles, want 1", released)
 	}
+}
+
+// A reader is not held behind a batch's write and fdatasync: the entries
+// already durable, and the pending ones in memory, stay readable while the
+// sync runs (review of PR #301, L6).
+func TestReadersDoNotWaitForASync(t *testing.T) {
+	_, d := base(t)
+	defer d.Close()
+	l := d.d.log
+	if err := l.Append(ents(4, 6, 1), nil); err != nil {
+		t.Fatal(err)
+	}
+	in, out := make(chan struct{}), make(chan struct{})
+	l.duringSync = func() {
+		close(in)
+		<-out
+	}
+	done := make(chan error, 1)
+	go func() { done <- l.Sync() }()
+	<-in
+	read := make(chan error, 1)
+	go func() {
+		_, err := l.Entries(1, 7, 1<<20, nil)
+		read <- err
+	}()
+	select {
+	case err := <-read:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		close(out)
+		t.Fatal("a reader waited for the sync")
+	}
+	close(out)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	checkEntries(t, d.Log(), 1, 6, 1)
 }

@@ -215,6 +215,13 @@ type FileLog struct {
 	// segment is published. Only the dm-crypt lane sets it, to cut power in
 	// that window; it is nil otherwise.
 	afterSeal func()
+	// duringSync runs while a batch's write and fdatasync run, the lock
+	// released. Only a test sets it.
+	duringSync func()
+	// wmu serialises the writers. A sync holds it, not mu, across its
+	// write and fdatasync, so readers do not wait for the disk (review of
+	// PR #301, L6).
+	wmu sync.Mutex
 }
 
 func segName(n uint64) string { return fmt.Sprintf("seg-%016x", n) }
@@ -809,6 +816,8 @@ func (l *FileLog) add(r *record) {
 
 // Append implements LogStore: entries and the hard state in ONE batch.
 func (l *FileLog) Append(entries []coreconsensus.Entry, hs *coreconsensus.HardState) error {
+	l.wmu.Lock()
+	defer l.wmu.Unlock()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if err := l.usable(); err != nil {
@@ -836,6 +845,8 @@ func (l *FileLog) Append(entries []coreconsensus.Entry, hs *coreconsensus.HardSt
 // flagged end-of-batch, and made durable by one fdatasync. A failure is
 // final: the log refuses every later call (D4, fsyncgate).
 func (l *FileLog) Sync() error {
+	l.wmu.Lock()
+	defer l.wmu.Unlock()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if err := l.usable(); err != nil {
@@ -857,12 +868,24 @@ func (l *FileLog) Sync() error {
 		l.restamp(l.batch)
 		cur = l.segs[len(l.segs)-1]
 	}
+	// The write and its fdatasync run without mu: the writers are held by
+	// wmu, readers find the pending entries in memory and the durable ones
+	// below l.off, which the write does not touch.
+	l.mu.Unlock()
+	var ferr error
 	if _, err := cur.f.WriteAt(l.pending, l.off); err != nil {
-		l.failed = storageFailed("write", err)
-		return l.failed
+		ferr = storageFailed("write", err)
+	} else {
+		if l.duringSync != nil {
+			l.duringSync()
+		}
+		if err := datasync(cur.f); err != nil {
+			ferr = storageFailed("fdatasync", err)
+		}
 	}
-	if err := datasync(cur.f); err != nil {
-		l.failed = storageFailed("fdatasync", err)
+	l.mu.Lock()
+	if ferr != nil {
+		l.failed = ferr
 		return l.failed
 	}
 	// Re-locate the entries the batch carried.
@@ -904,6 +927,8 @@ func (l *FileLog) restamp(batch uint64) {
 // TruncateSuffix implements LogStore: ONE truncate record, nothing else
 // (R7-12, R8-01, R8-03).
 func (l *FileLog) TruncateSuffix(from uint64) error {
+	l.wmu.Lock()
+	defer l.wmu.Unlock()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if err := l.usable(); err != nil {
@@ -924,6 +949,8 @@ func (l *FileLog) TruncateSuffix(from uint64) error {
 // whose entries the next checkpoint already supersedes are deleted, as a
 // prefix, with a directory fsync after the unlinks (D4 step 6).
 func (l *FileLog) CompactPrefix(through uint64) error {
+	l.wmu.Lock()
+	defer l.wmu.Unlock()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if err := l.usable(); err != nil {
@@ -998,6 +1025,8 @@ func (l *FileLog) Stamp() (coreconsensus.Stamp, error) {
 
 // WriteStamp implements LogStore: durable on return.
 func (l *FileLog) WriteStamp(s coreconsensus.Stamp) error {
+	l.wmu.Lock()
+	defer l.wmu.Unlock()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if err := writeStamp(l.dir, s); err != nil {
@@ -1009,6 +1038,8 @@ func (l *FileLog) WriteStamp(s coreconsensus.Stamp) error {
 
 // Close implements LogStore; the DataDir closes it.
 func (l *FileLog) Close() error {
+	l.wmu.Lock()
+	defer l.wmu.Unlock()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, s := range l.segs {
