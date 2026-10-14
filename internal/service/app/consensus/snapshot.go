@@ -249,7 +249,8 @@ func (n *Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io
 	ss.inFlight = true
 	ss.mu.Unlock()
 	// The cut runs on the apply goroutine, serialised with Apply.
-	req := newSaveReq(w, op)
+	// done has one slot, so the apply goroutine never blocks on a caller that left.
+	req := &saveReq{w: w, op: op, done: make(chan saveRes, 1)}
 	n.aq.push(applyItem{save: req})
 	select {
 	case r := <-req.done:
