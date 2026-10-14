@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
@@ -47,7 +48,9 @@ func (a *App) sealCommand(ctx context.Context, args []string, stdout, stderr io.
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *all == (fs.NArg() > 0) {
+	// Flags stop at the first store, so -all after one would be read as a
+	// store's name: it is a usage error wherever it stands.
+	if *all == (fs.NArg() > 0) || slices.ContainsFunc(fs.Args(), isAllFlag) {
 		fmt.Fprintf(stderr, "usage: %s privacy seal STORE…   a store's node ID, as privacy register names it\n"+
 			"       %[1]s privacy seal -all       every store that seals at rest\n", a.name)
 		return 2
@@ -66,6 +69,13 @@ func (a *App) sealCommand(ctx context.Context, args []string, stdout, stderr io.
 		}
 		return errors.Join(failed...)
 	})
+}
+
+// isAllFlag reports whether arg spells -all, in any of the forms flag
+// accepts.
+func isAllFlag(arg string) bool {
+	name, _, _ := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(arg, "-"), "-"), "=")
+	return strings.HasPrefix(arg, "-") && name == "all"
 }
 
 // sealableStores are the node IDs of every store `privacy seal` takes that

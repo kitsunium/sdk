@@ -131,6 +131,9 @@ func TestThePrivacyCommand(t *testing.T) {
 		// named beside it is a usage error, not a second pass.
 		{args: []string{"seal", "-all"}, has: []string{"cmd-privacy/store/letters: 0 of 2 records sealed now, the others were already\n"}, hasNot: []string{"no store"}},
 		{args: []string{"seal", "-all", "cmd-privacy/store/letters"}, code: 2, errHas: "usage"},
+		// Flags stop at the first store: -all after one is still -all, and
+		// still a usage error — nothing is sealed first.
+		{args: []string{"seal", "cmd-privacy/store/letters", "-all"}, code: 2, errHas: "usage", hasNot: []string{"sealed now"}},
 		{code: 2},
 	} {
 		step.run(t, dir)
