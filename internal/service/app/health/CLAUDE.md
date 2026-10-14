@@ -50,7 +50,11 @@ budget is what cancelled it (`inflight.expire`), because a body that honours its
 context returns `ctx.Err()` — an ordinary failure wearing no timeout — and the
 result it publishes is what every probe joining afterwards reads. A body that
 succeeds despite the cancellation keeps its success: a late answer is not a
-wrong one.
+wrong one. A run that COMPLETES is released (`entry.finish`) **before** its
+waiters are woken: the other order let a probe that began after a waiter had
+returned join the finished run and read it as its own measurement — a replay
+no `MaxAge` asked for, a failure served twice, and a readiness change
+sd_notify never announced because the next probe re-read the old aggregate.
 
 ## Sentinels (`0.3.59.*`)
 

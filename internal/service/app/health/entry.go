@@ -122,8 +122,9 @@ func (e *entry) claim(parent context.Context) (run *inflight, mine bool) {
 // finish records the outcome of a run and reports whether it just latched a
 // startup check for the first time.
 //
-// It clears active AFTER the result is published, so a probe arriving in
-// between joins a run that is already complete and gets its answer at once.
+// It clears active BEFORE the run's waiters are woken (see health.perform): a
+// probe that begins once a waiter has returned must measure, not join a run
+// that finished before it was asked.
 func (e *entry) finish(result corehealth.ResultValue) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()

@@ -41,6 +41,11 @@ setup() {
   REPO="$(mktemp -d)"
   cd "$REPO"
   g init -q -b main
+  # Every commit and every push spawns `git maintenance run --auto --detach`
+  # (git 2.47 measured), which outlives the command and takes
+  # objects/maintenance.lock: a teardown's `rm -rf` racing it fails with
+  # "objects: Directory not empty". A disposable repository needs no upkeep.
+  g config maintenance.auto false
   g config user.email "ci@example.invalid"
   g config user.name "ci"
 
@@ -173,6 +178,8 @@ change_vendor() {
 # --prune-tags before it reads one (ADR 0171).
 publish_remote() {
   g init -q --bare "$BATS_TEST_TMPDIR/origin.git"
+  g -C "$BATS_TEST_TMPDIR/origin.git" config maintenance.auto false
+  g -C "$BATS_TEST_TMPDIR/origin.git" config receive.autogc false
   g remote add origin "$BATS_TEST_TMPDIR/origin.git"
   if [ -n "$(g tag -l)" ]; then g push -q origin --tags; fi
 }

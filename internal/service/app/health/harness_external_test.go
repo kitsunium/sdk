@@ -91,9 +91,18 @@ func blocking(release <-chan struct{}, cancelled chan<- struct{}) corehealth.Che
 // It is deliberately NOT the same helper as [blocking]: a check that honours
 // its cancellation RETURNS when the budget expires, so the next probe starts a
 // fresh run, which is correct. Only a check that ignores it stays outstanding.
-func wedged(release <-chan struct{}, calls *atomic.Int64) corehealth.Check {
+//
+// Every entry is also signalled on entered, without blocking the body, so a
+// test can wait for the body to have been REACHED: the run's own budget timer
+// is armed before the body is called, so a timer that exists proves only that
+// the run's goroutine started, not that it got as far as the check.
+func wedged(release <-chan struct{}, calls *atomic.Int64, entered chan<- struct{}) corehealth.Check {
 	return func(_ context.Context) error {
 		calls.Add(1)
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
 		<-release
 		//: a late answer nobody is waiting for any more.
 		return nil

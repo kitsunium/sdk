@@ -153,6 +153,11 @@ maintainer's label). The tree's general rules are in `scripts/CLAUDE.md`.
   The pre-commit guards' bash 3.2 rule does not extend to this directory.
 - go.sum and a clean-room `go get` of a vendor module are settled at its first
   real release (ADR 0009): the tags must exist before their checksums can.
+- Every fixture repository the suites `init` — working and bare — sets
+  `maintenance.auto false` (bare ones also `receive.autogc false`): each commit
+  and push spawns `git maintenance run --auto --detach`, which outlives the
+  command and writes under `objects/`, and a teardown's `rm -rf` racing it
+  fails with `objects: Directory not empty` on correct code.
 
 ## Verify
 

@@ -34,3 +34,6 @@ code: it raises the core's.
   `wmu`, readers must not wait for the disk (review L6).
 - Take a JOIN answer from an unpinned peer (`JoinConfig.Pins`, review M4),
   or admit a key two members share (review M5).
+- Report a refused transfer as done on the node's own view that the target
+  leads: a deposed leader that has not heard its successor still names
+  itself. `confirmLeader` makes the view a fact with a barrier first.

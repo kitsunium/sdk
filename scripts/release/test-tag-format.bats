@@ -16,6 +16,11 @@ setup() {
   mkdir -p "$REPO"
   cd "$REPO"
   g init -q -b main
+  # Every commit and every push spawns `git maintenance run --auto --detach`
+  # (git 2.47 measured), which outlives the command and takes
+  # objects/maintenance.lock: a teardown's `rm -rf` racing it fails with
+  # "objects: Directory not empty". A disposable repository needs no upkeep.
+  g config maintenance.auto false
   g config user.email "ci@example.invalid"
   g config user.name "ci"
   : >f
@@ -123,6 +128,8 @@ lib() {
 @test "remote_tags_present compares full refs and drops the peeled lines" {
   REMOTE="$BATS_TEST_TMPDIR/remote.git"
   git init -q --bare "$REMOTE"
+  git -C "$REMOTE" config maintenance.auto false
+  git -C "$REMOTE" config receive.autogc false
   g tag -a v0.1.0 -m annotated
   g tag -a pkg/v1/data/v0.2.0 -m annotated
   g tag internal/v0.1.0

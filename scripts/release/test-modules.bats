@@ -43,6 +43,11 @@ setup() {
   mkdir -p "$REPO"
   cd "$REPO"
   g init -q -b main
+  # Every commit and every push spawns `git maintenance run --auto --detach`
+  # (git 2.47 measured), which outlives the command and takes
+  # objects/maintenance.lock: a teardown's `rm -rf` racing it fails with
+  # "objects: Directory not empty". A disposable repository needs no upkeep.
+  g config maintenance.auto false
   g config user.email "ci@example.invalid"
   g config user.name "ci"
   mkdir -p framework/kit internal/kernel/x pkg/v1/data pkg/v1/net third-party/aws
@@ -74,6 +79,8 @@ released() {
     g tag -a "$t" -m "$t" "$rel"
   done
   g init -q --bare "$BATS_TEST_TMPDIR/origin.git"
+  g -C "$BATS_TEST_TMPDIR/origin.git" config maintenance.auto false
+  g -C "$BATS_TEST_TMPDIR/origin.git" config receive.autogc false
   g remote add origin "$BATS_TEST_TMPDIR/origin.git"
   g push -q origin --tags
 }
@@ -320,6 +327,8 @@ monolith() {
   g tag -a v0.19.7 -m v0.19.7 "$rel"
   g tag -a third-party/aws/v0.19.6 -m third-party/aws/v0.19.6 "$rel"
   g init -q --bare "$BATS_TEST_TMPDIR/origin.git"
+  g -C "$BATS_TEST_TMPDIR/origin.git" config maintenance.auto false
+  g -C "$BATS_TEST_TMPDIR/origin.git" config receive.autogc false
   g remote add origin "$BATS_TEST_TMPDIR/origin.git"
   g push -q origin --tags
 }
