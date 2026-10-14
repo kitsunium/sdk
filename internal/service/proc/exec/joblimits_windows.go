@@ -157,7 +157,7 @@ func buildExtendedLimits(limits map[coreproc.Resource]coreproc.LimitValue) (exte
 // p must have been created suspended. Assigning a child that already runs
 // raced its exit: a `cmd /c exit 0` could be gone before the assignment, and
 // AssignProcessToJobObject refuses a process that has exited with
-// ERROR_ACCESS_DENIED — 9 of 2 000 spawns on windows-latest (#304).
+// ERROR_ACCESS_DENIED — 12 to 26 of 3 000 spawns on windows-latest (#304).
 func (j *jobLimit) assign(p *os.Process) error {
 	var r1 uintptr
 	var aerrno error
