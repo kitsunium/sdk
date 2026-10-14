@@ -77,14 +77,21 @@ func (h *health) perform(e *entry, run *inflight) {
 	err := h.invoke(e, run)
 	release()
 	result := h.outcome(e, run, err, begun)
-	//: published BEFORE the entry is released, so a probe arriving in between
-	//: joins a finished run and gets its answer at once.
 	run.result = result
-	close(run.done)
-	//: a startup check that just passed shrinks the set the phase reads.
-	if e.finish(result) {
+	//: the entry is released BEFORE the waiters are woken. The other order let
+	//: a probe that began after a waiter had already RETURNED join this
+	//: finished run and read its result as a measurement of its own: a
+	//: replay nobody configured (no MaxAge), a failure served twice although a
+	//: failure is never cached, and a readiness change that sd_notify never
+	//: saw because the next probe re-read the aggregate before it. Released
+	//: first, a probe arriving in between claims a run of its own.
+	latched := e.finish(result)
+	//: a startup check that just passed shrinks the set the phase reads,
+	//: before a waiter can read the phase.
+	if latched {
 		h.startupPassed()
 	}
+	close(run.done)
 }
 
 // outcome turns a finished body into the result every later probe will read.

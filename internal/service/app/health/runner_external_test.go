@@ -324,8 +324,9 @@ func TestAWedgedCheckCostsOneGoroutineNotOnePerPoll(t *testing.T) {
 	var calls atomic.Int64
 	release := make(chan struct{})
 	defer close(release)
+	entered := make(chan struct{}, 1)
 	mustAddReadiness(t, registry, corehealth.ReadinessCheckValue{
-		Name: "db", Check: wedged(release, &calls),
+		Name: "db", Check: wedged(release, &calls, entered),
 	})
 	//: three consecutive polls, each timing out on its own budget. The FIRST
 	//: arms two timers — the probe's and the run's own — while the two that
@@ -337,6 +338,12 @@ func TestAWedgedCheckCostsOneGoroutineNotOnePerPoll(t *testing.T) {
 	//: goroutine is running. Waiting for the probe's timer alone used to let
 	//: the clock advance before the body had been entered, and the assertion
 	//: then read 0 — reliably outside the race lane, never inside it.
+	//
+	//: The run's timer is armed BEFORE the body is called, so even that
+	//: proves the goroutine started and not that it reached the check: under
+	//: load the three polls could all time out first, and the count read 0
+	//: (46 of 4 000 runs, eight copies in parallel). The body's own entry is
+	//: what the count is about, so it is waited for before the count is read.
 	for poll := range 3 {
 		waits := 1
 		if poll == 0 {
@@ -347,6 +354,7 @@ func TestAWedgedCheckCostsOneGoroutineNotOnePerPoll(t *testing.T) {
 			t.Fatalf("poll %d did not time out", poll)
 		}
 	}
+	<-entered
 	if got := calls.Load(); got != 1 {
 		t.Errorf("the wedged check body was entered %d times over 3 polls, want 1 — "+
 			"a probe under poll must not be a goroutine factory", got)
