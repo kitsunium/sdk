@@ -323,16 +323,27 @@ func proposeOnLeader(t *testing.T, c *cluster, kv string) coreconsensus.TokenVal
 	}
 }
 
-// compactedPast waits until the current leader's log starts past index.
+// compactedPast waits until the log of every live node starts past index:
+// whichever of them leads when the stopped node comes back, it can only
+// catch that node up by an install, which is what the callers exercise.
 func compactedPast(t *testing.T, c *cluster, index uint64) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if first, _ := c.leader(5 * time.Second).log.Bounds(); first > index {
+		behind := 0
+		for _, tn := range c.nodes {
+			if tn.node == nil {
+				continue
+			}
+			if first, _ := tn.log.Bounds(); first <= index {
+				behind++
+			}
+		}
+		if behind == 0 {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the leader never compacted past %d", index)
+			t.Fatalf("%d live nodes never compacted past %d", behind, index)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -1018,8 +1029,10 @@ func TestAnInstallKeepsTheTwoNewestSnapshots(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 		metas = must(lag.snaps.List())(t)
 	}
-	if len(metas) == 0 || len(metas) > 2 {
-		t.Fatalf("after the install the follower holds %d snapshots", len(metas))
+	// Exactly two: the installed one and the newest it held. One would be a
+	// retention that removed a snapshot too many.
+	if len(metas) != 2 {
+		t.Fatalf("after the install the follower holds %d snapshots, want 2", len(metas))
 	}
 	if metas[0].Position.Index <= held {
 		t.Fatalf("the follower's newest snapshot is at %d, not past the %d it held: no install", metas[0].Position.Index, held)

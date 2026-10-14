@@ -65,7 +65,7 @@ declares none and raises the core's.
   writes of one key reach the journal in the book's order; a slow journal
   holds back one entity and no other; a journal may read the census
   (`TestAJournalWriteHoldsOnlyItsOwnKey`, `TestAJournalMayReadTheMachine`,
-  `TestNoTwoKeysShareAJournalGate`). The gates were once 256 mutexes picked by
+  `TestAJournalGateHoldsBackItsOwnKeyOnly`). The gates were once 256 mutexes picked by
   the key's hash: two keys shared one a time in 256, and the test above
   failed that often (#304). Without a journal the gate is still taken, and
   costs one uncontended lock.
