@@ -8,6 +8,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 // Cryptographic erasure (ADR 0006 §4, §6): a data key destroyed, every box it
@@ -142,28 +143,49 @@ func (a *App) destroyKey(ctx context.Context, z *sealer, ref string) (bool, erro
 // sealsUnder reports whether a record of the store keeps, in its former
 // values or its versions, a value sealed under the data key ref: those of a
 // record whose subject changed since stay sealed under its former person's
-// key, which they still need. A store that seals nothing keeps none.
+// key, which they still need. A store that seals nothing keeps none. A box
+// whose key cannot be read is an error, never "not under ref": when kit
+// cannot tell, the key stays.
 func (s *StoreService[T]) sealsUnder(ctx context.Context, ref string) (bool, error) {
 	se := s.sealing()
 	if se == nil {
 		return false, nil
 	}
-	if h := s.historied(); h != nil && h.hist != nil {
-		docs, err := h.hist.List(ctx)
-		if err != nil {
-			return false, err
-		}
-		for _, d := range docs {
-			for _, entries := range d.Fields {
-				if slices.ContainsFunc(entries, func(e formerEntry) bool { return sealedUnder(e.Value, ref) }) {
-					return true, nil
-				}
-			}
-		}
+	if kept, err := s.formerSealUnder(ctx, ref); err != nil || kept {
+		return kept, err
 	}
 	if s.revisions == 0 {
 		return false, nil
 	}
+	return versionsSealUnder(ctx, se, ref)
+}
+
+// formerSealUnder reports whether a former value the store's history keeps
+// is sealed under the data key ref.
+func (s *StoreService[T]) formerSealUnder(ctx context.Context, ref string) (bool, error) {
+	h := s.historied()
+	if h == nil || h.hist == nil {
+		return false, nil
+	}
+	docs, err := h.hist.List(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, d := range docs {
+		for _, entries := range d.Fields {
+			for _, e := range entries {
+				if kept, err := sealedUnder(e.Value, ref); err != nil || kept {
+					return kept, err
+				}
+			}
+		}
+	}
+	return false, nil
+}
+
+// versionsSealUnder reports whether a version a record of se keeps is
+// sealed under the data key ref.
+func versionsSealUnder[T any](ctx context.Context, se *sealedEngine[T], ref string) (bool, error) {
 	entries, err := se.resting(ctx, 0)
 	if err != nil {
 		return false, err
@@ -176,26 +198,46 @@ func (s *StoreService[T]) sealsUnder(ctx context.Context, ref string) (bool, err
 		case err != nil:
 			return false, err
 		}
-		if slices.ContainsFunc(versions, func(v docstore.Version) bool { return sealedUnder(v.JSON, ref) }) {
-			return true, nil
+		for _, v := range versions {
+			if kept, err := sealedUnder(v.JSON, ref); err != nil || kept {
+				return kept, err
+			}
 		}
 	}
 	return false, nil
 }
 
 // sealedUnder reports whether raw — a record, a version, a former value —
-// holds a box sealed under the data key ref.
-func sealedUnder(raw []byte, ref string) bool {
-	if isBoxValue(raw) {
-		got, ok := boxRef(raw)
-		return ok && got == ref
-	}
+// holds a box sealed under the data key ref. A box whose data key cannot
+// be read is an error: kit cannot tell.
+func sealedUnder(raw []byte, ref string) (bool, error) {
 	found := false
-	_, _, _ = boxWalk(raw, nil, "", false, func(_ memberAt, value []byte) ([]byte, bool, error) {
-		if got, ok := boxRef(value); ok && got == ref {
-			found = true
-		}
-		return value, false, nil
-	})
-	return found
+	visit := func(_ memberAt, value []byte) ([]byte, bool, error) {
+		got, err := keyOfBox(value)
+		found = found || (err == nil && got == ref)
+		return value, false, err
+	}
+	if isBoxValue(raw) {
+		_, _, err := visit(memberAt{}, raw)
+		return found, err
+	}
+	_, _, err := boxWalk(raw, nil, "", false, visit)
+	return found, err
+}
+
+// keyOfBox is the data key a box names: "" for one sealed under data-key
+// itself, which names none, and an error for one whose key cannot be read.
+func keyOfBox(value []byte) (string, error) {
+	root, raw, ok := boxBytes(value)
+	switch {
+	case !ok:
+		return "", failure(CodeSealOpen, "SEAL_BOX_UNREADABLE", "a sealed value cannot be read", nil)
+	case root:
+		return "", nil
+	}
+	ref, err := secret.SubjectOf(raw)
+	if err != nil {
+		return "", failure(CodeSealOpen, "SEAL_BOX_UNREADABLE", "a sealed value cannot be read", err)
+	}
+	return ref, nil
 }

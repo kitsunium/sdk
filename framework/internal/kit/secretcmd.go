@@ -103,23 +103,7 @@ func (a *App) secretsSubcommand(ctx context.Context, all []managedSecret, c *sec
 func (a *App) managedSecrets() []managedSecret {
 	st := a.secretsNow()
 	prefix := appPrefix(a.name)
-	var out, own []managedSecret
-	for _, svc := range a.services {
-		if svc == nil {
-			continue
-		}
-		nodes, _ := svc.snapshot()
-		for _, n := range nodes {
-			s, ok := n.(*Secret)
-			switch {
-			case !ok:
-			case s.kitOwn():
-				own = append(own, managedSecret{name: s.keptName(), stored: s.keptName(), env: st.kitEnv, envName: s.envName(), variable: s.variable(a), decl: s})
-			default:
-				out = append(out, managedSecret{name: s.key(), stored: s.keptName(), env: st.env, envName: s.envName(), variable: s.variable(a), decl: s})
-			}
-		}
-	}
+	out, own := a.managedDeclared(st)
 	for _, d := range a.opts.databases {
 		name := d.urlSecret()
 		out = append(out, managedSecret{name: name, stored: name, env: st.env, envName: name, variable: secretVariable(prefix, name)})
@@ -134,6 +118,28 @@ func (a *App) managedSecrets() []managedSecret {
 		out = append(out, managedSecret{name: kitSecretPrefix + smtpSecret, stored: kitSecretPrefix + smtpSecret, env: st.kitEnv, envName: smtpSecret, variable: secretVariable("KIT", smtpSecret)})
 	}
 	return out
+}
+
+// managedDeclared are the secrets the mounted services declare: the
+// product's, then kit's own, unsorted.
+func (a *App) managedDeclared(st *secretStores) (product, own []managedSecret) {
+	for _, svc := range a.services {
+		if svc == nil {
+			continue
+		}
+		nodes, _ := svc.snapshot()
+		for _, n := range nodes {
+			s, ok := n.(*Secret)
+			switch {
+			case !ok:
+			case s.kitOwn():
+				own = append(own, managedSecret{name: s.keptName(), stored: s.keptName(), env: st.kitEnv, envName: s.envName(), variable: s.variable(a), decl: s})
+			default:
+				product = append(product, managedSecret{name: s.key(), stored: s.keptName(), env: st.env, envName: s.envName(), variable: s.variable(a), decl: s})
+			}
+		}
+	}
+	return product, own
 }
 
 // kitOwn reports whether kit rotates the secret with what depends on it:
@@ -223,18 +229,18 @@ func (m *managedSecret) versionLine(ctx context.Context, store secret.Store, nam
 // the environment's store. It refuses a terminal: what is typed there is
 // echoed, and a pipe or a file keeps the value off the screen.
 func (a *App) setSecret(ctx context.Context, all []managedSecret, name string, stdin io.Reader, stdout, stderr io.Writer) int {
-	m, ok := findManaged(all, name)
+	managed, ok := findManaged(all, name)
 	if !ok {
 		fmt.Fprintf(stderr, "no secret named %q: %s secrets lists them\n", name, a.name)
 		return 2
 	}
 	st := a.secretsNow()
 	if st.kept == nil {
-		fmt.Fprintf(stderr, "KIT_SECRETS=env keeps no store: set %s where the product runs\n", m.variable)
+		fmt.Fprintf(stderr, "KIT_SECRETS=env keeps no store: set %s where the product runs\n", managed.variable)
 		return 1
 	}
-	if _, err := st.kept.Get(ctx, m.stored); m.index && err == nil {
-		fmt.Fprintf(stderr, "%s is made once and never replaced: every reference kit keeps — a person's records, the holds, the journal, the data keys' names, a database's index rows — is made under it; set it only where the store holds none, to bring back the one a lost store held\n", m.name)
+	if _, err := st.kept.Get(ctx, managed.stored); managed.index && err == nil {
+		fmt.Fprintf(stderr, "%s is made once and never replaced: every reference kit keeps — a person's records, the holds, the journal, the data keys' names, a database's index rows — is made under it; set it only where the store holds none, to bring back the one a lost store held\n", managed.name)
 		return 2
 	}
 	if f, ok := stdin.(*os.File); ok {
@@ -259,14 +265,14 @@ func (a *App) setSecret(ctx context.Context, all []managedSecret, name string, s
 		fmt.Fprintln(stderr, "standard input is empty: a secret has a value")
 		return 1
 	}
-	v, err := st.kept.Put(ctx, m.stored, secret.New(value))
+	v, err := st.kept.Put(ctx, managed.stored, secret.New(value))
 	if err != nil {
 		fmt.Fprintln(stderr, "the store refused it:", errs.PublicOf(err))
 		return 1
 	}
-	fmt.Fprintf(stdout, "%s: version %d\n", m.name, v.Version)
-	if _, err := m.env.Get(ctx, m.envName); err == nil {
-		fmt.Fprintf(stderr, "%s is set: the environment wins over the store until it is unset\n", m.variable)
+	fmt.Fprintf(stdout, "%s: version %d\n", managed.name, v.Version)
+	if _, err := managed.env.Get(ctx, managed.envName); err == nil {
+		fmt.Fprintf(stderr, "%s is set: the environment wins over the store until it is unset\n", managed.variable)
 	}
 	return 0
 }

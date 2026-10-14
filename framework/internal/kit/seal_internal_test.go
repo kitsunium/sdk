@@ -3,6 +3,7 @@ package kit
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -663,6 +664,36 @@ func TestDeletingAPersonsLastRecordDestroysTheirKey(t *testing.T) {
 	}
 	if n := shreds(); n != 2 {
 		t.Errorf("%d shred entries, want two: ann's and eve's", n)
+	}
+}
+
+// A value kit cannot read the data key of — a box no longer decodable, in
+// a former value — means kit cannot tell whether a person's key is still
+// needed: the key stays when their last record is deleted, rather than the
+// unreadable box being read as "nothing depends on it".
+func TestAnUnreadableBoxKeepsAPersonsKey(t *testing.T) {
+	needsFileStore(t)
+	_, cards := sealedCards(t, "unreadablecards", t.TempDir())
+	ctx := t.Context()
+	must(t, cards.Insert(ctx, card{ID: "c3", Owner: "bob", Note: "bob's words"}))
+	_, err := cards.Update(ctx, "c3", func(c *card) error { c.Owner, c.Note = "cid", "cid's words"; return nil })
+	must(t, err)
+	h := cards.historied()
+	_, err = h.hist.Update(ctx, "c3", func(doc *historyRecord) error {
+		for p, list := range doc.Fields {
+			for i := range list {
+				list[i].Value = json.RawMessage(`"` + boxPrefix + `!!! not a box !!!"`)
+			}
+			doc.Fields[p] = list
+		}
+		return nil
+	})
+	must(t, err)
+	must(t, cards.Insert(ctx, card{ID: "c1", Owner: "ann", Note: "ann's"}))
+	copyOfC1 := restingAt(t, cards, "c1")
+	must(t, cards.Delete(ctx, "c1"))
+	if c, err := cards.sealing().openRecord(ctx, "c1", copyOfC1); err != nil || c.Note != "ann's" {
+		t.Errorf("ann's key went though a box kit cannot read might need it: %+v, %v", c, err)
 	}
 }
 
