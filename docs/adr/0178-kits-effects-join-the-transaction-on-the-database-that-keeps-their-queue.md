@@ -216,13 +216,36 @@ may write its own. The open question is its relation to kit's own bound:
 `<name>-timeout` defaults to 5 s too (`transact_sql.go:196-203`). With both at
 5 s, a call can reach its context's deadline exactly as SQLite gives up.
 
-**Recommendation: A for MySQL; for SQLite, keep 5 s but derive it from
-`<name>-timeout` minus a margin when the URL writes none.** One floor is one
-sentence in the docs and one refusal at start, and both servers below it are
-out of support. The SQLite busy timeout must stay under the call's bound so
-that a lost race says `SQLITE_BUSY` (a retryable storage failure the
-supervisor handles) rather than a cancelled context. PostgreSQL needs no
-floor beyond docstore's.
+**Recommendation: A for MySQL; for SQLite, a busy timeout strictly under
+`<name>-timeout`, by a fixed rule.** One floor is one sentence in the docs and
+one refusal at start, and both servers below it are out of support. PostgreSQL
+needs no floor beyond docstore's.
+
+The SQLite rule, with `T` the resolved `<name>-timeout`:
+
+- **The margin** is `m = max(250 ms, T / 10)`, and the busy timeout kit gives
+  the engine when the URL writes none is `B = T − m`: 4.5 s for the default
+  `T` of 5 s, 27 s for 30 s, 250 ms for 500 ms. `B < T` holds for every `T`,
+  so a lost race on the write lock comes back as `SQLITE_BUSY` — a storage
+  failure the supervisor restarts the consumer after — before the call's
+  context ends, never as a cancelled context indistinguishable from a slow
+  caller. The margin is what the call still needs once the lock is granted:
+  250 ms covers a statement on a local file, and a tenth of `T` keeps the
+  ratio for long timeouts.
+- **A `T` below 500 ms is refused at start for a SQLite database**
+  (`B` would fall under the 250 ms margin itself), with a diagnostic naming the
+  setting and the floor.
+- **A busy timeout the URL writes itself** (`_busy_timeout` or `_timeout`, the
+  two spellings the driver reads) **that is `≥ T` is refused at start**, with
+  a diagnostic naming the database, the value the URL gives and the bound it
+  must stay under (`database.sqlite-busy-timeout`). kit never rewrites it: a
+  value the operator wrote and kit silently replaced would be an inert
+  setting, which ADR 0031 refuses. A URL value under `T` is kept as written.
+- The connector is what writes the parameter today (`sqlite.go:29-33`), and it
+  does not know `T`: kit hands `B` to it through a sibling of `Engine`
+  (`database_interface.go`, sibling interfaces, never a method), so an engine
+  that does not implement it keeps its own default and the check above still
+  runs on the URL it is given.
 
 ### C3 — the journal's key: its own, or derived
 
@@ -374,9 +397,41 @@ database: stores, their histories and versions, kit's own stores but the
 data keys when the target is SQLite (they never live there,
 `database_place.go:40-46`), and the waiting and dead messages of each file
 queue C1 moves. It runs with the product stopped, refuses a target whose
-tables hold rows, copies sealed boxes as they are (no key changes hands) and
-verifies by counting. It comes last because it must copy what the other
-pull requests place.
+tables hold rows, and copies sealed boxes as they are (no key changes
+hands). It comes last because it must copy what the other pull requests
+place.
+
+**A copy is declared done only when the fingerprints match, never on a
+count.** Two equal counts say nothing about a truncated document, a version
+written under the wrong number or a payload cut short. After writing, `data
+copy` reads source and target back through the engines and compares:
+
+- **Each document**: `SHA-256(store ‖ key ‖ bytes)`, each part
+  length-prefixed, where `bytes` is the document as the store keeps it —
+  sealed members as boxes, never opened. Both engines keep the document as
+  written (ADR 0139 §D3), so a faithful copy has the same bytes.
+- **Each version**: `SHA-256(store ‖ key ‖ number ‖ instant ‖ metadata ‖
+  bytes)`, the metadata in sorted-key JSON — a renumbered or re-stamped
+  version differs.
+- **Each store**: a running SHA-256 over its records' digests in key order,
+  which both engines read in that order. Equal store digests end the check
+  for that store; unequal ones make `data copy` walk both sides again to
+  name the first key that differs, and fail without marking the copy done.
+- **Each queue**: the SQL broker mints its own message identifiers, so a
+  message's identity cannot be compared; each message is
+  `SHA-256(payload ‖ dead ‖ deliveries ‖ reason ‖ code)`, and the queue's
+  digests are compared as a sorted multiset — the same messages, the same
+  number of times, in any order.
+
+*Cost*: one more full read of each side, streamed — constant memory for the
+stores, 32 bytes per message for the queues' sort (32 MB for a million
+waiting messages); SHA-256 runs at hundreds of MB/s per core, so the check
+costs about what the copy's own read cost. *What it does not prove*: that
+the boxes open under the target's keys — the keys are copied as boxes too,
+and a sample of records is read through kit, opened, as the last step.
+**(assumed: that a dead letter can be written into the SQL broker as dead,
+with its reason and count; `DeadLetterManager` replays or deletes, it does
+not insert — to check before PR 10, and an SDK addition if not.)**
 
 **Options for the split.**
 
@@ -410,7 +465,7 @@ alternatives were the sending user's key (a system mail to a person would
 not follow that person's erasure) and sealing hooks in the spool's `Config`
 (an SDK surface for one consumer).
 
-## Consequences
+## Consequences / Semantics
 
 - The product with one default database gets every topic publication,
   queued command, mail and watch notice atomic with its writes; the
@@ -429,7 +484,7 @@ not follow that person's erasure) and sealing hooks in the spool's `Config`
 - A store with revisions keeps deleted records 30 days unless its setting
   says 0.
 
-## Risks
+### Risks
 
 - **The flush at commit runs product code paths later than today**: a
   publication's encoding stays at the call, but its `INSERT` happens at the
@@ -443,13 +498,36 @@ not follow that person's erasure) and sealing hooks in the spool's `Config`
 - **The deferred `EventQueued`** may interact with ADR 0141's waiting for
   an announcement (C1, assumed above).
 
-## Verified and not yet proved
+### Verified and not yet proved
 
 Verified by reading the code at `55c542da`: every **(verified)** line of the
 Context, with its file and line. Not proved, and owned by the PR that needs
-it: the four **(assumed)** lines — the spool's deferred announcement, the
+it: the five **(assumed)** lines — the spool's deferred announcement, the
 file engine's key order, the data directory always present with a
-database, WordPress's 30 days.
+database, WordPress's 30 days, a dead letter written as dead by `data copy`.
+
+## Breaking changes
+
+None today: this ADR is a design and changes no code. The pull requests it
+plans would change, once accepted:
+
+- **`kit.Transact`'s outcome** (PR 5). Today a held publication, dispatch,
+  mail or notice that its queue refuses after the commit is logged and
+  reported, and the commit stands (`transact.go:49-56`, `transact.go:436-442`).
+  Once its queue is on the transaction's database, the refusal happens
+  inside the transaction, before the commit, and `kit.Transact` returns it
+  with every write of the transaction rolled back. A caller that treated a
+  nil return as "written, effects maybe lost" now gets an error where it got
+  nil; one that relied on writes standing whatever the queue said must
+  handle it. The doc of `kit.Transact` is rewritten in the same PR. Where
+  the queue is elsewhere, the outcome is unchanged.
+- **Start refusals** (PR 5): a MySQL older than 8.0.1, a MariaDB older than
+  10.6, a SQLite `<name>-timeout` under 500 ms, and a SQLite URL whose busy
+  timeout reaches `<name>-timeout` no longer start.
+- **Deletion** (PR 9): on a store with `Revisions(n)`, a product's deletion
+  keeps the record restorable 30 days unless `<store>-trash` is 0.
+- C3 and C5 break nothing: entries sealed under their own keys keep
+  opening, and C5 only accepts types that were refused.
 
 ## Alternatives considered
 
@@ -463,6 +541,22 @@ preferred. Two more were set aside before the choices:
   everything). The SDK's `Deferrer` runs after a commit (ADR 0139 §D1); kit's
   transactions also exist on the data directory and in memory, where no
   SDK transactor runs.
+
+## Deferred
+
+- **An outbox relayed per database** (C1 option B), for a product whose
+  publishers and consumers sit on different databases; addable behind the
+  same held-effect tag without changing a call site.
+- **`Records.Changed(since)`** (C6 option C), an exact catch-up, which needs
+  a store-wide change sequence in both engines.
+- **An age limit on versions** (C4), deferred again as ADR 0143 deferred it.
+- **A retention for the journal**, which C3's monthly key makes one
+  destruction per month once the owner sets its length.
+- **Cross-process deduplication of a queued command's key**: the `pending`
+  set stays in one process.
+- The rest of #274 that this ADR does not design: the oldest `data-key`
+  version index, `privacy seal` on every store, the versions' weight and the
+  revisions in the Studio and the static graph, and the modules' items.
 
 ## References
 
