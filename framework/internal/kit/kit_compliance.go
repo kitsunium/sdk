@@ -56,6 +56,10 @@ var (
 	_ Keeper           = (*Service)(nil)
 	_ ModuleConfigurer = (*Service)(nil)
 
+	_ queueOwner = (*Command[struct{}, struct{}])(nil)
+	_ queueOwner = (*SubscriptionWorker[struct{}])(nil)
+	_ queueOwner = (*Watch)(nil)
+
 	_ starter = (*Loop)(nil)
 	_ starter = (*Routine)(nil)
 	_ starter = (*Secret)(nil)

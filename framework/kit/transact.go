@@ -16,7 +16,7 @@ import (
 //		if err := Decisions.Insert(ctx, d); err != nil {
 //			return err
 //		}
-//		return Changes.Publish(ctx, Closed{ID: id}) // held: queued after the commit
+//		return Changes.Publish(ctx, Closed{ID: id}) // held: queued at the commit
 //	})
 //
 // A transaction belongs to one database: the one its first store call
@@ -32,8 +32,13 @@ import (
 // returns at once —, a watch's notice, the store's write hooks that wake
 // workflows and loops, a workflow's OnTransition hooks. Each is checked when
 // it is made, so a caller's mistake returns to the caller; a rollback drops
-// them, and a savepoint's rollback its own. One a queue refuses after the
-// commit is logged and reported, and the commit stands; a process that dies
+// them, and a savepoint's rollback its own. A publish, a dispatch or a notice
+// whose queue lives on the transaction's database — the one that keeps the
+// service of its subscription, command or watch, by a store's rules — is
+// written in the transaction, just before it commits: a queue that refuses
+// it fails the transaction, every write undone, and Transact returns the
+// refusal. Every other one leaves after the commit: one a queue refuses then
+// is logged and reported, and the commit stands; a process that dies
 // between the commit and the release loses what was held.
 //
 // On a database the transaction is the database's own, at its default

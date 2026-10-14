@@ -10,12 +10,14 @@ import (
 	"sync"
 
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // kit's own migrations on a database (ADR 0004): its tables — a store's, its
-// history's, a workflow's journal —, each one migration of the SDK's
-// document store, under kit's version table, kit_migrations, and run before
+// history's, a workflow's journal, a consumer's queue (ADR 0178 C1) —, each
+// one migration of the SDK's document store or, for a queue, of its SQL
+// broker, under kit's version table, kit_migrations, and run before
 // the modules' and the product's.
 //
 // The SDK's migrator refuses a pending migration older than one already
@@ -139,10 +141,10 @@ func (a *App) resolveKitSet(d *database, g *tableRegistry, gen uint64) (kitSet, 
 	}
 	out := kitSet{set: migrationSet{name: setKit, table: tableKit, migrations: []sql.Migration{first}}}
 	used := map[uint64]bool{registryVersion: true}
-	known, fresh, versionsOf := a.kitTablesOf(d, g)
+	known, fresh, tables := a.kitTablesOf(d, g)
 	for _, rec := range known {
 		used[rec.Version] = true
-		m, err := tableMigration(d.dialect(), rec.Table, versionsOf[rec.Table], rec.Version)
+		m, err := tableMigration(d.dialect(), tables[rec.Table], rec.Version)
 		if err != nil {
 			return kitSet{}, err
 		}
@@ -150,7 +152,7 @@ func (a *App) resolveKitSet(d *database, g *tableRegistry, gen uint64) (kitSet, 
 	}
 	for _, name := range fresh {
 		v := freeVersion(used, gen<<32|uint64(nameDigest(name)))
-		m, err := tableMigration(d.dialect(), name, versionsOf[name], v)
+		m, err := tableMigration(d.dialect(), tables[name], v)
 		if err != nil {
 			return kitSet{}, err
 		}
@@ -161,14 +163,12 @@ func (a *App) resolveKitSet(d *database, g *tableRegistry, gen uint64) (kitSet, 
 }
 
 // kitTablesOf are kit's tables on d: those g records, with their record,
-// and the new ones, sorted; and, for a table of a store's versions, the
-// store's table it belongs to.
-func (a *App) kitTablesOf(d *database, g *tableRegistry) (known []tableRecord, fresh []string, versionsOf map[string]string) {
-	versionsOf = map[string]string{}
+// and the new ones, sorted; and each table by its name, which says what
+// makes it.
+func (a *App) kitTablesOf(d *database, g *tableRegistry) (known []tableRecord, fresh []string, tables map[string]kitTable) {
+	tables = map[string]kitTable{}
 	for _, t := range a.kitTables(d) {
-		if t.versionsOf != "" {
-			versionsOf[t.name] = t.versionsOf
-		}
+		tables[t.name] = t
 		if rec, ok := g.get(t.name); ok {
 			known = append(known, rec)
 			continue
@@ -178,7 +178,7 @@ func (a *App) kitTablesOf(d *database, g *tableRegistry) (known []tableRecord, f
 		}
 	}
 	slices.Sort(fresh)
-	return known, fresh, versionsOf
+	return known, fresh, tables
 }
 
 // freeVersion is v, or the first version above it used does not hold,
@@ -192,13 +192,17 @@ func freeVersion(used map[uint64]bool, v uint64) uint64 {
 }
 
 // tableMigration is the migration of one of kit's tables: the SDK's
-// document store's two tables, or — for a store's versions — the table of
-// versions beside the store's, which the SDK names from it.
-func tableMigration(dialect sql.Dialect, name, versionsOf string, version uint64) (sql.Migration, error) {
-	if versionsOf != "" {
-		return docstore.SQLVersionsMigration(dialect, versionsOf, version)
+// document store's two tables; for a store's versions, the table of
+// versions beside the store's, which the SDK names from it; for a
+// consumer's queue, the SQL broker's one table (ADR 0178 C1).
+func tableMigration(dialect sql.Dialect, t kitTable, version uint64) (sql.Migration, error) {
+	switch {
+	case t.queue:
+		return queue.SQLMigration(dialect, t.name, version)
+	case t.versionsOf != "":
+		return docstore.SQLVersionsMigration(dialect, t.versionsOf, version)
 	}
-	return docstore.SQLMigration(dialect, name, version)
+	return docstore.SQLMigration(dialect, t.name, version)
 }
 
 // nameDigest is the low half of a new table's version.

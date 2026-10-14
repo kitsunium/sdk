@@ -224,13 +224,22 @@ func (a *App) describeURL(d *database, url secret.Value) (DatabaseURLValue, erro
 }
 
 // openPool has d's engine open its pool, which asks for the URL as it is
-// now before each new connection.
+// now before each new connection. An engine whose connections wait for a
+// lock (LockWaiter) is given lockWait, under <name>-timeout.
 func (a *App) openPool(d *database, url secret.Value, desc *DatabaseURLValue) (*stdsql.DB, error) {
 	current := func(ctx context.Context) (secret.Value, error) {
 		v, _, err := a.databaseURL(ctx, d)
 		return v, err
 	}
-	pool, err := d.engine.Open(url, current)
+	var (
+		pool *stdsql.DB
+		err  error
+	)
+	if w, ok := d.engine.(LockWaiter); ok {
+		pool, err = w.OpenWaiting(url, current, lockWait(resolvedSetting(a, d.timeout)))
+	} else {
+		pool, err = d.engine.Open(url, current)
+	}
 	if err != nil || pool == nil {
 		return nil, dbFailure(CodeDatabaseOpen, "DATABASE_OPEN", fmt.Sprintf("database %q (%s at %s) could not be opened by its engine", d.name, engineTitle(d.engineName()), desc.location()), a.dbFields(d, desc)...)
 	}
@@ -289,10 +298,14 @@ func (a *App) startDatabase(ctx context.Context, r *databaseRun) error {
 }
 
 // bringUp checks an opened database — one that does not answer fails the
-// start as unavailable —, then runs its migrations, kit's own first, which
-// make its stores' tables.
+// start as unavailable —, holds its server to kit's floor
+// (database_floor.go), then runs its migrations, kit's own first, which make
+// its stores' and its queues' tables.
 func (a *App) bringUp(ctx context.Context, r *databaseRun, o *opened) error {
 	if err := a.checkDatabase(ctx, r); err != nil {
+		return err
+	}
+	if err := a.checkServerFloor(ctx, r, o); err != nil {
 		return err
 	}
 	sets, registry, err := a.migrateAtStart(ctx, r.d, o)

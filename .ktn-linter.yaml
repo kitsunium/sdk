@@ -76,6 +76,13 @@ vocabulary:
     # they are. The -er form the rule would impose is "DecompressBoundedder",
     # which is not a word in any reading. Same argument as core/app/mail.Transport.
     - github.com/kitsunium/sdk/internal/core/data/transform.BoundedDecompressor
+    # kit.LockWaiter (ADR 0178 C2) is the sibling of kit.Engine an engine
+    # implements when its connections wait for a lock — SQLite's busy
+    # timeout. It already ends in -er and names the role ("an engine that
+    # waits for a lock"); the method's name is fixed by the port it extends,
+    # OpenWaiting beside Engine.Open, and the derivation the rule imposes,
+    # "OpenWaitinger", is not a word. Same argument as BoundProver above.
+    - github.com/kitsunium/sdk/framework/internal/kit.LockWaiter
     - github.com/kitsunium/sdk/internal/core/net.ConnHandler
     - github.com/kitsunium/sdk/internal/core/net.PacketHandler
     # EntryFetcher and Tagger are ADR 0039 siblings of the frozen core/data/cache.Store

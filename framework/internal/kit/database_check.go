@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
@@ -18,7 +19,8 @@ import (
 // in memory that a database keeps by name; two of kit's tables that would
 // take one name. Then, once the environment's stores are open, each URL:
 // set nowhere outside dev, unreadable, not one its engine reads, or leaving
-// TLS to the driver outside dev.
+// TLS to the driver outside dev; and a SQLite database's timing, against
+// its floor (database_floor.go).
 
 // databaseCheck is one judgement of the declared databases: what it found,
 // and what it learns as it goes.
@@ -211,6 +213,11 @@ func (a *App) databaseURLProblems() []model.Diagnostic {
 		}
 		if p := a.urlProblem(d, a.source(&d.decl)); p != nil {
 			out = append(out, *p)
+		}
+		if d.dialect() == sql.DialectSQLite {
+			if p := a.sqliteProblem(d, a.source(&d.decl)); p != nil {
+				out = append(out, *p)
+			}
 		}
 	}
 	return out

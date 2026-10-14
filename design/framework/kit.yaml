@@ -151,6 +151,9 @@ packages:
           - comment: 0.4.2.34 — a database's URL or tuning cannot be used
             name: CodeDatabaseConfig
             value: "0x00_04_02_22"
+          - comment: "0.4.2.76 — a database's server is below kit's floor: MySQL 8.0.1, MariaDB 10.6"
+            name: CodeDatabaseVersion
+            value: "0x00_04_02_4C"
           - doc: |-
               A transaction wrote a store another database keeps than the one it
               belongs to — the data directory counting as one: refused, Invalid.
@@ -195,7 +198,7 @@ packages:
           - comment: 0.4.2.46 — a queued command's input does not encode for its queue
             name: CodeCommandEncode
             value: "0x00_04_02_2E"
-          - comment: "0.4.2.47 — a watch's queue could not be opened, or refused a notice: the write stands, its notice is lost"
+          - comment: "0.4.2.47 — a watch's queue could not be opened, or refused a notice: lost when the write stands, the transaction's failure when it joined it"
             doc: Watches (ADR 0008).
             name: CodeWatchQueue
             value: "0x00_04_02_2F"
@@ -2286,7 +2289,7 @@ packages:
           		if err := Decisions.Insert(ctx, d); err != nil {
           			return err
           		}
-          		return Changes.Publish(ctx, Closed{ID: id}) // held: queued after the commit
+          		return Changes.Publish(ctx, Closed{ID: id}) // held: queued at the commit
           	})
 
           A transaction belongs to one database: the one its first store call
@@ -2302,8 +2305,13 @@ packages:
           returns at once —, a watch's notice, the store's write hooks that wake
           workflows and loops, a workflow's OnTransition hooks. Each is checked when
           it is made, so a caller's mistake returns to the caller; a rollback drops
-          them, and a savepoint's rollback its own. One a queue refuses after the
-          commit is logged and reported, and the commit stands; a process that dies
+          them, and a savepoint's rollback its own. A publish, a dispatch or a notice
+          whose queue lives on the transaction's database — the one that keeps the
+          service of its subscription, command or watch, by a store's rules — is
+          written in the transaction, just before it commits: a queue that refuses
+          it fails the transaction, every write undone, and Transact returns the
+          refusal. Every other one leaves after the commit: one a queue refuses then
+          is logged and reported, and the commit stands; a process that dies
           between the commit and the release loses what was held.
 
           On a database the transaction is the database's own, at its default
@@ -2812,6 +2820,30 @@ packages:
                 - type: "*stdsql.DB"
                 - type: error
         name: Engine
+      - doc: |-
+          LockWaiter is an [Engine] whose connections wait a bounded time for a lock
+          another connection holds — SQLite's busy timeout —, a sibling of Engine
+          (ADR 0178 C2). kit opens such an engine's pool with OpenWaiting instead
+          of Open, and gives it a wait under <name>-timeout, so that a lost race on
+          the lock comes back as the engine's refusal before the call's own
+          deadline. An engine that does not implement it keeps its own wait.
+        interface:
+          methods:
+            - doc: |-
+                OpenWaiting opens the pool url names, as Open does, its connections
+                waiting wait for a lock when url writes no wait of its own.
+              in:
+                - name: url
+                  type: secret.Value
+                - name: current
+                  type: func(context.Context) (secret.Value, error)
+                - name: wait
+                  type: time.Duration
+              name: OpenWaiting
+              out:
+                - type: "*stdsql.DB"
+                - type: error
+        name: LockWaiter
       - doc: "DatabaseConfigurer configures a database: [Keeps], [Migrations]."
         interface:
           unexported: true
@@ -4452,7 +4484,10 @@ packages:
               Publish sends msg to every subscription. It returns once every
               subscription's queue has accepted the message; delivery happens later.
               Inside a transaction ([Transact], a command's) the message is encoded now
-              and queued once the transaction commits: a rollback drops it.
+              and queued at the commit: in the transaction, just before it commits, for
+              a subscription whose queue lives on the transaction's database — a queue
+              that refuses it then fails the transaction —, once it committed for the
+              others. A rollback drops it.
             in:
               - name: ctx
                 type: context.Context
@@ -5142,6 +5177,15 @@ packages:
           sibling interfaces, never by a method.
         name: Engine
         target: ikit.Engine
+      - doc: |-
+          LockWaiter is an [Engine] whose connections wait a bounded time for a lock
+          another connection holds — SQLite's busy timeout —, a sibling of Engine
+          (ADR 0178 C2). kit opens such an engine's pool with OpenWaiting instead
+          of Open, and gives it a wait under <name>-timeout, so that a lost race on
+          the lock comes back as the engine's refusal before the call's own
+          deadline. An engine that does not implement it keeps its own wait.
+        name: LockWaiter
+        target: ikit.LockWaiter
       - doc: "DatabaseOption configures a database: [Keeps], [Migrations]."
         name: DatabaseOption
         target: ikit.DatabaseConfigurer
@@ -5804,6 +5848,12 @@ packages:
         name: CodeDatabaseConfig
         type: errs.Code
         value: "0x00_04_02_22"
+      - doc: |-
+          CodeDatabaseVersion refuses the start of a database whose server is below
+          kit's floor: MySQL 8.0.1 or MariaDB 10.6, which lease with SKIP LOCKED.
+        name: CodeDatabaseVersion
+        type: errs.Code
+        value: "0x00_04_02_4C"
       - doc: CodeTransactionSpan is CodeTransactionSpan.
         name: CodeTransactionSpan
         type: errs.Code
@@ -7618,7 +7668,7 @@ packages:
           		if err := Decisions.Insert(ctx, d); err != nil {
           			return err
           		}
-          		return Changes.Publish(ctx, Closed{ID: id}) // held: queued after the commit
+          		return Changes.Publish(ctx, Closed{ID: id}) // held: queued at the commit
           	})
 
           A transaction belongs to one database: the one its first store call
@@ -7634,8 +7684,13 @@ packages:
           returns at once —, a watch's notice, the store's write hooks that wake
           workflows and loops, a workflow's OnTransition hooks. Each is checked when
           it is made, so a caller's mistake returns to the caller; a rollback drops
-          them, and a savepoint's rollback its own. One a queue refuses after the
-          commit is logged and reported, and the commit stands; a process that dies
+          them, and a savepoint's rollback its own. A publish, a dispatch or a notice
+          whose queue lives on the transaction's database — the one that keeps the
+          service of its subscription, command or watch, by a store's rules — is
+          written in the transaction, just before it commits: a queue that refuses
+          it fails the transaction, every write undone, and Transact returns the
+          refusal. Every other one leaves after the commit: one a queue refuses then
+          is logged and reported, and the commit stands; a process that dies
           between the commit and the release loses what was held.
 
           On a database the transaction is the database's own, at its default

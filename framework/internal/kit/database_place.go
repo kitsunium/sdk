@@ -75,6 +75,46 @@ func (a *App) keeperOf(s placementSource) *database {
 	return nil
 }
 
+// queueKeeper is the database that keeps the queue of the consumer b — a
+// subscription's, a watch's, a queued command's (ADR 0178 C1) —, by the
+// rules a store follows: the one that keeps its service, else its module,
+// else the default database; nil when none does. kit's own services are
+// placed by name only, as their stores are.
+func (a *App) queueKeeper(b *nodeBase) *database {
+	_, byService, byModule, byDefault := a.keepersOf(b)
+	switch {
+	case byService != nil:
+		return byService
+	case byModule != nil:
+		return byModule
+	case !kitOwn(b.svc):
+		return byDefault
+	}
+	return nil
+}
+
+// queueKeptOn reports whether the queue of the consumer b lives on d: d
+// keeps it, and the app keeps its data neither in memory nor without a data
+// directory — where a store's data would not be on d either.
+func (a *App) queueKeptOn(b *nodeBase, d *database) bool {
+	return !a.opts.memory && a.dataDir != "" && a.queueKeeper(b) == d
+}
+
+// queueDatabase is the open database the queue of the consumer b lives on,
+// nil when its queue is a file or a memory one: no database keeps it, the
+// app keeps its data in memory or has no data directory, or the database
+// is not open — in dev without its URL.
+func (a *App) queueDatabase(b *nodeBase) *databaseRun {
+	d := a.queueKeeper(b)
+	if d == nil || !a.queueKeptOn(b, d) {
+		return nil
+	}
+	if r := a.runOf(d); r != nil && r.open() {
+		return r
+	}
+	return nil
+}
+
 // keepersOf are the first database that keeps a store by name, the first
 // that keeps its service, the first that keeps its module, and the default
 // database.

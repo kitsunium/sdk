@@ -3,7 +3,6 @@ package kit
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"sync"
 
@@ -16,7 +15,8 @@ import (
 
 // Queued commands (kit.Queued): Dispatch checks the command as its caller —
 // its validate tags, its authorization, its key — and puts it in the
-// command's own queue, the SDK's: a file queue under
+// command's own queue, the SDK's: a table on the database that keeps the
+// command's service (ADR 0178 C1), else a file queue under
 // <data>/<service>/commands/<name>, memory without a data directory. A
 // consumer, a loop of the daemon, handles it in the dispatcher's trace, as
 // the user who dispatched it, the policies around the handling; a failure is
@@ -26,6 +26,10 @@ import (
 // commandQueue is a queued command's queue in one run of the app.
 type commandQueue struct {
 	broker queue.Broker
+	// db is the database the queue lives on, nil for a file or a memory
+	// queue: a dispatch in a transaction on it joins the transaction (ADR
+	// 0178 C1).
+	db *databaseRun
 	// sup runs the command's consumer while the app runs: the SDK's
 	// supervisor, which restarts it after its queue fails.
 	sup *lifecycle.Supervisor
@@ -126,8 +130,11 @@ func (c *Command[C, R]) claim(ctx context.Context, a *App, q *commandQueue, in C
 }
 
 // put queues env, with the dispatch's trace and user — inside a
-// transaction, encoded now and queued once it commits: a rollback drops it,
-// and gives its key back.
+// transaction, encoded now and queued at the commit: in the transaction,
+// just before it commits, when the command's queue lives on the
+// transaction's database — a queue that refuses it then fails the
+// transaction —, once it committed otherwise. A rollback drops it, and gives
+// its key back.
 func (c *Command[C, R]) put(ctx context.Context, q *commandQueue, key string, env queuedEnvelope[C]) error {
 	env.Trace, _ = trace.FormatTraceParent(trace.SpanContextFromContext(ctx))
 	if uid, ok := UserID(ctx); ok {
@@ -153,7 +160,9 @@ func (c *Command[C, R]) put(ctx context.Context, q *commandQueue, key string, en
 		}
 		return err
 	}
-	if hold(ctx, heldEffect{node: c.id, release: release, drop: func() { q.release(key) }}) {
+	// Joined, a refusal fails the transaction, whose rollback gives the key
+	// back (drop).
+	if hold(ctx, heldEffect{node: c.id, release: release, joined: queue, drop: func() { q.release(key) }, queue: q.db}) {
 		markSpan(ctx, c.id, "held", "commit")
 		return nil
 	}
@@ -258,11 +267,11 @@ func (c *Command[C, R]) start(_ context.Context, a *App) error {
 	if !c.opts.queued {
 		return nil
 	}
-	broker, err := c.open(a)
+	broker, db, err := a.openConsumerQueue(&c.nodeBase, c.queueUnder(), c.opts.deliveries.maxDeliveries)
 	if err != nil {
 		return failure(CodeCommandQueue, "COMMAND_QUEUE", "a queued command's queue cannot be opened", err, errs.String("command", c.id))
 	}
-	q := &commandQueue{broker: broker, pending: map[string]bool{}}
+	q := &commandQueue{broker: broker, db: db, pending: map[string]bool{}}
 	loop := a.loop(c.id+" consumer", c.id, model.LoopConsumer, consumerHow)
 	c.queue.Store(q)
 	run := consumer{a: a, loop: loop, node: c.id, name: c.name, wake: model.WakeTopic}
@@ -277,10 +286,13 @@ func (c *Command[C, R]) start(_ context.Context, a *App) error {
 	return nil
 }
 
-// open opens the command's queue: a file queue under the data directory,
-// memory without one; a subscription's lease and retry delay.
-func (c *Command[C, R]) open(a *App) (queue.Broker, error) {
-	return a.openQueue(filepath.Join(c.svc.name, "commands", c.name), c.opts.deliveries.maxDeliveries)
+// queueUnder is what the command's queue is kept under, "" for a command
+// that is not queued: it has none.
+func (c *Command[C, R]) queueUnder() string {
+	if !c.opts.queued {
+		return ""
+	}
+	return underCommands
 }
 
 // consume runs the consumer until ctx ends. One at a time per worker: a
@@ -318,7 +330,7 @@ func (c *Command[C, R]) stop(ctx context.Context, _ *App) error {
 // attempts, its parallelism, where it waits and, running, its dead letters.
 func (c *Command[C, R]) describeQueue(a *App, info *model.CommandInfo) {
 	d := c.opts.deliveries
-	info.Mode, info.MaxDeliveries, info.Parallelism, info.Queue = model.ModeQueued, d.maxDeliveries, d.parallelism, queueOf(a)
+	info.Mode, info.MaxDeliveries, info.Parallelism, info.Queue = model.ModeQueued, d.maxDeliveries, d.parallelism, queueWhere(a, &c.nodeBase)
 	q := c.queue.Load()
 	if q == nil || a == nil || !a.running() {
 		return
@@ -331,12 +343,21 @@ func (c *Command[C, R]) describeQueue(a *App, info *model.CommandInfo) {
 }
 
 // queuePlace says where a queue of each kind waits, in a mechanic's label.
-var queuePlace = map[string]string{"file": "on disk", "memory": "in memory"}
+var queuePlace = map[string]string{"sql": "on its database", "file": "on disk", "memory": "in memory"}
 
-// queueOf is where a's queues are: "file" under a data directory,
-// "memory" without one.
-func queueOf(a *App) string {
-	if a != nil && a.dataDir != "" {
+// queueWhere is where the queue of the consumer b of a waits: "sql" on the
+// database that keeps it (ADR 0178 C1) — open, or which the app will open
+// —, "file" under a data directory, "memory" without one.
+func queueWhere(a *App, b *nodeBase) string {
+	switch {
+	case a == nil:
+		return "memory"
+	case b != nil:
+		if d := a.queueKeeper(b); d != nil && a.queueKeptOn(b, d) && a.storesOnDatabase(d) {
+			return "sql"
+		}
+	}
+	if a.dataDir != "" {
 		return "file"
 	}
 	return "memory"
@@ -346,7 +367,7 @@ func queueOf(a *App) string {
 // pipeline: where it waits, and how many attempts it gets.
 func (c *Command[C, R]) queueMechanic(a *App) model.Mechanic {
 	d := c.opts.deliveries
-	where := queueOf(a)
+	where := queueWhere(a, &c.nodeBase)
 	return model.Mechanic{
 		Kind: "queue", Label: fmt.Sprintf("%s · %d attempts", queuePlace[where], d.maxDeliveries), Package: "github.com/kitsunium/sdk/pkg/v1/data/queue",
 		Config: map[string]string{"queue": where, "maxDeliveries": strconv.Itoa(d.maxDeliveries), "parallelism": strconv.Itoa(d.parallelism)},

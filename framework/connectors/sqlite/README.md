@@ -20,7 +20,7 @@ var App = kit.NewApp("vigie", intake.Service, audit.Service).With(
 )
 ```
 
-Its URL, in the variable \<APP>\_\<NAME>\_URL, is the file's path — or a file: URI, with the driver's parameters —; without one, kit keeps the database in \<data>/\<name>.sqlite. The engine opens the file in WAL mode with a busy timeout, and its transactions take the write lock when they begin (\_txlock=immediate), so two writers queue rather than fail; a parameter the URL writes itself wins.
+Its URL, in the variable \<APP>\_\<NAME>\_URL, is the file's path — or a file: URI, with the driver's parameters —; without one, kit keeps the database in \<data>/\<name>.sqlite. The engine opens the file in WAL mode with a busy timeout, and its transactions take the write lock when they begin (\_txlock=immediate), so two writers queue rather than fail; a parameter the URL writes itself wins. It is a kit.LockWaiter: kit gives it a busy timeout under \<name>-timeout, T − max(250ms, T/10), and refuses at start a T under 500ms or a URL whose own busy timeout reaches T.
 
 On dragonfly, illumos and solaris, which modernc.org/sqlite does not port to, the module builds and Open refuses with proc.UnsupportedPlatform.
 
