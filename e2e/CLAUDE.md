@@ -8,8 +8,10 @@ The SDK conformance binary: a runtime test harness that calls the **public
 *works* on a platform, not merely that it *compiles* (the build bar is the
 cross-platform matrix; this is the runtime bar — see ADR 0018). Run on real
 kernels by `.github/workflows/e2e-cross.yml` (GitHub's Linux, macOS and Windows
-runners, the three BSDs, OmniOS and Oracle Solaris in VMs) and, on demand, on the lab's VMs by
-`.github/workflows/e2e-vm.yml`.
+runners, the three BSDs, OmniOS and Oracle Solaris in VMs, and — as root with a
+delegated cgroup v2 subtree under a real systemd or OpenRC — its `linux-init`
+job, ADR 0175) and, on demand, on the lab's three Linux VMs by
+`.github/workflows/e2e-vm.yml`, which boot each distro's own kernel.
 
 The module also hosts the **Docker-backed integration suites** under
 `integration/` (ADR 0157): the SQL mechanisms and the database writers against
@@ -61,7 +63,8 @@ e2e/
   table, naming the stuck function. The rule was already written and a check
   hung anyway — debian-systemd and fedora-systemd ran to e2e-vm's 25-minute cap
   with no output, because the table prints only after every check returns
-  (#118). The hung goroutine is abandoned, not stopped; the run moves on.
+  (#118). The hang was real: a cgroup-only spawn re-ran the host program
+  instead of the trampoline; `e2e-cross`'s `linux-init` job reproduced it. The hung goroutine is abandoned, not stopped; the run moves on.
 - **The tree is linted like the rest of the SDK** (`ktn-linter`, phases 1-8). It
   used to be excluded as "a runtime test harness, not library code"; the rules
   turned out to apply, and the exemption was mostly hiding missing tests. The
@@ -81,7 +84,7 @@ e2e/
   by `go build` only (`GOWORK=off`, via its `replace` directives). Validated by
   `bazel-ci.yml`'s `cross-build` (compile and vet on every GOOS/GOARCH cell) and
   `test-386` jobs, which loop over the module census, and by `e2e-cross.yml` and
-  `e2e-vm.yml` (real-kernel runs). It is intentionally NOT a Bazel target.
+  `e2e-vm.yml` (real-kernel runs; the cgroup rows only run as root, in `linux-init`). It is intentionally NOT a Bazel target.
 
 ## Do NOT
 

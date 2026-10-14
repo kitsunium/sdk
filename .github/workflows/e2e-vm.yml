@@ -1,5 +1,23 @@
-name: E2E VM tests (real OS kernels)
+name: E2E VM tests (distro kernels, lab only)
 
+# WHAT IS LEFT HERE, AND WHY (issue #118, ADR 0175). Everything that can run on
+# GitHub's public runners does, in e2e-cross.yml, which costs the lab nothing:
+#
+#   - Windows           : `native` windows-latest leg (conformance + every
+#                         package, gating). The windows-11 VM ran the same
+#                         binaries; the SDK has no Windows service (SCM) code,
+#                         so there is no SCM behaviour to prove on either.
+#   - FreeBSD, OpenBSD, NetBSD : the `bsd` job boots the same kernels in QEMU.
+#   - systemd, OpenRC, cgroup v2, root : the `linux-init` job (the runner's own
+#                         systemd; Debian and Fedora with their systemd as PID 1;
+#                         Alpine with OpenRC), privileged, cgroup delegated.
+#
+# What stays, and only by hand: the three Linux legs below, because a container
+# shares the runner's kernel (Azure 6.17) while these VMs boot each distro's OWN
+# kernel and its own init from power-on. Hosted runners do expose /dev/kvm
+# (observed on e2e-cross run 38526423869), so a QEMU guest is possible there;
+# nobody has built that image pipeline yet. When it exists, this file goes.
+#
 # Runs the platform-sensitive test suites on REAL operating systems — not
 # cross-compile-only. The proc domain (spawn, cgroup, rlimit, signals, reaper,
 # sd_notify) exercises live syscalls whose behaviour only a real kernel can
@@ -69,7 +87,7 @@ jobs:
       matrix:
         include:
           # name : Proxmox test VMID (template+100) : GOOS/GOARCH : SSH user : exe suffix
-          # ssh_wait (seconds, default 300): how long "Wait for SSH" polls.
+          # (windows-11 and the BSDs left for e2e-cross.yml, ADR 0175: no ssh_wait override remains.)
           - {
               name: debian-systemd,
               vmid: 204,
@@ -93,43 +111,6 @@ jobs:
               goarch: amd64,
               user: root,
               ext: "",
-            }
-          - {
-              name: freebsd,
-              vmid: 209,
-              goos: freebsd,
-              goarch: amd64,
-              user: root,
-              ext: "",
-            }
-          - {
-              name: openbsd,
-              vmid: 210,
-              goos: openbsd,
-              goarch: amd64,
-              user: root,
-              ext: "",
-            }
-          - {
-              name: netbsd,
-              vmid: 211,
-              goos: netbsd,
-              goarch: amd64,
-              user: root,
-              ext: "",
-            }
-          - {
-              name: windows-11,
-              vmid: 213,
-              goos: windows,
-              goarch: amd64,
-              user: kodflow,
-              ext: ".exe",
-              # A cold boot of Windows 11 from the base snapshot, then sshd
-              # starting as a service, overran 300s on run 29972089570 with
-              # the IP already leased (#118). The step below still says
-              # whether port 22 is open or closed when 600s is not enough.
-              ssh_wait: 600,
             }
     name: ${{ matrix.name }}
     steps:
@@ -251,7 +232,7 @@ jobs:
       # is a key or account problem.
       - name: Wait for SSH
         env:
-          SSH_WAIT: ${{ matrix.ssh_wait || 300 }}
+          SSH_WAIT: "300"
         run: |
           IP=${{ steps.ip.outputs.ip }}
           last=""

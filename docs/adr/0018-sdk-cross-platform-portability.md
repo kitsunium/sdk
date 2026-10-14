@@ -64,8 +64,10 @@ package **always compiles**; only behaviour degrades.
   non-zero on any failing cell) and its CI mirror the `cross-build` job in `.github/workflows/bazel-ci.yml`
   (a GitHub-hosted `GOOS/GOARCH` matrix, no infra dependency, `CGO_ENABLED=0`). A
   new platform-specific call that drops a package fails the matrix before merge.
-- **Runtime bar** is validated by `.github/workflows/e2e-vm.yml` on **real OS
-  kernels**. Bazel remains the canonical Linux gate (ADR 0004); the BSDs and
+- **Runtime bar** is validated on **real OS kernels** — since ADR 0175 by
+  `.github/workflows/e2e-cross.yml` on GitHub's runners (the text below describes
+  the lab mechanism of `e2e-vm.yml`, which now keeps only the three Linux distro
+  VMs). Bazel remains the canonical Linux gate (ADR 0004); the BSDs and
   Windows have no Bazel, so the platform-selected test suites run via
   `go test -c` (cross-compiled standalone binaries, no Go on the target) → SCP →
   SSH-execute on a persistent Proxmox VM (kodflow/labs infra: `[self-hosted, proxmox]`
