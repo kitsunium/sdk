@@ -55,21 +55,43 @@ func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
 	if l == nil {
 		t.Fatal("no leader")
 	}
+	var tok coreconsensus.TokenValue
 	for i := range n {
-		propose(t, l.node, fmt.Sprintf("k%d=v%d", i, i))
+		tok = propose(t, l.node, fmt.Sprintf("k%d=v%d", i, i))
 	}
-	c.waitAppliedDisk(nodes)
+	c.waitAppliedDisk(nodes, tok.Index)
 	return c, nodes
 }
 
-func (c *cluster) waitAppliedDisk(nodes []*diskNode) {
-	var want uint64
+// waitAppliedDisk waits until every node applied index AND its log records
+// a commit at or past it, or fails the test naming who is behind.
+//
+// Both halves are what the callers go on to rely on. Applied is what the
+// state machine holds; the recorded commit is what an offline operation
+// reads after the crash — Recover keeps a node's log up to its HardState
+// commit and cuts the rest — and a follower can apply an entry before the
+// batch carrying its commit reaches the log. The index is the last
+// proposal's token, never the largest Status().Commit at the time of the
+// call: Status is a node's view after its last turn, and the proposer can be
+// answered before the turn that commits publishes it. A deadline that ran
+// out used to return in silence, so a lagging node was crashed and the
+// failure surfaced later as a key the recovered history did not hold.
+func (c *cluster) waitAppliedDisk(nodes []*diskNode, index uint64) {
+	c.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
 	for _, dn := range nodes {
-		want = max(want, dn.node.Status().Commit)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for _, dn := range nodes {
-		for dn.node.Status().Applied < want && time.Now().Before(deadline) {
+		for {
+			hs, err := dn.dd.Log().HardState()
+			if err != nil {
+				c.t.Fatalf("node %d hard state: %v", dn.id, err)
+			}
+			st := dn.node.Status()
+			if st.Applied >= index && hs.Commit >= index {
+				break
+			}
+			if time.Now().After(deadline) {
+				c.t.Fatalf("node %d: applied %d, recorded commit %d, want both >= %d", dn.id, st.Applied, hs.Commit, index)
+			}
 			time.Sleep(5 * time.Millisecond)
 		}
 	}
