@@ -357,8 +357,7 @@ jobs:
           KIND: ${{ matrix.kind }}
         run: |
           set -euo pipefail
-          docker run -d --name init --privileged --tmpfs /run --tmpfs /tmp sdk-e2e-init
-          docker cp bins init:/opt/bins
+          docker run -d --name init --privileged --tmpfs /run --tmpfs /tmp -v "$PWD":/work:ro sdk-e2e-init
           for _ in $(seq 1 60); do
             if [ "$KIND" = systemd ]; then
               state=$(docker exec init systemctl is-system-running 2>/dev/null || true)
@@ -380,19 +379,19 @@ jobs:
           set -uo pipefail
           if [ "$KIND" = systemd ]; then
             docker exec init systemd-run --quiet --wait --pipe --collect \
-              -p Delegate=yes -p WorkingDirectory=/opt sh /opt/bins/run.sh
+              -p Delegate=yes -p WorkingDirectory=/work sh /work/bins/run.sh
           else
             # No systemd here to delegate a subtree: do what a container
             # entrypoint does. Move every process of the container's cgroup
             # into a leaf (cgroup v2 forbids a cgroup holding processes AND
             # controllers for its children), then enable the controllers.
-            docker exec -w /opt init sh -c '
+            docker exec -w /work init sh -c '
               set -e
               cd /sys/fs/cgroup
               mkdir -p init
               for p in $(cat cgroup.procs); do echo "$p" > init/cgroup.procs 2>/dev/null || true; done
               echo "+cpu +memory +pids +io" > cgroup.subtree_control
-              exec sh /opt/bins/run.sh'
+              exec sh /work/bins/run.sh'
           fi
 
       - name: Container log (on failure)
