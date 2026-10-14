@@ -2305,10 +2305,11 @@ packages:
           returns at once —, a watch's notice, the store's write hooks that wake
           workflows and loops, a workflow's OnTransition hooks. Each is checked when
           it is made, so a caller's mistake returns to the caller; a rollback drops
-          them, and a savepoint's rollback its own. A publish, a dispatch or a notice
-          whose queue lives on the transaction's database — the one that keeps the
-          service of its subscription, command or watch, by a store's rules — is
-          written in the transaction, just before it commits: a queue that refuses
+          them, and a savepoint's rollback its own. A publish, a dispatch, a mail or a
+          notice whose queue lives on the transaction's database — the one that
+          keeps the service of its subscription, command, mailer or watch, by a
+          store's rules — is written in the transaction, just before it commits, a
+          mail sealed under kit's data-key: a queue that refuses
           it fails the transaction, every write undone, and Transact returns the
           refusal. Every other one leaves after the commit: one a queue refuses then
           is logged and reported, and the commit stands; a process that dies
@@ -3132,7 +3133,12 @@ packages:
               delivery — and puts it in the outbox. It returns the message's outbox ID.
               Inside a transaction ([Transact], a command's) the mail waits for the
               commit — a rollback drops it —, and the ID returned at once is the one
-              the mail keeps.
+              the mail keeps. When the outbox lives on the transaction's database —
+              the one that keeps the mailer's service, by a store's rules — the mail
+              is written in the transaction, sealed, just before it commits: it
+              exists if and only if the transaction commits, the mailbox hears of it
+              after the commit, and an outbox that refuses it fails the transaction.
+              Elsewhere it is put in the outbox after the commit.
 
               A message without a sender gets the mailer's ([From]); without a date, the
               app's time; without a Message-ID, one made of its outbox ID, which every
@@ -7684,10 +7690,11 @@ packages:
           returns at once —, a watch's notice, the store's write hooks that wake
           workflows and loops, a workflow's OnTransition hooks. Each is checked when
           it is made, so a caller's mistake returns to the caller; a rollback drops
-          them, and a savepoint's rollback its own. A publish, a dispatch or a notice
-          whose queue lives on the transaction's database — the one that keeps the
-          service of its subscription, command or watch, by a store's rules — is
-          written in the transaction, just before it commits: a queue that refuses
+          them, and a savepoint's rollback its own. A publish, a dispatch, a mail or a
+          notice whose queue lives on the transaction's database — the one that
+          keeps the service of its subscription, command, mailer or watch, by a
+          store's rules — is written in the transaction, just before it commits, a
+          mail sealed under kit's data-key: a queue that refuses
           it fails the transaction, every write undone, and Transact returns the
           refusal. Every other one leaves after the commit: one a queue refuses then
           is logged and reported, and the commit stands; a process that dies

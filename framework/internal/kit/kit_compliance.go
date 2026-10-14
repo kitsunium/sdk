@@ -1,6 +1,9 @@
 package kit
 
-import "github.com/kitsunium/sdk/pkg/v1/app/statemachine"
+import (
+	"github.com/kitsunium/sdk/pkg/v1/app/statemachine"
+	"github.com/kitsunium/sdk/pkg/v1/data/queue"
+)
 
 // : Asserts at compile time every role a type is handed through an interface.
 var (
@@ -66,8 +69,16 @@ var (
 	_ starter = (*Watch)(nil)
 	_ starter = (*SubscriptionWorker[struct{}])(nil)
 
-	_ mailbox = (*Mailer)(nil)
-	_ starter = (*Mailer)(nil)
+	_ mailbox       = (*Mailer)(nil)
+	_ starter       = (*Mailer)(nil)
+	_ queueOwner    = (*Mailer)(nil)
+	_ sealingSource = (*Mailer)(nil)
+
+	_ queue.Waker             = (*sealedOutbox)(nil)
+	_ queue.LeaseExtender     = (*sealedOutbox)(nil)
+	_ queue.DeadLetterReader  = (*sealedOutbox)(nil)
+	_ queue.Rejecter          = (*sealedOutbox)(nil)
+	_ queue.DeadLetterManager = (*sealedOutbox)(nil)
 
 	_ settingDecl = (*SettingService[string])(nil)
 
