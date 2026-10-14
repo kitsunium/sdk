@@ -33,6 +33,28 @@
 // transport can continue the Send's trace, and every mail's fate reaches
 // [Config].Observe. The spool writes nothing anywhere itself.
 //
+// # A mail in its caller's transaction
+//
+// [Config].Broker takes a queue its caller built instead of [Config].Dir — a
+// queue on SQL (package [github.com/kitsunium/sdk/pkg/v1/data/queue]'s
+// NewSQL), which joins the transaction its context carries — and
+// [Config].Deferrer the transaction manager of that database. A mail sent
+// inside one of its transactions then exists if and only if the transaction
+// commits; its [EventQueued] is told after the commit, before any event of
+// its delivery, and never for a mail a rollback took back.
+//
+//	outbox, err := spool.New(spool.Config{
+//		Transport:   transport,
+//		Broker:      broker, // queue.NewSQL over tm: MaxDeliveries 6, like MaxAttempts
+//		Deferrer:    tm,     // the same sql.NewTransactor: a Deferrer and an Aborter
+//		MaxAttempts: 6,
+//	})
+//	err = sql.Transact(ctx, tm, func(ctx context.Context, ex sql.Executor) error {
+//		// … the writes the mail announces …
+//		_, err := outbox.Send(ctx, msg) // queued with them, or not at all
+//		return err
+//	})
+//
 // # An identifier minted before the mail is spooled
 //
 // [Spool].Send mints the mail's identifier. A caller that must know it before

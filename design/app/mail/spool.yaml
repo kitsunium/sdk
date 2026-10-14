@@ -258,6 +258,22 @@ packages:
       spool's identifier at the sender's domain — and returns once the mail is in
       the spool: durable, with a Dir, before Send returns.
 
+      # A mail in its caller's transaction
+
+      Config.Broker hands the spool a queue its caller built — a queue on SQL,
+      which joins the transaction its context carries (ADR 0151) — and
+      Config.Deferrer the transaction manager of its database. A Send made inside
+      one of that manager's transactions writes the mail in it: the mail exists
+      if and only if the transaction commits (ADR 0178). Its EventQueued is held
+      until the commit and told after it, and a delivery of the mail — which the
+      commit makes visible to the consumer at once — waits for it, as it waits
+      for every Send's (ADR 0111 D5, ADR 0141 D4). When the work is undone — the
+      transaction, or the savepoint the Send ran in, rolls back — the observer
+      hears nothing, and the identifier's registration ends with it, so a later
+      mail under that identifier is delivered (ADR 0139's Aborter). Outside a
+      transaction, and without a Broker, a Send tells the observer before it
+      returns.
+
       # An identifier the caller minted
 
       Send mints the mail's identifier with Config.NewID. SendWithID queues the
@@ -306,8 +322,8 @@ packages:
           - name: ok
             type: bool
       - doc: |-
-          New builds a spool from cfg over a durable queue in cfg.Dir, or an
-          in-memory one without it. It starts nothing: Run delivers.
+          New builds a spool from cfg over cfg.Broker, else a durable queue in
+          cfg.Dir, else an in-memory one. It starts nothing: Run delivers.
         in:
           - name: cfg
             type: Config
@@ -318,6 +334,8 @@ packages:
     imports:
       clock: github.com/kitsunium/sdk/internal/kernel/clock
       coremail: github.com/kitsunium/sdk/internal/core/app/mail
+      corequeue: github.com/kitsunium/sdk/internal/core/data/queue
+      coresql: github.com/kitsunium/sdk/internal/core/data/sql
       kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
     path: github.com/kitsunium/sdk/internal/service/app/mail/spool
     types:
@@ -368,8 +386,45 @@ packages:
                 Dir is the spool's directory: a durable queue that outlives the
                 process, shared by every process that names it. Empty keeps the spool
                 in memory, and a process that ends loses what it had not delivered.
+                It must stay empty beside a Broker.
               name: Dir
               type: string
+            - doc: |-
+                Broker is the queue the spool writes into and delivers from, built by
+                its caller instead of from Dir — a queue on SQL, so that a mail Send
+                queues inside the caller's transaction exists if and only if that
+                transaction commits (ADR 0151, ADR 0178). Nil builds the spool's own,
+                from Dir. The spool neither sets its policy nor closes it: build it
+                with MaxDeliveries equal to MaxAttempts, a VisibilityTimeout of at
+                least twice SendTimeout and a MaxMessageBytes that holds a mail with
+                its attachments, as the spool's own queue has, and close it after
+                Close. Dir and MaxMessageBytes describe the queue the spool would
+                build, and are refused beside it (SpoolMisconfigured).
+              name: Broker
+              type: corequeue.Broker
+            - doc: |-
+                Deferrer is the transaction manager of Broker's database when Broker
+                joins its caller's transaction — the Transactor queue.NewSQL was given
+                — and must also be a core/data/sql Aborter, which the SDK's
+                transactor is. One field for both, as queue.NewSQL takes one
+                Transactor for its Joiner and Deferrer: the two halves of one
+                outcome cannot come from two managers.
+
+                With it, a Send made inside one of its transactions tells Observe
+                EventQueued after the commit, and nothing at all when the work is
+                undone — the transaction or the savepoint the Send ran in rolled
+                back —, and a delivery of the mail still waits for that EventQueued.
+                A Send outside a transaction tells it at once. While such a
+                transaction is open, a delivery of a mail under the same identifier
+                waits for it to end.
+
+                Nil tells EventQueued when Send returns, which suits a Broker that
+                keeps no transaction; beside a Broker that joins one, it would
+                announce a mail a rollback then takes back. Set without a Broker, or
+                to a manager that is not an Aborter, it is refused
+                (SpoolMisconfigured).
+              name: Deferrer
+              type: coresql.Deferrer
             - doc: |-
                 From is the sender of every mail that names none. It must be a usable
                 address when set.
@@ -392,8 +447,9 @@ packages:
               name: SendTimeout
               type: time.Duration
             - doc: |-
-                MaxMessageBytes bounds one spooled mail. Zero means
-                DefaultMaxMessageBytes; negative is refused.
+                MaxMessageBytes bounds one spooled mail in the queue the spool builds.
+                Zero means DefaultMaxMessageBytes; negative is refused, and so is any
+                other value beside a Broker, whose own policy bounds a mail.
               name: MaxMessageBytes
               type: int
             - doc: |-
@@ -530,7 +586,9 @@ packages:
           - doc: |-
               Send validates msg, stamps what a retry must not change, and queues it
               under an identifier Config.NewID mints. It returns that identifier once the
-              mail is in the spool — on disk, with a Dir. A mail without a sender gets
+              mail is in the spool — on disk, with a Dir; in the caller's transaction,
+              with a Broker that joins it, and in the spool once that commits. A mail
+              without a sender gets
               Config.From; without a Date, the spool's clock; without a Message-ID, one
               made of its identifier at the sender's domain, which every attempt keeps.
 
@@ -618,8 +676,9 @@ packages:
               - type: error
             recv: pointer
           - doc: |-
-              Close refuses every later Send and closes the spool's queue, once the
-              publications in flight have landed. Closing twice is closing once. Stop Run
+              Close refuses every later Send and closes the queue the spool built, once
+              the publications in flight have landed; a Config.Broker stays its
+              caller's, to close after. Closing twice is closing once. Stop Run
               first — cancel its context and wait for it to return — or a delivery may be
               cut off mid-attempt; the mail it held comes back when its lease lapses.
             name: Close
@@ -664,6 +723,28 @@ packages:
       count, and what [Config].Annotate kept from the Send's context — so a
       transport can continue the Send's trace, and every mail's fate reaches
       [Config].Observe. The spool writes nothing anywhere itself.
+
+      # A mail in its caller's transaction
+
+      [Config].Broker takes a queue its caller built instead of [Config].Dir — a
+      queue on SQL (package [github.com/kitsunium/sdk/pkg/v1/data/queue]'s
+      NewSQL), which joins the transaction its context carries — and
+      [Config].Deferrer the transaction manager of that database. A mail sent
+      inside one of its transactions then exists if and only if the transaction
+      commits; its [EventQueued] is told after the commit, before any event of
+      its delivery, and never for a mail a rollback took back.
+
+      	outbox, err := spool.New(spool.Config{
+      		Transport:   transport,
+      		Broker:      broker, // queue.NewSQL over tm: MaxDeliveries 6, like MaxAttempts
+      		Deferrer:    tm,     // the same sql.NewTransactor: a Deferrer and an Aborter
+      		MaxAttempts: 6,
+      	})
+      	err = sql.Transact(ctx, tm, func(ctx context.Context, ex sql.Executor) error {
+      		// … the writes the mail announces …
+      		_, err := outbox.Send(ctx, msg) // queued with them, or not at all
+      		return err
+      	})
 
       # An identifier minted before the mail is spooled
 
@@ -789,8 +870,9 @@ packages:
       - alias:
           - doc: |-
               Config is the public alias for a spool's configuration: Transport and
-              MaxAttempts required; Dir, Clock, From, Backoff, SendTimeout,
-              MaxMessageBytes, PollInterval, Observe, Annotate and NewID optional.
+              MaxAttempts required; Dir or Broker and Deferrer, Clock, From, Backoff,
+              SendTimeout, MaxMessageBytes, PollInterval, Observe, Annotate and NewID
+              optional.
             name: Config
             target: svcspool.Config
       - alias:
@@ -848,8 +930,8 @@ packages:
             type: "*errs.Error"
       - func:
           doc: |-
-            New builds a durable outbox over cfg.Transport: a queue in cfg.Dir, or in
-            memory without one. It starts nothing: Run delivers.
+            New builds a durable outbox over cfg.Transport: over cfg.Broker, a queue in
+            cfg.Dir, or in memory without either. It starts nothing: Run delivers.
           forward: svcspool.New
           in:
             - name: cfg

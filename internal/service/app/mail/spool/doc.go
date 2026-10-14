@@ -38,6 +38,22 @@
 // spool's identifier at the sender's domain — and returns once the mail is in
 // the spool: durable, with a Dir, before Send returns.
 //
+// # A mail in its caller's transaction
+//
+// Config.Broker hands the spool a queue its caller built — a queue on SQL,
+// which joins the transaction its context carries (ADR 0151) — and
+// Config.Deferrer the transaction manager of its database. A Send made inside
+// one of that manager's transactions writes the mail in it: the mail exists
+// if and only if the transaction commits (ADR 0178). Its EventQueued is held
+// until the commit and told after it, and a delivery of the mail — which the
+// commit makes visible to the consumer at once — waits for it, as it waits
+// for every Send's (ADR 0111 D5, ADR 0141 D4). When the work is undone — the
+// transaction, or the savepoint the Send ran in, rolls back — the observer
+// hears nothing, and the identifier's registration ends with it, so a later
+// mail under that identifier is delivered (ADR 0139's Aborter). Outside a
+// transaction, and without a Broker, a Send tells the observer before it
+// returns.
+//
 // # An identifier the caller minted
 //
 // Send mints the mail's identifier with Config.NewID. SendWithID queues the

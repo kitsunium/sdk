@@ -6,6 +6,8 @@ import (
 
 	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
 	corespool "github.com/kitsunium/sdk/internal/core/app/mail/spool"
+	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
+	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -68,7 +70,40 @@ type Config struct {
 	// Dir is the spool's directory: a durable queue that outlives the
 	// process, shared by every process that names it. Empty keeps the spool
 	// in memory, and a process that ends loses what it had not delivered.
+	// It must stay empty beside a Broker.
 	Dir string
+	// Broker is the queue the spool writes into and delivers from, built by
+	// its caller instead of from Dir — a queue on SQL, so that a mail Send
+	// queues inside the caller's transaction exists if and only if that
+	// transaction commits (ADR 0151, ADR 0178). Nil builds the spool's own,
+	// from Dir. The spool neither sets its policy nor closes it: build it
+	// with MaxDeliveries equal to MaxAttempts, a VisibilityTimeout of at
+	// least twice SendTimeout and a MaxMessageBytes that holds a mail with
+	// its attachments, as the spool's own queue has, and close it after
+	// Close. Dir and MaxMessageBytes describe the queue the spool would
+	// build, and are refused beside it (SpoolMisconfigured).
+	Broker corequeue.Broker
+	// Deferrer is the transaction manager of Broker's database when Broker
+	// joins its caller's transaction — the Transactor queue.NewSQL was given
+	// — and must also be a core/data/sql Aborter, which the SDK's
+	// transactor is. One field for both, as queue.NewSQL takes one
+	// Transactor for its Joiner and Deferrer: the two halves of one
+	// outcome cannot come from two managers.
+	//
+	// With it, a Send made inside one of its transactions tells Observe
+	// EventQueued after the commit, and nothing at all when the work is
+	// undone — the transaction or the savepoint the Send ran in rolled
+	// back —, and a delivery of the mail still waits for that EventQueued.
+	// A Send outside a transaction tells it at once. While such a
+	// transaction is open, a delivery of a mail under the same identifier
+	// waits for it to end.
+	//
+	// Nil tells EventQueued when Send returns, which suits a Broker that
+	// keeps no transaction; beside a Broker that joins one, it would
+	// announce a mail a rollback then takes back. Set without a Broker, or
+	// to a manager that is not an Aborter, it is refused
+	// (SpoolMisconfigured).
+	Deferrer coresql.Deferrer
 	// From is the sender of every mail that names none. It must be a usable
 	// address when set.
 	From coremail.AddressValue
@@ -83,8 +118,9 @@ type Config struct {
 	MaxAttempts int
 	// SendTimeout bounds one attempt. Not positive means DefaultSendTimeout.
 	SendTimeout time.Duration
-	// MaxMessageBytes bounds one spooled mail. Zero means
-	// DefaultMaxMessageBytes; negative is refused.
+	// MaxMessageBytes bounds one spooled mail in the queue the spool builds.
+	// Zero means DefaultMaxMessageBytes; negative is refused, and so is any
+	// other value beside a Broker, whose own policy bounds a mail.
 	MaxMessageBytes int
 	// PollInterval is how late a mail another PROCESS spooled into Dir may be
 	// noticed; a mail spooled by this process is delivered at once. Zero is
@@ -109,6 +145,11 @@ func (c *Config) validate() error {
 		//: SpoolMisconfigured, naming the setting.
 		return misconfigured("MaxMessageBytes", "negative")
 	}
+	//: a caller's queue, and the transaction manager that announces after it.
+	if brokerErr := c.validateBroker(); brokerErr != nil {
+		//: SpoolMisconfigured, naming the setting.
+		return brokerErr
+	}
 	//: a default sender every mail would be refused for.
 	if !c.From.IsZero() {
 		//: the mail domain's own verdict on the address.
@@ -119,6 +160,43 @@ func (c *Config) validate() error {
 		}
 	}
 	//: a spool that can run.
+	return nil
+}
+
+// validateBroker refuses the settings a caller's Broker makes inert, and a
+// Deferrer that cannot announce what a Broker joined or take it back.
+func (c *Config) validateBroker() error {
+	//: the settings of the queue the spool builds, beside one it does not.
+	if c.Broker != nil {
+		//: a directory the spool would never open.
+		if c.Dir != "" {
+			//: SpoolMisconfigured, naming the setting.
+			return misconfigured("Dir", "set beside Broker")
+		}
+		//: a bound the caller's broker would never apply.
+		if c.MaxMessageBytes != 0 {
+			//: SpoolMisconfigured, naming the setting.
+			return misconfigured("MaxMessageBytes", "set beside Broker, whose own policy bounds a mail")
+		}
+	}
+	//: no transaction manager: Send announces when it returns.
+	if c.Deferrer == nil {
+		//: nothing more to check.
+		return nil
+	}
+	//: a queue the spool builds never joins a transaction, and a mail in it
+	//: would be announced after a commit that never decided it.
+	if c.Broker == nil {
+		//: SpoolMisconfigured, naming the setting.
+		return misconfigured("Deferrer", "set without Broker")
+	}
+	//: without the abort half, a rollback would leave a mail's registration
+	//: open, and every later delivery of its identifier waiting for it.
+	if _, aborts := c.Deferrer.(coresql.Aborter); !aborts {
+		//: SpoolMisconfigured, naming the setting.
+		return misconfigured("Deferrer", "not a core/data/sql Aborter")
+	}
+	//: a transaction manager the spool can announce through.
 	return nil
 }
 
