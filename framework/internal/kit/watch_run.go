@@ -80,7 +80,9 @@ func (w *Watch) consume(ctx context.Context, a *App, r *watchRun, loop *loopStat
 // from the store that was written — the delivers edge —, then the
 // handler, told what the notice says and the store's marked fields, in a
 // context marked as its own (handling): what it writes there,
-// a watch that hears its own module's stores does not hear back.
+// a watch that hears its own module's stores does not hear back. A notice
+// that does not decode is dead-lettered on its first delivery (ADR 0151
+// §D8).
 func (w *Watch) deliver(a *App, r *watchRun, loop *loopState) queue.Handler {
 	c := consumer{a: a, loop: loop, node: w.id, name: w.name, wake: model.WakeChange}
 	return func(ctx context.Context, d queue.Delivery) error {
@@ -91,8 +93,8 @@ func (w *Watch) deliver(a *App, r *watchRun, loop *loopState) queue.Handler {
 		}
 		return c.deliver(ctx, &d, origin{trace: n.Trace, node: n.Store}, func(ctx context.Context, sp *span) error {
 			if decodeErr != nil {
-				return failure(CodeUndecodable, "MESSAGE_UNDECODABLE", "the notice does not decode", decodeErr,
-					errs.String("watch", w.id), errs.String("message", d.Message.ID))
+				return queue.DoNotRetry(failure(CodeUndecodable, "MESSAGE_UNDECODABLE", "the notice does not decode", decodeErr,
+					errs.String("watch", w.id), errs.String("message", d.Message.ID)))
 			}
 			written := WrittenEvent{Store: n.Store, Key: n.Key, Deleted: n.Deleted, Fields: slices.Clone(r.fields[n.Store])}
 			if sp.detailed() {

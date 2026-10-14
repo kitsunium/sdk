@@ -74,9 +74,11 @@ func (f commandOption) commandConfigure(o *commandOptions) { f(o) }
 // Queued sends a command to the background. Dispatch returns once the
 // command's own queue accepted it — a file queue under the data directory,
 // memory without one —, and a consumer handles it, [Parallelism] at a time,
-// retried after half a second up to [MaxDeliveries] attempts (5), then
-// dead-lettered. It answers nothing: its result is [EmptyValue], and exposed, it
-// answers 202 Accepted.
+// retried up to [MaxDeliveries] attempts (5) — half a second after the first
+// failure, the wait doubling after each, never more than a minute —, then
+// dead-lettered; a dispatch that does not decode is dead-lettered at its
+// first failure, since no retry makes it decode. It answers nothing: its
+// result is [EmptyValue], and exposed, it answers 202 Accepted.
 //
 // Delivery is at least once: Queued is the product's promise that the
 // handler tolerates a redelivery, and a [Command.Key] narrows the duplicates

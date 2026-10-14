@@ -2246,7 +2246,7 @@ Purpose says why the store keeps its records (GDPR art. 30(1)(b)): the register 
 func Queued() CommandOption
 ```
 
-Queued sends a command to the background. Dispatch returns once the command's own queue accepted it — a file queue under the data directory, memory without one —, and a consumer handles it, [Parallelism](#Parallelism) at a time, retried after half a second up to [MaxDeliveries](#MaxDeliveries) attempts (5), then dead-lettered. It answers nothing: its result is [Empty](#Empty), and exposed, it answers 202 Accepted.
+Queued sends a command to the background. Dispatch returns once the command's own queue accepted it — a file queue under the data directory, memory without one —, and a consumer handles it, [Parallelism](#Parallelism) at a time, retried up to [MaxDeliveries](#MaxDeliveries) attempts (5) — half a second after the first failure, the wait doubling after each, never more than a minute —, then dead-lettered; a dispatch that does not decode is dead-lettered at its first failure, since no retry makes it decode. It answers nothing: its result is [Empty](#Empty), and exposed, it answers 202 Accepted.
 
 Delivery is at least once: Queued is the product's promise that the handler tolerates a redelivery, and a [Command](#Command).Key narrows the duplicates without removing them. The handler runs in the dispatcher's trace, as the user who dispatched it ([UserID](#UserID)); what the auth handler said about that user is not queued. A queued command's input is a contract with the messages already queued: add a field, never rename one.
 
