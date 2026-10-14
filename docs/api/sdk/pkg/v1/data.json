@@ -7019,7 +7019,7 @@
       "name": "NewMigrator",
       "spelled": "func(cfg Config, mig MigrateConfig) (runner Migrator, err error)",
       "canonical": "func(cfg github.com/kitsunium/sdk/pkg/v1/data/sql.Config, mig github.com/kitsunium/sdk/pkg/v1/data/sql.MigrateConfig) (runner github.com/kitsunium/sdk/pkg/v1/data/sql.Migrator, err error)",
-      "doc": "NewMigrator returns the migration runner. It refuses a dialect with no\nsession-scoped advisory lock, by name and at construction.\n",
+      "doc": "NewMigrator returns the migration runner. Every run is serialised: on\nthe session's advisory lock where the engine has one (PostgreSQL,\nMySQL), and on the database file's write lock on SQLite, which has\nnone (ADR 0140). No dialect the SDK speaks is refused for the lock.\n",
       "file": "sql/facade_gen.go",
       "layer": "public",
       "family": "data"
