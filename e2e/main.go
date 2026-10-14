@@ -2,7 +2,7 @@
 // on the host and exits non-zero when any behaviour that *should* work on this
 // platform is wrong.
 //
-// It is built per-GOOS and run on each real OS by .github/workflows/e2e-vm.yml —
+// It is built per-GOOS and run on each real OS by .github/workflows/e2e-cross.yml —
 // the proof that the SDK works, not merely compiles, everywhere, and that where a
 // platform has no native mechanic the API degrades to a uniform
 // UnsupportedPlatform rather than misbehaving.

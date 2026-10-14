@@ -454,7 +454,7 @@ jobs:
           } > user-data
           printf 'instance-id: sdk-e2e\nlocal-hostname: sdk-e2e\n' > meta-data
           cloud-localds seed.iso user-data meta-data
-          qemu-img create -q -f qcow2 -F qcow2 -b base.qcow2 disk.qcow2 4G
+          qemu-img create -q -f qcow2 -F qcow2 -b base.qcow2 disk.qcow2
           qemu-system-x86_64 -enable-kvm -cpu host -smp 2 -m 3072 \
             -display none -serial file:console.log -daemonize -pidfile qemu.pid \
             -drive file=disk.qcow2,if=virtio -drive file=seed.iso,if=virtio,format=raw,readonly=on \
@@ -466,7 +466,10 @@ jobs:
             fi
             sleep 5
           done
-          echo "::error::guest never accepted ssh"; tail -60 console.log; exit 1
+          echo "::error::guest never accepted ssh"
+          ssh -v -i key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=5 root@127.0.0.1 true 2>&1 | tail -25 || true
+          tail -60 console.log; exit 1
 
       - name: Run inside ${{ matrix.name }} on the guest's own kernel
         if: matrix.kind == 'vm'
@@ -478,7 +481,9 @@ jobs:
           s="ssh -i key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@127.0.0.1"
           echo "runner kernel: $(uname -r)"
           echo "guest kernel : $($s uname -r)"
-          tar -C .. -cf - bins | $s 'rm -rf /root/work && mkdir /root/work && tar -C /root/work -xf -'
+          # The whole checkout, as the containers mount it: some suites audit the
+          # sources above the working directory (they look for go.work).
+          tar -C .. --exclude=./.git --exclude=./vm -cf - . | $s 'rm -rf /root/work && mkdir /root/work && tar -C /root/work -xf -'
           if [ "$INIT" = systemd ]; then
             $s 'cd /root/work && systemd-run --quiet --wait --pipe --collect -p Delegate=yes -p WorkingDirectory=/root/work sh bins/run.sh'
           else

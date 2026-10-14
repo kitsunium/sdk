@@ -4,7 +4,7 @@
 // Unix fd inheritance, so the facade Files/Prepare forward the central
 // UnsupportedPlatform sentinel off Unix. There is no Unix facade test today (the
 // service layer carries the round-trip), so this file is the facade's sole
-// off-platform contract assertion, built and run by the e2e-vm CI binary on a
+// off-platform contract assertion, built and run by the e2e-cross CI binary on a
 // real non-Unix kernel.
 package listen_test
 

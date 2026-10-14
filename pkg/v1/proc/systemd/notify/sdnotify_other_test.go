@@ -3,7 +3,7 @@
 // Package notify_test — non-Linux facade contract: the listener relies on
 // SO_PASSCRED, a Linux facility, so the facade Listen forwards the central
 // UnsupportedPlatform sentinel (and no listener/path) off Linux. Gated on the
-// same `!linux` tag as the service stub so the e2e-vm CI binary validates the
+// same `!linux` tag as the service stub so the e2e-cross CI binary validates the
 // off-platform path on a real non-Linux kernel, not via a runtime.GOOS guess.
 package notify_test
 

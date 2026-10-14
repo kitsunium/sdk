@@ -309,7 +309,7 @@ have built an authentication bypass out of an expired cookie.
 
 - **A Windows file store** behind a real DACL (`CreateFileW` +
   `SECURITY_ATTRIBUTES` via `advapi32`), validated on a real kernel by
-  `e2e-vm.yml` per ADR 0018's runtime bar.
+  `e2e-cross.yml` per ADR 0018's runtime bar.
 - **A distributed store** (Redis, Postgres). `Store` is a published port and
   `StateValue` exists precisely so one can be written outside the SDK; shipping
   one here would put a vendor dependency in `internal/service`.

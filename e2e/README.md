@@ -44,9 +44,9 @@ Only `FAIL` counts against the exit code.
 
 `.github/workflows/e2e-cross.yml` cross-compiles or builds this binary per OS and
 runs it on the real kernel of each (GitHub's runners and VMs; its `linux-init`
-job runs it as root under systemd and OpenRC). `.github/workflows/e2e-vm.yml`
-ships it by hand to the lab's three Linux VMs, which boot each distro's own
-kernel — the "the SDK works everywhere" proof. Locally it runs on whatever host you
+job runs it as root under systemd and OpenRC, and in QEMU/KVM guests that boot
+the Debian, Fedora and Alpine cloud images on their own kernels) — the "the SDK
+works everywhere" proof. Locally it runs on whatever host you
 are on.
 
 ## Integration suites (Docker)

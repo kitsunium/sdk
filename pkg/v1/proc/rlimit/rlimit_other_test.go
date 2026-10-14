@@ -3,7 +3,7 @@
 // Package rlimit_test — non-Unix facade contract: setrlimit(2) has no equivalent
 // off Unix, so the facade Apply and PrepareSysProcAttr forward the central
 // UnsupportedPlatform sentinel there. Gated on the same `!unix` tag as the
-// service stub (rlimit_other.go) so the e2e-vm CI binary validates the
+// service stub (rlimit_other.go) so the e2e-cross CI binary validates the
 // off-platform path on a real non-Unix kernel, not via a runtime.GOOS guess.
 //
 // `!unix` and NOT `!linux`: the service implements rlimits on every Unix target,

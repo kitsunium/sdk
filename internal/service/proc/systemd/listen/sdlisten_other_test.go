@@ -4,7 +4,7 @@
 // Unix file-descriptor inheritance, so every entry point degrades to the central
 // UnsupportedPlatform sentinel off Unix. The end-to-end round-trip is covered by
 // sdlisten_external_test.go on Unix; this complement is built and run off Unix
-// (windows/plan9/js/wasip1) so the e2e-vm CI binary validates the off-platform
+// (windows/plan9/js/wasip1) so the e2e-cross CI binary validates the off-platform
 // degrade on a real non-Unix kernel.
 package listen_test
 
