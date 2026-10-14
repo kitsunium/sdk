@@ -454,10 +454,15 @@ var checks = map[string]func(mutation) error{
 }
 
 func TestChecksPassUnmutated(t *testing.T) {
+	// One parallel subtest per check: they share no state, and the two
+	// simulated ones are most of the target's serial CPU (#304, eachSeed).
 	for name, c := range checks {
-		if err := c(0); err != nil {
-			t.Errorf("%s: %v", name, err)
-		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if err := c(0); err != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+		})
 	}
 }
 

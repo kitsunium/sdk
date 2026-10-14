@@ -48,12 +48,14 @@ go_test(
         "soak_internal_test.go",
     ],
     embed = [":raft"],
-    # The deterministic simulations take ~90 s under race and coverage
-    # as one target, and .bazelrc caps every target at 60 s (#126).
-    # rules_go deals TOP-LEVEL tests to shards by index modulo the count,
-    # so the two 60-seed suites are four top-level tests each (seedQuarter)
-    # and eight shards keep every shard near a quarter of the old worst.
-    shard_count = 8,
+    # The deterministic simulations take ~300 CPU-seconds under race and
+    # coverage, and .bazelrc caps every target at 60 s (#126). rules_go
+    # deals TOP-LEVEL tests to shards by index modulo the count, so the two
+    # 60-seed suites are twelve top-level tests each and the 30-seed one
+    # three (seedPart), every seed loop runs its seeds as parallel subtests
+    # (eachSeed), and 26 shards hold each shard near 20 CPU-seconds: at
+    # eight, two shards of ~55 overran 60 s on CI (#304).
+    shard_count = 26,
     deps = [
         "//internal/core/app/consensus",
         "//internal/kernel/errs",
