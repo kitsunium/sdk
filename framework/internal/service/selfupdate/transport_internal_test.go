@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	coreupd "github.com/kitsunium/sdk/framework/internal/core/selfupdate"
@@ -164,6 +165,100 @@ func TestNewReleaseHTTPClient_refusesDowngrade(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNewReleaseHTTPClient_ownsItsConnections pins that the release client
+// does not share http.DefaultTransport's connection pool (issue #304).
+//
+// Any code in the process can call CloseIdleConnections on the default
+// transport — httptest.Server.Close does it on every server a test closes,
+// and so does http.Client.CloseIdleConnections on any client built with a nil
+// Transport. net/http hands a connection back to the idle pool BEFORE it
+// delivers a body-less response to the request waiting on it, so a close in
+// that window breaks the request in flight: the caller gets "HTTP/1.x
+// transport connection broken: http: CloseIdleConnections called" for the
+// first hop, and the redirect refusal behind it — InsecureRedirect — is never
+// reached. The fixture is exactly that shape: http.Redirect writes no body for
+// a request with no method.
+//
+// The first row is structural and deterministic. The second hammers the race
+// from outside: without a transport of its own the release client failed it
+// on 9 runs of 20 (go test -race -count=20), with one it cannot, because
+// nothing outside this client reaches its pool.
+//
+// Deliberately NOT parallel: the closing goroutine targets the process-wide
+// transport, and a top-level test without t.Parallel runs before any parallel
+// test resumes, so it cannot break a sibling that does use that transport.
+func TestNewReleaseHTTPClient_ownsItsConnections(t *testing.T) {
+	t.Run("the transport is the client's own", func(t *testing.T) {
+		client := newReleaseHTTPClient()
+		//: A nil Transport IS http.DefaultTransport; so is the value itself.
+		if client.Transport == nil || client.Transport == http.DefaultTransport {
+			t.Fatalf("Transport = %v, want a transport owned by the release client", client.Transport)
+		}
+		//: The proxy is why this client is not pkg/v1/net/client (CLAUDE.md):
+		//: the transport of its own must still honour HTTP(S)_PROXY.
+		owned, ok := client.Transport.(*http.Transport)
+		if !ok || owned.Proxy == nil {
+			t.Fatalf("Transport = %T with no Proxy, want the environment's proxy honoured", client.Transport)
+		}
+	})
+
+	t.Run("a close of the default pool never breaks a refusal", func(t *testing.T) {
+		const (
+			concurrentCallers int = 8
+			attempts          int = 400
+		)
+		target := "ftp://127.0.0.1:1/asset.tar.gz"
+		downgrade := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Redirect(w, &http.Request{}, target, http.StatusFound)
+		}))
+		t.Cleanup(downgrade.Close)
+
+		defaultPool, ok := http.DefaultTransport.(interface{ CloseIdleConnections() })
+		if !ok {
+			t.Skip("http.DefaultTransport has no CloseIdleConnections to race with")
+		}
+		stop := make(chan struct{})
+		closed := make(chan struct{})
+		//: What every httptest.Server.Close elsewhere in the process does,
+		//: as often as the scheduler allows.
+		go func() {
+			defer close(closed)
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					defaultPool.CloseIdleConnections()
+				}
+			}
+		}()
+		t.Cleanup(func() { close(stop); <-closed })
+
+		//: Several callers at once: the window is a few instructions wide, and
+		//: more requests in flight cross it more often per second of test.
+		client := newReleaseHTTPClient()
+		var callers sync.WaitGroup
+		for caller := range concurrentCallers {
+			callers.Go(func() {
+				for attempt := range attempts {
+					resp, err := client.Get(downgrade.URL)
+					if err == nil {
+						closeBestEffort(resp.Body, "downgrade response")
+						t.Errorf("caller %d attempt %d: Get() followed a redirect to %s, want it refused", caller, attempt, target)
+						return
+					}
+					//: The refusal must surface as itself, never as a transport fault.
+					if !errors.Is(err, coreupd.InsecureRedirect) {
+						t.Errorf("caller %d attempt %d: Get() error = %v, want errors.Is coreupd.InsecureRedirect", caller, attempt, err)
+						return
+					}
+				}
+			})
+		}
+		callers.Wait()
+	})
 }
 
 // TestNewReleaseHTTPClient_followsSecureRedirect is the other half: the

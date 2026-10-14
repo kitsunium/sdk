@@ -234,18 +234,33 @@ Signatures go through `pkg/v1/crypto/sign` (`keys.go`), the archive digest throu
 `pkg/v1/crypto/hash` (`checksum.go`), the statement's expiry through an injected
 `pkg/v1/clock` clock and the Windows refusal is `pkg/v1/proc`'s. HTTP is the
 exception: `newReleaseHTTPClient` (`transport.go`) stays a `net/http` client over
-`http.DefaultTransport` rather than `pkg/v1/net/client`, because the guarded
-transport sets no `Proxy` and so ignores `HTTP(S)_PROXY` and `NO_PROXY` —
+a clone of `http.DefaultTransport` rather than `pkg/v1/net/client`, because the
+guarded transport sets no `Proxy` and so ignores `HTTP(S)_PROXY` and `NO_PROXY` —
 measured, it dialled the host directly where the default transport went through
 the proxy — and an update that cannot leave a network through its proxy never
 reaches a machine behind one. Adopting it waits for a proxy option in the net
 domain's `ClientConfig`; the guarded policy would then also have to re-state
 this client's https-only, bounded hops.
 
+A clone, never the default itself (issue #304): the clone keeps the default's
+settings, its proxy first, and owns its connection pool. The default's pool is
+the process's, and anything may empty it — `httptest.Server.Close` does on every
+close, `CloseIdleConnections` on any client with a nil `Transport` too. net/http
+puts a connection back in the idle pool before it hands a body-less response to
+the request waiting on it, so an outside close in that window broke the request
+in flight with `HTTP/1.x transport connection broken: http: CloseIdleConnections
+called`, and a downgrade the redirect policy would have refused surfaced as a
+transport fault instead of `InsecureRedirect`.
+`TestNewReleaseHTTPClient_ownsItsConnections` holds it: a structural row, and a
+row racing the default pool's close against eight callers (failed 9 runs in 20
+before the clone).
+
 ## Do NOT
 
 - Swap `newReleaseHTTPClient` for `pkg/v1/net/client` while the guarded transport
   ignores the environment's proxy (see the section above).
+- Hand `newReleaseHTTPClient` a nil `Transport` or `http.DefaultTransport`
+  itself: its connection pool is the process's to empty (issue #304).
 - Reorder the trust chain, or check a digest against a manifest whose signature
   has not been verified.
 - Reintroduce a product name, a repository or an environment variable as a
