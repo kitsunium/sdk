@@ -332,14 +332,10 @@ func (s *Spool) queue(ctx context.Context, id string, msg coremail.MessageValue)
 // spent — or dropped it with a commit that stood, and the caller announces
 // the mail itself, as it does outside a transaction.
 func (s *Spool) holdAnnouncement(ctx context.Context, event *EventValue, end func()) bool {
-	//: no transaction manager: nothing joins a transaction.
-	if s.deferrer == nil {
+	//: no transaction manager, or no transaction of its on ctx: announced
+	//: now. Otherwise a rollback ends the registration, and tells nobody.
+	if s.deferrer == nil || !s.aborter.OnAbort(ctx, func(context.Context) { end() }) {
 		//: announced now.
-		return false
-	}
-	//: a rollback ends the registration, and tells nobody.
-	if !s.aborter.OnAbort(ctx, func(context.Context) { end() }) {
-		//: no transaction of the manager's on ctx: announced now.
 		return false
 	}
 	//: the commit tells the observer, then ends the registration.

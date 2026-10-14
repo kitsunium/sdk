@@ -23,7 +23,7 @@ maintainer's half.
 | Symbol | Kind | Notes |
 |---|---|---|
 | `Spool` | alias | the outbox: `Send`, `SendWithID`, `Run`, `DeadLetters`, `Close` — `SendWithID` reaches consumers through the alias, so the facade adds no function for it (ADR 0141) |
-| `Config` | alias | `Transport` and `MaxAttempts` required; `Dir`, `Clock`, `From`, `Backoff`, `SendTimeout`, `MaxMessageBytes`, `PollInterval`, `Observe`, `Annotate`, `NewID` optional |
+| `Config` | alias | `Transport` and `MaxAttempts` required; `Dir` — or `Broker`, a caller's queue (`queue.NewSQL`), with `Deferrer`, its transaction manager, a `sql.Deferrer` that is also a `sql.Aborter` (ADR 0178) —, `Clock`, `From`, `Backoff`, `SendTimeout`, `MaxMessageBytes`, `PollInterval`, `Observe`, `Annotate`, `NewID` optional |
 | `Event`, `EventKind`, `Attempt`, `DeadLetter` | aliases | onto `EventValue`, `EventKind`, `AttemptValue`, `DeadLetterValue` |
 | `EventQueued` … `EventDuplicate` | constants | the five event kinds |
 | `DefaultSendTimeout`, `DefaultRetryBase`, `DefaultRetryMax`, `DefaultMaxMessageBytes`, `DeliveredMemory` | constants | the spool's clamps |
