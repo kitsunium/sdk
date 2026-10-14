@@ -467,6 +467,8 @@ jobs:
           printf 'instance-id: sdk-e2e\nlocal-hostname: sdk-e2e\n' > meta-data
           cloud-localds seed.iso user-data meta-data
           qemu-img create -q -f qcow2 -F qcow2 -b base.qcow2 disk.qcow2
+          # Room for the checkout: cloud-init grows the root partition into it.
+          qemu-img resize -q disk.qcow2 8G
           qemu-system-x86_64 -enable-kvm -cpu host -smp 2 -m 3072 \
             -display none -serial file:console.log -daemonize -pidfile qemu.pid \
             -drive file=disk.qcow2,if=virtio -drive file=seed.iso,if=virtio,format=raw,readonly=on \
