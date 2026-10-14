@@ -985,17 +985,6 @@ rules:
       - "**/internal/service/net/server/**"
       - "internal/service/net/server/**"
 
-  # KTN-FUNC-MAXPARAM — errs.Static takes six constants (ADR 0176).
-  #
-  # Define's five arguments plus the HTTP and exit statuses its options set.
-  # Grouping them in a struct would cost what Static exists to avoid: a struct
-  # argument is a value the compiler must build before the call, and the design
-  # (kit gen) writes this call, not a person. Function-level, never a file.
-  KTN-FUNC-MAXPARAM:
-    exclude:
-      - "**/internal/kernel/errs/error.go:Static"
-      - "internal/kernel/errs/error.go:Static"
-
   # KTN-STRUCT-CTOR (phase 4) — Effective Go's own naming rule wins.
   #
   # The rule wants a struct named Client to be built by NewClient(). This package

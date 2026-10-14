@@ -59,7 +59,7 @@ arbitrary expression, kit cannot write a sentinel as a constant.
    `errs.Static` is a sibling of `Define` (ADR 0039), not a change of it: it takes
    constants only, its body is one composite literal, and it has no panic, no
    variadic and no closure, so it inlines and the variable initialises at link
-   time. The name is fixed in PR 1: `Static`.
+   time. The name is fixed in PR 1: `Static`. Six parameters exceed KTN-FUNC-MAXPARAM (max 5), whose analyzer reads `IsFileExcluded` only and ignores `exclude_functions` (kodflow/ktn-linter#734). Measured with Go 1.27.2: passing the statuses as a struct (`errs.Statuses{HTTP: 401, Exit: 78}`) keeps the call inlined but leaves a package `init` that stores the two fields, and a packed integer allocates at init; only six scalar parameters are fully static.
 
 3. **Validation moves to `kit gen`.** Today `Define` validates at init and
    panics. For `Static` kit checks, when it generates: the reason's pattern, the
