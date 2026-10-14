@@ -4882,7 +4882,7 @@ type Violation struct {
 <a name="Wake"></a>
 ## type [Wake](<https://github.com/kitsunium/sdk/blob/main/framework/kit/loop.go>)
 
-Wake says why a declared loop runs: the reason, the instant, and the topic that woke it when one did.
+Wake says why a declared loop runs: the reason, the instant, and the topic that woke it when one did. Wakes that come while it runs, or while it backs off after a failure, are gathered into one run: Reasons and Topics say every one of them, and Reason the one that decides the run.
 
 ```go
 type Wake = ikit.WakeEvent
@@ -4893,12 +4893,21 @@ Wake is an alias of `github.com/kitsunium/sdk/framework/internal/kit.WakeEvent`,
 ```go
 type Wake struct {
 	// Reason is model.WakeInterval, WakeDeadline, WakeTopic, WakeStart or
-	// WakeManual.
-	Reason string
+	// WakeManual: WakeManual when a nudge is among the wakes the run
+	// gathers — the one wake that cuts a backoff short —, else the first
+	// that came.
+	Reason  string
 	// At is when the wake happened, on the app's clock.
-	At     time.Time
-	// Topic is the topic node that woke the loop, for a topic wake.
-	Topic  string
+	At      time.Time
+	// Topic is the topic node whose publish woke the loop first, when a
+	// topic's did.
+	Topic   string
+	// Reasons are the reasons of every wake the run gathers, each once, in
+	// the order they came: Reason is among them.
+	Reasons []string
+	// Topics are the topic nodes whose publish woke the loop into this run,
+	// each once, in the order they came: Topic is the first.
+	Topics  []string
 }
 ```
 

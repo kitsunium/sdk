@@ -3031,21 +3031,37 @@ packages:
           unexported: true
       - doc: |-
           WakeEvent says why a declared loop runs: the reason, the instant, and the
-          topic that woke it when one did.
+          topic that woke it when one did. Wakes that come while it runs, or while
+          it backs off after a failure, are gathered into one run: Reasons and
+          Topics say every one of them, and Reason the one that decides the run.
         name: WakeEvent
         struct:
           fields:
             - doc: |-
                 Reason is model.WakeInterval, WakeDeadline, WakeTopic, WakeStart or
-                WakeManual.
+                WakeManual: WakeManual when a nudge is among the wakes the run
+                gathers — the one wake that cuts a backoff short —, else the first
+                that came.
               name: Reason
               type: string
             - doc: At is when the wake happened, on the app's clock.
               name: At
               type: time.Time
-            - doc: Topic is the topic node that woke the loop, for a topic wake.
+            - doc: |-
+                Topic is the topic node whose publish woke the loop first, when a
+                topic's did.
               name: Topic
               type: string
+            - doc: |-
+                Reasons are the reasons of every wake the run gathers, each once, in
+                the order they came: Reason is among them.
+              name: Reasons
+              type: "[]string"
+            - doc: |-
+                Topics are the topic nodes whose publish woke the loop into this run,
+                each once, in the order they came: Topic is the first.
+              name: Topics
+              type: "[]string"
       - doc: LoopConfigurer configures a declared loop.
         interface:
           unexported: true
@@ -5211,7 +5227,9 @@ packages:
         target: ikit.Loop
       - doc: |-
           Wake says why a declared loop runs: the reason, the instant, and the
-          topic that woke it when one did.
+          topic that woke it when one did. Wakes that come while it runs, or while
+          it backs off after a failure, are gathered into one run: Reasons and
+          Topics say every one of them, and Reason the one that decides the run.
         name: Wake
         target: ikit.WakeEvent
       - doc: LoopOption configures a declared loop.

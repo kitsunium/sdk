@@ -196,9 +196,13 @@ has the map): before writing something generic here, look for it there.
   `CodeWorkflowReentrant` — refused, never a deadlock. The store's `onWrite`
   and `onDelete` hooks run outside every lock: `Machine.Changed` waits for the
   entity's lock unless a transition of it is in flight.
-- **One run at a time, a burst is one run.** Wakes during a run are gathered
-  (`loopRun.pending`, a one-token channel) into one run after it; the first
-  reason wins. After a failure the next run waits 1s→1m — the SDK's
+- **One run at a time, a burst is one run.** Wakes during a run, or a
+  backoff, are gathered (`loopRun.pending`, a one-token channel whose token
+  is sent and taken with its wake, under `Loop.mu`) into one run after it,
+  whose `WakeEvent` says every one — `Reasons`, `Topics`, each once, in the
+  order they came —; its `Reason` is a nudge's when one is among them, the
+  first's otherwise, so a nudge behind a publish is never held by a backoff
+  (`TestALoopsWakeSaysEveryReason`). After a failure the next run waits 1s→1m — the SDK's
   `resilience.Backoff` (`loopBackoff`) — a nudge excepted;
   a past deadline waits at least `minDeadlineGap` after a run. The loop
   arms a timer only to sleep on it: a wake already there is taken first,

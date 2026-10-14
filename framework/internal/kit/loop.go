@@ -63,15 +63,59 @@ type Loop struct {
 }
 
 // WakeEvent says why a declared loop runs: the reason, the instant, and the
-// topic that woke it when one did.
+// topic that woke it when one did. Wakes that come while it runs, or while
+// it backs off after a failure, are gathered into one run: Reasons and
+// Topics say every one of them, and Reason the one that decides the run.
 type WakeEvent struct {
 	// Reason is model.WakeInterval, WakeDeadline, WakeTopic, WakeStart or
-	// WakeManual.
+	// WakeManual: WakeManual when a nudge is among the wakes the run
+	// gathers — the one wake that cuts a backoff short —, else the first
+	// that came.
 	Reason string
 	// At is when the wake happened, on the app's clock.
 	At time.Time
-	// Topic is the topic node that woke the loop, for a topic wake.
+	// Topic is the topic node whose publish woke the loop first, when a
+	// topic's did.
 	Topic string
+	// Reasons are the reasons of every wake the run gathers, each once, in
+	// the order they came: Reason is among them.
+	Reasons []string
+	// Topics are the topic nodes whose publish woke the loop into this run,
+	// each once, in the order they came: Topic is the first.
+	Topics []string
+}
+
+// wakeOf is a wake for reason at, alone: its own account of itself.
+func wakeOf(reason string, at time.Time, topic string) WakeEvent {
+	w := WakeEvent{Reason: reason, At: at, Topic: topic, Reasons: []string{reason}}
+	if topic != "" {
+		w.Topics = []string{topic}
+	}
+	return w
+}
+
+// gather adds to w, the wake a run is for, a wake that came after it: its
+// reasons and topics, each once, in the order they came. A nudge among them
+// makes the run a manual one; the first wake's instant stays the run's.
+func (w WakeEvent) gather(later WakeEvent) WakeEvent {
+	w.Reasons, w.Topics = slices.Clone(w.Reasons), slices.Clone(w.Topics)
+	for _, r := range later.Reasons {
+		if !slices.Contains(w.Reasons, r) {
+			w.Reasons = append(w.Reasons, r)
+		}
+	}
+	for _, t := range later.Topics {
+		if !slices.Contains(w.Topics, t) {
+			w.Topics = append(w.Topics, t)
+		}
+	}
+	if w.Topic == "" {
+		w.Topic = later.Topic
+	}
+	if slices.Contains(w.Reasons, model.WakeManual) {
+		w.Reason = model.WakeManual
+	}
+	return w
 }
 
 // LoopConfigurer configures a declared loop.
@@ -103,8 +147,10 @@ type loopOption func(o *loopOptions)
 type loopRun struct {
 	a     *App
 	state *loopState
-	// wake holds one token when a wake is pending; pending says why — the
-	// first reason since the last run: a burst is one run.
+	// wake holds one token while a wake is pending; pending is every wake
+	// since the last run, gathered: a burst is one run. Both are guarded by
+	// Loop.mu — the token is sent and taken with its wake —, but a receive
+	// on wake.
 	wake    chan struct{}
 	pending *WakeEvent
 	cancel  context.CancelFunc
@@ -250,32 +296,49 @@ func (l *Loop) schedule() string {
 // backoff is the wait after n consecutive failures: 1s, doubling, up to 1m.
 func backoff(n int) time.Duration { return loopBackoff.Delay(n) }
 
-// signal wakes the loop, when it runs. Guarded by l.mu.
+// signal wakes the loop, when it runs: the wake — w's reason and topic,
+// at the app's instant — is gathered into the one pending, and the token
+// sent under the same lock, so that a token always has its wake to take.
 func (l *Loop) signal(w WakeEvent) {
 	l.mu.Lock()
+	defer l.mu.Unlock()
 	r := l.running
 	if r == nil {
-		l.mu.Unlock()
 		return
 	}
-	if r.pending == nil {
-		w.At = r.a.clock.Now()
-		r.pending = &w
+	came := wakeOf(w.Reason, r.a.clock.Now(), w.Topic)
+	if r.pending != nil {
+		came = r.pending.gather(came)
 	}
-	l.mu.Unlock()
+	r.pending = &came
 	select {
 	case r.wake <- struct{}{}:
 	default:
 	}
 }
 
-// take returns the pending wake and clears it.
-func (l *Loop) take(r *loopRun) WakeEvent {
+// take returns the pending wake, if one is, and clears it with its token.
+func (l *Loop) take(r *loopRun) (WakeEvent, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	w := WakeEvent{Reason: model.WakeManual, At: r.a.clock.Now()}
-	if r.pending != nil {
-		w, r.pending = *r.pending, nil
+	select {
+	case <-r.wake:
+	default:
+	}
+	if r.pending == nil {
+		return WakeEvent{}, false
+	}
+	w := *r.pending
+	r.pending = nil
+	return w, true
+}
+
+// after is w, the wake a run is for, with what is pending now gathered
+// after it: a wake that came while the run's own was taken is the run's
+// too.
+func (l *Loop) after(r *loopRun, w WakeEvent) WakeEvent {
+	if later, ok := l.take(r); ok {
+		return w.gather(later)
 	}
 	return w
 }
@@ -338,7 +401,7 @@ func (l *Loop) cycle(ctx context.Context, r *loopRun) {
 	defer close(done)
 	a := r.a
 	ctx = a.asLoop(ctx, l.id)
-	w := WakeEvent{Reason: model.WakeStart, At: a.clock.Now()}
+	w := wakeOf(model.WakeStart, a.clock.Now(), "")
 	failures := 0
 	for {
 		started := a.clock.Now()
@@ -435,7 +498,7 @@ func (n *nextWake) backOff(floor time.Time) {
 // moved to. Nothing changes on a real clock: the loop runs for that wake, or
 // holds it until the backoff's end, as it did when it armed a timer first.
 func (l *Loop) wait(ctx context.Context, r *loopRun, n nextWake) (WakeEvent, bool) {
-	var held *WakeEvent // a wake that came during the backoff
+	var held *WakeEvent // the wakes that came during the backoff, gathered
 	for {
 		if w, ok, done := l.takePending(r, n.floor, &held); done {
 			return w, ok
@@ -479,12 +542,13 @@ func (l *Loop) sleep(ctx context.Context, r *loopRun, n nextWake, held **WakeEve
 	case <-ctx.Done():
 		return WakeEvent{}, false, true
 	case <-fire:
+		// A wake that came as the timer fired is this run's too.
 		if *held != nil {
 			w := **held
 			w.At = a.clock.Now()
-			return w, true, true
+			return l.after(r, w), true, true
 		}
-		return WakeEvent{Reason: n.reason, At: a.clock.Now()}, true, true
+		return l.after(r, wakeOf(n.reason, a.clock.Now(), "")), true, true
 	case _, open := <-r.wake:
 		if !open {
 			return WakeEvent{}, false, true
@@ -493,23 +557,32 @@ func (l *Loop) sleep(ctx context.Context, r *loopRun, n nextWake, held **WakeEve
 	}
 }
 
-// judged runs the loop for the wake that came, or holds it until floor.
+// judged runs the loop for the wakes that came, gathered after those held,
+// or holds them all until floor.
 func (l *Loop) judged(r *loopRun, floor time.Time, held **WakeEvent) (wake WakeEvent, ok, done bool) {
-	came, now := l.woken(r, floor)
+	came, now := l.woken(r, floor, *held)
 	if now {
-		return came, true, true
+		return *came, true, true
 	}
-	*held = &came
+	*held = came
 	return WakeEvent{}, false, false
 }
 
-// woken takes the wake that came and says whether the loop runs for it now
-// — a nudge, or any wake once floor, the backoff's end, has come — or holds
-// it until floor. wait asks it for a wake already there and for one that
-// comes while it sleeps: both are judged alike.
-func (l *Loop) woken(r *loopRun, floor time.Time) (wake WakeEvent, now bool) {
-	wake = l.take(r)
-	return wake, wake.Reason == model.WakeManual || !r.a.clock.Now().Before(floor)
+// woken takes what came, gathered after held — the wakes a backoff holds
+// already, nil for none —, and says whether the loop runs for it now — a
+// nudge among them, or any wake once floor, the backoff's end, has come —
+// or holds it until floor. wait asks it for a wake already there and for
+// one that comes while it sleeps: both are judged alike. A token whose wake
+// a run already took leaves held as it was.
+func (l *Loop) woken(r *loopRun, floor time.Time, held *WakeEvent) (wake *WakeEvent, now bool) {
+	came, ok := l.take(r)
+	switch {
+	case !ok:
+		return held, false
+	case held != nil:
+		came = held.gather(came)
+	}
+	return &came, came.Reason == model.WakeManual || !r.a.clock.Now().Before(floor)
 }
 
 // onPublish calls fn after every publish on the topic, until removed.

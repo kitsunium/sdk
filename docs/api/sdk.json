@@ -7903,13 +7903,13 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit",
       "name": "WakeEvent",
-      "spelled": "struct{Reason string; At time.Time; Topic string}",
-      "canonical": "struct{Reason string; At time.Time; Topic string}",
+      "spelled": "struct{Reason string; At time.Time; Topic string; Reasons []string; Topics []string}",
+      "canonical": "struct{Reason string; At time.Time; Topic string; Reasons []string; Topics []string}",
       "fields": [
         {
           "name": "Reason",
           "type": "string",
-          "doc": "Reason is model.WakeInterval, WakeDeadline, WakeTopic, WakeStart or\nWakeManual.\n"
+          "doc": "Reason is model.WakeInterval, WakeDeadline, WakeTopic, WakeStart or\nWakeManual: WakeManual when a nudge is among the wakes the run\ngathers — the one wake that cuts a backoff short —, else the first\nthat came.\n"
         },
         {
           "name": "At",
@@ -7919,10 +7919,20 @@
         {
           "name": "Topic",
           "type": "string",
-          "doc": "Topic is the topic node that woke the loop, for a topic wake.\n"
+          "doc": "Topic is the topic node whose publish woke the loop first, when a\ntopic's did.\n"
+        },
+        {
+          "name": "Reasons",
+          "type": "[]string",
+          "doc": "Reasons are the reasons of every wake the run gathers, each once, in\nthe order they came: Reason is among them.\n"
+        },
+        {
+          "name": "Topics",
+          "type": "[]string",
+          "doc": "Topics are the topic nodes whose publish woke the loop into this run,\neach once, in the order they came: Topic is the first.\n"
         }
       ],
-      "doc": "WakeEvent says why a declared loop runs: the reason, the instant, and the\ntopic that woke it when one did.\n",
+      "doc": "WakeEvent says why a declared loop runs: the reason, the instant, and the\ntopic that woke it when one did. Wakes that come while it runs, or while\nit backs off after a failure, are gathered into one run: Reasons and\nTopics say every one of them, and Reason the one that decides the run.\n",
       "file": "framework/internal/kit/loop.go",
       "layer": "framework"
     },
@@ -13384,7 +13394,7 @@
       "spelled": "ikit.WakeEvent",
       "canonical": "github.com/kitsunium/sdk/framework/internal/kit.WakeEvent",
       "owner": "go:github.com/kitsunium/sdk/framework/internal/kit.WakeEvent",
-      "doc": "Wake says why a declared loop runs: the reason, the instant, and the\ntopic that woke it when one did.\n",
+      "doc": "Wake says why a declared loop runs: the reason, the instant, and the\ntopic that woke it when one did. Wakes that come while it runs, or while\nit backs off after a failure, are gathered into one run: Reasons and\nTopics say every one of them, and Reason the one that decides the run.\n",
       "file": "framework/kit/loop.go",
       "layer": "framework"
     },

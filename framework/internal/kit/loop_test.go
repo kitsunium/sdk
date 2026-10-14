@@ -166,7 +166,8 @@ func TestDeclaredLoopWakes(t *testing.T) {
 	}
 }
 
-// Wakes that come during a run are one run after it.
+// Wakes that come during a run are one run after it, which says every one
+// of them: a nudge among them makes it a manual run.
 func TestLoopWakesAreCoalesced(t *testing.T) {
 	resetDigests()
 	gate := make(chan struct{})
@@ -187,8 +188,9 @@ func TestLoopWakesAreCoalesced(t *testing.T) {
 	close(gate)
 	w := waitWakes(t, 2)
 	stillWakes(t, 2)
-	if w[1].Reason != model.WakeTopic {
-		t.Errorf("the burst ran for %+v, want the first reason, a topic", w[1])
+	if w[1].Reason != model.WakeManual || !slices.Equal(w[1].Reasons, []string{model.WakeTopic, model.WakeManual}) ||
+		!slices.Equal(w[1].Topics, []string{"members/topic/joined"}) {
+		t.Errorf("the burst ran for %+v, want a manual run that says the topic's publishes and the nudge", w[1])
 	}
 }
 
