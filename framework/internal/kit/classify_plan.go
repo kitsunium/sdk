@@ -102,6 +102,10 @@ type classPlan struct {
 	// problems refuse the start; warnings are said in dev, in config and in
 	// the Studio, one per declared field.
 	problems []phrase
+	// resting refuse the start only where kit reads one person's identity
+	// from the type — a store's entity, a topic's message, a queued
+	// command's input: a subject inside a list or a map (ADR 0178, C5).
+	resting  []phrase
 	warnings []fieldWarning
 }
 
@@ -153,7 +157,9 @@ func buildPlan(t reflect.Type) *classPlan {
 }
 
 // judgeMembers says what each member's tag gets wrong, in the members'
-// order, and returns the members tagged subject.
+// order, and returns the members tagged subject outside every list and
+// map: one inside a list is never the type's identity, so it is never its
+// second subject either.
 func (p *classPlan) judgeMembers() []*member {
 	var subjects []*member
 	for i := range p.members {
@@ -170,22 +176,26 @@ func (p *classPlan) judgeMembers() []*member {
 			p.problems = append(p.problems, say("classify.history-many", "field", m.field))
 		}
 		if m.tag.marks.has(markSubject) {
-			subjects = append(subjects, m)
-			p.judgeSubject(m)
+			subjects = p.judgeSubject(m, subjects)
 		}
 	}
 	return subjects
 }
 
 // judgeSubject refuses a subject kit cannot read as one person's identity:
-// one inside a list or a map, one that is neither a string nor an integer.
-func (p *classPlan) judgeSubject(m *member) {
-	switch {
-	case m.inCollection():
-		p.problems = append(p.problems, say("classify.subject-many", "field", m.field))
-	case !subjectKind(m.typ):
+// one inside a list or a map — only where the type rests, the one place kit
+// reads an identity from it —, one that is neither a string nor an integer.
+// It returns subjects with m appended when m sits outside every list and
+// map.
+func (p *classPlan) judgeSubject(m *member, subjects []*member) []*member {
+	if m.inCollection() {
+		p.resting = append(p.resting, say("classify.subject-many", "field", m.field))
+		return subjects
+	}
+	if !subjectKind(m.typ) {
 		p.problems = append(p.problems, say("classify.subject-type", "field", m.field, "type", m.typ))
 	}
+	return append(subjects, m)
 }
 
 // inCollection reports whether the member is reached through an element of

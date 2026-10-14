@@ -1,6 +1,7 @@
 package kit
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"slices"
@@ -195,29 +196,117 @@ type listedHistory struct {
 	} `json:"replies"`
 }
 
-// The type's own refusals: two subjects, a subject in a list, a subject
-// that is not an identity, an erased field that is not a time, former
-// values kept inside a list.
+// The type's own refusals: two subjects, a subject in a list — where the
+// type rests —, a subject that is not an identity, an erased field that is
+// not a time, former values kept inside a list.
 func TestATypeIsJudgedWhole(t *testing.T) {
-	for typ, want := range map[reflect.Type][]string{
-		reflect.TypeFor[twoSubjects]():   {"two subject fields"},
-		reflect.TypeFor[listedSubject](): {"inside a list or a map"},
-		reflect.TypeFor[badSubject]():    {"holds a []string", "kit stamps a time.Time"},
-		reflect.TypeFor[listedHistory](): {"sits inside a list or a map"},
+	for typ, want := range map[reflect.Type]struct{ everywhere, resting []string }{
+		reflect.TypeFor[twoSubjects]():   {everywhere: []string{"two subject fields"}},
+		reflect.TypeFor[listedSubject](): {resting: []string{"inside a list or a map"}},
+		reflect.TypeFor[badSubject]():    {everywhere: []string{"holds a []string", "kit stamps a time.Time"}},
+		reflect.TypeFor[listedHistory](): {everywhere: []string{"sits inside a list or a map"}},
 	} {
 		p := planOf(typ)
-		if len(p.problems) != len(want) {
-			t.Errorf("%s: %v", typ, p.problems)
-			continue
-		}
-		for i, w := range want {
-			if !strings.Contains(p.problems[i].String(), w) {
-				t.Errorf("%s says %q, want %q", typ, p.problems[i], w)
-			}
-		}
+		saysAll(t, typ, "everywhere", p.problems, want.everywhere)
+		saysAll(t, typ, "at rest", p.resting, want.resting)
 		if p.subject != nil {
 			t.Errorf("%s has a subject kit can use", typ)
 		}
+	}
+}
+
+// saysAll fails t unless problems say each of want, in order, and nothing
+// else.
+func saysAll(t *testing.T, typ reflect.Type, where string, problems []phrase, want []string) {
+	t.Helper()
+	if len(problems) != len(want) {
+		t.Errorf("%s %s: %v", typ, where, problems)
+		return
+	}
+	for i, w := range want {
+		if !strings.Contains(problems[i].String(), w) {
+			t.Errorf("%s says %q %s, want %q", typ, problems[i], where, w)
+		}
+	}
+}
+
+// listedPerson is a record about one person, as a store keeps it.
+type listedPerson struct {
+	Email string `json:"email" kit:"subject"`
+	Name  string `json:"name" kit:"personal"`
+}
+
+// listedPage is what a list answers: the records of several people, and
+// the one person who asked.
+type listedPage struct {
+	Asker  string         `json:"asker" kit:"subject"`
+	People []listedPerson `json:"people"`
+	Others []listedPerson `json:"others"`
+}
+
+// subjectManyAt returns the diagnostics of an app with one service
+// declared by declare that refuse a subject in a list — or count one as a
+// type's second subject.
+func subjectManyAt(declare func(*Service)) []string {
+	svc := NewService("listing", "")
+	declare(svc)
+	var said []string
+	for _, d := range NewApp("listing", svc).classificationProblems(false) {
+		if strings.Contains(d.Message, "inside a list or a map") || strings.Contains(d.Message, "two subject fields") {
+			said = append(said, d.Node+": "+d.Message)
+		}
+	}
+	return said
+}
+
+// A subject in a list is refused only where kit reads one person's
+// identity from it — a store's entity, a topic's message, a queued
+// command's input: the types that rest and are sealed. Where kit reads no
+// identity — an endpoint's request and response, a query's input and
+// result, a synchronous command's input and result, an auth handler's
+// credentials and data — it is personal data for redaction, and accepted
+// (ADR 0178, C5).
+func TestASubjectInAListIsRefusedOnlyWhereKitReadsAnIdentity(t *testing.T) {
+	answer := func(context.Context, EmptyValue) (listedPage, error) { return listedPage{}, nil }
+	take := func(context.Context, listedPage) (EmptyValue, error) { return EmptyValue{}, nil }
+	accepted := map[string]func(*Service){
+		"endpoint response": func(s *Service) { s.Endpoint("GET /people", answer) },
+		"endpoint request":  func(s *Service) { s.Endpoint("POST /people", take) },
+		"query result":      func(s *Service) { s.Query("people", answer) },
+		"query input":       func(s *Service) { s.Query("asked", take) },
+		"command result":    func(s *Service) { s.Command("list", answer) },
+		"command input":     func(s *Service) { s.Command("import", take) },
+		"auth handler": func(s *Service) {
+			s.AuthHandler("pages", func(context.Context, listedPage) (UID, listedPage, error) { return "", listedPage{}, nil })
+		},
+	}
+	for where, declare := range accepted {
+		if said := subjectManyAt(declare); len(said) != 0 {
+			t.Errorf("%s: refused %q", where, said)
+		}
+	}
+	refused := map[string]struct {
+		declare func(*Service)
+		node    string
+	}{
+		"store entity":         {func(s *Service) { s.Store("pages", func(p listedPage) string { return p.Asker }) }, "listing/store/pages"},
+		"topic message":        {func(s *Service) { s.Topic[listedPage]("pages") }, "listing/topic/pages"},
+		"queued command input": {func(s *Service) { s.Command("import", take, Queued()) }, "listing/command/import"},
+	}
+	for where, c := range refused {
+		said := subjectManyAt(c.declare)
+		if len(said) != 2 || !strings.HasPrefix(said[0], c.node+": ") {
+			t.Errorf("%s: said %q, want both lists refused at %s", where, said, c.node)
+		}
+	}
+	// A type a store keeps and an endpoint answers is refused at the store,
+	// once per field, whichever declaration comes first.
+	both := subjectManyAt(func(s *Service) {
+		s.Endpoint("GET /pages", func(context.Context, EmptyValue) (listedPage, error) { return listedPage{}, nil })
+		s.Store("pages", func(p listedPage) string { return p.Asker })
+	})
+	if len(both) != 2 || !strings.HasPrefix(both[0], "listing/store/pages: ") {
+		t.Errorf("a type both kept and answered: said %q", both)
 	}
 }
 
