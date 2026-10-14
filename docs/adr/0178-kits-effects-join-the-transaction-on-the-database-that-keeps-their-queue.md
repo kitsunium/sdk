@@ -1,8 +1,9 @@
 # ADR 0178 — kit's effects join the transaction on the database that keeps their queue
 
-- **Status**: Proposed. A design only: nothing in this ADR is implemented. Every choice below is put to the owner with its options and a recommendation; the recommendations become decisions when the owner accepts them, choice by choice.
+- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status and each choice's *Decision* line. Implemented: C5 (PR 2 of C7's order, the subject in a list). The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
 - **Date**: 2026-10-14
-- **Deciders**: SDK maintainers (issue #274)
+- **Accepted**: 2026-10-14
+- **Deciders**: SDK maintainers (issue #274); arbitrated by the owner
 - **Depends on**: [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) (the SQL broker: a message published in a transaction exists if and only if it commits), [ADR 0139](0139-a-document-store-over-sql-joins-the-transaction-its-context-carries.md) (`Joiner`, `Deferrer`, every call runs where its context says), [ADR 0143](0143-a-document-keeps-its-versions-in-its-own-write.md) (versions, and the trash it deferred)
 - **Related**: [ADR 0140](0140-sqlites-migration-lock-is-the-database-files-write-lock.md) (SQLite's write lock), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (kit's engine is `framework/`), [ADR 0111](0111-a-mail-spool-retries-on-a-backoff-and-resends-only-after-a-crash.md) and [ADR 0141](0141-a-mail-spool-keeps-an-identifier-its-caller-minted.md) (the mail spool), [ADR 0112](0112-a-loop-that-must-keep-running-is-supervised-beside-the-lifecycle.md) (the supervisor), [ADR 0172](0172-a-product-initialises-what-it-imports-and-the-stores-stay-in-the-core.md), [ADR 0175](0175-a-products-tests-reach-the-disk-with-one-option.md) (`kittest.NewDisk`, which the tests of this work run on), [ADR 0040](0040-changing-a-published-shape-while-v0.md); kitsunium/platform#34 decision 4, kitsunium/platform#35, kodmain/moderation#16
 
@@ -94,7 +95,8 @@ checked, and says what would check it.
 ## Decision
 
 Seven choices. Each states the question, the options with their concrete
-cost, and the recommendation.
+cost, the recommendation, and the option the owner retained on 2026-10-14
+— in every choice, the recommendation.
 
 ### C1 — how the outbox adopts `queue.NewSQL`, and what becomes of holding
 
@@ -188,6 +190,9 @@ site. The analyser should warn when a declared publishes/delivers edge
 crosses two databases (the graph has both ends), so the non-atomic case is
 said at the declaration rather than discovered after a crash.
 
+**Decision.** A, with the two-phase release — the outbox inside the
+transaction — by the owner's decision, 2026-10-14.
+
 ### C2 — the floors: MySQL `SKIP LOCKED`, SQLite's busy timeout
 
 **Question.** The SQL broker needs MySQL 8.0.1 or MariaDB 10.6; an older
@@ -247,6 +252,10 @@ The SQLite rule, with `T` the resolved `<name>-timeout`:
   that does not implement it keeps its own default and the check above still
   runs on the URL it is given.
 
+**Decision.** A for MySQL — MySQL 8.0.1+ or MariaDB 10.6+, checked at
+start — and, for SQLite, the busy timeout `B = T − max(250 ms, T / 10)` with
+its two start refusals, by the owner's decision, 2026-10-14.
+
 ### C3 — the journal's key: its own, or derived
 
 **Question.** One data key per journal entry grows `kit.privacy/store/keys`
@@ -278,6 +287,9 @@ is told of adds one per notice. What does the journal seal under?
 erasure is possible and whose rotation needs nothing new; the period is a
 month so that a journal retention, when the owner sets one, has a grain
 finer than a year and coarser than a day.
+
+**Decision.** A — a journal key of its own per calendar month, `"j:YYYY-MM"`
+— by the owner's decision, 2026-10-14.
 
 ### C4 — the trash: a default age limit, and its value
 
@@ -313,6 +325,10 @@ follows, and the privacy bypass keeps retention and erasure exactly as
 strict as today. **(assumed: WordPress's `EMPTY_TRASH_DAYS` default is 30;
 to be cited from its documentation in the PR.)**
 
+**Decision.** A — a 30-day trash, `<store>-trash`, for stores with
+`Revisions(n)` only, privacy's deletions bypassing it — by the owner's
+decision, 2026-10-14.
+
 ### C5 — a `subject` in a list
 
 **Question.** Vigie's endpoints return lists of records whose type has a
@@ -344,6 +360,19 @@ Does it mean anything in a list?
 what rests — that a response never makes; keeping it where that decision is
 made and lifting it where it is not removes Vigie's workaround without
 weakening any erasure.
+
+**Decision.** A — the subject targeted: refused in a list only where kit
+reads an identity — by the owner's decision, 2026-10-14. **Implemented**
+(PR 2): a type's plan keeps a subject inside a list or a map apart from its
+other problems (`classPlan.resting`, `classify_plan.go`), and each
+declaration says which of its types rest (`dataType.rests`,
+`classify_walk.go`): a store's entity, a topic's message and a queued
+command's input refuse it, said once per type at the first declaration where
+the type rests; an endpoint's request and response, a query's input and
+result, a synchronous command's input and result and an auth handler's
+types accept it. A subject in a list is no longer counted as a type's second
+subject. Redaction is unchanged. `TestASubjectInAListIsRefusedOnlyWhereKitReadsAnIdentity`
+holds each place.
 
 ### C6 — `Records.Keys`, and the watches' catch-up at start
 
@@ -389,6 +418,10 @@ the same on demand.
 unclean stop.** C is the precise tool, but it changes both engines for a
 case C1 makes rare; A costs one method and is what a full re-scan needs
 anyway.
+
+**Decision.** A — `Records.Keys(ctx) iter.Seq2[string, error]`, offered to
+watching modules only, one journal entry per call, and the catch-up on an
+unclean stop — by the owner's decision, 2026-10-14.
 
 ### C7 — `data copy`, the pull requests, and their order
 
@@ -456,6 +489,9 @@ not insert — to check before PR 10, and an SDK addition if not.)**
 9. C4 — the trash, after 8.
 10. `data copy`, last.
 
+**Decision.** A — small pull requests, in this order, `data copy` verified
+by fingerprints — by the owner's decision, 2026-10-14.
+
 **Sealing the mail outbox (item 6).** kit seals the spool's payload in a
 broker that wraps the one C1 gives the spool — the way `wrapQueue` already
 stands in front of a queue in tests (`consumer.go:57-60`) — under `data-key`
@@ -508,8 +544,8 @@ database, WordPress's 30 days, a dead letter written as dead by `data copy`.
 
 ## Breaking changes
 
-None today: this ADR is a design and changes no code. The pull requests it
-plans would change, once accepted:
+None so far: C5, the one choice implemented, only accepts types that were
+refused. The pull requests still to come change:
 
 - **`kit.Transact`'s outcome** (PR 5). Today a held publication, dispatch,
   mail or notice that its queue refuses after the commit is logged and
@@ -528,6 +564,13 @@ plans would change, once accepted:
   keeps the record restorable 30 days unless `<store>-trash` is 0.
 - C3 and C5 break nothing: entries sealed under their own keys keep
   opening, and C5 only accepts types that were refused.
+
+## Revision history
+
+| Version | Date | What changed |
+|---|---|---|
+| Proposed | 2026-10-14 | The design, merged in #320 |
+| Accepted | the owner's decision, 2026-10-14 | The recommendation of each choice retained as written; a *Decision* line per choice. C5 implemented in the same pull request |
 
 ## Alternatives considered
 
