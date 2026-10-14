@@ -236,6 +236,27 @@ func (c *cluster) leader(timeout time.Duration) *testNode {
 	return nil
 }
 
+// settledLeader returns a leader whose term already has a committed entry,
+// so its term's no-op is behind it: the state a membership change requires.
+// Its own proof is an entry proposed and committed in the term it still
+// leads; a leadership that moved meanwhile is looked for again.
+func (c *cluster) settledLeader(timeout time.Duration) *testNode {
+	c.t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		l := c.leader(timeout)
+		tok := propose(c.t, l.node, "settle=1")
+		st := l.node.Status()
+		if st.Role == coreconsensus.RoleLeader && st.Term == tok.Term && st.Commit >= tok.Index {
+			return l
+		}
+		if time.Now().After(deadline) {
+			c.t.Fatalf("no leader committed an entry of its own term (last %d: %+v, token %v)", l.id, st, tok)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func (c *cluster) waitApplied(index uint64, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	for _, tn := range c.nodes {
@@ -452,12 +473,16 @@ func TestClusterTransferLeadership(t *testing.T) {
 	if err := l.node.TransferLeadership(ctx, "op:test", to.id); err != nil {
 		t.Fatalf("transfer: %v", err)
 	}
-	if st := to.node.Status(); st.Role != coreconsensus.RoleLeader {
-		// The watch saw the leader; give the target's own status a turn.
-		time.Sleep(50 * time.Millisecond)
-		if st = to.node.Status(); st.Role != coreconsensus.RoleLeader {
-			t.Fatalf("target role %v", st.Role)
+	// The transfer returned once the old leader SAW the target lead; the
+	// target's own Status is published after its own turn, which a loaded
+	// scheduler may not have run yet. A fixed grace is a guess about that
+	// scheduler, so the condition is waited for, on a bound.
+	deadline := time.Now().Add(5 * time.Second)
+	for st := to.node.Status(); st.Role != coreconsensus.RoleLeader; st = to.node.Status() {
+		if time.Now().After(deadline) {
+			t.Fatalf("target role %v (term %d, leader %d)", st.Role, st.Term, st.Leader)
 		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	propose(t, to.node, "b=2")
 }
@@ -770,7 +795,10 @@ func TestLongLoopTurnDropsTheLease(t *testing.T) {
 // One JOIN per slot per election timeout (R7-42).
 func TestJoinIsRateLimitedPerSlot(t *testing.T) {
 	c := newCluster(t, 3, 0)
-	l := c.leader(5 * time.Second)
+	// A JOIN is a membership change, and a leader admits none before its
+	// term's no-op committed (MEMBERSHIP_CHANGE_PENDING): taking the leader
+	// by role alone races that commit.
+	l := c.settledLeader(5 * time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	peer := coreconsensus.AuthenticatedPeerValue{Slot: "burst", SPKI: [32]byte{7}}
