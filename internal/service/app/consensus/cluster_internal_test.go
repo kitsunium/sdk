@@ -297,6 +297,47 @@ func propose(t *testing.T, n *Node, kv string) coreconsensus.TokenValue {
 	}
 }
 
+// proposeOnLeader proposes kv to whichever node leads now, again on a new
+// leader when the one asked lost its leadership before answering. Only for
+// a set the test may write twice: an OUTCOME_UNKNOWN proposal may have
+// committed, and retrying it writes the same value again; an
+// ENTRY_SUPERSEDED one did not. Under load a two-node majority can change
+// leader mid-sequence, and propose, bound to one node, then fails (#304).
+func proposeOnLeader(t *testing.T, c *cluster, kv string) coreconsensus.TokenValue {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		l := c.leader(5 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		tok, _, err := l.node.Propose(ctx, []byte(kv))
+		cancel()
+		if err == nil {
+			return tok
+		}
+		retry := errors.Is(err, coreconsensus.NotLeader) ||
+			errs.HasCode(err, coreconsensus.CodeOutcomeUnknown) || errs.HasCode(err, coreconsensus.CodeEntrySuperseded)
+		if !retry || time.Now().After(deadline) {
+			t.Fatalf("propose %q: %v", kv, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// compactedPast waits until the current leader's log starts past index.
+func compactedPast(t *testing.T, c *cluster, index uint64) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if first, _ := c.leader(5 * time.Second).log.Bounds(); first > index {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the leader never compacted past %d", index)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestClusterElectsReplicatesAndSurvivesLeaderLoss(t *testing.T) {
 	c := newCluster(t, 3, 0)
 	l := c.leader(5 * time.Second)
@@ -908,18 +949,17 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 	c.kill(lag)
 	var tok coreconsensus.TokenValue
 	for i := range 200 {
-		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
+		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for first, _ := l.log.Bounds(); first <= 10; first, _ = l.log.Bounds() {
-		if time.Now().After(deadline) {
-			t.Fatal("leader never compacted")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	compactedPast(t, c, 10)
+	// The crash is armed before the leader can reach the restarted node:
+	// armed after, an install that published in between left nothing to
+	// crash and the wait below timed out (#304, macOS).
+	c.net.Isolate(lag.id, true)
 	c.start(lag)
 	lag.node.crashAfterPublish.Store(true)
-	deadline = time.Now().Add(10 * time.Second)
+	c.net.Isolate(lag.id, false)
+	deadline := time.Now().Add(10 * time.Second)
 	for !lag.node.stopped.Load() {
 		if time.Now().After(deadline) {
 			t.Fatal("no install reached publication")
@@ -934,6 +974,55 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 	c.waitApplied(tok.Index, 10*time.Second)
 	if v, _ := lag.sm.get("k199"); v != "199" {
 		t.Fatalf("after resuming the install: k199=%q", v)
+	}
+}
+
+// An install onto a node that already holds two snapshots of its own keeps
+// two, as a cut does (D7, R6-02): it used to leave three until that node's
+// next cut, which TestDiskClusterSurvivesFullRestart caught under load (#304).
+func TestAnInstallKeepsTheTwoNewestSnapshots(t *testing.T) {
+	c := newCluster(t, 3, 20)
+	l := c.leader(5 * time.Second)
+	var lag *testNode
+	for _, tn := range c.nodes {
+		if tn != l {
+			lag = tn
+			break
+		}
+	}
+	var tok coreconsensus.TokenValue
+	for i := range 100 {
+		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
+	}
+	c.waitApplied(tok.Index, 10*time.Second)
+	deadline := time.Now().Add(10 * time.Second)
+	for len(must(lag.snaps.List())(t)) < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("the follower never cut two snapshots of its own")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	held := tok.Index
+	c.kill(lag)
+	for i := 100; i < 300; i++ {
+		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
+	}
+	compactedPast(t, c, held+1)
+	c.start(lag)
+	c.waitApplied(tok.Index, 10*time.Second)
+	// The applied index moves with the restore, a moment before the install
+	// prunes: the count is waited for, on a bound.
+	deadline = time.Now().Add(5 * time.Second)
+	metas := must(lag.snaps.List())(t)
+	for len(metas) > 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+		metas = must(lag.snaps.List())(t)
+	}
+	if len(metas) == 0 || len(metas) > 2 {
+		t.Fatalf("after the install the follower holds %d snapshots", len(metas))
+	}
+	if metas[0].Position.Index <= held {
+		t.Fatalf("the follower's newest snapshot is at %d, not past the %d it held: no install", metas[0].Position.Index, held)
 	}
 }
 

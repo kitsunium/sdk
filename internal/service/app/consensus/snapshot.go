@@ -196,16 +196,9 @@ func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.Sna
 // afterCut keeps the two newest snapshots and compacts the log back to the
 // older one, less SnapshotTrailing, with saturating arithmetic (D7).
 func (n *Node) afterCut() {
-	metas, err := n.cfg.Snapshots.List()
-	if err != nil || len(metas) == 0 {
+	metas := n.retain()
+	if len(metas) == 0 {
 		return
-	}
-	for _, m := range metas[min(2, len(metas)):] {
-		// Refused while a transfer reads it: kept until the next cut, which
-		// tries again. Worth a line, never a stop.
-		if err := n.cfg.Snapshots.Remove(m.ID); err != nil {
-			n.obs.info("consensus: an old snapshot is kept for now", lstr("id", m.ID), lstr("error", err.Error()))
-		}
 	}
 	older := metas[min(1, len(metas)-1)].Position.Index
 	n.am.Lock()
@@ -220,6 +213,26 @@ func (n *Node) afterCut() {
 		n.r.Compact(through)
 		n.handleReady()
 	})
+}
+
+// retain keeps the two newest snapshots (D7, R6-02), removing the older ones,
+// and returns the store's list, newest first; nil when it cannot be read. A
+// cut publishes a snapshot and so does an install: both end here, or an
+// install onto a node holding two left three until that node's next cut
+// (#304).
+func (n *Node) retain() []coreconsensus.SnapshotMetaValue {
+	metas, err := n.cfg.Snapshots.List()
+	if err != nil {
+		return nil
+	}
+	for _, m := range metas[min(2, len(metas)):] {
+		// Refused while a transfer reads it: kept until the next cut or
+		// install, which tries again. Worth a line, never a stop.
+		if err := n.cfg.Snapshots.Remove(m.ID); err != nil {
+			n.obs.info("consensus: an old snapshot is kept for now", lstr("id", m.ID), lstr("error", err.Error()))
+		}
+	}
+	return metas
 }
 
 // requestCut asks the apply goroutine for a cut, unless one is in flight.
@@ -521,11 +534,19 @@ func (n *Node) install(req coreconsensus.InstallParams) error {
 		// does not load it again, or the failure to do so travels with it.
 		return alsoFailed(err, "remove", n.cfg.Snapshots.Remove(snapID))
 	}
+	n.installed(meta, req.From.ID)
+	return nil
+}
+
+// installed moves raft onto a restored install and keeps the two newest
+// snapshots: the installed one is the newest, and the oldest of the ones
+// this node held goes, as after a cut.
+func (n *Node) installed(meta coreconsensus.SnapshotMetaValue, from coreconsensus.NodeID) {
 	n.exec(func() {
 		n.r.InstallSnapshot(meta)
 		n.handleReady()
 	})
+	n.retain()
 	n.obs.inc(mSnapshotInstalls)
-	n.obs.info("consensus: snapshot installed", lattr("index", meta.Position.Index), lattr("from", uint64(req.From.ID)))
-	return nil
+	n.obs.info("consensus: snapshot installed", lattr("index", meta.Position.Index), lattr("from", uint64(from)))
 }
