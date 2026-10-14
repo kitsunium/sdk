@@ -33,6 +33,9 @@ func Listen(addr string) AppOption {
 }
 
 // DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.
+// Given to an app after [InMemory], it wins: the last of the two says where
+// the data is — so a test helper that runs the product in memory runs it
+// on disk with the one option its test gives (kittest.NewDisk).
 func DataDir(dir string) AppOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.DataDir(dir)
@@ -65,8 +68,9 @@ func Clock(c clock.Timed) AppOption {
 }
 
 // InMemory keeps data in memory. On an app, it overrides the data directory
-// for every store and queue — what a test wants. On a store, it keeps that
-// store in memory even when the app has a data directory.
+// for every store and queue — KIT_DATA_DIR, and a [DataDir] given before it:
+// what a test wants. On a store, it keeps that store in memory even when the
+// app has a data directory.
 func InMemory() interface {
 	StoreOption
 	AppOption
