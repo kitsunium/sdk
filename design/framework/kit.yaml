@@ -984,7 +984,11 @@ packages:
         name: Listen
         out:
           - type: AppConfigurer
-      - doc: DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.
+      - doc: |-
+          DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.
+          Given to an app after [InMemory], it wins: the last of the two says where
+          the data is — so a test helper that runs the product in memory runs it
+          on disk with the one option its test gives (kittest.NewDisk).
         in:
           - name: dir
             type: string
@@ -1025,8 +1029,9 @@ packages:
           - type: AppConfigurer
       - doc: |-
           InMemory keeps data in memory. On an app, it overrides the data directory
-          for every store and queue — what a test wants. On a store, it keeps that
-          store in memory even when the app has a data directory.
+          for every store and queue — KIT_DATA_DIR, and a [DataDir] given before it:
+          what a test wants. On a store, it keeps that store in memory even when the
+          app has a data directory.
         name: InMemory
         out:
           - type: interface{StoreConfigurer; AppConfigurer}
@@ -6455,7 +6460,11 @@ packages:
         name: Listen
         out:
           - type: AppOption
-      - doc: DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.
+      - doc: |-
+          DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.
+          Given to an app after [InMemory], it wins: the last of the two says where
+          the data is — so a test helper that runs the product in memory runs it
+          on disk with the one option its test gives (kittest.NewDisk).
         in:
           - name: dir
             type: string
@@ -6496,8 +6505,9 @@ packages:
           - type: AppOption
       - doc: |-
           InMemory keeps data in memory. On an app, it overrides the data directory
-          for every store and queue — what a test wants. On a store, it keeps that
-          store in memory even when the app has a data directory.
+          for every store and queue — KIT_DATA_DIR, and a [DataDir] given before it:
+          what a test wants. On a store, it keeps that store in memory even when the
+          app has a data directory.
         name: InMemory
         out:
           - type: interface{StoreOption; AppOption}
@@ -7683,6 +7693,77 @@ packages:
           one process per configuration home.
         name: PerConfigDir
         type: Scope
+  - doc: |-
+      Package kittest runs a product in its own tests as production runs it: on
+      a data directory, where kit seals what it keeps at rest, a transaction
+      writes files and a rollback writes them back, a store's retention erases
+      and folds what it overwrote, and a restart reads everything back — none
+      of which a product kept in memory (kit.InMemory) ever meets: kit seals
+      nothing in memory.
+
+      A suite keeps most of its tests in memory, fast and hermetic, and runs on
+      disk those that are about what rests there:
+
+      	func TestNothingPersonalRestsInClear(t *testing.T) {
+      		disk := kittest.NewDisk(t)
+      		app := start(t, disk) // the suite's own helper, in memory unless told otherwise
+      		fileReport(t, app, "ann@example.com")
+      		if files := disk.Holding(t, "ann@example.com"); len(files) > 0 {
+      			t.Errorf("in clear on disk: %v", files)
+      		}
+      	}
+
+      A Disk is an AppOption: kit.DataDir(disk.Dir), which wins over a
+      kit.InMemory given before it. Given to the product started again — once
+      the first app stopped — it is the same data and the same secrets: a
+      restart.
+    functions:
+      - doc: |-
+          NewDisk returns a new data directory for t. The secrets kit makes — its
+          data-key and its index key, what the product generates — are kept beside
+          the data, as production keeps them unless KIT_SECRETS says otherwise, so
+          an app started again on the same Disk opens what the first sealed.
+
+          It skips t where the platform keeps no data directory: the SDK's disk
+          file system is Linux's, macOS's and the BSDs', and refuses Windows.
+        in:
+          - name: t
+            type: testing.TB
+        name: NewDisk
+        out:
+          - type: "*Disk"
+    imports:
+      kit: github.com/kitsunium/sdk/framework/kit
+    path: github.com/kitsunium/sdk/framework/kit/kittest
+    types:
+      - doc: |-
+          Disk is a data directory of a test's own, and the option that runs an app
+          on it.
+        methods:
+          - doc: |-
+              Holding returns the files of the data directory that hold one of words,
+              byte for byte — slash-separated, relative to Dir, sorted —, the secrets
+              kit keeps there left out: what a test asserts is empty once kit seals
+              what the words were written into. An empty word matches nothing.
+            in:
+              - name: t
+                type: testing.TB
+              - name: words
+                type: string
+            name: Holding
+            out:
+              - type: "[]string"
+            recv: pointer
+            variadic: true
+        name: Disk
+        struct:
+          fields:
+            - doc: AppOption keeps an app's data in Dir.
+              embedded: true
+              type: kit.AppOption
+            - doc: Dir is the data directory, removed once the test and its subtests end.
+              name: Dir
+              type: string
   - codes:
       - const:
           - doc: |-

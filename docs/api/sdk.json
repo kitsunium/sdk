@@ -144,6 +144,13 @@
       "doc": "Package yaml lets a kit product read YAML configuration files —\nconfig/config.yaml, config/<env>.yaml, and .yml — as it reads JSON ones.\nkit reads JSON itself; importing this package is the whole of what a\nproduct does to read YAML, and what links the YAML codec into it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/config/yaml\"\n\nA product with a YAML file and without this import is refused at the start,\nnaming the import.\n"
     },
     {
+      "path": "github.com/kitsunium/sdk/framework/kit/kittest",
+      "name": "kittest",
+      "dir": "framework/kit/kittest",
+      "layer": "framework",
+      "doc": "Package kittest runs a product in its own tests as production runs it: on\na data directory, where kit seals what it keeps at rest, a transaction\nwrites files and a rollback writes them back, a store's retention erases\nand folds what it overwrote, and a restart reads everything back — none\nof which a product kept in memory (kit.InMemory) ever meets: kit seals\nnothing in memory.\n\nA suite keeps most of its tests in memory, fast and hermetic, and runs on\ndisk those that are about what rests there:\n\n\tfunc TestNothingPersonalRestsInClear(t *testing.T) {\n\t\tdisk := kittest.NewDisk(t)\n\t\tapp := start(t, disk) // the suite's own helper, in memory unless told otherwise\n\t\tfileReport(t, app, \"ann@example.com\")\n\t\tif files := disk.Holding(t, \"ann@example.com\"); len(files) > 0 {\n\t\t\tt.Errorf(\"in clear on disk: %v\", files)\n\t\t}\n\t}\n\nA Disk is an AppOption: kit.DataDir(disk.Dir), which wins over a\nkit.InMemory given before it. Given to the product started again — once\nthe first app stopped — it is the same data and the same secrets: a\nrestart.\n"
+    },
+    {
       "path": "github.com/kitsunium/sdk/framework/kit/server",
       "name": "server",
       "dir": "framework/kit/server",
@@ -4938,7 +4945,7 @@
       "name": "DataDir",
       "spelled": "func(dir string) AppConfigurer",
       "canonical": "func(dir string) github.com/kitsunium/sdk/framework/internal/kit.AppConfigurer",
-      "doc": "DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.\n",
+      "doc": "DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.\nGiven to an app after [InMemory], it wins: the last of the two says where\nthe data is — so a test helper that runs the product in memory runs it\non disk with the one option its test gives (kittest.NewDisk).\n",
       "file": "framework/internal/kit/config.go",
       "layer": "framework"
     },
@@ -5577,7 +5584,7 @@
       "name": "InMemory",
       "spelled": "func() interface{StoreConfigurer; AppConfigurer}",
       "canonical": "func() interface{github.com/kitsunium/sdk/framework/internal/kit.StoreConfigurer; github.com/kitsunium/sdk/framework/internal/kit.AppConfigurer}",
-      "doc": "InMemory keeps data in memory. On an app, it overrides the data directory\nfor every store and queue — what a test wants. On a store, it keeps that\nstore in memory even when the app has a data directory.\n",
+      "doc": "InMemory keeps data in memory. On an app, it overrides the data directory\nfor every store and queue — KIT_DATA_DIR, and a [DataDir] given before it:\nwhat a test wants. On a store, it keeps that store in memory even when the\napp has a data directory.\n",
       "file": "framework/internal/kit/config.go",
       "layer": "framework"
     },
@@ -11647,7 +11654,7 @@
       "name": "DataDir",
       "spelled": "func(dir string) AppOption",
       "canonical": "func(dir string) github.com/kitsunium/sdk/framework/kit.AppOption",
-      "doc": "DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.\n",
+      "doc": "DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.\nGiven to an app after [InMemory], it wins: the last of the two says where\nthe data is — so a test helper that runs the product in memory runs it\non disk with the one option its test gives (kittest.NewDisk).\n",
       "file": "framework/kit/config.go",
       "layer": "framework"
     },
@@ -12098,7 +12105,7 @@
       "name": "InMemory",
       "spelled": "func() interface{StoreOption; AppOption}",
       "canonical": "func() interface{github.com/kitsunium/sdk/framework/kit.StoreOption; github.com/kitsunium/sdk/framework/kit.AppOption}",
-      "doc": "InMemory keeps data in memory. On an app, it overrides the data directory\nfor every store and queue — what a test wants. On a store, it keeps that\nstore in memory even when the app has a data directory.\n",
+      "doc": "InMemory keeps data in memory. On an app, it overrides the data directory\nfor every store and queue — KIT_DATA_DIR, and a [DataDir] given before it:\nwhat a test wants. On a store, it keeps that store in memory even when the\napp has a data directory.\n",
       "file": "framework/kit/config.go",
       "layer": "framework"
     },
@@ -13632,6 +13639,53 @@
       "owner": "go:github.com/kitsunium/sdk/framework/internal/kit.WrittenEvent",
       "doc": "Written is what a watch is told of a write: which store, which record, and\nwhether it was deleted — never a value. The watch reads the record itself\n([RecordsOf]): without its secret members, and journaled.\n",
       "file": "framework/kit/watch.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/kit/kittest.Disk",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/kit/kittest",
+      "name": "Disk",
+      "spelled": "struct{kit.AppOption; Dir string}",
+      "canonical": "struct{github.com/kitsunium/sdk/framework/kit.AppOption; Dir string}",
+      "fields": [
+        {
+          "name": "AppOption",
+          "embedded": true,
+          "type": "kit.AppOption",
+          "doc": "AppOption keeps an app's data in Dir.\n"
+        },
+        {
+          "name": "Dir",
+          "type": "string",
+          "doc": "Dir is the data directory, removed once the test and its subtests end.\n"
+        }
+      ],
+      "doc": "Disk is a data directory of a test's own, and the option that runs an app\non it.\n",
+      "file": "framework/kit/kittest/kittest.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/kit/kittest.(*Disk).Holding",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/kit/kittest",
+      "name": "Holding",
+      "recv": "Disk",
+      "spelled": "func(t testing.TB, words ...string) []string",
+      "canonical": "func(t testing.TB, words ...string) []string",
+      "doc": "Holding returns the files of the data directory that hold one of words,\nbyte for byte — slash-separated, relative to Dir, sorted —, the secrets\nkit keeps there left out: what a test asserts is empty once kit seals\nwhat the words were written into. An empty word matches nothing.\n",
+      "file": "framework/kit/kittest/kittest.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/kit/kittest.NewDisk",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/kit/kittest",
+      "name": "NewDisk",
+      "spelled": "func(t testing.TB) *Disk",
+      "canonical": "func(t testing.TB) *github.com/kitsunium/sdk/framework/kit/kittest.Disk",
+      "doc": "NewDisk returns a new data directory for t. The secrets kit makes — its\ndata-key and its index key, what the product generates — are kept beside\nthe data, as production keeps them unless KIT_SECRETS says otherwise, so\nan app started again on the same Disk opens what the first sealed.\n\nIt skips t where the platform keeps no data directory: the SDK's disk\nfile system is Linux's, macOS's and the BSDs', and refuses Windows.\n",
+      "file": "framework/kit/kittest/kittest.go",
       "layer": "framework"
     },
     {
