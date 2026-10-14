@@ -4,6 +4,7 @@ package consensus
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,11 +44,7 @@ func TestADroppedSegmentIsSyncedWhenTheNextOneIsRetained(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() {
-			if cerr := f.Close(); cerr != nil && !errors.Is(cerr, os.ErrClosed) {
-				t.Error(cerr)
-			}
-		})
+		closeAtCleanup(t, f)
 		l.segs = append(l.segs, &segment{n: n, f: f})
 	}
 	// The second segment still holds a retained entry: the pass removes the
@@ -68,6 +65,17 @@ func TestADroppedSegmentIsSyncedWhenTheNextOneIsRetained(t *testing.T) {
 	if err == nil {
 		t.Fatal("the pass returned nil: the unlink it made was never synced")
 	}
+}
+
+// closeAtCleanup closes f when the test ends; a segment the pass removed
+// was closed by it already, which is not a failure.
+func closeAtCleanup(t *testing.T, f io.Closer) {
+	t.Helper()
+	t.Cleanup(func() {
+		if err := f.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			t.Error(err)
+		}
+	})
 }
 
 // TestAnUnreadableStopMarkerRefusesTheStart pins D4's "fail closed before

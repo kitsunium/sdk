@@ -1059,11 +1059,11 @@ func TestUnknownEntryKindInAnAppendStopsTheNode(t *testing.T) {
 	e := coreconsensus.EntryValue{Position: coreconsensus.PositionValue{Term: tok.Term, Index: tok.Index + 1}, Kind: 0x80, Data: []byte("x")}
 	e.BodySum = wire.BodySum(e.Data)
 	e.ChainSum = wire.ChainSum(prev[0].ChainSum, &e)
-	m := coreconsensus.MessageValue{
+	m := &coreconsensus.MessageValue{
 		Version: 1, Group: 1, Kind: coreconsensus.MsgApp, From: l.id, To: f.id, Term: l.node.Status().Term,
 		Index: tok.Index, LogTerm: tok.Term, Entries: []coreconsensus.EntryValue{e},
 	}
-	f.node.deliver(coreconsensus.AuthenticatedPeerValue{ID: l.id}, appendFrame(&m))
+	f.node.deliver(coreconsensus.AuthenticatedPeerValue{ID: l.id}, appendFrame(m))
 	deadline := time.Now().Add(5 * time.Second)
 	for !f.node.stopped.Load() {
 		if time.Now().After(deadline) {
@@ -1092,7 +1092,10 @@ func TestUnknownEntryKindInTheLogStopsTheNode(t *testing.T) {
 	e := coreconsensus.EntryValue{Position: coreconsensus.PositionValue{Term: tok.Term, Index: tok.Index + 1}, Kind: 0x80, Data: []byte("x")}
 	e.BodySum = wire.BodySum(e.Data)
 	e.ChainSum = wire.ChainSum(prev[0].ChainSum, &e)
-	hs, _ := tn.log.HardState()
+	hs, err := tn.log.HardState()
+	if err != nil {
+		t.Fatal(err)
+	}
 	hs.Commit = e.Position.Index
 	if err := tn.log.Append([]coreconsensus.EntryValue{e}, &hs); err != nil {
 		t.Fatal(err)
