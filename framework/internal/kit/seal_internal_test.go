@@ -533,6 +533,7 @@ func TestErasingAPersonsLastRecordDestroysTheirKey(t *testing.T) {
 // and by config; with the data in memory, or the key pinned, it is not
 // (kitsunium/platform#35, kitsunium/sdk#274).
 func TestAnIndexKeyInMemoryIsWarnedOf(t *testing.T) {
+	needsFileStore(t)
 	t.Setenv("KIT_SECRETS", "memory")
 	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
 	t.Setenv("KIT_INDEX_KEY", "")
