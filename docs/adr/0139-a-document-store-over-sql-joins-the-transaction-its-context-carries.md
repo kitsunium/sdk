@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-27
 - **Deciders**: SDK maintainers
+- **Amended**: 2026-10-14 — a third sibling, `Aborter` (see the dated section at the end), for ADR 0178's mail spool
 - **Amended by**: [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — §D2: the two engines implement ports after all, declared in `internal/core/data/docstore` — two families, `Collection` without a context and `CollectionContext` with one, and the shared `Announcer` — so neither engine gains or loses a context
 - **Related**: [ADR 0055](0055-sdk-sql-domain.md) (the `sql` domain this builds on), [ADR 0110](0110-a-document-store-writes-one-entry-and-rests-as-one-file.md) (the document store whose contract this keeps), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a port grows by siblings), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (an engine's values are the engine's), [ADR 0140](0140-sqlites-migration-lock-is-the-database-files-write-lock.md) (the SQLite runner that migrates its tables); kitsunium/platform ADRs 0004, 0006 and 0007 (kitsunium/platform#18), tracked here as #254
 
@@ -375,3 +376,70 @@ a change of behaviour.
   `INSERT … ON DUPLICATE KEY UPDATE` (affected rows), `LOCK IN SHARE MODE`,
   InnoDB gap locks and READ COMMITTED; SQLite: UPSERT and `RETURNING` (3.35),
   write-transaction start on a write statement
+
+## Amendment (2026-10-14): a third sibling, `Aborter`, for the work that is undone
+
+**Why.** ADR 0178 has the mail spool publish into a SQL queue inside its
+caller's transaction, and announce the mail (`EventQueued`) only after the
+commit. The spool keeps a delivery of a mail from being reported before the
+mail's announcement by registering the mail's identifier before it publishes
+and ending the registration once the announcement is out (ADR 0111 D5,
+ADR 0141 D4). Held with `Defer`, that end runs after a commit and is dropped
+by a rollback without a word: the registration then stays open, and the next
+delivery of that identifier — a repeat ADR 0141 D3 allows, which a rollback
+makes legitimate — waits forever, with every mail queued behind it on the
+spool's one consumer. `Deferrer` can say "after the commit" and nothing else;
+the callee that announced something before the commit needs "the work was
+undone" too.
+
+**Decision.** `core/data/sql` gains a third ADR 0039 sibling of `Transactor`,
+one method, frozen like the other two, published by `pkg/v1/data/sql` as the
+alias `Aborter`. `Deferrer` is not widened.
+
+```go
+type Aborter interface {
+	OnAbort(ctx context.Context, fn func(ctx context.Context)) (held bool)
+}
+```
+
+- **What "undone" means for each scope.** A function held under a scope runs
+  when that scope's work is undone: its savepoint rolls back — the unit of
+  work returned an error or panicked — or any scope around it rolls back, the
+  root included. The root's work is undone when its unit of work fails or
+  panics, when a poisoned transaction refuses its commit, and when the COMMIT
+  itself fails — which `COMMIT_FAILED` already reports as a unit of work that
+  had no effect. A released savepoint hands what it held to the scope around
+  it, which decides in turn, exactly as for `Defer`. A commit that stands drops
+  everything still held, unrun.
+- **When it runs.** Once, newest first — the order work is undone in —, on
+  the goroutine that ends the scope: a failed savepoint after its
+  `ROLLBACK TO SAVEPOINT` and before its `Transact` returns, the root after its
+  `ROLLBACK` and before its `Transact` returns or its panic continues. A
+  savepoint whose `ROLLBACK TO SAVEPOINT` itself fails runs its functions too:
+  the transaction is poisoned and never commits that work.
+- **On which context.** The context `OnAbort` was given, through
+  `context.WithoutCancel`: values travel, the ending does not — the rule this
+  domain already follows for its own clean-up statements (`cleanup()`), since
+  the commonest reason for a rollback is that the caller's context ended.
+- **With `Defer`.** For one function held with each under the same scope,
+  exactly one runs. The one exception is `Defer`'s own: a function held with
+  `Defer` that panics stops those held after it, and a commit stood, so no
+  abort runs either.
+- **False answers.** `OnAbort` reports false and holds nothing when the
+  context carries no open transaction of this transactor — no transaction,
+  another transactor's, or one that has ended. A nil fn holds nothing.
+
+**Verification.** `internal/core/data/sql`:
+`TestTheTransactorsSiblingsAreFrozenAtOneMethodEach` names the third sibling.
+`internal/service/data/sql/abort_external_test.go`: the four ways a root does
+not commit (failed unit of work, poisoned commit, failed COMMIT, panic) each
+run the held functions once, newest first, after the `ROLLBACK`, on a context
+whose cancellation they do not see, and never what was held for the commit; a
+commit runs none; a failed savepoint runs its own and its released children's
+functions before its `Transact` returns while the root commits; a released
+savepoint's functions are dropped by the root's commit and run by its
+rollback; a panic in a savepoint runs the savepoint's, then the root's; and the
+false answers.
+
+**Breaking changes.** None: one new interface, one new method on the
+unexported transactor, one new alias.

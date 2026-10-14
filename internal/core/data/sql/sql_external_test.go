@@ -48,15 +48,17 @@ func TestTransactorIsFrozenAtOneMethod(t *testing.T) {
 	}
 }
 
-// TestTheTransactorsSiblingsAreFrozenAtOneMethodEach pins the two capabilities
-// ADR 0139 added BESIDE the frozen Transactor rather than in it. pkg/v1 aliases
-// both, so each is published at one method: a second capability is a third
-// sibling, never a widened one.
+// TestTheTransactorsSiblingsAreFrozenAtOneMethodEach pins the three
+// capabilities ADR 0139 added BESIDE the frozen Transactor rather than in it —
+// Aborter by its 2026-10-14 amendment. pkg/v1 aliases each, so each is
+// published at one method: another capability is another sibling, never a
+// widened one.
 func TestTheTransactorsSiblingsAreFrozenAtOneMethodEach(t *testing.T) {
 	t.Parallel()
 	for name, sibling := range map[string]reflect.Type{
-		"Join":  reflect.TypeFor[coresql.Joiner](),
-		"Defer": reflect.TypeFor[coresql.Deferrer](),
+		"Join":    reflect.TypeFor[coresql.Joiner](),
+		"Defer":   reflect.TypeFor[coresql.Deferrer](),
+		"OnAbort": reflect.TypeFor[coresql.Aborter](),
 	} {
 		if sibling.NumMethod() != 1 {
 			t.Fatalf("%s has %d methods, want 1", sibling.Name(), sibling.NumMethod())

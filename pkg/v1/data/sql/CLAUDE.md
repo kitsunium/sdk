@@ -16,7 +16,7 @@ writes from `design/data/sql.yaml`: edit the design, run `kit gen`, then
 
 | Kind | Names |
 |---|---|
-| Port aliases | `Executor`, `Preparer`, `TxFunc`, `Transactor`, `Joiner` and `Deferrer` (the transactor's ADR 0039 siblings — ADR 0139), `Checker`, `Migrator`, `Step` |
+| Port aliases | `Executor`, `Preparer`, `TxFunc`, `Transactor`, `Joiner`, `Deferrer` and `Aborter` (the transactor's ADR 0039 siblings — ADR 0139; `Aborter` by its 2026-10-14 amendment), `Checker`, `Migrator`, `Step` |
 | Value aliases | `TxOptions` (= `coresql.TxOptionsValue`), `Migration` (= `coresql.MigrationValue`), `Dialect` — with the engine's vocabulary its core type spells: `Placeholder`, `QuoteIdent`, `ForUpdate`, `ForUpdateSkipLocked` |
 | Config aliases | `Config`, `PoolConfig`, `MigrateConfig` |
 | Constants | `DialectPostgres`, `DialectMySQL`, `DialectSQLite` |

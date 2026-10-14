@@ -11,6 +11,7 @@ import (
 	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
 	corespool "github.com/kitsunium/sdk/internal/core/app/mail/spool"
 	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
+	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -49,6 +50,11 @@ type Spool struct {
 	transport coremail.Transport
 	// broker is the queue the spool writes into.
 	broker corequeue.Broker
+	// deferrer and aborter are Config.Deferrer's two halves, nil without it:
+	// what tells the observer after a commit, and what ends a registration
+	// when the work is undone.
+	deferrer coresql.Deferrer
+	aborter  coresql.Aborter
 	// clock stamps, bounds and paces.
 	clock clock.Timed
 	// observe, annotate and newID are the configured functions.
@@ -79,10 +85,13 @@ type Spool struct {
 	// mu guards announcing.
 	mu     sync.RWMutex
 	closed bool
+	// ownsBroker is true for the queue the spool built, which Close closes;
+	// a Config.Broker stays its caller's.
+	ownsBroker bool
 }
 
-// New builds a spool from cfg over a durable queue in cfg.Dir, or an
-// in-memory one without it. It starts nothing: Run delivers.
+// New builds a spool from cfg over cfg.Broker, else a durable queue in
+// cfg.Dir, else an in-memory one. It starts nothing: Run delivers.
 func New(cfg Config) (*Spool, error) {
 	//: everything decidable before a queue exists.
 	if invalid := cfg.validate(); invalid != nil {
@@ -90,6 +99,13 @@ func New(cfg Config) (*Spool, error) {
 		return nil, invalid
 	}
 	s := resolve(&cfg)
+	//: the caller's queue, whose policy is the caller's.
+	if cfg.Broker != nil {
+		s.broker = cfg.Broker
+		//: ready to take mail.
+		return s, nil
+	}
+	s.ownsBroker = true
 	policy := corequeue.PolicyValue{
 		VisibilityTimeout: 2 * s.sendTimeout,
 		RetryDelay:        s.backoff.BaseDelay,
@@ -119,7 +135,11 @@ func resolve(cfg *Config) *Spool {
 		transport: cfg.Transport, clock: cfg.Clock, observe: cfg.Observe, annotate: cfg.Annotate,
 		newID: cfg.NewID, delivered: newLedger(DeliveredMemory), from: cfg.From, backoff: cfg.Backoff,
 		announcing: map[string]*announcement{}, maxAttempts: cfg.MaxAttempts, sendTimeout: cfg.SendTimeout,
-		poll: cfg.PollInterval,
+		poll: cfg.PollInterval, deferrer: cfg.Deferrer,
+	}
+	//: validate made sure a Deferrer is an Aborter too.
+	if cfg.Deferrer != nil {
+		s.aborter, _ = cfg.Deferrer.(coresql.Aborter)
 	}
 	//: the wall clock is the only non-arbitrary default.
 	if s.clock == nil {
@@ -159,7 +179,9 @@ func maxMessageBytes(configured int) int {
 
 // Send validates msg, stamps what a retry must not change, and queues it
 // under an identifier Config.NewID mints. It returns that identifier once the
-// mail is in the spool — on disk, with a Dir. A mail without a sender gets
+// mail is in the spool — on disk, with a Dir; in the caller's transaction,
+// with a Broker that joins it, and in the spool once that commits. A mail
+// without a sender gets
 // Config.From; without a Date, the spool's clock; without a Message-ID, one
 // made of its identifier at the sender's domain, which every attempt keeps.
 //
@@ -268,18 +290,59 @@ func (s *Spool) queue(ctx context.Context, id string, msg coremail.MessageValue)
 		//: MessageUnencodable.
 		return kerrs.Wrap(corespool.MessageUnencodable, kerrs.WrapParams{}, kerrs.String("mail", record.ID))
 	}
-	//: the consumer may deliver the mail before Publish returns here: its
-	//: delivery waits until the observer has heard it was queued.
-	defer s.announce(record.ID)()
-	//: durable before the caller hears of it, with a Dir.
+	//: the consumer may deliver the mail before Publish returns here — or,
+	//: in a transaction, as soon as it commits: its delivery waits until the
+	//: observer has heard it was queued. Ended once, whichever path ends it.
+	var once sync.Once
+	registered := s.announce(record.ID)
+	end := func() { once.Do(registered) }
+	held := false
+	defer func() {
+		//: a registration a transaction's outcome does not own ends here.
+		if !held {
+			end()
+		}
+	}()
+	//: durable before the caller hears of it, with a Dir; in the caller's
+	//: transaction, with a Broker that joins it.
 	if publishErr := s.publish(ctx, payload); publishErr != nil {
 		//: SpoolClosed, MessageTooLarge, QueueBackendFailed, or the caller's
 		//: context.
 		return publishErr
 	}
-	s.emit(&EventValue{Kind: EventQueued, At: record.QueuedAt, QueuedAt: record.QueuedAt, ID: record.ID, Message: record.Message, Meta: record.Meta})
+	event := EventValue{Kind: EventQueued, At: record.QueuedAt, QueuedAt: record.QueuedAt, ID: record.ID, Message: record.Message, Meta: record.Meta}
+	//: inside a transaction: told after its commit, or never.
+	if held = s.holdAnnouncement(ctx, &event, end); held {
+		//: in the transaction.
+		return nil
+	}
+	s.emit(&event)
 	//: in the spool.
 	return nil
+}
+
+// holdAnnouncement holds the mail's EventQueued, and then the end of its
+// registration, until the transaction ctx carries for Config.Deferrer
+// commits, and ends the registration without a word when that work is undone
+// instead (ADR 0178). It reports whether it held them; false — no Deferrer,
+// no transaction of its manager on ctx — leaves both to the caller, now.
+//
+// The abort half is held first: once it is, a transaction that settles
+// before the commit half is held has either run it — a rollback, and end is
+// spent — or dropped it with a commit that stood, and the caller announces
+// the mail itself, as it does outside a transaction.
+func (s *Spool) holdAnnouncement(ctx context.Context, event *EventValue, end func()) bool {
+	//: no transaction manager, or no transaction of its on ctx: announced
+	//: now. Otherwise a rollback ends the registration, and tells nobody.
+	if s.deferrer == nil || !s.aborter.OnAbort(ctx, func(context.Context) { end() }) {
+		//: announced now.
+		return false
+	}
+	//: the commit tells the observer, then ends the registration.
+	return s.deferrer.Defer(ctx, func() {
+		defer end()
+		s.emit(event)
+	})
 }
 
 // isClosed reports whether Close ran.
@@ -459,8 +522,9 @@ func (s *Spool) DeadLetters(ctx context.Context, maxLetters int) ([]DeadLetterVa
 	return out, nil
 }
 
-// Close refuses every later Send and closes the spool's queue, once the
-// publications in flight have landed. Closing twice is closing once. Stop Run
+// Close refuses every later Send and closes the queue the spool built, once
+// the publications in flight have landed; a Config.Broker stays its
+// caller's, to close after. Closing twice is closing once. Stop Run
 // first — cancel its context and wait for it to return — or a delivery may be
 // cut off mid-attempt; the mail it held comes back when its lease lapses.
 func (s *Spool) Close() error {
@@ -473,8 +537,8 @@ func (s *Spool) Close() error {
 	}
 	s.closed = true
 	closer, closable := s.broker.(io.Closer)
-	//: a queue with nothing to release.
-	if !closable {
+	//: a queue with nothing to release, or the caller's to release.
+	if !closable || !s.ownsBroker {
 		//: closed.
 		return nil
 	}

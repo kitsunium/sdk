@@ -5,7 +5,7 @@
 
 Implements the **ADR 0055** relational-database ports declared in
 `internal/core/data/sql`: the transaction manager (root transactions **and** nested
-savepoints) with its `Joiner` and `Deferrer` siblings (ADR 0139), the
+savepoints) with its `Joiner`, `Deferrer` and `Aborter` siblings (ADR 0139), the
 connection-pool policy, the bounded health check, and the migration runner
 with its version table and its lock — the session's advisory lock, or SQLite's
 database-file write lock (ADR 0140).
@@ -26,9 +26,9 @@ under the values this package allocated. This package declares no code.
 | `sql.go` | `failed()` — the verdict/driver-error join |
 | `config.go` | `Config`, `PoolConfig`, `Default{MaxLifetime,MaxIdle,CheckTimeout}` |
 | `resolved.go` | `resolved` — the validated, clamped form of a `Config` |
-| `tx.go` | `NewTransactor`, `transactor`, root/nested settle paths, `cleanup()`, `txEnded()`; the held functions run after the root's commit and are dropped with a failed savepoint |
-| `join.go` | `Join` (core/data/sql.Joiner) and `Defer` (core/data/sql.Deferrer) — ADR 0139 |
-| `txstate.go` | `txState` — savepoint counter + poison flag + the functions held until the commit, each tagged with its scope's id, under one `sync.RWMutex` |
+| `tx.go` | `NewTransactor`, `transactor`, root/nested settle paths, `cleanup()`, `txEnded()`; the held functions run after the root's commit and are dropped with a failed savepoint; the functions held for an abort run after a failed savepoint's or a root's rollback (`runAborted`, newest first) |
+| `join.go` | `Join` (core/data/sql.Joiner), `Defer` (core/data/sql.Deferrer) and `OnAbort` (core/data/sql.Aborter) — ADR 0139, the last by its 2026-10-14 amendment |
+| `txstate.go` | `txState` — savepoint counter + poison flag + the functions held until the commit and those held until an abort (`abortFn`, with its detached context), each tagged with its scope's id, under one `sync.RWMutex` |
 | `txscope.go` | `txScope` — the per-context transaction chain and its walk; each link carries the executor its scope lent and its id (0 for the root, the savepoint counter otherwise) |
 | `scope_key_type.go` | the single unexported context key |
 | `executor.go` | `scopedExecutor` — the retiring guard handed to a `TxFunc` |
@@ -124,7 +124,15 @@ under the values this package allocated. This package declares no code.
   with `TX_CLOSED`. **`Defer` tags a held function with the id of the scope
   that held it**; a failed savepoint drops ids at or above its own — scopes
   are a stack and ids only grow — and the root runs what is left after its
-  COMMIT, before `Transact` returns (ADR 0139).
+  COMMIT, before `Transact` returns (ADR 0139). **`OnAbort` tags its function
+  the same way and is the complement** (ADR 0139, amended 2026-10-14): a
+  failed savepoint — error or panic — runs what was held at or above its id
+  once its ROLLBACK TO SAVEPOINT ran (or failed and poisoned the transaction,
+  which then never commits), newest first; the root runs what is left after
+  a ROLLBACK — failed unit of work, poison, a failed COMMIT, a panic, before
+  the panic continues — and drops it with a COMMIT that stood. Each function
+  gets the context `OnAbort` was given, through `context.WithoutCancel`, the
+  rule `cleanup()` follows: a clean-up never rides the cancelled context.
 - **The version table name is validated by `isIdentifier`, never bound.**
   An identifier cannot be a parameter, so it is interpolated — that check,
   `^[A-Za-z_][A-Za-z0-9_]*$` written out rather than a regular expression

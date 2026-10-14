@@ -27,7 +27,7 @@ keeps the value its allocation gave it whichever layer declares it.
 
 | Code | Reason | Status | When |
 |---|---|---|---|
-| `0.3.81.1` | `SPOOL_MISCONFIGURED` | exit 78 | `New` refused its `Config`, or `Config.NewID` minted an identifier no mail can keep |
+| `0.3.81.1` | `SPOOL_MISCONFIGURED` | exit 78 | `New` refused its `Config` — since ADR 0178 also a `Dir` or a `MaxMessageBytes` beside a `Broker`, a `Deferrer` without one or that is not an `Aborter` —, or `Config.NewID` minted an identifier no mail can keep |
 | `0.3.81.2` | `SPOOL_CLOSED` | HTTP 503 | `Send` or `SendWithID` after `Close` |
 | `0.3.81.3` | `MESSAGE_UNDECODABLE` | — | a spooled record that is not a spooled mail; that delivery's failure |
 | `0.3.81.4` | `MESSAGE_UNENCODABLE` | HTTP 400 | `encoding/json` refused the record — a `Date` outside the years 0 to 9999 |

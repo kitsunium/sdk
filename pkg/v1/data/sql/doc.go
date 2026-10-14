@@ -72,11 +72,12 @@
 //
 // # Joining the caller's transaction, and waiting for its commit
 //
-// The transactor [NewTransactor] returns has two more capabilities, each an
+// The transactor [NewTransactor] returns has three more capabilities, each an
 // interface of its own beside [Transactor], found by type assertion (ADR 0139):
 //
-//	ex, inTx := tm.(sql.Joiner).Join(ctx)       // where a statement under ctx runs
-//	held := tm.(sql.Deferrer).Defer(ctx, notify) // notify runs once ctx's transaction commits
+//	ex, inTx := tm.(sql.Joiner).Join(ctx)          // where a statement under ctx runs
+//	held := tm.(sql.Deferrer).Defer(ctx, notify)    // notify runs once ctx's transaction commits
+//	held = tm.(sql.Aborter).OnAbort(ctx, takeBack) // takeBack runs once ctx's work is undone
 //
 // [Joiner] answers the executor of the transaction ctx carries — so a
 // repository called inside its caller's transaction reads what that
@@ -86,7 +87,12 @@
 // transaction commits: a rollback drops it, and so does the rollback of the
 // savepoint it was held in. It is how a message, a mail or a store's write
 // hook waits for the work it announces to be committed. The SDK's document
-// store over SQL is built on both.
+// store over SQL is built on both. [Aborter] is the complement of [Deferrer]:
+// it holds a function until that work is undone — the savepoint it was held
+// in rolls back, or the transaction does not commit — and runs it then, on a
+// context the rollback's cancellation does not reach; a commit drops it. It is
+// how something announced before the commit is taken back when the commit
+// never comes.
 //
 // # Migrations
 //

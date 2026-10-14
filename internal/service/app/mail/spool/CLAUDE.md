@@ -9,7 +9,9 @@ identifier its caller minted (ADR 0141); `Run` hands each mail to a
 mail after its last attempt with that failure, and drops a redelivery of a
 mail it delivered — the one resend left is a crash between the relay's
 acceptance and the acknowledgement, under the same Message-ID. The queue is `internal/service/data/queue` — `NewFile` with a
-`Dir`, `NewMemory` without. Public facade: `pkg/v1/app/mail/spool` (`New`).
+`Dir`, `NewMemory` without — or `Config.Broker`, one its caller built: a
+queue on SQL joined to the caller's transaction, with `Config.Deferrer` its
+transaction manager (ADR 0178). Public facade: `pkg/v1/app/mail/spool` (`New`).
 
 Code range `0.3.81.*`, declared with its sentinels in
 `internal/core/app/mail/spool` (ADR 0160). This package declares no code and
@@ -20,9 +22,9 @@ raises the core's.
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `spool.go` | `Spool`, `New`, `Send` (`mint`), `SendWithID`, both through `queue` (`stamp`, `domainOf`), the per-identifier `announcement` count, `Run` (the queue's `Consume`, one mail at a time), `DeadLetters`, `Close` |
+| `spool.go` | `Spool`, `New`, `Send` (`mint`), `SendWithID`, both through `queue` (`stamp`, `domainOf`), the per-identifier `announcement` count, `holdAnnouncement` (a Send inside a transaction: `EventQueued` held until the commit, the registration ended by `OnAbort` on a rollback), `Run` (the queue's `Consume`, one mail at a time), `DeadLetters`, `Close` (a `Config.Broker` stays its caller's) |
 | `identifier.go` | `MaxIDBytes` and `checkID` — the rule every identifier keeps, whoever minted it |
-| `config.go` | `Config`, `DefaultSendTimeout`, `DefaultRetryBase` / `DefaultRetryMax`, `DefaultMaxMessageBytes`, `DeliveredMemory`; the refusals |
+| `config.go` | `Config` (`Broker` and `Deferrer` since ADR 0178), `DefaultSendTimeout`, `DefaultRetryBase` / `DefaultRetryMax`, `DefaultMaxMessageBytes`, `DeliveredMemory`; the refusals (`validateBroker`: `Dir` or `MaxMessageBytes` beside a `Broker`, a `Deferrer` without one or that is not an `Aborter`) |
 | `deliver.go` | the queue handler: the record read back, a duplicate dropped, the attempt bounded on the spool's clock with its `AttemptValue` in the context, a transport panic recovered, a failure parked (`LeaseExtender.Extend` by `Backoff.Delay(attempt)`) or — on the last attempt — nacked into the dead letter |
 | `ledger.go` | the delivered-ID ring (`DeliveredMemory` entries) |
 | `event.go` | `EventKind` (`queued`, `sent`, `retrying`, `dead-lettered`, `duplicate`), `EventValue`, `AttemptValue` + `AttemptFrom`, `DeadLetterValue` |
@@ -98,6 +100,24 @@ raises the core's.
   observer must not release a delivery of the other's mail
   (`TestTwoSendsOfOneIDEachKeepTheirQueuedEventFirst` fails with the
   replace-the-entry version).
+- **In its caller's transaction, `queued` waits for the commit, and a
+  rollback ends the registration in silence** (ADR 0178). With a `Broker` that
+  joins the transaction, the mail exists only if it commits, and the commit
+  wakes the consumer BEFORE any function the spool held runs (the SQL broker
+  holds its wake first, ADR 0151 §D2) — so the registration must outlive
+  `Send` and end after `queued`, told by a function held with
+  `Deferrer.Defer`. Held with `Defer` alone, a rollback dropped that end
+  without a word, the registration stayed open, and the next delivery of the
+  identifier — a repeat ADR 0141 D3 allows, which a rollback makes legitimate —
+  waited forever with every mail behind it on the one consumer. So the end is
+  also held with `Aborter.OnAbort` (ADR 0139, amended 2026-10-14), behind a
+  `sync.Once`: exactly one of the two runs. The abort half is held first, so a
+  transaction that settles between the two calls has either run it or
+  committed, and `Send` then announces as outside a transaction.
+  `TestAMailQueuedInARolledBackTransactionNeverExists` stalls until its
+  timeout with the abort half removed. `Deferrer` is one field, asserted to be
+  an `Aborter`, as `queue.NewSQL` takes one `Transactor`: the two halves of one
+  outcome cannot come from two managers.
 
 ## Do NOT
 
@@ -115,6 +135,9 @@ raises the core's.
 - **Log from here.**
 - **Emit a delivery event with `emit`**: use `report`, which keeps the mail's
   `queued` first. And never hold `observing` while waiting for anything.
+- **End a transactional Send's registration on `Defer` alone**: a rollback
+  drops it and stalls the consumer. Hold the end with `OnAbort` too.
+- **Close a `Config.Broker`**, or set its policy: it is the caller's.
 
 ## Verification
 
@@ -126,3 +149,7 @@ cd internal/service && GOWORK=off go test -race ./app/mail/spool
 
 The durable cases (`disk_external_test.go`) need the file queue, which
 Windows refuses by design (ADR 0056): they assert that refusal and skip there.
+The transactional cases (`transaction_external_test.go`) run the SDK's real
+transaction manager over a driver that accepts every statement, and a memory
+broker whose publication is held with that manager's `Defer` — the SQL
+broker's outcome and wake order, without its SQL.

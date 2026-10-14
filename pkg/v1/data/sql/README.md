@@ -65,14 +65,15 @@ Three consequences worth knowing before you rely on it:
 
 ### Joining the caller's transaction, and waiting for its commit
 
-The transactor [NewTransactor](#NewTransactor) returns has two more capabilities, each an interface of its own beside [Transactor](#Transactor), found by type assertion (ADR 0139):
+The transactor [NewTransactor](#NewTransactor) returns has three more capabilities, each an interface of its own beside [Transactor](#Transactor), found by type assertion (ADR 0139):
 
 ```
-ex, inTx := tm.(sql.Joiner).Join(ctx)       // where a statement under ctx runs
-held := tm.(sql.Deferrer).Defer(ctx, notify) // notify runs once ctx's transaction commits
+ex, inTx := tm.(sql.Joiner).Join(ctx)          // where a statement under ctx runs
+held := tm.(sql.Deferrer).Defer(ctx, notify)    // notify runs once ctx's transaction commits
+held = tm.(sql.Aborter).OnAbort(ctx, takeBack) // takeBack runs once ctx's work is undone
 ```
 
-[Joiner](#Joiner) answers the executor of the transaction ctx carries — so a repository called inside its caller's transaction reads what that transaction wrote — or the pool when it carries none. A context that outlived its transaction still names it, and its executor refuses rather than fall back to the pool. [Deferrer](#Deferrer) holds a function until that transaction commits: a rollback drops it, and so does the rollback of the savepoint it was held in. It is how a message, a mail or a store's write hook waits for the work it announces to be committed. The SDK's document store over SQL is built on both.
+[Joiner](#Joiner) answers the executor of the transaction ctx carries — so a repository called inside its caller's transaction reads what that transaction wrote — or the pool when it carries none. A context that outlived its transaction still names it, and its executor refuses rather than fall back to the pool. [Deferrer](#Deferrer) holds a function until that transaction commits: a rollback drops it, and so does the rollback of the savepoint it was held in. It is how a message, a mail or a store's write hook waits for the work it announces to be committed. The SDK's document store over SQL is built on both. [Aborter](#Aborter) is the complement of [Deferrer](#Deferrer): it holds a function until that work is undone — the savepoint it was held in rolls back, or the transaction does not commit — and runs it then, on a context the rollback's cancellation does not reach; a commit drops it. It is how something announced before the commit is taken back when the commit never comes.
 
 ### Migrations
 
@@ -118,6 +119,8 @@ The sentinels above are the matchable values; their Code() is the ADR 0005 dotte
 - [func ParseDialect\(name string\) \(dialect Dialect, err error\)](<#ParseDialect>)
 - [func Statements\(stmts ...string\) Step](<#Statements>)
 - [func Transact\(ctx context.Context, tm Transactor, fn TxFunc\) error](<#Transact>)
+- [type Aborter](<#Aborter>)
+  - [func \(Aborter\) OnAbort\(ctx context.Context, fn func\(ctx context.Context\)\) \(held bool\)](<#Aborter.OnAbort>)
 - [type Checker](<#Checker>)
   - [func \(Checker\) Check\(ctx context.Context\) error](<#Checker.Check>)
 - [type Config](<#Config>)
@@ -494,6 +497,66 @@ func Transact(ctx context.Context, tm Transactor, fn TxFunc) error
 Transact runs fn inside a transaction with the driver's default isolation.
 
 It is the ergonomic form of [Transactor](#Transactor).Transact for the common case. The port itself keeps the options parameter so it never needs a second method (ADR 0039); this helper keeps the call site short.
+
+<a name="Aborter"></a>
+## type [Aborter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
+
+Aborter is the public alias for the ADR 0039 sibling of [Transactor](#Transactor) that holds a function until the work a context carries is undone — its savepoint or its transaction rolled back — and drops it with a commit: the complement of [Deferrer](#Deferrer). Discover it by type assertion.
+
+```go
+type Aborter = coresql.Aborter
+```
+
+Aborter is an alias of `github.com/kitsunium/sdk/internal/core/data/sql.Aborter`, declared as:
+
+```go
+type Aborter interface {
+	// OnAbort holds fn until the work of the scope ctx carries for this
+	// transactor is undone, and reports true.
+	//
+	// The work is undone when the scope's savepoint rolls back, or when any
+	// scope around it does, the root included: the root's unit of work
+	// returned an error or panicked, its commit was refused — a poisoned
+	// transaction — or the COMMIT itself failed, which [CommitFailed] reports
+	// as a unit of work that had no effect. A savepoint that is released
+	// hands what it held to the scope around it, which decides in turn; a
+	// commit that stands drops every function still held, unrun.
+	//
+	// The held functions run once, newest first, on the goroutine that ends
+	// the scope, after its ROLLBACK or ROLLBACK TO SAVEPOINT and before that
+	// scope's Transact returns — or before its panic continues. Each is
+	// handed ctx without its cancellation or deadline: a function that
+	// cleans up after a rollback must not die of the cancellation that
+	// caused it. It must not panic, and it must not open a transaction on
+	// ctx, which is over.
+	//
+	// For a function held with OnAbort and another with Defer under the same
+	// scope, exactly one of the two runs, unless a function held with Defer
+	// before it panics.
+	//
+	// OnAbort reports false and holds nothing when ctx carries no open
+	// transaction of this transactor. There is nothing to undo, so fn is the
+	// caller's again. A nil fn holds nothing and gets the same answer.
+	OnAbort(ctx context.Context, fn func(ctx context.Context)) (held bool)
+}
+```
+
+<a name="Aborter.OnAbort"></a>
+### func \(Aborter\) [OnAbort](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/sql/design_gen.go>)
+
+```go
+func (Aborter) OnAbort(ctx context.Context, fn func(ctx context.Context)) (held bool)
+```
+
+OnAbort holds fn until the work of the scope ctx carries for this transactor is undone, and reports true.
+
+The work is undone when the scope's savepoint rolls back, or when any scope around it does, the root included: the root's unit of work returned an error or panicked, its commit was refused — a poisoned transaction — or the COMMIT itself failed, which [CommitFailed](#CommitFailed) reports as a unit of work that had no effect. A savepoint that is released hands what it held to the scope around it, which decides in turn; a commit that stands drops every function still held, unrun.
+
+The held functions run once, newest first, on the goroutine that ends the scope, after its ROLLBACK or ROLLBACK TO SAVEPOINT and before that scope's Transact returns — or before its panic continues. Each is handed ctx without its cancellation or deadline: a function that cleans up after a rollback must not die of the cancellation that caused it. It must not panic, and it must not open a transaction on ctx, which is over.
+
+For a function held with OnAbort and another with Defer under the same scope, exactly one of the two runs, unless a function held with Defer before it panics.
+
+OnAbort reports false and holds nothing when ctx carries no open transaction of this transactor. There is nothing to undo, so fn is the caller's again. A nil fn holds nothing and gets the same answer.
 
 <a name="Checker"></a>
 ## type [Checker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)

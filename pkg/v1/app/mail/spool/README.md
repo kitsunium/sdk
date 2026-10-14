@@ -23,6 +23,24 @@ id, err := outbox.Send(ctx, mail.Message{To: to, Subject: "Welcome", Text: body}
 
 A redelivery of a mail the spool delivered — its lease lapsed while a slow relay was still accepting it — is recognised by its identifier and dropped. The one duplicate no outbox can prevent is a process that dies between the relay's acceptance and the acknowledgement; the next process sends the mail again under the SAME Message-ID, which is how a receiver recognises it. Every attempt carries its [Attempt](#Attempt) in its context — the identifier, the count, and what [Config](#Config).Annotate kept from the Send's context — so a transport can continue the Send's trace, and every mail's fate reaches [Config](#Config).Observe. The spool writes nothing anywhere itself.
 
+### A mail in its caller's transaction
+
+[Config](#Config).Broker takes a queue its caller built instead of [Config](#Config).Dir — a queue on SQL (package [github.com/kitsunium/sdk/pkg/v1/data/queue](https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/data/queue)'s NewSQL), which joins the transaction its context carries — and [Config](#Config).Deferrer the transaction manager of that database. A mail sent inside one of its transactions then exists if and only if the transaction commits; its [EventQueued](#EventQueued) is told after the commit, before any event of its delivery, and never for a mail a rollback took back.
+
+```
+outbox, err := spool.New(spool.Config{
+	Transport:   transport,
+	Broker:      broker, // queue.NewSQL over tm: MaxDeliveries 6, like MaxAttempts
+	Deferrer:    tm,     // the same sql.NewTransactor: a Deferrer and an Aborter
+	MaxAttempts: 6,
+})
+err = sql.Transact(ctx, tm, func(ctx context.Context, ex sql.Executor) error {
+	// … the writes the mail announces …
+	_, err := outbox.Send(ctx, msg) // queued with them, or not at all
+	return err
+})
+```
+
 ### An identifier minted before the mail is spooled
 
 [Spool](#Spool).Send mints the mail's identifier. A caller that must know it before the spool has the mail — a framework that holds a mail until a transaction commits, and returns the identifier at the call — mints it itself and queues the mail later with [Spool](#Spool).SendWithID, which stamps what Send stamps and makes the Message-ID of that identifier:
@@ -246,7 +264,7 @@ AttemptFrom returns the attempt a delivery context carries — only a context a 
 func New(cfg Config) (*Spool, error)
 ```
 
-New builds a durable outbox over cfg.Transport: a queue in cfg.Dir, or in memory without one. It starts nothing: Run delivers.
+New builds a durable outbox over cfg.Transport: over cfg.Broker, a queue in cfg.Dir, or in memory without either. It starts nothing: Run delivers.
 
 <a name="Attempt"></a>
 ## type [Attempt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/facade_gen.go>)
@@ -275,7 +293,7 @@ type Attempt struct {
 <a name="Config"></a>
 ## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/spool/facade_gen.go>)
 
-Config is the public alias for a spool's configuration: Transport and MaxAttempts required; Dir, Clock, From, Backoff, SendTimeout, MaxMessageBytes, PollInterval, Observe, Annotate and NewID optional.
+Config is the public alias for a spool's configuration: Transport and MaxAttempts required; Dir or Broker and Deferrer, Clock, From, Backoff, SendTimeout, MaxMessageBytes, PollInterval, Observe, Annotate and NewID optional.
 
 ```go
 type Config = svcspool.Config
@@ -315,7 +333,40 @@ type Config struct {
 	// Dir is the spool's directory: a durable queue that outlives the
 	// process, shared by every process that names it. Empty keeps the spool
 	// in memory, and a process that ends loses what it had not delivered.
+	// It must stay empty beside a Broker.
 	Dir             string
+	// Broker is the queue the spool writes into and delivers from, built by
+	// its caller instead of from Dir — a queue on SQL, so that a mail Send
+	// queues inside the caller's transaction exists if and only if that
+	// transaction commits (ADR 0151, ADR 0178). Nil builds the spool's own,
+	// from Dir. The spool neither sets its policy nor closes it: build it
+	// with MaxDeliveries equal to MaxAttempts, a VisibilityTimeout of at
+	// least twice SendTimeout and a MaxMessageBytes that holds a mail with
+	// its attachments, as the spool's own queue has, and close it after
+	// Close. Dir and MaxMessageBytes describe the queue the spool would
+	// build, and are refused beside it (SpoolMisconfigured).
+	Broker          corequeue.Broker
+	// Deferrer is the transaction manager of Broker's database when Broker
+	// joins its caller's transaction — the Transactor queue.NewSQL was given
+	// — and must also be a core/data/sql Aborter, which the SDK's
+	// transactor is. One field for both, as queue.NewSQL takes one
+	// Transactor for its Joiner and Deferrer: the two halves of one
+	// outcome cannot come from two managers.
+	//
+	// With it, a Send made inside one of its transactions tells Observe
+	// EventQueued after the commit, and nothing at all when the work is
+	// undone — the transaction or the savepoint the Send ran in rolled
+	// back —, and a delivery of the mail still waits for that EventQueued.
+	// A Send outside a transaction tells it at once. While such a
+	// transaction is open, a delivery of a mail under the same identifier
+	// waits for it to end.
+	//
+	// Nil tells EventQueued when Send returns, which suits a Broker that
+	// keeps no transaction; beside a Broker that joins one, it would
+	// announce a mail a rollback then takes back. Set without a Broker, or
+	// to a manager that is not an Aborter, it is refused
+	// (SpoolMisconfigured).
+	Deferrer        coresql.Deferrer
 	// From is the sender of every mail that names none. It must be a usable
 	// address when set.
 	From            coremail.AddressValue
@@ -330,8 +381,9 @@ type Config struct {
 	MaxAttempts     int
 	// SendTimeout bounds one attempt. Not positive means DefaultSendTimeout.
 	SendTimeout     time.Duration
-	// MaxMessageBytes bounds one spooled mail. Zero means
-	// DefaultMaxMessageBytes; negative is refused.
+	// MaxMessageBytes bounds one spooled mail in the queue the spool builds.
+	// Zero means DefaultMaxMessageBytes; negative is refused, and so is any
+	// other value beside a Broker, whose own policy bounds a mail.
 	MaxMessageBytes int
 	// PollInterval is how late a mail another PROCESS spooled into Dir may be
 	// noticed; a mail spooled by this process is delivered at once. Zero is
@@ -468,7 +520,7 @@ type Spool struct{}
 func (*Spool) Close() error
 ```
 
-Close refuses every later Send and closes the spool's queue, once the publications in flight have landed. Closing twice is closing once. Stop Run first — cancel its context and wait for it to return — or a delivery may be cut off mid-attempt; the mail it held comes back when its lease lapses.
+Close refuses every later Send and closes the queue the spool built, once the publications in flight have landed; a Config.Broker stays its caller's, to close after. Closing twice is closing once. Stop Run first — cancel its context and wait for it to return — or a delivery may be cut off mid-attempt; the mail it held comes back when its lease lapses.
 
 <a name="Spool.DeadLetters"></a>
 ### func \(Spool\) [DeadLetters](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/mail/spool/spool.go>)
@@ -495,7 +547,7 @@ Run delivers the spool until ctx ends, on the calling goroutine: it returns nil 
 func (*Spool) Send(ctx context.Context, msg coremail.MessageValue) (id string, err error)
 ```
 
-Send validates msg, stamps what a retry must not change, and queues it under an identifier Config.NewID mints. It returns that identifier once the mail is in the spool — on disk, with a Dir. A mail without a sender gets Config.From; without a Date, the spool's clock; without a Message-ID, one made of its identifier at the sender's domain, which every attempt keeps.
+Send validates msg, stamps what a retry must not change, and queues it under an identifier Config.NewID mints. It returns that identifier once the mail is in the spool — on disk, with a Dir; in the caller's transaction, with a Broker that joins it, and in the spool once that commits. A mail without a sender gets Config.From; without a Date, the spool's clock; without a Message-ID, one made of its identifier at the sender's domain, which every attempt keeps.
 
 A refusal is the mail domain's own typed verdict (HeaderInjection, InvalidAddress, NoRecipients, EmptyBody…), the queue's (MessageTooLarge), SpoolMisconfigured for an identifier from Config.NewID that breaks the rule SendWithID states, or SpoolClosed; nothing is queued. A Send racing Close either lands before the queue closes or is SpoolClosed.
 
