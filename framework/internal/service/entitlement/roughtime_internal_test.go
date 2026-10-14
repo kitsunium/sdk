@@ -106,9 +106,16 @@ func Test_roughtimeExchange(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := roughtimeExchange(tt.address(t), buildRoughtimeRequest(make([]byte, roughtimeNonceSize)))
+			address := tt.address(t)
+			response, err := roughtimeExchange(address, buildRoughtimeRequest(make([]byte, roughtimeNonceSize)))
 			if !errors.Is(err, coreent.ErrCIUnverifiable) {
-				t.Errorf("roughtimeExchange() error = %v, want coreent.ErrCIUnverifiable (%s)", err, tt.reason)
+				//: The response is named because the one way this case
+				//: returns nil is a datagram from whoever bound the released
+				//: port since: seen once in CI and never reproduced, so the
+				//: next failure says who answered instead of only that
+				//: somebody did.
+				t.Errorf("roughtimeExchange(%s) error = %v, want coreent.ErrCIUnverifiable (%s); %d response bytes, head %q",
+					address, err, tt.reason, len(response), response[:min(len(response), 32)])
 			}
 		})
 	}
