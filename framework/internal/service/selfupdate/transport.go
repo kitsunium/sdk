@@ -48,12 +48,41 @@ const (
 // that cannot leave a network through its proxy never arrives on any machine
 // behind one. The guarded client's policy would have to re-state this one's
 // https-only hops as a request policy besides.
+//
+// The transport is a CLONE of http.DefaultTransport, never the value itself
+// (issue #304). Clone keeps everything the default does, the environment's
+// proxy first; what it does not keep is the connection pool, which is
+// process-wide and which any code may empty — httptest.Server.Close does on
+// every close, and so does CloseIdleConnections on any client with a nil
+// Transport. net/http returns a connection to the idle pool before it hands a
+// body-less response to the request waiting on it, so an outside close in
+// that window broke this client's request in flight: the caller got "HTTP/1.x
+// transport connection broken: http: CloseIdleConnections called" instead of
+// the InsecureRedirect refusal the redirect would have produced. A pool of
+// its own is a pool only this client closes.
 func newReleaseHTTPClient() *http.Client {
-	//: Same timeout as before; only the redirect policy is tightened.
+	//: Same timeout as before; the redirect policy is tightened and the
+	//: connection pool is the client's own.
 	return &http.Client{
+		Transport:     releaseTransport(),
 		Timeout:       httpTimeout,
 		CheckRedirect: checkReleaseRedirect,
 	}
+}
+
+// releaseTransport returns a transport configured as http.DefaultTransport
+// is, with a connection pool nothing else in the process shares.
+func releaseTransport() *http.Transport {
+	base, isStd := http.DefaultTransport.(*http.Transport)
+	//: A program may have replaced the default with a RoundTripper of its
+	//: own, which cannot be cloned; the environment's proxy is the one
+	//: setting this client may not lose, so the fallback still carries it.
+	if !isStd {
+		//: Proxy-aware, otherwise net/http's zero-value defaults.
+		return &http.Transport{Proxy: http.ProxyFromEnvironment}
+	}
+	//: The default's settings, a pool of its own.
+	return base.Clone()
 }
 
 // checkReleaseRedirect is newReleaseHTTPClient's policy, kept as a named
