@@ -294,9 +294,12 @@ func (s *StoreService[T]) removeUnlessHeld(ctx context.Context, a *App, key stri
 	if err := s.holdRefusal(ctx, a, key); err != nil {
 		return err
 	}
-	subject := s.subjectAt(ctx, a, key)
+	subject, known := s.subjectAt(ctx, a, key)
 	if err := s.remove(ctx, key); err != nil {
 		return err
+	}
+	if !known {
+		return nil
 	}
 	if err := a.shredIfLast(ctx, subject); err != nil {
 		logger.Warn(ctx, a.log, "the data key of a person whose last record was deleted could not be destroyed",
@@ -305,18 +308,19 @@ func (s *StoreService[T]) removeUnlessHeld(ctx context.Context, a *App, key stri
 	return nil
 }
 
-// subjectAt is the subject of the record under key, as it is, when kit
-// keeps data keys a deletion may leave behind: "" otherwise, or when the
-// record cannot be read — its deletion then says why.
-func (s *StoreService[T]) subjectAt(ctx context.Context, a *App, key string) string {
+// subjectAt is the subject of the record under key, as it is, and whether
+// kit knows it: not when kit keeps no data keys a deletion may leave
+// behind, the store has no subject, or the record cannot be read — its
+// deletion then says why.
+func (s *StoreService[T]) subjectAt(ctx context.Context, a *App, key string) (subject string, known bool) {
 	if a.privacyKeyStore() == nil || s.plan().subject == nil {
-		return ""
+		return "", false
 	}
 	v, err := s.read(ctx, key)
 	if err != nil {
-		return ""
+		return "", false
 	}
-	return s.subjectOf(v)
+	return s.subjectOf(v), true
 }
 
 // heldCount is how many of the store's records a hold keeps, for the graph.
