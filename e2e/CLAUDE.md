@@ -10,7 +10,7 @@ cross-platform matrix; this is the runtime bar — see ADR 0018). Run on real
 kernels by `.github/workflows/e2e-cross.yml` (GitHub's Linux, macOS and Windows
 runners, the three BSDs, OmniOS and Oracle Solaris in VMs, and — as root with a
 delegated cgroup v2 subtree under a real systemd or OpenRC — its `linux-init`
-job, ADR 0175) and, on demand, on the lab's three Linux VMs by
+job, ADR 0177) and, on demand, on the lab's three Linux VMs by
 `.github/workflows/e2e-vm.yml`, which boot each distro's own kernel.
 
 The module also hosts the **Docker-backed integration suites** under

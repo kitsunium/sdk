@@ -1,4 +1,4 @@
-# ADR 0175 — the Linux init runtime bar runs on public runners, and the lab keeps only what a container cannot give
+# ADR 0177 — the Linux init runtime bar runs on public runners, and the lab keeps only what a container cannot give
 
 - **Status**: Accepted
 - **Date**: 2026-10-14

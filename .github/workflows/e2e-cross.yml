@@ -216,7 +216,7 @@ jobs:
           cd e2e && go run .
 
   # ── Linux with a REAL init: systemd and OpenRC, as root, cgroup v2 delegated ──
-  # Issue #118 / ADR 0175. e2e-vm.yml booted Debian and Fedora (systemd) and
+  # Issue #118 / ADR 0177. e2e-vm.yml booted Debian and Fedora (systemd) and
   # Alpine (OpenRC) on the lab's Proxmox to reach what the unprivileged `native`
   # leg above cannot: root, a delegated cgroup v2 subtree (cgroup.Available is an
   # honest write probe, so `native` reports NotSupported for the cgroup rows),
@@ -233,7 +233,7 @@ jobs:
   #
   # What this does NOT give: the distro's own KERNEL. A container shares the
   # runner's kernel; the lab VMs ran each distro's. That residue is what
-  # e2e-vm.yml keeps (ADR 0175).
+  # e2e-vm.yml keeps (ADR 0177).
   linux-init:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest

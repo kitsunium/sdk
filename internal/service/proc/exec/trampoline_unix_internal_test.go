@@ -12,6 +12,7 @@ package exec
 
 import (
 	"os"
+	osexec "os/exec"
 	"runtime"
 	"slices"
 	"strconv"
@@ -56,6 +57,28 @@ func Test_installTrampoline(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// Test_installTrampolineEmptyPayload pins the cgroup-only spawn (#118): such a
+// spec encodes an EMPTY payload, so the sentinel variable is present with no
+// value, and the re-exec'd copy must still act as the trampoline. Read as "not
+// a trampoline" it ran the host program again, which spawned itself in turn.
+// The copy is this test binary, started the way trampolineSpawn starts it
+// (argv = [self, target, target argv...]); the target prints a marker only the
+// trampoline path can reach. No root and no cgroup: the placement is not
+// requested, only the recognition is under test.
+func Test_installTrampolineEmptyPayload(t *testing.T) {
+	t.Parallel()
+	self, err := os.Executable()
+	if err != nil {
+		t.Skipf("no path to re-exec: %v", err)
+	}
+	cmd := osexec.Command(self, "/bin/sh", "sh", "-c", "echo trampoline-reached-target")
+	cmd.Env = append(os.Environ(), trampolineEnv+"=")
+	out, runErr := cmd.CombinedOutput()
+	if runErr != nil || !strings.Contains(string(out), "trampoline-reached-target") {
+		t.Fatalf("an empty-payload trampoline did not exec its target: err=%v out=%q", runErr, out)
 	}
 }
 

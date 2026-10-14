@@ -1,6 +1,6 @@
 name: E2E VM tests (distro kernels, lab only)
 
-# WHAT IS LEFT HERE, AND WHY (issue #118, ADR 0175). Everything that can run on
+# WHAT IS LEFT HERE, AND WHY (issue #118, ADR 0177). Everything that can run on
 # GitHub's public runners does, in e2e-cross.yml, which costs the lab nothing:
 #
 #   - Windows           : `native` windows-latest leg (conformance + every
@@ -87,7 +87,7 @@ jobs:
       matrix:
         include:
           # name : Proxmox test VMID (template+100) : GOOS/GOARCH : SSH user : exe suffix
-          # (windows-11 and the BSDs left for e2e-cross.yml, ADR 0175: no ssh_wait override remains.)
+          # (windows-11 and the BSDs left for e2e-cross.yml, ADR 0177: no ssh_wait override remains.)
           - {
               name: debian-systemd,
               vmid: 204,

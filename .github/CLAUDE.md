@@ -15,7 +15,7 @@ GitHub-side configuration for the SDK repo: the workflows — the SDK lanes, the
 | `workflows/release-size.yml`    | The size a pull request would publish, asked before it merges |
 | `workflows/vuln-scan.yml`       | Daily govulncheck over every module |
 | `workflows/e2e-cross.yml`       | Runtime tests on Linux (unprivileged, and as root under systemd and OpenRC), macOS, Windows, the three BSDs, illumos and Solaris |
-| `workflows/e2e-vm.yml`          | Manual runs on the lab's three Linux VMs, for the distros' own kernels (ADR 0175) |
+| `workflows/e2e-vm.yml`          | Manual runs on the lab's three Linux VMs, for the distros' own kernels (ADR 0177) |
 | `workflows/docs-deploy.yml`     | Builds and deploys the versioned docs portal |
 | `workflows/bazel-bench.yml`     | Kernel benchmarks, on demand, weekly or on a `run-bench` label |
 | `dependabot.yml`                | Weekly `github-actions` ecosystem updates, `chore:` commit prefix, `dependencies` label |
