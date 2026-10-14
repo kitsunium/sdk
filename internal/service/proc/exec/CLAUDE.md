@@ -267,8 +267,9 @@ return `RLIMIT_FAILED` for a spawn that did nothing wrong
 (`TestWindowsRlimitMemoryMapped`, run 38497960840). Measured on windows-latest,
 8 spawns in flight: the old order failed 9 of 2 000, then 12, 26 and 14 of
 3 000 on three hosts, every one `ERROR_ACCESS_DENIED` from the assignment; the
-suspended order failed 0 of 3 000 on the same three hosts. `Test_confineRunsTheChildOnlyOnceAssigned` holds the suspended
-child for 500 ms and requires it not to have exited before `confine`;
+suspended order failed 0 of 3 000 on the same three hosts.
+`Test_confineRunsTheChildOnlyOnceAssigned` holds the suspended child for
+500 ms and requires it not to have exited before `confine`;
 `Test_anExitedChildIsNotAssigned` pins the Windows refusal the order answers.
 The cgroup port's `Assign` (`proc/cgroup`) takes a pid it did not spawn and
 keeps its own contract.
