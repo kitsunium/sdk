@@ -9,6 +9,10 @@ jobs:
   rlimit:
     runs-on: windows-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -21,8 +25,8 @@ jobs:
         env: { GOWORK: "off", CGO_ENABLED: "0" }
         run: |
           cd internal/service
-          go test -count=1 -v -run 'Repro304' ./proc/exec 2>&1 | grep -E 'PROBE304|^(ok|FAIL|---)' || true
-      - name: TestWindowsRlimitMemoryMapped x 3000
+          go test -count=1 -v -run 'Repro304' ./proc/exec 2>&1 | grep -E 'PROBE304|^(ok|FAIL|---)|_test.go' || true
+      - name: TestWindows x 3000
         shell: bash
         env: { GOWORK: "off", CGO_ENABLED: "0" }
         run: |
@@ -34,41 +38,51 @@ jobs:
           done
           echo "RESULT rlimit: $fails failing invocations of 300 (x10 counts, whole TestWindows set)"
 
-  harness:
+  # A/B on many fresh hosts: main's harness suite (with the recovered nil
+  # dereference) against this branch's, alternating on the same host, and each
+  # host's CPU and Windows exception-context size recorded (golang/go#81238).
+  harness-ab:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        mode: [plain, race, loaded]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           persist-credentials: false
+          path: fixed
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+          ref: main
+          path: stock
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version-file: go.mod
-      - name: loop
-        shell: bash
-        env: { GOWORK: "off", GOTRACEBACK: "all" }
+          go-version-file: fixed/go.mod
+          cache: false
+      - name: host
+        shell: pwsh
         run: |
-          cd e2e
-          if [ "${{ matrix.mode }}" = race ]; then
-            CGO_ENABLED=1 go test -race -c -o h.exe ./harness
-          else
-            CGO_ENABLED=0 go test -c -o h.exe ./harness
-          fi
-          run_loop() {
-            local tag=$1 n=$2 fails=0
-            for i in $(seq 1 "$n"); do
-              ./h.exe -test.count=10 > "out-$tag-$i.txt" 2>&1 || { fails=$((fails+1)); echo "=== $tag run $i failed"; head -c 20000 "out-$tag-$i.txt"; }
-              rm -f "out-$tag-$i.txt"
-            done
-            echo "RESULT $tag: $fails failing invocations of $n (x10 counts)"
-          }
-          if [ "${{ matrix.mode }}" = loaded ]; then
-            run_loop a 300 & run_loop b 300 & run_loop c 300 & run_loop d 300 &
-            wait
-          else
-            run_loop one 600
-          fi
+          (Get-CimInstance Win32_Processor).Name | ForEach-Object { "HOST cpu: $_" }
+      - name: context size
+        shell: bash
+        env: { GOWORK: "off", CGO_ENABLED: "0" }
+        run: |
+          mkdir -p "$RUNNER_TEMP/ctx"
+          printf 'module ctx\n\ngo 1.27\n' > "$RUNNER_TEMP/ctx/go.mod"
+          cp fixed/.github/repro-304-ctx.go.txt "$RUNNER_TEMP/ctx/main.go"
+          (cd "$RUNNER_TEMP/ctx" && go run .)
+      - name: A/B loop
+        shell: bash
+        env: { GOWORK: "off", CGO_ENABLED: "0" }
+        run: |
+          (cd stock/e2e && go test -c -o "$RUNNER_TEMP/stock.exe" ./harness)
+          (cd fixed/e2e && go test -c -o "$RUNNER_TEMP/fixed.exe" ./harness)
+          sf=0 ff=0 n=60
+          for i in $(seq 1 $n); do
+            "$RUNNER_TEMP/stock.exe" -test.count=20 > s.txt 2>&1 || { sf=$((sf+1)); echo "=== stock run $i:"; grep -m3 -E 'fatal error|unexpected|FAIL|panic' s.txt; }
+            "$RUNNER_TEMP/fixed.exe" -test.count=20 > f.txt 2>&1 || { ff=$((ff+1)); echo "=== fixed run $i:"; grep -m3 -E 'fatal error|unexpected|FAIL|panic' f.txt; }
+          done
+          echo "RESULT shard ${{ matrix.shard }}: stock $sf/$n failed, fixed $ff/$n failed (each run -test.count=20)"

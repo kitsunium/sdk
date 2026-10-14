@@ -64,7 +64,10 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 		//: propagate the typed SPAWN_FAILED from the stdio setup verbatim.
 		return nil, ioErr
 	}
-	p, sErr := spawnWindows(spec, sio)
+	//: a confined child is created suspended, so it runs no instruction before
+	//: it is in its job — and cannot exit before it, which the assignment would
+	//: refuse (#304).
+	p, sErr := spawnWindows(spec, sio, job != nil)
 	//: a CreateProcess failure already left the stdio fds for cleanup.
 	if sErr != nil {
 		//: release the half-wired stdio fds + the job before surfacing the failure.
@@ -73,9 +76,8 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 		//: propagate the typed SPAWN_FAILED verbatim.
 		return nil, sErr
 	}
-	//: confine the freshly spawned child; a failed assign kills + reaps it so no
-	//: unconfined process escapes (a tiny assign-after-spawn window remains, as
-	//: os.StartProcess cannot CREATE_SUSPENDED).
+	//: confine the suspended child, then resume it; a failed assign or resume
+	//: kills + reaps it, so no unconfined process ever runs.
 	if aErr := confine(job, p); aErr != nil {
 		//: release the stdio fds (no copiers started yet) and surface the failure.
 		sio.closeAll()
@@ -88,16 +90,24 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 	return newHandle(p, spec.Setpgid, sio, job), nil
 }
 
-// confine assigns p to job (when a job was requested). On failure it kills and
-// reaps the child and releases the job, so no unconfined process is left running.
+// confine assigns p — created suspended — to job (when a job was requested),
+// then resumes it. On failure it kills and reaps the child and releases the job,
+// so no unconfined process is left running and none ever ran.
 func confine(job *jobLimit, p *os.Process) error {
 	//: no job requested — the spawn is intentionally unconfined.
 	if job == nil {
 		//: nothing to assign.
 		return nil
 	}
-	//: bind the child to the job's limits.
-	if aErr := job.assign(p.Pid); aErr != nil {
+	//: bind the suspended child to the job's limits, then let it run.
+	aErr := job.assign(p)
+	//: only a confined child is resumed.
+	if aErr == nil {
+		//: the child's first instruction runs under the job's limits.
+		aErr = resumeSuspended(p.Pid)
+	}
+	//: an unconfined or never-resumed child must not survive.
+	if aErr != nil {
 		//: kill + reap the child so it never runs outside its requested limits.
 		swallowErr(p.Kill())
 		_, _ = p.Wait()
@@ -106,17 +116,24 @@ func confine(job *jobLimit, p *os.Process) error {
 		//: surface the typed RLIMIT_FAILED.
 		return aErr
 	}
-	//: the child is confined.
+	//: the child is confined and running.
 	return nil
 }
 
-// spawnWindows builds the os.ProcAttr and starts the process via CreateProcess.
-func spawnWindows(spec coreproc.Spec, sio *stdioState) (*os.Process, error) {
+// spawnWindows builds the os.ProcAttr and starts the process via CreateProcess,
+// suspended when suspended is set (the child is confined before it runs).
+func spawnWindows(spec coreproc.Spec, sio *stdioState, suspended bool) (*os.Process, error) {
+	flags := creationFlags(spec)
+	//: CREATE_SUSPENDED: the primary thread waits for confine to resume it.
+	if suspended {
+		//: no instruction of the child runs before its job holds it.
+		flags |= createSuspended
+	}
 	attr := &os.ProcAttr{
 		Dir:   spec.Dir,
 		Env:   spawnEnv(spec.Env),
 		Files: sio.files[:],
-		Sys:   &syscall.SysProcAttr{CreationFlags: creationFlags(spec)},
+		Sys:   &syscall.SysProcAttr{CreationFlags: flags},
 	}
 	p, serr := os.StartProcess(spec.Path, buildArgv(spec), attr)
 	//: a CreateProcess fault (missing image, access denied) is a typed SPAWN_FAILED.
