@@ -40,7 +40,7 @@ const outboxBind = "outbox"
 // bytes for three — with room for the box's header and the JSON string
 // around it. The bound on the mail itself is maxMailBytes, which
 // sealedOutbox applies before it seals.
-const sealedMailBytes = maxMailBytes/3*4 + 64<<10
+const sealedMailBytes int = maxMailBytes/3*4 + 64<<10
 
 // sealedOutbox is the broker a mailer's spool writes into and delivers from
 // when its outbox is on a database: the SQL broker, each payload sealed on
@@ -169,7 +169,7 @@ func (m *Mailer) outboxPolicy() queue.Policy {
 // behind a test's wrapper, and the database's transaction manager, for the
 // spool to announce a mail after the commit and forget it after a rollback.
 // It returns no database where the outbox stays the spool's own.
-func (m *Mailer) openOutbox(ctx context.Context, a *App) (*databaseRun, queue.Broker, sql.Deferrer, error) {
+func (m *Mailer) openOutbox(ctx context.Context, a *App) (db *databaseRun, broker queue.Broker, deferrer sql.Deferrer, err error) {
 	r := a.queueDatabase(&m.nodeBase)
 	if r == nil {
 		return nil, nil, nil, nil
