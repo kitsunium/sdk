@@ -2246,7 +2246,7 @@ Purpose says why the store keeps its records (GDPR art. 30(1)(b)): the register 
 func Queued() CommandOption
 ```
 
-Queued sends a command to the background. Dispatch returns once the command's own queue accepted it — a file queue under the data directory, memory without one —, and a consumer handles it, [Parallelism](#Parallelism) at a time, retried after half a second up to [MaxDeliveries](#MaxDeliveries) attempts (5), then dead-lettered. It answers nothing: its result is [Empty](#Empty), and exposed, it answers 202 Accepted.
+Queued sends a command to the background. Dispatch returns once the command's own queue accepted it — a file queue under the data directory, memory without one —, and a consumer handles it, [Parallelism](#Parallelism) at a time, retried up to [MaxDeliveries](#MaxDeliveries) attempts (5) — half a second after the first failure, the wait doubling after each, never more than a minute —, then dead-lettered; a dispatch that does not decode is dead-lettered at its first failure, since no retry makes it decode. It answers nothing: its result is [Empty](#Empty), and exposed, it answers 202 Accepted.
 
 Delivery is at least once: Queued is the product's promise that the handler tolerates a redelivery, and a [Command](#Command).Key narrows the duplicates without removing them. The handler runs in the dispatcher's trace, as the user who dispatched it ([UserID](#UserID)); what the auth handler said about that user is not queued. A queued command's input is a contract with the messages already queued: add a field, never rename one.
 
@@ -4612,7 +4612,7 @@ Count returns how many entities the store holds.
 func (*Store) Delete(ctx context.Context, key string) error
 ```
 
-Delete removes the entity with the given key, or returns a [NotFound](#NotFound) error.
+Delete removes the entity with the given key, or returns a [NotFound](#NotFound) error. When the store seals at rest and the entity was its person's last record, their data key goes with it, as with an erasure — at the commit, in a [Transact](#Transact) —, once nothing kit keeps still needs it: a held record, or a former value or version sealed under it, keeps the key.
 
 <a name="Store.Diff"></a>
 ### func \(Store\) [Diff](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/revisions.go>)
@@ -4882,7 +4882,7 @@ type Violation struct {
 <a name="Wake"></a>
 ## type [Wake](<https://github.com/kitsunium/sdk/blob/main/framework/kit/loop.go>)
 
-Wake says why a declared loop runs: the reason, the instant, and the topic that woke it when one did.
+Wake says why a declared loop runs: the reason, the instant, and the topic that woke it when one did. Wakes that come while it runs, or while it backs off after a failure, are gathered into one run: Reasons and Topics say every one of them, and Reason the one that decides the run.
 
 ```go
 type Wake = ikit.WakeEvent
@@ -4893,12 +4893,21 @@ Wake is an alias of `github.com/kitsunium/sdk/framework/internal/kit.WakeEvent`,
 ```go
 type Wake struct {
 	// Reason is model.WakeInterval, WakeDeadline, WakeTopic, WakeStart or
-	// WakeManual.
-	Reason string
+	// WakeManual: WakeManual when a nudge is among the wakes the run
+	// gathers — the one wake that cuts a backoff short —, else the first
+	// that came.
+	Reason  string
 	// At is when the wake happened, on the app's clock.
-	At     time.Time
-	// Topic is the topic node that woke the loop, for a topic wake.
-	Topic  string
+	At      time.Time
+	// Topic is the topic node whose publish woke the loop first, when a
+	// topic's did.
+	Topic   string
+	// Reasons are the reasons of every wake the run gathers, each once, in
+	// the order they came: Reason is among them.
+	Reasons []string
+	// Topics are the topic nodes whose publish woke the loop into this run,
+	// each once, in the order they came: Topic is the first.
+	Topics  []string
 }
 ```
 

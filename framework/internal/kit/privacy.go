@@ -109,6 +109,7 @@ type privacyStore interface {
 	subjectKeys(ctx context.Context, a *App, ids []string) ([]string, error)
 	exportOf(ctx context.Context, keys []string, preview bool) (storeExport, error)
 	eraseOnRequest(ctx context.Context, a *App, key, reason string) (erasureOutcome, []string, error)
+	sealsUnder(ctx context.Context, ref string) (bool, error)
 	holdKey(ctx context.Context, a *App, key, reason string) error
 	heldCount(a *App) int
 	fold(ctx context.Context) error

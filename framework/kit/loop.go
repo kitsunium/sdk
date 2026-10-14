@@ -15,7 +15,9 @@ import (
 type Loop = ikit.Loop
 
 // Wake says why a declared loop runs: the reason, the instant, and the
-// topic that woke it when one did.
+// topic that woke it when one did. Wakes that come while it runs, or while
+// it backs off after a failure, are gathered into one run: Reasons and
+// Topics say every one of them, and Reason the one that decides the run.
 type Wake = ikit.WakeEvent
 
 // LoopOption configures a declared loop.

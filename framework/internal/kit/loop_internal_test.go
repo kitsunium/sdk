@@ -50,3 +50,65 @@ func TestALoopTakesWhatCameBeforeItArmsATimer(t *testing.T) {
 		t.Errorf("timers armed for %v, want one, for the backoff's second", clk.armed)
 	}
 }
+
+// The wakes a run gathers say themselves, each once, in the order they
+// came: every reason, every topic. A nudge among them makes the run a
+// manual one, which a backoff does not hold — behind a publish too —, and
+// the first wake's reason is the run's otherwise. signal once kept the
+// first wake alone, so that a nudge after a publish waited the backoff out
+// (kitsunium/platform#35, kitsunium/sdk#274).
+func TestALoopsWakeSaysEveryReason(t *testing.T) {
+	clk := &countedClock{ManualClock: clock.NewManualClock(time.Date(2026, 9, 30, 9, 0, 0, 0, time.UTC))}
+	now := clk.Now()
+	r := &loopRun{a: &App{clock: clk}, wake: make(chan struct{}, 1)}
+	l := &Loop{running: r}
+	hourly := nextWake{at: now.Add(time.Hour), reason: model.WakeInterval}
+	failed := nextWake{at: now.Add(time.Hour), reason: model.WakeInterval, floor: now.Add(time.Second)}
+	const joined, left = "members/topic/joined", "members/topic/left"
+
+	l.signal(WakeEvent{Reason: model.WakeTopic, Topic: joined})
+	l.signal(WakeEvent{Reason: model.WakeTopic, Topic: left})
+	l.signal(WakeEvent{Reason: model.WakeTopic, Topic: joined})
+	w, ok := l.wait(t.Context(), r, hourly)
+	if !ok || w.Reason != model.WakeTopic || w.Topic != joined || !slices.Equal(w.Reasons, []string{model.WakeTopic}) ||
+		!slices.Equal(w.Topics, []string{joined, left}) || !w.At.Equal(now) {
+		t.Errorf("three publishes on two topics: %+v, ok %v", w, ok)
+	}
+	if len(r.wake) != 0 || r.pending != nil {
+		t.Error("the three publishes left a wake for another run")
+	}
+
+	l.signal(WakeEvent{Reason: model.WakeTopic, Topic: joined})
+	l.Nudge()
+	w, ok = l.wait(t.Context(), r, failed)
+	if !ok || w.Reason != model.WakeManual || w.Topic != joined || !slices.Equal(w.Reasons, []string{model.WakeTopic, model.WakeManual}) ||
+		!slices.Equal(w.Topics, []string{joined}) {
+		t.Errorf("a publish, then a nudge, during a backoff: %+v, ok %v", w, ok)
+	}
+	if len(clk.armed) != 0 {
+		t.Errorf("the nudge waited for the backoff's end: timers armed for %v", clk.armed)
+	}
+}
+
+// A wake held through a backoff keeps the instant it came at: the run it
+// starts says when the publish happened, not when the backoff ended — the
+// first wake's instant stays the run's.
+func TestAHeldWakeKeepsItsInstant(t *testing.T) {
+	clk := clock.NewManualClock(time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC))
+	came := clk.Now()
+	r := &loopRun{a: &App{clock: clk}, wake: make(chan struct{}, 1)}
+	l := &Loop{running: r}
+	failed := nextWake{at: came.Add(time.Hour), reason: model.WakeInterval, floor: came.Add(time.Second)}
+
+	l.signal(WakeEvent{Reason: model.WakeTopic, Topic: "members/topic/joined"})
+	done := make(chan WakeEvent, 1)
+	go func() {
+		w, _ := l.wait(t.Context(), r, failed)
+		done <- w
+	}()
+	clk.BlockUntil(1) // the backoff's timer, armed
+	clk.Advance(time.Second)
+	if w := <-done; w.Reason != model.WakeTopic || !w.At.Equal(came) {
+		t.Errorf("a publish held through a backoff: %+v, want its own instant %v", w, came)
+	}
+}

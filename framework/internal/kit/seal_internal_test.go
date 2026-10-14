@@ -3,6 +3,7 @@ package kit
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -525,6 +526,174 @@ func TestErasingAPersonsLastRecordDestroysTheirKey(t *testing.T) {
 	}
 	if shreds != 1 {
 		t.Errorf("%d shred entries, want one: her last record", shreds)
+	}
+}
+
+// kit's index key kept in memory alone — KIT_SECRETS=memory, KIT_INDEX_KEY
+// unset — while the app keeps its data on disk is warned of, at the start
+// and by config; with the data in memory, or the key pinned, it is not
+// (kitsunium/platform#35, kitsunium/sdk#274).
+func TestAnIndexKeyInMemoryIsWarnedOf(t *testing.T) {
+	needsFileStore(t)
+	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("KIT_INDEX_KEY", "")
+	t.Setenv("KIT_INDEX_KEY_FILE", "")
+	svc := NewService("indexed", "Cards kit references, for the index key's warning.")
+	svc.Store("cards", func(c card) string { return c.ID })
+	const said = "kit's index key lives in memory alone"
+	warned := func(app *App) bool {
+		return slices.ContainsFunc(app.Graph().Diagnostics, func(d model.Diagnostic) bool {
+			return d.Severity == "warning" && strings.Contains(d.Message, said) && strings.Contains(d.Texts["fr"], "ne vit qu’en mémoire")
+		})
+	}
+	run := func(opts ...AppConfigurer) bool {
+		app := NewApp("indexed", svc).With(append([]AppConfigurer{Listen("127.0.0.1:0"), Env(EnvProduction), Logs(io.Discard)}, opts...)...)
+		must(t, app.Start(t.Context()))
+		defer func() { must(t, app.Stop(context.Background())) }()
+		return warned(app)
+	}
+	dir := t.TempDir()
+	if !run(DataDir(dir)) {
+		t.Error("an index key in memory beside data on disk is not warned of")
+	}
+	var out, errOut bytes.Buffer
+	NewApp("indexed", svc).With(DataDir(dir), Env(EnvProduction), Logs(io.Discard)).configCommand(t.Context(), nil, &out, &errOut)
+	if !strings.Contains(errOut.String(), "warning: "+said) {
+		t.Errorf("config does not warn of the index key in memory:\n%s", errOut.String())
+	}
+	if run(InMemory()) {
+		t.Error("an app kept in memory is warned of its index key")
+	}
+	t.Setenv("KIT_INDEX_KEY", "an index key of thirty-two bytes")
+	if run(DataDir(t.TempDir())) {
+		t.Error("a pinned index key is warned of")
+	}
+}
+
+// The product's own Delete of a person's last record destroys their data
+// key, as an erasure or a retention's deletion does — a copy of what it
+// sealed stops opening, the journal says so —, but never while anything kit
+// keeps still needs it: a record of theirs left, held or not, or a former
+// value a record whose subject changed since keeps sealed under it. In a
+// transaction the key goes at the commit: a deletion rolled back destroys
+// nothing (kitsunium/platform#35, kitsunium/sdk#274).
+func TestDeletingAPersonsLastRecordDestroysTheirKey(t *testing.T) {
+	needsFileStore(t)
+	app, cards := sealedCards(t, "deletedcards", t.TempDir())
+	ctx := t.Context()
+	// opens says whether a copy of a record, taken while it was there, still
+	// opens: whether its person's key is still kept.
+	opens := func(key string, copyOf []byte) bool {
+		t.Helper()
+		c, err := cards.sealing().openRecord(ctx, key, copyOf)
+		must(t, err)
+		return c.Note != ""
+	}
+	shreds := func() int {
+		t.Helper()
+		entries, err := app.journalEntries(ctx, 100)
+		must(t, err)
+		n := 0
+		for _, e := range entries {
+			if e.Op == model.JournalShred {
+				n++
+			}
+		}
+		return n
+	}
+
+	must(t, cards.Insert(ctx, card{ID: "c1", Owner: "ann", Note: "first"}))
+	must(t, cards.Insert(ctx, card{ID: "c2", Owner: "ann", Note: "second"}))
+	copyOfC1 := restingAt(t, cards, "c1")
+	must(t, cards.Delete(ctx, "c1"))
+	if !opens("c1", copyOfC1) {
+		t.Fatal("ann's key went with one of her two records")
+	}
+	copyOfC2 := restingAt(t, cards, "c2")
+	must(t, cards.Delete(ctx, "c2"))
+	if opens("c2", copyOfC2) {
+		t.Error("ann's key outlived her last record")
+	}
+	if n := shreds(); n != 1 {
+		t.Errorf("%d shred entries, want one: ann's last record", n)
+	}
+
+	// A record whose subject changed keeps its former values under its
+	// former person's key: bob's last record deleted, his key stays.
+	must(t, cards.Insert(ctx, card{ID: "c3", Owner: "bob", Note: "bob's words"}))
+	_, err := cards.Update(ctx, "c3", func(c *card) error { c.Owner, c.Note = "cid", "cid's words"; return nil })
+	must(t, err)
+	must(t, cards.Insert(ctx, card{ID: "c4", Owner: "bob", Note: "bob again"}))
+	copyOfC4 := restingAt(t, cards, "c4")
+	must(t, cards.Delete(ctx, "c4"))
+	if !opens("c4", copyOfC4) {
+		t.Error("bob's key went, though a former value is sealed under it")
+	}
+	if former, err := cards.Former(ctx, "c3", "/note"); err != nil || len(former) != 1 || string(former[0].Value) != `"bob's words"` {
+		t.Errorf("c3's former value, sealed under bob's key: %+v, %v", former, err)
+	}
+
+	// A held record of dan's keeps his key.
+	must(t, cards.Insert(ctx, card{ID: "c5", Owner: "dan", Note: "held"}))
+	must(t, cards.Hold(ctx, "c5", "a court's request"))
+	must(t, cards.Insert(ctx, card{ID: "c6", Owner: "dan", Note: "deleted"}))
+	copyOfC6 := restingAt(t, cards, "c6")
+	must(t, cards.Delete(ctx, "c6"))
+	if !opens("c6", copyOfC6) {
+		t.Error("dan's key went, though a record of his is held")
+	}
+
+	// In kit.Transact: a deletion rolled back destroys nothing, and one
+	// committed does, once its transaction ends.
+	must(t, cards.Insert(ctx, card{ID: "c7", Owner: "eve", Note: "eve's"}))
+	copyOfC7 := restingAt(t, cards, "c7")
+	rolled := errors.New("rolled back")
+	if err := Transact(ctx, func(ctx context.Context) error { return errors.Join(cards.Delete(ctx, "c7"), rolled) }); !errors.Is(err, rolled) {
+		t.Fatal(err)
+	}
+	if !opens("c7", copyOfC7) {
+		t.Error("a deletion rolled back destroyed eve's key")
+	}
+	if c, err := cards.Get(ctx, "c7"); err != nil || c.Note != "eve's" {
+		t.Errorf("eve's record after the rollback: %+v, %v", c, err)
+	}
+	must(t, Transact(ctx, func(ctx context.Context) error { return cards.Delete(ctx, "c7") }))
+	if opens("c7", copyOfC7) {
+		t.Error("eve's key outlived her last record's committed deletion")
+	}
+	if n := shreds(); n != 2 {
+		t.Errorf("%d shred entries, want two: ann's and eve's", n)
+	}
+}
+
+// A value kit cannot read the data key of — a box no longer decodable, in
+// a former value — means kit cannot tell whether a person's key is still
+// needed: the key stays when their last record is deleted, rather than the
+// unreadable box being read as "nothing depends on it".
+func TestAnUnreadableBoxKeepsAPersonsKey(t *testing.T) {
+	needsFileStore(t)
+	_, cards := sealedCards(t, "unreadablecards", t.TempDir())
+	ctx := t.Context()
+	must(t, cards.Insert(ctx, card{ID: "c3", Owner: "bob", Note: "bob's words"}))
+	_, err := cards.Update(ctx, "c3", func(c *card) error { c.Owner, c.Note = "cid", "cid's words"; return nil })
+	must(t, err)
+	h := cards.historied()
+	_, err = h.hist.Update(ctx, "c3", func(doc *historyRecord) error {
+		for p, list := range doc.Fields {
+			for i := range list {
+				list[i].Value = json.RawMessage(`"` + boxPrefix + `!!! not a box !!!"`)
+			}
+			doc.Fields[p] = list
+		}
+		return nil
+	})
+	must(t, err)
+	must(t, cards.Insert(ctx, card{ID: "c1", Owner: "ann", Note: "ann's"}))
+	copyOfC1 := restingAt(t, cards, "c1")
+	must(t, cards.Delete(ctx, "c1"))
+	if c, err := cards.sealing().openRecord(ctx, "c1", copyOfC1); err != nil || c.Note != "ann's" {
+		t.Errorf("ann's key went though a box kit cannot read might need it: %+v, %v", c, err)
 	}
 }
 

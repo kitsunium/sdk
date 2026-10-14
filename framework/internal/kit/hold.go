@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // Legal holds (ADR 0006 §5). A hold stops erasure and deletion, whoever
@@ -283,14 +284,43 @@ func (s *StoreService[T]) heldUntilRefusal(ctx context.Context, a *App, key stri
 }
 
 // removeUnlessHeld removes the record under key unless a hold keeps it:
-// Store.Delete's hook.
+// Store.Delete's hook. The person's data key goes with their last record,
+// as with an erasure or a retention's deletion — at the commit in a
+// transaction —, once nothing kit keeps needs it (shredIfLast); a key that
+// could not be destroyed is said in the log, and the deletion stands.
 func (s *StoreService[T]) removeUnlessHeld(ctx context.Context, a *App, key string) error {
 	unlock := a.lockHolds(s.id)
 	defer unlock()
 	if err := s.holdRefusal(ctx, a, key); err != nil {
 		return err
 	}
-	return s.remove(ctx, key)
+	subject, known := s.subjectAt(ctx, a, key)
+	if err := s.remove(ctx, key); err != nil {
+		return err
+	}
+	if !known {
+		return nil
+	}
+	if err := a.shredIfLast(ctx, subject); err != nil {
+		logger.Warn(ctx, a.log, "the data key of a person whose last record was deleted could not be destroyed",
+			logger.String("store", s.id), logger.String("error", describeText(err)))
+	}
+	return nil
+}
+
+// subjectAt is the subject of the record under key, as it is, and whether
+// kit knows it: not when kit keeps no data keys a deletion may leave
+// behind, the store has no subject, or the record cannot be read — its
+// deletion then says why.
+func (s *StoreService[T]) subjectAt(ctx context.Context, a *App, key string) (subject string, known bool) {
+	if a.privacyKeyStore() == nil || s.plan().subject == nil {
+		return "", false
+	}
+	v, err := s.read(ctx, key)
+	if err != nil {
+		return "", false
+	}
+	return s.subjectOf(v), true
 }
 
 // heldCount is how many of the store's records a hold keeps, for the graph.

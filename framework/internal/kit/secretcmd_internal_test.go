@@ -197,3 +197,56 @@ func secretsOf(t *testing.T, app *App, stdin string, args ...string) (int, strin
 	code := app.secretsCommand(t.Context(), args, strings.NewReader(stdin), &out, &errOut)
 	return code, out.String() + errOut.String()
 }
+
+// kit's index key is listed beside the product's secrets once the app
+// references what it keeps: made by kit, never rotated, and set only where
+// the store holds none — a lost store's, brought back (kitsunium/platform#35,
+// kitsunium/sdk#274).
+func TestTheSecretsCommandListsKitsIndexKey(t *testing.T) {
+	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
+		t.Skip("the SDK's file store needs file modes that are access lists")
+	}
+	t.Setenv("KIT_SECRETS", "file:"+filepath.Join(t.TempDir(), "secrets"))
+	t.Setenv("KIT_SECRETS_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
+	t.Setenv("KIT_INDEX_KEY", "")
+	t.Setenv("KIT_INDEX_KEY_FILE", "")
+	svc := NewService("cmd-people", "People's cards, whose subject kit references.")
+	svc.Store("cards", func(c card) string { return c.ID })
+	app := NewApp("vault", svc).With(Env(EnvProduction), Logs(io.Discard))
+	line := func(out string) string {
+		for l := range strings.SplitSeq(out, "\n") {
+			if strings.HasPrefix(l, "kit-index-key") {
+				return strings.Join(strings.Fields(l), " ")
+			}
+		}
+		return ""
+	}
+	if code, out := secretsOf(t, app, "", "list"); code != 0 || line(out) != "kit-index-key kit not made yet KIT_INDEX_KEY - - -" {
+		t.Fatalf("list (%d):\n%s", code, out)
+	}
+	if code, out := secretsOf(t, app, "an index key of thirty-two bytes\n", "set", "kit-index-key"); code != 0 || out != "kit-index-key: version 1\n" {
+		t.Fatalf("set where the store holds none: %d %q", code, out)
+	}
+	if code, out := secretsOf(t, app, "", "list"); code != 0 || !strings.HasPrefix(line(out), "kit-index-key kit file KIT_INDEX_KEY 1 ") ||
+		!strings.HasSuffix(line(out), " never") {
+		t.Fatalf("list once made (%d):\n%s", code, out)
+	}
+	for _, c := range []struct {
+		stdin string
+		args  []string
+		code  int
+		want  string
+	}{
+		{"another\n", []string{"set", "kit-index-key"}, 2, "made once and never replaced"},
+		{"", []string{"rotate", "kit-index-key"}, 2, "never rotated"},
+		{"", []string{"rotate", "-all"}, 1, "the product generates no secret"},
+	} {
+		if code, out := secretsOf(t, app, c.stdin, c.args...); code != c.code || !strings.Contains(out, c.want) {
+			t.Errorf("%v: %d %q, want %d and %q", c.args, code, out, c.code, c.want)
+		}
+	}
+	// An app that references nothing lists no index key of kit's.
+	if _, out := secretsOf(t, NewApp("vault", cmdSecrets).With(Env(EnvProduction), Logs(io.Discard)), "", "list"); line(out) != "" {
+		t.Errorf("an app that references nothing lists kit's index key:\n%s", out)
+	}
+}

@@ -229,6 +229,8 @@ go_test(
         "configcmd_internal_test.go",
         "connectors_internal_test.go",
         "connectors_test.go",
+        "consumer_retry_internal_test.go",
+        "consumer_supervised_internal_test.go",
         "counter_product_test.go",
         "database_decl_test.go",
         "database_env_test.go",

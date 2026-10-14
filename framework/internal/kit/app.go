@@ -25,6 +25,7 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/app/lifecycle"
 	"github.com/kitsunium/sdk/pkg/v1/app/scheduler"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
+	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
@@ -102,6 +103,10 @@ type App struct {
 
 	lc     lifecycle.Lifecycle
 	health health.Health
+	// wrapQueue, when a test sets it, stands in front of every queue the app
+	// opens for a consumer: how a test makes a queue's storage fail. nil in
+	// every app a product builds.
+	wrapQueue func(queue.Broker) queue.Broker
 	// streams ends every live event stream when the app starts draining: an
 	// open Studio must not hold the HTTP shutdown for its whole budget.
 	streams    context.Context
