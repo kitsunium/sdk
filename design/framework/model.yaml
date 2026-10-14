@@ -5926,7 +5926,9 @@ packages:
               name: MaxAttempts
               tag: json:"maxAttempts"
               type: int
-            - doc: "Outbox is \"memory\" or \"file\": where queued messages wait."
+            - doc: |-
+                Outbox is "memory", "file" or "sql": where queued messages wait — "sql"
+                on the database that keeps the mailer's service, each message sealed.
               name: Outbox
               tag: json:"outbox,omitempty"
               type: string

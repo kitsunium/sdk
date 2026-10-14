@@ -32,10 +32,11 @@ import (
 // returns at once —, a watch's notice, the store's write hooks that wake
 // workflows and loops, a workflow's OnTransition hooks. Each is checked when
 // it is made, so a caller's mistake returns to the caller; a rollback drops
-// them, and a savepoint's rollback its own. A publish, a dispatch or a notice
-// whose queue lives on the transaction's database — the one that keeps the
-// service of its subscription, command or watch, by a store's rules — is
-// written in the transaction, just before it commits: a queue that refuses
+// them, and a savepoint's rollback its own. A publish, a dispatch, a mail or a
+// notice whose queue lives on the transaction's database — the one that
+// keeps the service of its subscription, command, mailer or watch, by a
+// store's rules — is written in the transaction, just before it commits, a
+// mail sealed under kit's data-key: a queue that refuses
 // it fails the transaction, every write undone, and Transact returns the
 // refusal. Every other one leaves after the commit: one a queue refuses then
 // is logged and reported, and the commit stands; a process that dies

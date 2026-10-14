@@ -4,6 +4,7 @@ go 1.27.2
 
 require (
 	github.com/kitsunium/sdk v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/pkg/v1/app v0.0.0-00010101000000-000000000000
 	github.com/kitsunium/sdk/pkg/v1/data v0.0.0-00010101000000-000000000000
 	github.com/kitsunium/sdk/pkg/v1/errs v0.0.0-00010101000000-000000000000
 	github.com/kitsunium/sdk/pkg/v1/proc v0.0.0-00010101000000-000000000000
@@ -15,7 +16,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/kitsunium/sdk/internal v0.0.0-00010101000000-000000000000 // indirect
-	github.com/kitsunium/sdk/pkg/v1/app v0.0.0-00010101000000-000000000000 // indirect
 	github.com/kitsunium/sdk/pkg/v1/clock v0.0.0-00010101000000-000000000000 // indirect
 	github.com/kitsunium/sdk/pkg/v1/concur v0.0.0-00010101000000-000000000000 // indirect
 	github.com/kitsunium/sdk/pkg/v1/crypto v0.0.0-00010101000000-000000000000 // indirect
