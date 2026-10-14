@@ -451,6 +451,13 @@ jobs:
             echo '  - name: root'
             echo '    ssh_authorized_keys:'
             echo "      - $(cat key.pub)"
+            # Alpine's cloud-init gives the key to its default user and leaves
+            # root's refused; this installs it for root whatever the distro did.
+            echo 'runcmd:'
+            echo '  - |'
+            echo '    mkdir -p /root/.ssh && chmod 700 /root/.ssh'
+            echo "    echo '$(cat key.pub)' > /root/.ssh/authorized_keys"
+            echo '    chmod 600 /root/.ssh/authorized_keys'
           } > user-data
           printf 'instance-id: sdk-e2e\nlocal-hostname: sdk-e2e\n' > meta-data
           cloud-localds seed.iso user-data meta-data
