@@ -62,16 +62,15 @@ GATES=(
   # `gofumpt -l` + sdkguard: two of the three checks of `make lint` that no
   # lane ran until #236. The other five are invoked by the workflow as direct
   # `bash …` steps, so they are outside this list by construction.
-  #
-  # `lint-ktn-check` is the third, and it is deliberately NOT listed. Its step
-  # is conditional on a KTN_LINTER_TOKEN secret, because the ktn-linter release
-  # lives in a private repository that a workflow token cannot read — measured
-  # on this lane: `gh release download v1.11.2 --repo kodflow/ktn-linter`
-  # answers `release not found` under `secrets.GITHUB_TOKEN`, and downloads the
-  # asset under a credentialed account. A step a missing secret can skip is not
-  # a gate, and this file must not certify one as if it were. Add it here on
-  # the same commit that makes the step unconditional (#236).
   lint-check
+  # ktn-linter, the third. It was kept out of this list while its step hung on
+  # a repository secret that never existed, so every run skipped it: a step a
+  # missing secret can skip is not a gate. The binary now comes from the
+  # vendor's public channel (`kodflow/ktn/setup`) and proves its licence with
+  # the runner's OIDC token, so the only runs that skip it are a fork's or
+  # Dependabot's pull request, which GitHub gives no id-token — with a warning,
+  # and the step fails on any other run that has none (#236).
+  lint-ktn-check
   # scripts/ci/*.bats — the module census and the govulncheck gate (ADR 0136,
   # ADR 0137). A suite nothing runs is not a test suite (ADR 0088).
   ci-scripts-check

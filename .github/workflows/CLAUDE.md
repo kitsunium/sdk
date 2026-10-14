@@ -22,15 +22,15 @@ CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate), `post-commit.yml` (th
 
 ## bazel-ci.yml (the SDK lane)
 
-Five jobs: `bazel` (the gate), `shell-gates` (the checks that need neither Bazel
-nor Go), `cross-build` (every module COMPILES, tests included, on every supported GOOS/GOARCH),
+Six jobs: `bazel` (the gate), `shell-gates` (the checks that need neither Bazel
+nor Go), `lint-ktn` (ktn-linter, the one job holding an id-token), `cross-build` (every module COMPILES, tests included, on every supported GOOS/GOARCH),
 `test-386` (the 32-bit RUNTIME) and `docs-site` (the docs portal, held to
 `docs/api`). The last two run raw `go` rather than
 Bazel, for the reason stated under Do NOT below: Bazel here builds for the host
 only, so a platform it cannot reach is covered by the toolchain that can, or by
 nothing.
 
-Job `bazel` on `ubuntu-latest`, timeout 120 min, `needs: shell-gates` with `if: ${{ !cancelled() }}`. Its first step fails unless `needs.shell-gates.result` is `success`: shell-gates is not a required check, and `needs:` alone would make its failure SKIP `bazel`, which GitHub counts as a passing required check — so this is how the gates of shell-gates block a merge (#236). `scripts/ci-gates-check.sh` asserts all three pieces. Steps in order:
+Job `bazel` on `ubuntu-latest`, timeout 120 min, `needs: [shell-gates, lint-ktn]` with `if: ${{ !cancelled() }}`, and the workflow's `contents: read` only. Its first step fails unless `needs.shell-gates.result` and `needs.lint-ktn.result` are both `success`: neither is a required check, and `needs:` alone would make a failure SKIP `bazel`, which GitHub counts as a passing required check — so this is how their gates block a merge (#236). `scripts/ci-gates-check.sh` asserts all three pieces, for each. Steps in order:
 
 1. `bazel-contrib/setup-bazel@…` — caches `bazelisk`, disk cache keyed on `.bazelrc`+`.bazelversion`+`MODULE.bazel`+all `go.mod`/`go.sum`, plus the repository cache. `setup-go` reads the root module's `go.mod` and caches on every `go.sum` — the root, `internal` and the families require nothing outside the repository, so theirs are empty (ADR 0171).
 2. **Drift check** — `bazel mod tidy && bazel run //:gazelle`, then `git diff --exit-code` AND a check for untracked `BUILD.bazel`/`go.mod`/`go.sum`. Catches both modifications and new files (post-audit finding #11).
@@ -46,11 +46,21 @@ Job `bazel` on `ubuntu-latest`, timeout 120 min, `needs: shell-gates` with `if: 
    Then **package docs, BENCH.md presence and error-code drift** — `check-pkg-docs.sh`, `check-bench-md.sh` and `check-error-codes-drift.sh`, which only the opt-in local pre-commit hook ran until it was removed (ADR 0153).
 10. **Layer invariant** — `scripts/check-layer-deps.sh` asserts seven `bazel query` expressions empty (ADR 0068; the last three are the framework's, ADR 0147).
    Then **platforms invariant** — `scripts/pre-commit/check-platforms.sh` fails when `scripts/ci/platforms.sh`, the table tools/genindex judges doc links and writes `docs/api` on, stops naming exactly the cells of the `cross-build` matrix below, in its order. The matrix has to be written in the workflow, so the cells are written twice and this holds the two equal.
-11. **Lint gate, in two halves.** `make lint-check` (`gofumpt -l` + `make guard` + `make doclinks`, ADR 0138, + `make api-check`: `docs/api` regenerated from the code on every cell and compared byte for byte, the code's surface held to the markers of the pins kit writes from `design/` and every generated file to its design file's bytes — ADR 0163) runs unconditionally, and `make lint-ktn-check` (`ktn-linter`, after the vulnerability gate) runs only when a `KTN_LINTER_TOKEN` secret exists. Those three are the checks of `make lint` that no lane ran until #236; the others are steps 2, 7, 8, 9 and 10 above, so this adds a CLASS of analysis rather than repeating one. The split is a measurement, not taste: `kodflow/ktn-linter` is private and a workflow token is scoped to the repository that issued it, so `gh release download v1.11.2 --repo kodflow/ktn-linter` answered `release not found` under `secrets.GITHUB_TOKEN` on this very lane. **The linter is built from source, never downloaded**: a release binary is stamped with the vendor's licence anchor and demands a licence on the runner, while a source build leaves the anchor empty — the maintainers' mode upstream documents. The Makefile pins the commit (`KTN_LINTER_COMMIT`, the commit of tag v1.45.4 — a commit because a tag can move) and the version stamped into `main.Version`; one step fetches exactly that commit into `$RUNNER_TEMP` with the token as a one-invocation HTTP header, and a second step with NO credential in its environment runs `make lint-ktn-install`, which refuses any other commit or a dirty checkout and asserts the built binary reports the pinned version (1.9.11 exits 0 with "No issues found" on a tree 1.11.2 rejects, so presence proves nothing). A fork or Dependabot pull request receives no secret and takes the same skip branch as an unset secret. **`lint-ktn-check` is deliberately absent from `GATES`** — a step a missing secret can skip is not a gate, and the run emits a `::warning::` saying so; as measured on 2026-10-12, `gh secret list` shows no `KTN_LINTER_TOKEN`. Add the secret and the target to `GATES` in the same commit. These steps are in THIS job because `bazel` and `post-commit` are the only required checks on `main`.
+11. **Lint gate.** `make lint-check` (`gofumpt -l` + `make guard` + `make doclinks`, ADR 0138, + `make api-check`: `docs/api` regenerated from the code on every cell and compared byte for byte, the code's surface held to the markers of the pins kit writes from `design/` and every generated file to its design file's bytes — ADR 0163). Its third half, ktn-linter, is the `lint-ktn` job below, which this job needs. Those three are the checks of `make lint` that no lane ran until #236; the others are steps 2, 7, 8, 9 and 10 above, so this adds a CLASS of analysis rather than repeating one. These steps are in THIS job because `bazel` and `post-commit` are the only required checks on `main`.
 12. **Vulnerability gate** — `make vuln-install` then `make vuln-check`: `govulncheck` in source mode in every module of the census (`scripts/ci/go-modules.sh`), `GOWORK=off`, one at a time. Fails on a REACHABLE vulnerable symbol (govulncheck's exit 3) and on a scan that did not complete — "no packages matched" included, from any module: the root is the SDK module since ADR 0162, no longer the empty anchor ADR 0157 §5 excused; an imported-but-uncalled vulnerable package is reported and passes. Blocking on purpose, and in THIS job because it is required: the SDK's requires are every consumer's floor, so a reachable vulnerability is ours to fix before anything else merges (ADR 0136, #210). The scanner version is pinned once, in the Makefile, and `vuln-check.sh` refuses any other.
 13. `bazel coverage --combined_report=lcov //...` → uploaded as `coverage-${{ github.run_number }}` artifact (per-run unique name so concurrent runs don't dedupe, post-audit finding #28). Note coverage runs under the default (race-on) config, so it does **not** reflect the step-6 tests.
 
 Concurrency: `${{ github.workflow }}-${{ github.ref }}` with cancel-in-progress.
+
+### lint-ktn (ktn-linter, licensed by OIDC)
+
+`ubuntu-latest`, timeout 30 min, `permissions: { contents: read, id-token: write }` — the only job of the workflow holding an id-token, and the workflow root does not grant it. Checkout, `setup-go` (same pin and cache as `bazel`), then `make lint-ktn-check` (`ktn-linter run --skip-phases=tests ./...`), in `scripts/ci-gates-check.sh`'s `GATES`; it blocks a merge because `bazel` needs it and fails on its result.
+
+**Why a job of its own.** A job granted an id-token exports `ACTIONS_ID_TOKEN_REQUEST_URL` to every process, and `framework/internal/service/entitlement` decides it is on CI from exactly that variable: with the grant on `bazel`, `make test-framework` sent device-path entitlement tests down the CI path and failed `CI_NOT_ENTITLED` (#300's first run). The suites were made hermetic too; the separation keeps `bazel`'s environment what it was.
+
+**ktn-linter comes from the vendor's public channel**: `kodflow/ktn/setup`, pinned by commit, installs the release binary (its installer verifies the published checksum) and runs `ktn-linter license status`, which proves the licence with the runner's OIDC token — no key, no repository secret, no device seat. The licence covers the run when the published roster lists the NUMERIC id of the repository's owner (`repository_owner_id`) — for this repository the `kitsunium` organisation, not a person. The action's own steps are pinned; the installer (`kodflow/ktn@main/install.sh`) and the binary are rolling-latest by the vendor's design — one release is kept and the signed roster's minimum version upgrades an older binary — so the version a run used is read from its log, not from this repository.
+
+**The one skip is a pull request GitHub gives no id-token** — from a fork, or from Dependabot: a step before the action detects exactly those two, emits a `::warning::` and skips the two steps after it, and the job succeeds; any other run that finds no `ACTIONS_ID_TOKEN_REQUEST_URL` FAILS, since a lost permission must not read as a skipped gate. No step continues on error. This replaces a from-source build of the private `kodflow/ktn-linter` fetched with a repository secret that was never created, so its steps were skipped on every run and the target was held out of `GATES`; `make lint-ktn-install` remains the local from-source alternative.
 
 ### shell-gates (the gates that need no toolchain)
 
@@ -97,12 +107,12 @@ gates block a merge.
 5. **Pre-commit guard regression** — `make pre-commit-check`.
 
 These four, plus `make test-framework`, `make lint-check`, `make vuln-install`,
-`make vuln-check`, `make lint-ktn-install` and `make lint-ktn-check` in the `bazel` job and `make docs-check` in the
+`make vuln-check` in the `bazel` job, `make lint-ktn-check` in the `lint-ktn` job and `make docs-check` in the
 `docs-site` job, are the only `make` invocations in this workflow, and that is deliberate:
 `ci-gates-check` asserts the Makefile↔CI link by target NAME, which only works
 if CI goes through the target. The two lint targets are not in THIS job because
-they need a Go toolchain and a built binary — the two things `shell-gates`
-exists to do without. Adding a gate means editing `GATES` **and** this
+they need a Go toolchain, and ktn-linter an installed, licensed binary — the
+things `shell-gates` exists to do without. Adding a gate means editing `GATES` **and** this
 file, plus the Makefile's `.PHONY` — all three, or the check fails. That is not
 a claim: adding a gate to `GATES` before wiring its step produced
 `UNGATED: 'make <target>' exists but .github/workflows/bazel-ci.yml never
@@ -202,7 +212,7 @@ Concurrency: `sdk-release-${{ github.ref }}` with `cancel-in-progress: false` (N
 ## Conventions
 
 - Action references SHA-pinned with a trailing `# vX` comment (e.g. `actions/checkout@93cb6efe…  # v5`) — except `kodflow/post-commit@main`, unpinned on purpose so a rule fixed there is live here on the next run (the file's header says why).
-- `permissions: contents: read` only — nothing in the SDK lane writes back.
+- `permissions: contents: read` only — nothing in the SDK lane writes back. The one other grant is `id-token: write`, on the `lint-ktn` job alone, for ktn-linter's OIDC licence check: it mints a token, it writes nothing. Never on `bazel`: the grant exports `ACTIONS_ID_TOKEN_REQUEST_URL`, which the entitlement suites read.
 - `bazel-ci.yml` is the only source-of-truth gate. CI does NOT run `golangci-lint` directly (ADR 0004), and runs `go test` directly only where Bazel cannot — other GOOS/GOARCH (see Do NOT). It DOES run `govulncheck` directly, per module (`make vuln-check`, ADR 0136): the vulnerability database is the one input Bazel does not carry, which is why ADR 0004's retirement of the old scans left nothing scanning the SDK (#210).
 - A job that loops over modules reads `scripts/ci/go-modules.sh` (ADR 0137). Writing a module list into a workflow is how `tools/` fell out of every 32-bit lane.
 

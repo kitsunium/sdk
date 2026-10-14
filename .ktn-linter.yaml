@@ -524,6 +524,14 @@ rules:
       - "internal/service/app/consensus/cluster_internal_test.go:gatedKV.Apply"
       - "**/pkg/v1/app/consensus/consensus_external_test.go:counter.Apply"
       - "pkg/v1/app/consensus/consensus_external_test.go:counter.Apply"
+      # The interface METHOD, declared in a local interface (kodflow/ktn-linter#726
+      # moved the finding onto the declaration, #732 shipped it): fromCode takes
+      # the value public kit.Set(name string, value any) stored for a setting
+      # whose type parameter T is known only to the implementation behind
+      # settingDecl, so it arrives without a static type and the method asserts
+      # it to T — `any` is the type the value has here, not a missing abstraction.
+      - "**/framework/internal/kit/setting_interface.go:settingDecl.fromCode"
+      - "framework/internal/kit/setting_interface.go:settingDecl.fromCode"
 
   # KTN-API-MINIF (info) — "prefer the narrowest interface for this parameter".
   #

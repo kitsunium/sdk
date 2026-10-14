@@ -75,28 +75,45 @@ Superseded by ADR 0154 (the charter); ADR 0088 stays as the incident's record, a
 
 ## ktn-linter in CI (#236)
 
-`make lint` runs `ktn-linter`, and CI runs it only where it can do so safely:
+`make lint` runs `ktn-linter`, and `make lint-ktn-check` is a gate: listed in
+`ci-gates-check.sh`'s `GATES`, run by the `lint-ktn` job of `bazel-ci.yml`,
+which the required `bazel` job needs and checks — so it blocks.
 
-- **Built from source, never from a release** (`make lint-ktn-install`): a
-  release binary carries the vendor's licence anchor and needs a licence on
-  the machine; a source build leaves it empty, which upstream documents as the
-  maintainers' mode. The Makefile pins `KTN_LINTER_COMMIT` (the commit of tag
-  v1.45.4) and `KTN_LINTER_VERSION`; the target refuses another commit, a dirty
-  checkout, or a binary reporting another version.
-- **The source is private** (`kodflow/ktn-linter`): `secrets.GITHUB_TOKEN`
-  cannot read it, so the `bazel` job fetches the pinned commit with a
-  `KTN_LINTER_TOKEN` secret (Contents:read on that repository), in a step that
-  does nothing else; the build and the lint run without it.
-- **Without the secret the three steps are skipped with a warning** — an unset
-  secret, a fork pull request or a Dependabot one. That is why `lint-ktn-check`
-  is NOT in `ci-gates-check.sh`'s `GATES`: a step a missing secret can skip is
-  not a gate, and the manifest must not certify one. Measured 2026-10-12: the
-  repository has no `KTN_LINTER_TOKEN`. Setting it and adding `lint-ktn-check`
-  to `GATES` is one commit; a fork pull request would still skip, so making the
-  linter blocking for those needs a public source or a `pull_request_target`
-  design, which this lane deliberately does not use.
-- **What runs unconditionally** is `make lint-check` (gofumpt, sdkguard,
-  doclinks, api-check) and the guards of `GUARDS`, all in the required job.
+- **The binary is the vendor's release, from its public channel.**
+  `kodflow/ktn/setup` (pinned by commit in `bazel-ci.yml`) installs it — its
+  installer verifies the published checksum — and runs `ktn-linter license
+  status`, which proves the licence with the runner's OIDC token: no key, no
+  repository secret, no device seat. The `lint-ktn` job holds `id-token:
+  write` for that alone — never `bazel`, because the grant exports
+  `ACTIONS_ID_TOKEN_REQUEST_URL` to every process and the entitlement suites
+  `make test-framework` runs read it to decide they are on CI. The run is covered when the vendor's signed roster lists the
+  numeric id of the repository's owner (`repository_owner_id`), which for
+  `kitsunium/sdk` is the `kitsunium` organisation — not the maintainer's own
+  account. The binary is rolling-latest by the vendor's design (one release is
+  downloadable, and the roster's minimum version upgrades an older one), so
+  the version a run used is read from its log.
+- **The one skip: a pull request from a fork, or from Dependabot.** GitHub
+  gives those runs no id-token, so the licence cannot be proven there; the job
+  detects exactly those two, warns (`::warning title=ktn-linter gate did not
+  run::`) and skips the install and the lint. That is acceptable because a
+  fork pull request cannot merge without a maintainer, whose own pushes lint:
+  pushing the fork's branch to this repository lints it before the merge, and
+  the merge commit on `main` is linted after it either way. A Dependabot pull
+  request touches only workflow pins (`.github/dependabot.yml`), and its merge
+  to `main` is linted too. Any other
+  run that finds no token FAILS rather than skips: there the token is missing
+  because the permission was lost, and a gate that quietly skips itself is
+  the shape #236 exists to close. No step continues on error.
+- **`make lint-ktn-install` is the local alternative**, for a maintainer with
+  read access to the private source: it builds the commit the Makefile pins,
+  whose licence gate is inert by construction (the maintainers' mode upstream
+  documents), and refuses another commit, a dirty checkout, or a binary
+  reporting another version. No secret is involved — the clone uses the
+  maintainer's own account. CI does not run it. Move its pin when CI reports a
+  newer release, or the local and CI verdicts can differ.
+- **Before this**, CI built the linter from that private source, fetched with
+  a repository secret that was never created, so all three steps were skipped
+  on every run and the target was kept out of `GATES`.
 
 ## Rules from ADR 0137
 

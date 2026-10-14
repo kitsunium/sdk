@@ -339,6 +339,12 @@ byte-level base-N API: `codec.Marshal("base64", v)` is the one verb.
 - Consumers import only `pkg/v1/*`; `internal/*` is blocked by Go's `internal/` firewall, which is also what keeps them out under Bazel.
 - Build / test / lint go through **Bazel 9** — see ADR 0004. `go test ./...` still works locally for quick iteration but CI only runs `bazel`. Because the two build systems disagree about what is in scope, anything excluded from one MUST be covered by the other — see rule 12.
 
+## Where things stand
+
+- **The split release is published.** The first per-module release (ADR 0171) is on origin: the root at `v0.20.0`; `internal/v0.1.0` and the eleven families at `pkg/v1/<family>/v0.1.0`; the four connectors (`framework/connectors/{mysql,postgres,sqlite,ssh}`) and the nine vendor modules under `third-party/` at `v0.20.0`; and the tombstones `internal/{kernel,core,service}/v0.18.0`.
+- **Automatic releases are on.** The repository variable `RELEASE_ENABLED` is `true`, so `sdk-release.yml` cuts after every green `SDK CI (Bazel)` run on `main`. The base now holds `internal/go.mod`, so the bootstrap hold no longer applies: each module continues its own last tag (`scripts/release/CLAUDE.md`).
+- **ktn-linter runs in CI and blocks.** The `lint-ktn` job of `bazel-ci.yml` installs the vendor's release binary with `kodflow/ktn/setup` (pinned by commit) and proves the licence with the runner's OIDC token — `permissions: id-token: write` on that job only, no repository secret, no device seat — then runs `make lint-ktn-check`, which is in `scripts/ci-gates-check.sh`'s `GATES`; the required `bazel` job needs it and fails on its result. Never grant the id-token to `bazel`: it exports `ACTIONS_ID_TOKEN_REQUEST_URL`, which the entitlement suites read. A fork or Dependabot pull request gets no id-token and is skipped with a warning; any other run without one fails. The run is covered only while the vendor's signed roster lists this repository owner's numeric id (`kitsunium`, an organisation). See `scripts/CLAUDE.md` §ktn-linter in CI.
+
 ## How to work
 
 | Goal | Flow |
@@ -411,7 +417,7 @@ sdk/
 
 | Command | Expected |
 |---|---|
-| `ktn-linter lint ./...` | No issues found |
+| `ktn-linter run --skip-phases=tests ./...` (`make lint-ktn-check`) | No issues found |
 | `bazel build //...` | all targets pass |
 | `bazel test --config=race //...` | every `*_test` target green (race on by default — see `.bazelrc`) |
 | `bazel coverage --combined_report=lcov //...` | LCOV at `$(bazel info output_path)/_coverage/_coverage_report.dat` |

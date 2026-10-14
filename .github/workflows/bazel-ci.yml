@@ -21,27 +21,41 @@ jobs:
     timeout-minutes: 120
     # `bazel` and `post-commit` are the only required checks on main (the
     # branch protection names `bazel`, the ruleset `post-commit` — measured
-    # with `gh api`). shell-gates is a sibling that runs ci-gates-check and
-    # three BATS suites; on its own its failure blocks nothing. So this job
-    # waits for it and fails at once when it did not succeed — the gates it
-    # runs are as blocking as the ones below (#236).
+    # with `gh api`). shell-gates (ci-gates-check and three BATS suites) and
+    # lint-ktn (ktn-linter) are siblings; on their own their failures block
+    # nothing. So this job waits for both and fails at once when either did
+    # not succeed — the gates they run are as blocking as the ones below
+    # (#236).
     #
     # `needs:` alone would be worse than nothing: a job skipped because a job
     # it needs failed concludes `skipped`, and GitHub counts a skipped required
-    # check as passing. `!cancelled()` keeps this job running when shell-gates
-    # fails, so the first step below is what turns the failure into a red
-    # `bazel`. scripts/ci-gates-check.sh asserts all three pieces.
-    needs: shell-gates
+    # check as passing. `!cancelled()` keeps this job running when a needed
+    # job fails, so the first step below is what turns the failure into a red
+    # `bazel`. scripts/ci-gates-check.sh asserts all three pieces, per job.
+    #
+    # This job keeps the workflow's `contents: read` and nothing more. The
+    # id-token ktn-linter needs is granted to lint-ktn alone: a job granted it
+    # exports ACTIONS_ID_TOKEN_REQUEST_URL to every process, and the
+    # entitlement suites `make test-framework` runs here read exactly that
+    # variable to decide they are on CI (#300's first run).
+    needs: [shell-gates, lint-ktn]
     if: ${{ !cancelled() }}
     steps:
-      - name: shell-gates succeeded
+      - name: shell-gates and lint-ktn succeeded
         env:
           SHELL_GATES_RESULT: ${{ needs.shell-gates.result }}
+          LINT_KTN_RESULT: ${{ needs.lint-ktn.result }}
         run: |
+          failed=0
           if [ "$SHELL_GATES_RESULT" != success ]; then
             echo "::error::the shell-gates job concluded '$SHELL_GATES_RESULT'; its gates block the merge through this required job"
-            exit 1
+            failed=1
           fi
+          if [ "$LINT_KTN_RESULT" != success ]; then
+            echo "::error::the lint-ktn job concluded '$LINT_KTN_RESULT'; ktn-linter blocks the merge through this required job"
+            failed=1
+          fi
+          exit "$failed"
 
       # SHA-pinned per the .github/workflows/CLAUDE.md policy — version
       # comments track the resolved human-readable tag.
@@ -186,9 +200,10 @@ jobs:
         run: bash scripts/pre-commit/check-platforms.sh
 
       # The three checks of `make lint` that no lane ran (#236): `gofumpt -l`,
-      # sdkguard and ktn-linter. The other five are the steps above — gazelle
-      # drift, alloc-lane, audit-coverage, domain-docs, layer-deps — so this
-      # adds a class of analysis, it does not repeat one. `make lint-check`
+      # sdkguard and ktn-linter (the lint-ktn job, which this one needs). The
+      # other five are the steps above — gazelle drift, alloc-lane,
+      # audit-coverage, domain-docs, layer-deps — so this adds a class of
+      # analysis, it does not repeat one. `make lint-check`
       # also runs `make doclinks` (ADR 0138) and `make api-check`: docs/api
       # regenerated from the code on every cell and compared byte for byte, the
       # code's surface held to the pins' markers and every generated file to
@@ -230,76 +245,6 @@ jobs:
       - name: vulnerability gate — govulncheck over every module
         run: make vuln-check
 
-      # The ktn-linter half needs a credential this repository does not have,
-      # so it is asked for rather than assumed. kodflow/ktn-linter is PRIVATE,
-      # and a workflow token is scoped to the repository that issued it:
-      # measured on this lane, `gh release download v1.11.2 --repo
-      # kodflow/ktn-linter` answered `release not found` under
-      # `secrets.GITHUB_TOKEN`. A pull request from a fork, and a Dependabot
-      # one, receive no repository secret at all, so they take the same branch
-      # as a repository where the secret is unset: the three steps below are
-      # skipped and a warning says so. That is why `lint-ktn-check` is NOT in
-      # scripts/ci-gates-check.sh's GATES — a step a missing secret can skip is
-      # not a gate (#236).
-      #
-      # The linter is BUILT FROM SOURCE at the commit the Makefile pins
-      # (KTN_LINTER_COMMIT), never downloaded from a release: a release binary
-      # carries the vendor's licence anchor and demands a licence on the runner,
-      # while a source build leaves the anchor empty and its gate inert — the
-      # mode upstream documents for maintainers. See `lint-ktn-install`.
-      #
-      # The secret is read in its own step so it is not exposed to the rest of
-      # the job, and the `secrets` context is not available in a step-level
-      # `if:` — only `env` and `steps` are, hence the output.
-      - name: is the ktn-linter credential configured
-        id: ktncred
-        env:
-          KTN_LINTER_TOKEN: ${{ secrets.KTN_LINTER_TOKEN }}
-        run: |
-          if [ -n "${KTN_LINTER_TOKEN:-}" ]; then
-            echo 'present=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'present=false' >> "$GITHUB_OUTPUT"
-            echo "::warning title=ktn-linter gate did not run::KTN_LINTER_TOKEN is unset (or this is a fork or Dependabot pull request, which receives no secret), so the ktn-linter half of the lint gate was skipped. It is NOT in scripts/ci-gates-check.sh's GATES for that reason — a step a missing secret can skip is not a gate. Set the secret to a fine-grained token with Contents:read on kodflow/ktn-linter and add lint-ktn-check to GATES (#236)."
-          fi
-
-      # Fetches the pinned commit, and only that, into the runner's temporary
-      # directory — outside the workspace, so no drift or untracked-file check
-      # can see it. The token travels as an HTTP header for this one git
-      # invocation; it is never written to a remote URL or to git config, and
-      # the step does nothing but fetch. Fetching by SHA is what pins it: a
-      # moved tag cannot change what is fetched.
-      - name: fetch ktn-linter source (pinned commit)
-        if: steps.ktncred.outputs.present == 'true'
-        env:
-          KTN_LINTER_TOKEN: ${{ secrets.KTN_LINTER_TOKEN }}
-        run: |
-          commit="$(awk -F' := ' '$1 == "KTN_LINTER_COMMIT" { print $2 }' Makefile)"
-          [ -n "$commit" ] || { echo "::error::Makefile pins no KTN_LINTER_COMMIT"; exit 1; }
-          src="$RUNNER_TEMP/ktn-linter-src"
-          git init -q "$src"
-          auth="$(printf 'x-access-token:%s' "$KTN_LINTER_TOKEN" | base64 -w0)"
-          git -C "$src" -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
-            fetch -q --depth 1 https://github.com/kodflow/ktn-linter.git "$commit"
-          git -C "$src" checkout -q --detach FETCH_HEAD
-          echo "KTN_LINTER_SRC=$src" >> "$GITHUB_ENV"
-
-      # A separate step, with no credential in its environment: `go build`
-      # resolves public modules only, and the binary's first execution — the
-      # version assertion inside the target — must not be handed the token
-      # (raised by Qodo on this lane, and correct). The target refuses a
-      # checkout at any other commit or with local changes, and asserts the
-      # built binary reports the pinned version: 1.9.11 exits 0 with "No issues
-      # found!" on a tree 1.11.2 rejects, so a binary that is merely present
-      # proves nothing about what was analysed.
-      - name: build ktn-linter from source (pinned)
-        if: steps.ktncred.outputs.present == 'true'
-        run: make lint-ktn-install
-
-      - name: lint gate — ktn-linter
-        if: steps.ktncred.outputs.present == 'true'
-        run: make lint-ktn-check
-
       - name: coverage
         run: |
           bazel coverage --combined_report=lcov //...
@@ -315,6 +260,96 @@ jobs:
           # the run does not emit a "retention-days greater than max" warning.
           retention-days: 1
           if-no-files-found: warn
+
+  # ktn-linter — its own job, because it is the only one that needs an
+  # id-token, and a job granted one exports ACTIONS_ID_TOKEN_REQUEST_URL to
+  # every process it starts: the entitlement suites of the `bazel` job read
+  # that variable and took the CI path when the grant sat there. Not a
+  # required check itself; `bazel` needs it and fails when it did not succeed,
+  # exactly as for shell-gates.
+  lint-ktn:
+    name: lint gate — ktn-linter
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # A job-level block REPLACES the workflow's, so contents: read is restated.
+    # The id-token grant is for ktn-linter's licence check alone: the runner's
+    # OIDC token is how a CI run proves it is one. No other job asks for it,
+    # and the workflow root does not grant it.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      # ktn-linter loads packages through the go command, so it needs the
+      # toolchain and the module cache the `bazel` job sets up the same way.
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: '**/go.sum'
+
+      # ktn-linter, through the vendor's PUBLIC channel (#236). kodflow/ktn
+      # publishes the release binary and a setup action that installs it and
+      # proves the licence with the runner's own OIDC token: no key and no
+      # repository secret, and a CI run spends no device seat. That is what
+      # the id-token grant in this job's permissions is for, and the only thing.
+      # The licence covers this run when the published roster lists the
+      # NUMERIC id of the repository's owner (`repository_owner_id` in the
+      # token) — here the kitsunium organisation, not a person.
+      #
+      # This replaces a from-source build of the private repository, fetched
+      # with a repository secret that was never created — so all three of its
+      # steps were skipped on every run. `lint-ktn-check` is in
+      # scripts/ci-gates-check.sh's GATES from this change on. `make lint-ktn-install` stays the local, from-source
+      # alternative (Makefile).
+      #
+      # One pin holds and two cannot. The action is pinned by commit, so its
+      # steps do not move under this lane; the installer it runs
+      # (kodflow/ktn@main/install.sh, checksum-verified) and the binary are
+      # rolling-latest by the vendor's design — exactly one release stays
+      # downloadable, and the signed roster's minimum version makes an older
+      # binary upgrade itself. The version the run used is printed by the
+      # action's licence step and by the linter itself.
+      #
+      # The one skip is forced by GitHub: a pull request from a fork, and a
+      # Dependabot one, receive no id-token, so the licence check cannot pass
+      # there. Those two are skipped with a warning; every other run that
+      # finds no token FAILS, because the token missing anywhere else means
+      # the permission was lost, and a gate that skips itself quietly is not a
+      # gate. A fork pull request cannot merge without a maintainer, whose own
+      # pushes lint (scripts/CLAUDE.md §ktn-linter in CI).
+      - name: can this run prove it is CI (OIDC)
+        id: ktnoidc
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          if [ "$EVENT" = pull_request ] && { [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ] || [ "$ACTOR" = 'dependabot[bot]' ]; }; then
+            echo 'run=false' >> "$GITHUB_OUTPUT"
+            echo "::warning title=ktn-linter gate did not run::this is a pull request from a fork (${HEAD_REPO}) or from Dependabot, and GitHub gives such a run no id-token, so ktn-linter cannot prove its licence here. The maintainer's push that lands it is linted (#236)."
+            exit 0
+          fi
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::error title=ktn-linter has no OIDC token::this run is neither a fork nor a Dependabot pull request, yet no id-token is available — the lint-ktn job lost 'permissions: id-token: write'. Refusing to skip the gate."
+            exit 1
+          fi
+          echo 'run=true' >> "$GITHUB_OUTPUT"
+
+      # kodflow/ktn main, resolved 2026-10-13 with
+      # `gh api repos/kodflow/ktn/commits/main --jq .sha`; setup/action.yml
+      # last changed in 5a71b64b (#27, the OIDC licence). Its own last step
+      # runs `ktn-linter license status` and fails unless it reads valid.
+      - name: install ktn-linter + verify its licence (OIDC)
+        if: steps.ktnoidc.outputs.run == 'true'
+        uses: kodflow/ktn/setup@c04471fd26f73fc099b3acd6fd5305b3308003d9 # main @ 2026-09-28
+
+      - name: lint gate — ktn-linter
+        if: steps.ktnoidc.outputs.run == 'true'
+        run: make lint-ktn-check
 
   # Shell gates — the checks that need neither Bazel nor Go. A sibling job, so
   # a broken release script is reported in seconds instead of behind a 120-minute

@@ -23,9 +23,9 @@ GitHub-side configuration for the SDK repo: the workflows — the SDK lanes, the
 ## Conventions
 
 - `ubuntu-latest` runners, except where the platform is the point (`e2e-cross.yml`'s macOS and Windows cells — its BSDs, illumos and Solaris run in VMs on `ubuntu-latest` — and `e2e-vm.yml`'s `kitsunium-runner` scale set); action references SHA-pinned with a trailing `# vX` version comment, except `kodflow/post-commit@main`, unpinned on purpose.
-- `permissions: contents: read` at the workflow root unless a step needs more.
+- `permissions: contents: read` at the workflow root unless a step needs more; a grant one job needs is made at that job, never at the root — `bazel-ci.yml`'s `lint-ktn` job alone holds `id-token: write`, for ktn-linter's OIDC licence check — never the `bazel` job, whose entitlement suites read the variable that grant exports.
 - Concurrency group `${{ github.workflow }}-${{ github.ref }}` with `cancel-in-progress: true` so rapid re-pushes do not corrupt Bazel caches — except where a run must never be cut short: `sdk-release.yml` (a tag push in flight), `docs-deploy.yml` and `e2e-vm.yml` (one shared lab) do not cancel.
-- Authenticate via `GITHUB_TOKEN`, or a repository secret where that token cannot reach (`KTN_LINTER_TOKEN` for the private linter, the lab's secrets in `e2e-vm.yml`); never inline secrets.
+- Authenticate via `GITHUB_TOKEN`, the runner's OIDC token where a third party verifies the run itself (`kodflow/ktn/setup`, ktn-linter's licence), or a repository secret where neither reaches (the lab's secrets in `e2e-vm.yml`); never inline secrets.
 
 ## Do NOT
 

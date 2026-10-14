@@ -40,6 +40,25 @@ const sampleUUID string = "11111111-2222-3333-4444-555555555555"
 // between two usable ones rather than let sort order decide.
 const otherUUID string = "99999999-8888-4777-8666-555544443333"
 
+// TestMain clears the runner's OIDC variables before any test of the package
+// runs. Verify takes the CI path when both ACTIONS_ID_TOKEN_REQUEST_URL and
+// ACTIONS_ID_TOKEN_REQUEST_TOKEN are set (InCI), and a GitHub Actions job
+// granted id-token sets both for every process — so on
+// such a job every device-path test below was sent down the CI path and failed
+// (thirteen of them, the first time the bazel job held the grant). The tests
+// that exercise the CI path set both with t.Setenv, which restores the cleared
+// state afterwards. Cleared here once rather than per test, so the device-path
+// tests stay parallel.
+func TestMain(m *testing.M) {
+	for _, name := range []string{"ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_ID_TOKEN_REQUEST_TOKEN"} {
+		//: Unsetenv fails only on a name the platform cannot hold.
+		if err := os.Unsetenv(name); err != nil {
+			panic(err)
+		}
+	}
+	os.Exit(m.Run())
+}
+
 // stubGetter answers roster requests with one canned bundle, so admission
 // logic is exercised without a network.
 type stubGetter struct {

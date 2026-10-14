@@ -34,10 +34,12 @@ installing the tool. Install it before committing:
 
   /ktn
 
-  # or manually, FROM SOURCE at the commit the Makefile pins — the same
-  # build CI runs. Never from a release: a release binary carries the
-  # vendor's licence anchor and demands a licence on this machine, a source
-  # build leaves it empty. kodflow/ktn-linter is private, so the clone needs
+  # or the vendor's release — the binary CI runs — which demands a licence
+  # on this machine (https://github.com/kodflow/ktn#getting-a-licence):
+  curl -sSL https://raw.githubusercontent.com/kodflow/ktn/main/install.sh | bash
+
+  # or FROM SOURCE at the commit the Makefile pins, whose licence gate is
+  # inert by construction. kodflow/ktn-linter is private, so the clone needs
   # an account that can read it.
   gh repo clone kodflow/ktn-linter /tmp/ktn-src \\
     && git -C /tmp/ktn-src checkout --detach \\

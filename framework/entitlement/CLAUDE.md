@@ -167,7 +167,18 @@ depends on it.
 
 ## Verification
 
+The suite is hermetic to the runner's OIDC variables. `Verify` takes the CI
+path when both `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`
+are set (`InCI`), and a GitHub Actions job granted `id-token: write` sets both
+for every process it starts — so a
+device-path test inherits the CI path from the job, not from its own setup.
+The rotation test clears both with `t.Setenv(…, "")` per row, which is why it is sequential; it failed `CI_NOT_ENTITLED` the first time a job held the grant. A test of the CI path sets both variables itself with `t.Setenv`. Reproduce
+the hostile environment with
+`ACTIONS_ID_TOKEN_REQUEST_URL=https://x ACTIONS_ID_TOKEN_REQUEST_TOKEN=y GITHUB_ACTIONS=true`
+in front of the `go test` below.
+
 ```sh
 bazel test --config=race //framework/entitlement:entitlement_test
 bazel test --config=race //framework/internal/service/entitlement:entitlement_test
+GOWORK=off go test -race ./framework/entitlement/ ./framework/internal/service/entitlement/
 ```
