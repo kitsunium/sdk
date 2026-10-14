@@ -234,9 +234,8 @@ packages:
             doc: |-
               Misconfigured refuses an exporter that cannot be built as asked; the
               rule field says which rule failed.
+            exit: CONFIG
             name: Misconfigured
-            options:
-              - errs.WithExitCode(78)
             private: "framework/telemetry: no socket path, a buffer outside [64, 1<<20], or a node ID outside the grammar; the rule field says which"
             public: The telemetry exporter is misconfigured
             reason: MISCONFIGURED

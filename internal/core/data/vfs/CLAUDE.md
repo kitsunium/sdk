@@ -38,7 +38,6 @@ and never deleted; the file, left with nothing but its package comment, is gone
 | `path.go` | `ValidatePath` (the `fs.ValidPath` grammar) and `ValidateWritePath` (plus the root refusal) |
 | `perm.go` | `ValidatePerm` — the zero-mode and out-of-`ModePerm` refusals |
 | `codes_gen.go` | the eight `Code` constants, `0.2.25.1` … `0.2.25.8`, then `0.3.55.1` and `0.3.55.2`; the ten sentinels, each var named for its `Define` reason — the port's eight, then `RootUnavailable` and `DirectorySyncFailed` — written by kit gen from `design/data/vfs.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `exitDataErr`, `exitNoPerm`, `exitConfig`, `exitIOErr` |
 | `BENCH.md` | guard cost and, more importantly, guard *allocation* |
 
 ## Reading is io/fs, and that is a decision, not an omission

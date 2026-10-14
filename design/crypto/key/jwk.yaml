@@ -117,10 +117,9 @@ packages:
             doc: |-
               Malformed is returned when the document is not the JSON shape RFC 7517
               describes — invalid JSON, a non-object JWK, or a non-array "keys".
+            exit: DATAERR
+            http: 400
             name: Malformed
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
-              - errs.WithExitCode(exitDataErr)
             private: "service/crypto/key/jwk: json.Unmarshal rejected the document, or a JWK/JWK-Set member had the wrong JSON kind"
             public: JWK document is malformed
             reason: MALFORMED
@@ -128,10 +127,9 @@ packages:
             doc: |-
               MissingMember is returned when a member required for the declared key
               type is absent or empty.
+            exit: DATAERR
+            http: 400
             name: MissingMember
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
-              - errs.WithExitCode(exitDataErr)
             private: "service/crypto/key/jwk: a member required by the declared kty (kty/crv/x/y/k, or keys on a Set) is absent or empty"
             public: JWK is missing a required member
             reason: MISSING_MEMBER
@@ -139,10 +137,9 @@ packages:
             doc: |-
               UnsupportedKeyType is returned for a "kty" this package does not model.
               RSA is deliberately here: the SDK ships no RSA signer.
+            exit: DATAERR
+            http: 400
             name: UnsupportedKeyType
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
-              - errs.WithExitCode(exitDataErr)
             private: "service/crypto/key/jwk: kty is not EC, OKP or oct; RSA is unsupported because the SDK ships no RSA scheme"
             public: JWK key type is not supported
             reason: UNSUPPORTED_KEY_TYPE
@@ -150,10 +147,9 @@ packages:
             doc: |-
               UnsupportedCurve is returned for an unknown "crv", or a known curve
               paired with the wrong "kty".
+            exit: DATAERR
+            http: 400
             name: UnsupportedCurve
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
-              - errs.WithExitCode(exitDataErr)
             private: "service/crypto/key/jwk: crv is unknown, or valid for a different kty (P-256 under OKP, Ed25519 under EC)"
             public: JWK curve is not supported
             reason: UNSUPPORTED_CURVE
@@ -161,10 +157,9 @@ packages:
             doc: |-
               InvalidEncoding is returned when a member is not unpadded base64url, or
               its decoded length is not the fixed size the declared curve mandates.
+            exit: DATAERR
+            http: 400
             name: InvalidEncoding
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
-              - errs.WithExitCode(exitDataErr)
             private: "service/crypto/key/jwk: base64.RawURLEncoding rejected a member, or its decoded length is not the curve's fixed octet length"
             public: JWK member is not valid unpadded base64url
             reason: INVALID_ENCODING
@@ -173,10 +168,9 @@ packages:
               KeyMismatch is returned when well-encoded material does not describe a
               key on the declared curve — off-curve point, out-of-range scalar, or a
               private member whose derived public key differs from the declared one.
+            exit: DATAERR
+            http: 400
             name: KeyMismatch
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
-              - errs.WithExitCode(exitDataErr)
             private: "service/crypto/key/jwk: point is off-curve or the identity, scalar is outside [1,n-1], or d does not derive the declared x/y"
             public: JWK material does not match the declared curve
             reason: KEY_MISMATCH
@@ -207,10 +201,9 @@ packages:
             doc: |-
               KeyNotFound is returned when a Set lookup resolves no key, including the
               empty-kid lookup that would otherwise match every key carrying none.
+            exit: DATAERR
+            http: 404
             name: KeyNotFound
-            options:
-              - errs.WithHTTPStatus(httpNotFound)
-              - errs.WithExitCode(exitDataErr)
             private: "service/crypto/key/jwk: Set.ByKid matched no member, or was called with an empty kid"
             public: No key in the set carries that key id
             reason: KEY_NOT_FOUND
@@ -219,10 +212,9 @@ packages:
               AmbiguousKid is returned when a Set lookup matches more than one key.
               Selecting one would depend on JSON member order; callers rotating keys
               enumerate the candidates with AllByKid instead.
+            exit: DATAERR
+            http: 400
             name: AmbiguousKid
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
-              - errs.WithExitCode(exitDataErr)
             private: "service/crypto/key/jwk: Set.ByKid matched more than one member; use AllByKid and choose explicitly (ADR 0031)"
             public: Several keys in the set carry that key id
             reason: AMBIGUOUS_KID

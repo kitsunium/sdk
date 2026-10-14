@@ -2,11 +2,6 @@ package transform
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
 
-// exitDataErr matches sysexits EX_DATAERR — a malformed or over-large frame is
-// a data problem, not a generic internal software error (70). It mirrors the
-// stdlib sibling in internal/core/data/transform.
-const exitDataErr int = 65
-
 var (
 	// zstdWrap is the WrapParams the zstd scheme attaches to a library cause;
 	// its fields mirror the ZstdFailed sentinel.

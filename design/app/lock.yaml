@@ -410,9 +410,8 @@ packages:
               Refusing at CONSTRUCTION rather than at the first Acquire is the other
               half: it puts the failure where the program is wired, in the process's
               first second, instead of in the middle of the first contended section.
+            exit: CONFIG
             name: LockMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/lock: a locker constructor received a TTL, a directory or a poll interval it cannot honour; the fields name the option and the value"
             public: The lock cannot be built from the given configuration
             reason: LOCK_MISCONFIGURED
@@ -451,9 +450,8 @@ packages:
               is what an uninitialised variable holds. Accepting it would funnel every
               caller that forgot to set a name through one shared lock — correct-looking,
               silent, and indistinguishable from contention nobody can explain.
+            exit: DATAERR
             name: LockNameRejected
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/lock: Acquire or TryAcquire received an empty name or one the backend cannot represent; the fields name the offending part"
             public: The lock name is not usable as given
             reason: LOCK_NAME_REJECTED
@@ -468,14 +466,13 @@ packages:
               which turns the one mechanism that survives a stalled holder into a
               mechanism that endorses one. A counter allowed to wrap does the same
               thing, silently and in order.
+            exit: DATAERR
             name: LockFenceCorrupt
             note: |-
               The outcomes the concrete lockers emit — the in-process locker and the file
               locker of internal/service/app/lock. They are declared here, with the
               port's, so that the domain's codes and sentinels are in one place
               (ADR 0160).
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "service/app/lock: the lock file's contents are not a decimal fencing counter, or are the one counter that cannot be advanced without wrapping; the fields name the path, the offending bytes' length and which of the two conditions it is"
             public: The lock's fencing ledger is not readable
             reason: LOCK_FENCE_CORRUPT
@@ -489,9 +486,8 @@ packages:
               the current holder is flocking, both are told they hold the lock, and
               neither can observe the other — the exact failure this domain exists to
               prevent, reachable without any race at all.
+            exit: CONFIG
             name: LockDirectoryUnsafe
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/lock: the directory is world-writable and not sticky, so its lock files can be replaced by any account; the fields name the path and the mode"
             public: The lock directory's permissions do not protect the lock files
             reason: LOCK_DIRECTORY_UNSAFE
@@ -525,9 +521,8 @@ packages:
               directory in which an existing entry can be UNLINKED by anyone; this
               attack creates an entry at a name nobody has taken yet, which the sticky
               bit permits and 0777|sticky — what /tmp is — explicitly accepts.
+            exit: CONFIG
             name: LockPathRedirected
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/lock: a symbolic link or reparse point occupies the lock file's path, so the lock and its fencing ledger would land on a file chosen by whoever planted it; the fields name the path, the kind of indirection and what the kernel reported"
             public: The lock path is a link rather than a file
             reason: LOCK_PATH_REDIRECTED
@@ -548,9 +543,8 @@ packages:
               refuses once the swap has happened — so a Keepalive cancels the
               protected work's context with this cause rather than letting it run on
               inside a section it no longer owns.
+            exit: CONFIG
             name: LockFileReplaced
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/lock: the lock file this lease holds was unlinked or replaced while it was held, so the next acquisition locks a different inode and a fresh fencing ledger; the fields name the path, the lock, the fencing token and which of the two conditions was observed"
             public: The lock file is no longer the file its name leads to
             reason: LOCK_FILE_REPLACED

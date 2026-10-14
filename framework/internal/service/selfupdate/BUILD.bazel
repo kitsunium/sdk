@@ -13,7 +13,6 @@ go_library(
         "diagnose.go",
         "doc.go",
         "elevation.go",
-        "errors.go",
         "interfaces.go",
         "keys.go",
         "osfilesystem.go",

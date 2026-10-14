@@ -7,14 +7,6 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// exitDataErr matches sysexits EX_DATAERR — a bad key or undecryptable box is a
-// data problem, not a generic internal software error (70).
-const exitDataErr int = 65
-
-// httpBadRequest is the HTTP status a decryption failure maps to: the supplied
-// ciphertext is client-bad input, not a server fault.
-const httpBadRequest int = 400
-
 // conflictText renders a registry conflict for the boot panic that reports it:
 // the typed error's header and Public, then each field it carries, quoted.
 // Error() never renders a field (rule 4), and the panic is the only place an

@@ -208,9 +208,8 @@ packages:
             doc: |-
               InvalidComponent is returned by Add for a component that could never
               run. The "missing" field names which half is absent.
+            exit: CONFIG
             name: InvalidComponent
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/lifecycle: component has an empty name, a nil Start or a nil Stop; the field names which"
             public: The lifecycle component is not runnable and was refused
             reason: INVALID_COMPONENT
@@ -219,9 +218,8 @@ packages:
               DuplicateComponent is returned by Add when the name is already taken.
               Names are how a transition and an error identify a component, so two
               components sharing one would make every report ambiguous.
+            exit: CONFIG
             name: DuplicateComponent
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/lifecycle: component names are unique per Lifecycle; the field carries the name"
             public: A component is already registered under that name
             reason: DUPLICATE_COMPONENT
@@ -231,9 +229,8 @@ packages:
               Lifecycle is started. The order is frozen for the duration of a run:
               appending to it mid-flight would give the new component a start
               position it never had, and no defensible place in the reverse order.
+            exit: CONFIG
             name: LifecycleRunning
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/lifecycle: the component order is frozen once Start begins; add before Start, or after Stop returns"
             public: The lifecycle is already started
             reason: LIFECYCLE_RUNNING
@@ -287,9 +284,8 @@ packages:
               behalf, which is what severed sockets under live handlers before ADR
               0043. Every component after it in the reverse order still gets its own
               full budget.
+            exit: TEMPFAIL
             name: StopTimeout
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "service/app/lifecycle: the per-component stop budget expired; the goroutine was abandoned, not killed"
             public: A component did not stop within its budget and was abandoned
             reason: STOP_TIMEOUT
@@ -328,9 +324,8 @@ packages:
             reason: RUN_PANICKED
           - code: CodeSupervisorMisconfigured
             doc: SupervisorMisconfigured refuses a supervisor that could never run.
+            exit: CONFIG
             name: SupervisorMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/lifecycle: NewSupervisor needs a Name and a Run; the field names which is missing"
             public: The supervisor cannot run as configured
             reason: SUPERVISOR_MISCONFIGURED
@@ -339,9 +334,8 @@ packages:
               SupervisorRunning refuses a second Start while the first supervision
               is still running: two loops over one function would be two owners of
               whatever it drives.
+            exit: CONFIG
             name: SupervisorRunning
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/lifecycle: Start was called while a supervision is running; Stop it first"
             public: The supervisor is already running
             reason: SUPERVISOR_RUNNING

@@ -42,10 +42,9 @@ packages:
               NotJSON refuses a document that is not exactly one JSON value. The fields
               name which document — "from" or "to" — and the byte offset where reading
               stopped, never what the document held.
+            exit: DATAERR
+            http: 400
             name: NotJSON
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
-              - errs.WithExitCode(exitDataErr)
             private: "service/data/codec/jsonpatch: a document is not exactly one well-formed JSON value; the fields name the document and the offset, never its content"
             public: A document to compare is not a JSON value
             reason: NOT_JSON

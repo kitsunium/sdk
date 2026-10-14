@@ -545,9 +545,8 @@ packages:
             doc: |-
               UnknownDialect is returned by ParseDialect for a name that is in
               neither the accepted nor the refused set.
+            exit: CONFIG
             name: UnknownDialect
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/data/sql: dialect name is not in the accepted set (postgres, mysql, sqlite); the field carries the name"
             public: The SQL dialect is not one this SDK supports
             reason: UNKNOWN_DIALECT
@@ -558,9 +557,8 @@ packages:
               a caller debugging a refusal needs to know whether their engine is
               unheard-of or known-and-declined, because only the second one comes
               with a reason they can evaluate.
+            exit: CONFIG
             name: DialectRefused
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/data/sql: the engine's savepoint grammar is a different algorithm, not a different string; the reason field says which"
             public: That SQL engine is recognised and deliberately not supported
             reason: DIALECT_REFUSED
@@ -572,9 +570,8 @@ packages:
               the read-only-ness of that transaction. Honouring the request is
               impossible; ignoring it would hand the caller a weaker transaction than
               the one they asked for, under a nil error.
+            exit: CONFIG
             name: NestedIsolation
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/data/sql: a nested scope is a savepoint; open the outer transaction with the options instead"
             public: A nested transaction cannot change isolation or read-only mode
             reason: NESTED_ISOLATION
@@ -582,9 +579,8 @@ packages:
             doc: |-
               InvalidMigration is returned for a migration that could never run. The
               "missing" field names which half is absent.
+            exit: CONFIG
             name: InvalidMigration
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/data/sql: migration has version 0, an empty name, a nil Up or a nil Down; the missing field names which"
             public: The migration is not runnable and was refused
             reason: INVALID_MIGRATION
@@ -594,9 +590,8 @@ packages:
               caller's own declaration coming back at them, not a defect the SDK
               found — which is why it reads as a statement about the migration rather
               than about the runner.
+            exit: CONFIG
             name: MigrationIrreversible
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/data/sql: Down is the Irreversible step; reversing it requires a new forward migration"
             public: That migration was declared irreversible and cannot be rolled back
             reason: MIGRATION_IRREVERSIBLE
@@ -605,9 +600,8 @@ packages:
               ConfigInvalid is returned by every constructor in
               internal/service/data/sql for a Config that could never produce a
               working port.
+            exit: CONFIG
             name: ConfigInvalid
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/data/sql: Config has a nil DB or an unusable Dialect; the missing field names which"
             public: The SQL configuration is incomplete and was refused
             reason: CONFIG_INVALID
@@ -618,9 +612,8 @@ packages:
               matters: database/sql reads 0 as UNLIMITED, and "as many connections as
               the application happens to want" is a decision made by forgetting a
               line, not by taking one (ADR 0031's refusal side).
+            exit: CONFIG
             name: PoolMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/data/sql: a non-positive MaxOpen means unlimited in database/sql; state the ceiling explicitly"
             public: The connection-pool policy is not one this SDK will apply
             reason: POOL_MISCONFIGURED
@@ -628,10 +621,9 @@ packages:
             doc: |-
               BeginFailed is joined with the driver's error when a transaction could
               not be opened. Nothing ran.
+            exit: TEMPFAIL
+            http: 503
             name: BeginFailed
-            options:
-              - errs.WithExitCode(exitTempFail)
-              - errs.WithHTTPStatus(httpUnavailable)
             private: "service/data/sql: BeginTx failed; the driver error travels beside this one under errors.Join"
             public: The database refused to open a transaction
             reason: BEGIN_FAILED
@@ -640,10 +632,9 @@ packages:
               CommitFailed is joined with the driver's error when COMMIT was
               rejected. It says the unit of work did NOT take effect, which is the
               one fact a caller must not have to infer.
+            exit: TEMPFAIL
+            http: 503
             name: CommitFailed
-            options:
-              - errs.WithExitCode(exitTempFail)
-              - errs.WithHTTPStatus(httpUnavailable)
             private: "service/data/sql: COMMIT was rejected; the driver error travels beside this one under errors.Join"
             public: The transaction could not be committed and had no effect
             reason: COMMIT_FAILED
@@ -653,9 +644,8 @@ packages:
               never instead of it. A teardown that also breaks is a second defect,
               and reporting only it would hide the first — the rule ADR 0050 wrote
               for UnwindFailed, applied to the same shape one layer down.
+            exit: TEMPFAIL
             name: RollbackFailed
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "service/data/sql: ROLLBACK was rejected; the connection is discarded by database/sql"
             public: Rolling the transaction back did not complete cleanly
             reason: ROLLBACK_FAILED
@@ -666,9 +656,8 @@ packages:
               the three, because the consequences differ: a failed SAVEPOINT means
               the nested scope never started, while a failed ROLLBACK TO means the
               engine's state is unknown and the transaction is poisoned.
+            exit: TEMPFAIL
             name: SavepointFailed
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "service/data/sql: the statement field names which of SAVEPOINT / RELEASE / ROLLBACK TO failed"
             public: A savepoint statement was rejected by the database
             reason: SAVEPOINT_FAILED
@@ -683,9 +672,8 @@ packages:
               leaves a usable transaction. But when that statement ITSELF fails, the
               engine's state is no longer known, and continuing would commit a
               transaction containing work the SDK believes it undid.
+            exit: TEMPFAIL
             name: TxPoisoned
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "service/data/sql: a savepoint rollback failed, so the engine state is unknown; the whole transaction is abandoned"
             public: The transaction is no longer usable and will not be committed
             reason: TX_POISONED
@@ -695,9 +683,8 @@ packages:
               it returned. database/sql would answer ErrTxDone for a finished
               transaction and would EXECUTE for a nested scope whose outer
               transaction is still open — the second case is the one worth catching.
+            exit: CONFIG
             name: TxClosed
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/data/sql: the Executor outlived its Transact scope; it is valid only for the duration of the call"
             public: That transaction handle is no longer valid
             reason: TX_CLOSED
@@ -705,10 +692,9 @@ packages:
             doc: |-
               HealthCheckFailed is joined with the driver's error when the probe was
               answered with a failure.
+            exit: TEMPFAIL
+            http: 503
             name: HealthCheckFailed
-            options:
-              - errs.WithExitCode(exitTempFail)
-              - errs.WithHTTPStatus(httpUnavailable)
             private: "service/data/sql: PingContext returned an error; the driver error travels beside this one under errors.Join"
             public: The database is not reachable
             reason: HEALTH_CHECK_FAILED
@@ -718,10 +704,9 @@ packages:
               budget. It is a separate code from HealthCheckFailed because a database
               that refuses is a different operational fact from one that hangs, and a
               readiness endpoint routes on the difference.
+            exit: TEMPFAIL
+            http: 503
             name: HealthCheckTimeout
-            options:
-              - errs.WithExitCode(exitTempFail)
-              - errs.WithHTTPStatus(httpUnavailable)
             private: "service/data/sql: the probe budget expired; the ping goroutine is abandoned, never killed"
             public: The database did not answer the health check in time
             reason: HEALTH_CHECK_TIMEOUT
@@ -732,9 +717,8 @@ packages:
               the schema change nor the version row took effect — except on engines
               with non-transactional DDL, which is stated in the package doc rather
               than papered over.
+            exit: TEMPFAIL
             name: MigrationFailed
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "service/data/sql: version+direction fields; step error joined; on MySQL DDL commits implicitly, so a failed step can leave the schema change applied WITHOUT its version row (ADR 0055 D8)"
             public: A migration did not apply and was rolled back
             reason: MIGRATION_FAILED
@@ -746,9 +730,8 @@ packages:
               would now apply UNDER it — producing a schema that matches neither
               branch's expectation and a version table that cannot express what
               happened.
+            exit: CONFIG
             name: MigrationOutOfOrder
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/data/sql: renumber the migration above the highest applied version; the fields carry both"
             public: A pending migration is older than one already applied
             reason: MIGRATION_OUT_OF_ORDER
@@ -764,9 +747,8 @@ packages:
               MySQL serialise on the session's advisory lock, SQLite on the database
               file's write lock. It stays defined because it is published, and a
               caller matching it would otherwise stop compiling.
+            exit: CONFIG
             name: MigrationLockUnsupported
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/data/sql: the dialect offers neither a session-scoped advisory lock nor a database-file lock; wire your own exclusion"
             public: That dialect has no advisory lock, so migrations cannot be serialised
             reason: MIGRATION_LOCK_UNSUPPORTED
@@ -774,9 +756,8 @@ packages:
             doc: |-
               MigrationLockTimeout is returned when another holder kept the migration
               lock for the whole budget. Nothing was applied.
+            exit: TEMPFAIL
             name: MigrationLockTimeout
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "service/data/sql: the advisory lock was held throughout the budget; no migration was applied"
             public: Another process is running migrations and did not finish in time
             reason: MIGRATION_LOCK_TIMEOUT
@@ -785,9 +766,8 @@ packages:
               MigrationUnknownVersion refuses a Down over a version the running
               binary has no migration for. The database is ahead of the code, and
               reversing a change whose Down is not present would be guessing.
+            exit: CONFIG
             name: MigrationUnknownVersion
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/data/sql: Down cannot reverse a version with no Step; deploy the build that owns it"
             public: The database records a migration this build does not carry
             reason: MIGRATION_UNKNOWN_VERSION
@@ -797,9 +777,8 @@ packages:
               identifier. A table name cannot be a bound parameter, so it is
               interpolated — which makes validating it the only thing between a
               configuration string and an injection.
+            exit: CONFIG
             name: VersionTableInvalid
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/data/sql: an identifier cannot be bound as a parameter, so only [A-Za-z_][A-Za-z0-9_]* is accepted"
             public: The version-table name is not a plain SQL identifier
             reason: VERSION_TABLE_INVALID
@@ -808,9 +787,8 @@ packages:
               DuplicateMigration refuses two migrations declaring the same version.
               The version IS the identity, so a duplicate makes "has this been
               applied?" unanswerable.
+            exit: CONFIG
             name: DuplicateMigration
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/data/sql: a version identifies a migration; the field carries the duplicated value"
             public: Two migrations declare the same version
             reason: DUPLICATE_MIGRATION

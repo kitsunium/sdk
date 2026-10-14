@@ -202,17 +202,15 @@ packages:
       - var:
           - code: CodeZstdFailed
             doc: ZstdFailed wraps a failure from the zstd codec (Compress or Decompress).
+            exit: DATAERR
             name: ZstdFailed
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "third-party/transform: the zstd codec returned an error"
             public: zstd transform failed
             reason: ZSTD_FAILED
           - code: CodeS2Failed
             doc: S2Failed wraps a failure from the s2 codec (Compress or Decompress).
+            exit: DATAERR
             name: S2Failed
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "third-party/transform: the s2 codec returned an error"
             public: s2 transform failed
             reason: S2_FAILED
@@ -222,9 +220,8 @@ packages:
               more plaintext than the compressor's configured ceiling allows. No output
               is returned with it: the caller's dst is handed back at its original
               length, so a refused bomb never leaves a partial payload behind.
+            exit: DATAERR
             name: DecompressionLimitExceeded
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "third-party/transform: the decompression-bomb ceiling refused this payload"
             public: Decompressed output would exceed the configured limit
             reason: DECOMPRESSION_LIMIT_EXCEEDED

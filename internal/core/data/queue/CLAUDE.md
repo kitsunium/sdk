@@ -44,7 +44,7 @@ nothing but its package comment, is gone (rule 5); the package comment is `doc.g
 | `retry.go` | `DoNotRetry(cause)`: the mark a handler puts on a failure no retry can fix (ADR 0151) |
 | `policy.go` | `PolicyValue` (with `MaxRetryDelay`, ADR 0151), `Validate` + `validateRetryGrowth`, `Normalized`, `DefaultMaxMessageBytes`, `MaxDeadlineOffset` |
 | `codes_gen.go` | the seven `0.2.23.*` codes, then the five `0.3.53.*` codes of the brokers and the consumer engine (ADR 0160); the seven port sentinels, then `QueueBackendFailed`, `QueueDirectoryUnusable`, `ConsumerMisconfigured`, `HandlerPanicked` and `SQLQueueMisconfigured`, which `internal/service/data/queue` emits — declared here since ADR 0160 under the service layer's `LL = 3` they were allocated with — written by kit gen from `design/data/queue.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `exitConfig`, `exitTempFail`, `exitDataErr`, `exitNoInput`, `exitIOErr`, `httpNotFound` |
+| `errors.go` | hand-written beside them: `exitDataErr`, the exit code `DoNotRetry`'s wrap carries |
 
 ## The five things this domain decided
 

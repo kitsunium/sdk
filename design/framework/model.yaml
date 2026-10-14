@@ -3902,7 +3902,6 @@ packages:
           - type: string
     imports:
       errs: github.com/kitsunium/sdk/internal/kernel/errs
-      http: net/http
       json: encoding/json
     path: github.com/kitsunium/sdk/framework/model/internal/core
     sentinels:
@@ -3912,9 +3911,8 @@ packages:
               InvalidID is returned by [ParseID] for a string the ID grammar does not
               match. Its "part" field names what failed — the kind, the service name, the
               node name —, never the input.
+            http: 400
             name: InvalidID
-            options:
-              - errs.WithHTTPStatus(http.StatusBadRequest)
             private: "framework/model.ParseID: the input does not match IDPattern; the part field names the failing component"
             public: The node identifier is not valid
             reason: INVALID_ID

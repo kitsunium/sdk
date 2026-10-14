@@ -630,9 +630,8 @@ packages:
               It is a refusal and not a clamp for the fields whose zero has two
               opposite readings — see PolicyValue's documentation, which also names
               the two fields this sentinel deliberately does NOT guard.
+            exit: CONFIG
             name: QueueMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/data/queue: a policy field has no usable value and no default the SDK could invent; the field names which"
             public: The queue policy is not one this broker can honour
             reason: QUEUE_MISCONFIGURED
@@ -645,9 +644,8 @@ packages:
               producer fill a device every other producer shares.
 
               Its fields carry the two SIZES and never the payload.
+            exit: CONFIG
             name: MessageTooLarge
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/data/queue: payload larger than PolicyValue.MaxMessageBytes; the fields carry both sizes, never the bytes"
             public: The message payload exceeds the queue's configured maximum size
             reason: MESSAGE_TOO_LARGE
@@ -662,9 +660,8 @@ packages:
               a receipt built by hand, kept across a restart of an in-memory broker,
               or handed to the wrong queue. Collapsing them would send every reader
               looking for the wrong one half the time.
+            exit: CONFIG
             name: UnknownReceipt
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/data/queue: receipt unparseable or never issued by this broker; the field carries no payload"
             public: The receipt does not name a lease this queue issued
             reason: UNKNOWN_RECEIPT
@@ -680,9 +677,8 @@ packages:
               it. A consumer that gets this has produced a duplicate — which the
               at-least-once guarantee permits — and the one thing it must not do is
               believe the work is finished.
+            exit: TEMPFAIL
             name: LeaseExpired
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/data/queue: visibility timeout elapsed before Ack/Nack/Extend; the message is queued again or dead-lettered"
             public: The lease on that message has expired and the acknowledgement was ignored
             reason: LEASE_EXPIRED
@@ -694,9 +690,8 @@ packages:
               Returning an empty slice instead would be ADR 0031's inert policy: a
               consumer loop asking for zero messages spins forever, processes
               nothing, reports no error, and looks exactly like an idle queue.
+            exit: CONFIG
             name: InvalidBatchSize
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/data/queue: Receive/DeadLetters called with max <= 0, which would poll forever and deliver nothing"
             public: A batch size must be positive
             reason: INVALID_BATCH_SIZE
@@ -714,9 +709,8 @@ packages:
               error's own Reason, Code and Public are what the dead letter keeps:
               origin wins (CLAUDE.md rule 6), which is the reason an investigator
               needs.
+            exit: DATAERR
             name: NotRetryable
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/data/queue: a handler declared a failure no retry can fix; the engine dead-letters the message at once with the handler's own cause"
             public: The message cannot be processed and was dead-lettered without a retry
             reason: NOT_RETRYABLE
@@ -725,10 +719,9 @@ packages:
               DeadLetterNotFound refuses a replay or a deletion naming a dead letter
               the store does not hold: one that never died, or was already replayed
               or deleted — by this caller or, concurrently, by another. Nothing moved.
+            exit: NOINPUT
+            http: 404
             name: DeadLetterNotFound
-            options:
-              - errs.WithExitCode(exitNoInput)
-              - errs.WithHTTPStatus(httpNotFound)
             private: "core/data/queue: the dead-letter store holds no message under the identifier; nothing was replayed or deleted"
             public: No dead letter has that identifier
             reason: DEAD_LETTER_NOT_FOUND
@@ -745,9 +738,8 @@ packages:
               where it is not the payload, the path or the table — never the message
               bytes; and the SQL broker WITHHOLDS the driver's text from every
               rendering, because a driver quotes the row a statement touched.
+            exit: IOERR
             name: QueueBackendFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "service/data/queue: a filesystem call or a SQL statement failed; the fields name the operation and where, never the payload"
             public: The queue's storage refused an operation
             reason: QUEUE_BACKEND_FAILED
@@ -760,9 +752,8 @@ packages:
               the SDK does not speak, or a table name that is not a lower-case SQL
               identifier the broker can interpolate safely. The "setting" and
               "problem" fields name which (ADR 0151).
+            exit: CONFIG
             name: SQLQueueMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/data/queue: the SQL broker's transactor, dialect or table is unusable; the fields name the setting and the problem"
             public: The SQL queue's configuration cannot be used
             reason: SQL_QUEUE_MISCONFIGURED
@@ -776,9 +767,8 @@ packages:
               service/app/lock makes about its lock directory, and it is made at wiring
               time for the same reason — at first use it would be a mystery, at
               construction it names the directory.
+            exit: CONFIG
             name: QueueDirectoryUnusable
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/data/queue: the queue directory is missing, is not a directory, or is writable by other accounts"
             public: The queue directory cannot be used safely
             reason: QUEUE_DIRECTORY_UNUSABLE
@@ -795,9 +785,8 @@ packages:
               resilience.HedgeConfig.Idempotent's instrument, for exactly its reason
               — a precondition the SDK cannot check becomes a required, greppable
               assertion instead of a comment nobody reads.
+            exit: CONFIG
             name: ConsumerMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/data/queue: Handler is nil, or HandlerIsIdempotent is false under an at-least-once queue; the field names which"
             public: The consumer configuration is not runnable and was refused
             reason: CONSUMER_MISCONFIGURED

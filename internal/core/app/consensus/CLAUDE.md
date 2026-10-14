@@ -21,7 +21,7 @@ storage and transport's), both declared here (ADR 0160).
 | `doc.go` | the package comment |
 | `entry.go`, `identity.go`, `membership.go`, `message.go`, `snapshot.go`, `status.go` | the values |
 | `position.go`, `stamp.go`, `timing_contract.go` | the values two or more of the files above hold as a field, one file named after each (KTN-STRUCT-COLOCATE) |
-| `errors.go` | the exit codes the sentinels carry (65, 69, 73, 74, 75, 76, 78) |
+| `errors.go` | `exitCantCreate` (73), the exit code `StopReasonValue.ExitCode` returns for an unmarked stop; the sentinels' exit codes (65, 69, 73, 74, 75, 76, 78) are the design's `exit:` fields (ADR 0176) |
 
 ## Do NOT
 

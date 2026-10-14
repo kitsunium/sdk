@@ -338,9 +338,8 @@ packages:
             doc: |-
               InvalidCheck is returned by every Add for a check that could never run.
               The "missing" field names which half is absent.
+            exit: CONFIG
             name: InvalidCheck
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/health: check has an empty name or a nil body; the field names which"
             public: The health check is not runnable and was refused
             reason: INVALID_CHECK
@@ -354,9 +353,8 @@ packages:
               and once on liveness, because they are different questions about
               different evidence and an operator reading "cache" on both is reading
               two answers, not a collision.
+            exit: CONFIG
             name: DuplicateCheck
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/health: check names are unique per probe; the fields carry the name and the probe"
             public: A health check is already registered under that name
             reason: DUPLICATE_CHECK
@@ -366,9 +364,8 @@ packages:
               package never mints. The probe answers StatusUnhealthy rather than
               guessing: picking liveness for a caller who did not say what they
               wanted is how a dependency outage becomes a restart loop.
+            exit: CONFIG
             name: UnknownProbe
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/health: probe must be ProbeStartup, ProbeReadiness or ProbeLiveness; the field carries the value"
             public: The requested health probe does not exist
             reason: UNKNOWN_PROBE
@@ -393,14 +390,13 @@ packages:
               *errs.Error cause keeps its own identity through origin-wins, so a
               caller who already writes typed errors sees their own Public in the
               probe body and everyone else sees this one.
+            exit: UNAVAILABLE
             name: CheckFailed
             note: |-
               The engine's verdicts, raised by internal/service/app/health as it runs a
               probe, drains, notifies and asks. They are declared here, with the
               registration refusals, so that the domain's codes and sentinels are in one
               place (ADR 0160).
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "service/app/health: check returned a non-nil error; the fields carry its name and probe"
             public: A health check reported a failure
             reason: CHECK_FAILED
@@ -418,9 +414,8 @@ packages:
               unhealthy would just be a second spelling of this. What IS preserved is
               the distinction: ResultValue.TimedOut separates "the dependency said
               no" from "the dependency said nothing".
+            exit: UNAVAILABLE
             name: CheckTimeout
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "service/app/health: check exceeded its timeout; the fields carry its name, probe and budget"
             public: A health check did not answer within its budget
             reason: CHECK_TIMEOUT
@@ -429,9 +424,8 @@ packages:
               StaleCacheWindow is returned by AddReadiness for a MaxAge above the
               MaxCacheAge ceiling internal/service/app/health enforces. Refused rather
               than clamped: see MaxCacheAge there.
+            exit: CONFIG
             name: StaleCacheWindow
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/health: MaxAge exceeds MaxCacheAge; the fields carry both"
             public: The health check cache window is longer than the SDK will vouch for
             reason: STALE_CACHE_WINDOW
@@ -441,9 +435,8 @@ packages:
               while a startup check has yet to pass. No readiness check was run,
               because "not yet started" already answers the routing question and
               dialling a dependency to reconfirm it would only add load.
+            exit: UNAVAILABLE
             name: StartupPending
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "service/app/health: readiness short-circuited; a startup check has not passed"
             public: The process is still starting and is not accepting traffic yet
             reason: STARTUP_PENDING
@@ -456,9 +449,8 @@ packages:
               Liveness deliberately keeps answering normally while this is true: a
               draining process that gets killed for failing liveness loses exactly
               the in-flight work the drain existed to finish.
+            exit: UNAVAILABLE
             name: Draining
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "service/app/health: readiness short-circuited; Drain has been called and is one-way"
             public: The process is shutting down and is no longer accepting traffic
             reason: DRAINING
@@ -478,9 +470,8 @@ packages:
               address has no host:port shape or no port in 1–65535, the path is not
               absolute, or the timeout is negative. Nothing is dialled; the argument
               field names which.
+            exit: CONFIG
             name: AskMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/health: Ask refused its configuration before dialling; the argument field names what"
             public: The readiness probe was given an address, path or timeout it cannot use
             reason: ASK_MISCONFIGURED
@@ -488,9 +479,8 @@ packages:
             doc: |-
               AskUnreachable reports an Ask that got no answer because the connection
               or the request failed. The transport's own error is the cause.
+            exit: UNAVAILABLE
             name: AskUnreachable
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "service/app/health: the connection or the request failed before any answer; the cause is the transport's"
             public: The process could not be reached
             reason: ASK_UNREACHABLE
@@ -500,9 +490,8 @@ packages:
               caller whose own context ended first gets the same code, with the
               context's error in the chain — the precedent CheckTimeout set for a
               departed caller.
+            exit: UNAVAILABLE
             name: AskTimeout
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "service/app/health: the budget or the caller's context ended before an answer arrived"
             public: The process did not answer the readiness probe in time
             reason: ASK_TIMEOUT
@@ -511,9 +500,8 @@ packages:
               AskNotReady reports an Ask the process answered with a status other than
               200. The status field carries it; the body was drained and discarded and
               no byte of it is in the error.
+            exit: UNAVAILABLE
             name: AskNotReady
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "service/app/health: the process answered a status other than 200; the status field carries it"
             public: The process answered that it is not ready
             reason: ASK_NOT_READY

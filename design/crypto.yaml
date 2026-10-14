@@ -1207,9 +1207,8 @@ packages:
             doc: |-
               InvalidKey is returned by NewKey when the supplied material is not
               exactly KeyLen bytes (or by an AEAD when the cipher rejects the key).
+            exit: DATAERR
             name: InvalidKey
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/crypto.NewKey: key must be exactly KeyLen bytes"
             public: Encryption key has the wrong length
             reason: INVALID_KEY
@@ -1217,10 +1216,9 @@ packages:
             doc: |-
               DecryptionFailed is the single non-oracle error returned by Open for any
               failure — bad tag, malformed framing, unknown wire id, or wrong key.
+            exit: DATAERR
+            http: 400
             name: DecryptionFailed
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
-              - errs.WithExitCode(exitDataErr)
             private: "core/crypto.Open: authentication, framing, or key check failed (cause withheld to avoid an oracle)"
             public: Decryption failed
             reason: DECRYPTION_FAILED
@@ -1253,9 +1251,8 @@ packages:
             doc: |-
               SigningFailed is returned by Sign when the supplied private key is not
               well-formed for the scheme (e.g. the wrong length).
+            exit: DATAERR
             name: SigningFailed
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/crypto.Sign: private key is not valid for the scheme (wrong length or encoding)"
             public: Signing key is malformed
             reason: SIGNING_FAILED
@@ -1279,9 +1276,8 @@ packages:
             doc: |-
               DerivationFailed is returned by Subkey when the requested length exceeds
               the scheme's maximum output (e.g. HKDF's 255*HashLen ceiling).
+            exit: DATAERR
             name: DerivationFailed
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/crypto.Subkey: requested length exceeds the scheme's maximum output"
             public: Requested derived-key length is too large
             reason: DERIVATION_FAILED
@@ -1330,9 +1326,8 @@ packages:
             doc: |-
               AgreementFailed wraps an AgreementShared fault where the scheme rejected the
               inputs (e.g. a low-order peer point); it never leaks key bytes.
+            exit: DATAERR
             name: AgreementFailed
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/crypto.AgreementShared: the scheme rejected the inputs (cause withheld of key bytes)"
             public: Key agreement failed to derive a shared secret
             reason: AGREEMENT_FAILED
@@ -1340,9 +1335,8 @@ packages:
             doc: |-
               StreamTruncated is returned by a streaming Open reader when the stream ends
               before its final-flag chunk — a truncated or tampered stream, not a clean EOF.
+            exit: DATAERR
             name: StreamTruncated
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/crypto.OpenStream: reader hit EOF before decrypting the final-flag chunk"
             public: The authenticated stream was truncated before its final chunk
             reason: STREAM_TRUNCATED
@@ -1352,9 +1346,8 @@ packages:
               is structurally invalid (bad field count, magic, version, kdf/aead id, or
               base64). It signals corruption only — a wrong passphrase surfaces the
               non-oracle DecryptionFailed instead, so this is no key/password oracle.
+            exit: DATAERR
             name: InvalidKeyEnvelope
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "service/crypto/key/keyenvelope.UnwrapKey: $kenv$ string is not well-formed"
             public: Key envelope is malformed
             reason: INVALID_KEY_ENVELOPE
@@ -1363,9 +1356,8 @@ packages:
               DigestMismatch is returned by a VerifyingReader on its final (EOF) read when
               the computed digest does not match the expected value. The digest is public,
               so the comparison is non-oracle and surfaces only at the terminal read.
+            exit: DATAERR
             name: DigestMismatch
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "service/crypto/hash/stdhash.VerifyingReader: computed digest differs from the expected hex at EOF"
             public: Stream digest does not match the expected value
             reason: DIGEST_MISMATCH

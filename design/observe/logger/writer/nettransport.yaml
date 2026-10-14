@@ -39,9 +39,8 @@ packages:
             doc: |-
               NetTransportDialFailed wraps a net.Dial failure (tcp/udp) or a rejected
               HTTP endpoint at construction time.
+            exit: IOERR
             name: NetTransportDialFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "service/observe/logger/writer/nettransport: net.Dial failed or the HTTP endpoint was invalid"
             public: Network transport could not establish its destination
             reason: NET_TRANSPORT_DIAL_FAILED
@@ -49,9 +48,8 @@ packages:
             doc: |-
               NetTransportWriteFailed wraps a per-record send failure: a net.Conn.Write
               error or a non-2xx HTTP response.
+            exit: IOERR
             name: NetTransportWriteFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "service/observe/logger/writer/nettransport: the underlying transport returned an error"
             public: Network transport write failed
             reason: NET_TRANSPORT_WRITE_FAILED

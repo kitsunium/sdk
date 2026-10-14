@@ -31,7 +31,7 @@ A `pkg/v1` facade that names these aliases this package, never the service one (
 
 - Change a value to make it fit this directory. `LL = 3` records the layer that allocated the range, not the one that declares it (ADR 0160 §3); a renumbered code breaks every dashboard, alert rule and client that branches on it.
 - Add encoding, decoding, a bound or a failure constructor here: that is mechanism, and it stays in `internal/service/data/codec/multipart` (ADR 0160 §4).
-- Import `net/http` for a status: `errs.WithHTTPStatus` takes an int.
+- Import `net/http` for a status: a sentinel's status is its design's `http:` field, an int (ADR 0176).
 - Declare a code outside `0.3.41.*`, the range `codeRangeOwners` gives this directory.
 
 ## Verification

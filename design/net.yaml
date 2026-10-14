@@ -847,105 +847,92 @@ packages:
       - var:
           - code: CodeListenFailed
             doc: ListenFailed is returned when a listener could not be bound.
+            exit: UNAVAILABLE
             name: ListenFailed
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "core/net: binding a listener failed; the wrap cause is the OS error"
             public: The server could not bind its listening address
             reason: LISTEN_FAILED
           - code: CodeInvalidAddress
             doc: InvalidAddress is returned for a syntactically unusable address.
+            exit: USAGE
             name: InvalidAddress
-            options:
-              - errs.WithExitCode(exitUsage)
             private: "core/net: the supplied host:port or socket path could not be parsed"
             public: The network address is not valid
             reason: INVALID_ADDRESS
           - code: CodeUnsupportedNetwork
             doc: UnsupportedNetwork is returned for a network name outside the served set.
+            exit: USAGE
             name: UnsupportedNetwork
-            options:
-              - errs.WithExitCode(exitUsage)
             private: "core/net: network outside {tcp,tcp4,tcp6,udp,udp4,udp6,unix,unixgram,unixpacket}"
             public: The network type is not supported
             reason: UNSUPPORTED_NETWORK
           - code: CodeServerClosed
             doc: ServerClosed is returned once the server has stopped accepting work.
+            exit: UNAVAILABLE
             name: ServerClosed
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "core/net: the server stopped accepting; this is the terminal state of a graceful shutdown"
             public: The server is closed
             reason: SERVER_CLOSED
           - code: CodeAlreadyStarted
             doc: AlreadyStarted is returned by Start on a server that is already serving.
+            exit: SOFTWARE
             name: AlreadyStarted
-            options:
-              - errs.WithExitCode(exitSoftware)
             private: "core/net: Start called on a server whose phase is already Serving"
             public: The server is already started
             reason: ALREADY_STARTED
           - code: CodeNotStarted
             doc: NotStarted is returned when an operation requires a running server.
+            exit: SOFTWARE
             name: NotStarted
-            options:
-              - errs.WithExitCode(exitSoftware)
             private: "core/net: the operation requires a running server"
             public: The server is not started
             reason: NOT_STARTED
           - code: CodeHandlerMissing
             doc: HandlerMissing is returned when a group was bound without a handler.
+            exit: USAGE
             name: HandlerMissing
-            options:
-              - errs.WithExitCode(exitUsage)
             private: "core/net: a group reached Start with a nil handler"
             public: The listener group has no handler
             reason: HANDLER_MISSING
           - code: CodeHandlerPanic
             doc: HandlerPanic wraps a panic recovered inside a handler.
+            exit: SOFTWARE
             name: HandlerPanic
-            options:
-              - errs.WithExitCode(exitSoftware)
             private: "core/net: a handler panicked; the connection was closed and the process kept running"
             public: The connection handler failed unexpectedly
             reason: HANDLER_PANIC
           - code: CodeConnLimitReached
             doc: ConnLimitReached is returned when the group's connection ceiling is full.
+            exit: TEMPFAIL
             name: ConnLimitReached
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/net: the group's concurrency ceiling rejected the connection"
             public: The server is at its connection limit
             reason: CONN_LIMIT_REACHED
           - code: CodeDrainTimeout
             doc: DrainTimeout is returned when the shutdown drain budget expired.
+            exit: TEMPFAIL
             name: DrainTimeout
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/net: connections were still in flight when the drain budget expired"
             public: The server did not drain before its deadline
             reason: DRAIN_TIMEOUT
           - code: CodeGroupUnknown
             doc: GroupUnknown is returned for a lookup of an undeclared group.
+            exit: USAGE
             name: GroupUnknown
-            options:
-              - errs.WithExitCode(exitUsage)
             private: "core/net: no group is registered under that name"
             public: The listener group is not declared
             reason: GROUP_UNKNOWN
           - code: CodeGroupDuplicate
             doc: GroupDuplicate is returned for a second declaration of one group name.
+            exit: USAGE
             name: GroupDuplicate
-            options:
-              - errs.WithExitCode(exitUsage)
             private: "core/net: a group with that name already exists on this server"
             public: The listener group is already declared
             reason: GROUP_DUPLICATE
           - code: CodeSocketAdoptFailed
             doc: SocketAdoptFailed is returned when an inherited socket could not be adopted.
+            exit: OSERR
             name: SocketAdoptFailed
-            options:
-              - errs.WithExitCode(exitOSErr)
             private: "core/net: a supervisor-passed descriptor could not be turned into a listener"
             public: An inherited socket could not be adopted
             reason: SOCKET_ADOPT_FAILED
@@ -956,9 +943,8 @@ packages:
               has no caller, so the drop is reported through
               StateValue.OversizedPackets. The sentinel stays because it is what gives
               that count a documented name in the registry.
+            exit: DATAERR
             name: PacketTooLarge
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/net: the received datagram exceeded the group's maximum packet size"
             public: The datagram is larger than the accepted size
             reason: PACKET_TOO_LARGE
@@ -967,17 +953,15 @@ packages:
               TLSMaterialInvalid is returned for absent, malformed, or empty TLS material.
               It is deliberately loud: an unusable bundle must never degrade into a trust
               store that silently verifies nothing.
+            exit: CONFIG
             name: TLSMaterialInvalid
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/net: the certificate, key, or CA bundle yielded no usable material"
             public: The TLS material is missing or invalid
             reason: TLS_MATERIAL_INVALID
           - code: CodeTLSHandshakeFailed
             doc: TLSHandshakeFailed is returned when a TLS or mTLS handshake did not complete.
+            exit: UNAVAILABLE
             name: TLSHandshakeFailed
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "core/net: the TLS or mTLS handshake did not complete"
             public: The TLS handshake failed
             reason: TLS_HANDSHAKE_FAILED
@@ -986,33 +970,29 @@ packages:
               RequestDenied is returned when the transport policy refused an outbound call.
               The public message never names the refused path, so a denial cannot leak the
               shape of the private API surface through a log line.
+            exit: NOPERM
             name: RequestDenied
-            options:
-              - errs.WithExitCode(exitNoPerm)
             private: "core/net: the transport policy refused the outbound request"
             public: The request was refused by policy
             reason: REQUEST_DENIED
           - code: CodeResponseTooLarge
             doc: ResponseTooLarge is returned when a response body exceeded the read ceiling.
+            exit: DATAERR
             name: ResponseTooLarge
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/net: the response body exceeded the configured maximum size"
             public: The response is larger than the accepted size
             reason: RESPONSE_TOO_LARGE
           - code: CodeCallFailed
             doc: CallFailed is returned when an outbound call produced no response.
+            exit: UNAVAILABLE
             name: CallFailed
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "core/net: the outbound call did not produce a response"
             public: The outbound call failed
             reason: CALL_FAILED
           - code: CodeTooManyRedirects
             doc: TooManyRedirects is returned when a call exceeded its redirect budget.
+            exit: UNAVAILABLE
             name: TooManyRedirects
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "core/net: the redirect chain was longer than the configured maximum"
             public: The outbound call exceeded its redirect budget
             reason: TOO_MANY_REDIRECTS
@@ -1020,9 +1000,8 @@ packages:
             doc: |-
               InvalidDuration is returned for a configuration duration that parses as
               neither a Go duration literal nor an integer nanosecond count.
+            exit: CONFIG
             name: InvalidDuration
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/net: the value is neither a Go duration literal nor a nanosecond count"
             public: The duration value is not valid
             reason: INVALID_DURATION
@@ -1031,9 +1010,8 @@ packages:
               UnsafePath is returned for a path carrying a dot segment in any form. It is
               evaluated before the allowlist, because Go normalises dot segments neither
               in url.URL nor in the transport, so an anchored pattern alone is not enough.
+            exit: NOPERM
             name: UnsafePath
-            options:
-              - errs.WithExitCode(exitNoPerm)
             private: "core/net: the path carries a literal or percent-encoded dot segment"
             public: The request path is not in normalised form
             reason: UNSAFE_PATH
@@ -1045,9 +1023,8 @@ packages:
               would arrive as a different value plus a stray field. It is refused, never
               truncated — a silently shortened id is a resume token that points at the
               wrong place.
+            exit: USAGE
             name: SSEFieldInvalid
-            options:
-              - errs.WithExitCode(exitUsage)
             private: "core/net: an SSE frame carried a line terminator in a single-line field, an unrepresentable retry, or no field at all"
             public: The event cannot be represented in the event-stream format
             reason: SSE_FIELD_INVALID
@@ -1058,9 +1035,8 @@ packages:
               client only when the handler returns, so an endless stream delivers nothing
               at all — the failure is total and silent, which is why it is refused at
               construction rather than discovered in production.
+            exit: SOFTWARE
             name: SSEFlushUnsupported
-            options:
-              - errs.WithExitCode(exitSoftware)
             private: "core/net: the http.ResponseWriter implements neither Flush nor http.Flusher"
             public: The response cannot be streamed
             reason: SSE_FLUSH_UNSUPPORTED
@@ -1069,9 +1045,8 @@ packages:
               SSEStreamClosed is returned by a send on a stream that has already ended:
               the client disconnected, the server began draining, or the handler closed
               it. It is the terminal outcome a streaming handler loops until.
+            exit: UNAVAILABLE
             name: SSEStreamClosed
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "core/net: the SSE stream ended — peer gone, server draining, or closed by the handler"
             public: The event stream is closed
             reason: SSE_STREAM_CLOSED
@@ -1082,9 +1057,8 @@ packages:
               CLAMPED to the domain default, because a working keep-alive needs no
               explanation; a negative one is REFUSED, because no value the SDK invented
               for it would be defensible and "never" already has an explicit spelling.
+            exit: CONFIG
             name: SSEStreamMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/net: a negative keep-alive interval or write budget was supplied"
             public: The event stream options are not valid
             reason: SSE_STREAM_MISCONFIGURED
@@ -1094,9 +1068,8 @@ packages:
               opening handshake. The upgrade is refused with an HTTP status rather than
               a Close frame, because at that point there is no WebSocket connection to
               close — the response is still an ordinary HTTP one.
+            exit: DATAERR
             name: WSHandshakeFailed
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/net: the request does not satisfy RFC 6455 §4.2.1, or its origin was refused"
             public: The WebSocket handshake is not valid
             reason: WS_HANDSHAKE_FAILED
@@ -1107,9 +1080,8 @@ packages:
               was fine and the peer did nothing wrong — this stack cannot take over the
               socket, which is a deployment fact (HTTP/2, or a middleware that wraps the
               ResponseWriter without forwarding Unwrap), not a client error.
+            exit: SOFTWARE
             name: WSUpgradeUnsupported
-            options:
-              - errs.WithExitCode(exitSoftware)
             private: "core/net: the http.ResponseWriter exposes no http.Hijacker, so the socket cannot be taken over"
             public: The connection cannot be upgraded
             reason: WS_UPGRADE_UNSUPPORTED
@@ -1119,9 +1091,8 @@ packages:
               covers FAILS THE CONNECTION rather than being skipped: a peer that sent a
               frame this endpoint ignored believes it said something, and the two would
               be desynchronised from that point on.
+            exit: DATAERR
             name: WSProtocolViolation
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/net: the frame violates RFC 6455 framing — masking, reserved bits/opcodes, control-frame shape, minimal length, or fragmentation order"
             public: The WebSocket frame is not valid
             reason: WS_PROTOCOL_VIOLATION
@@ -1131,9 +1102,8 @@ packages:
               the connection's ceiling. The check runs against the ANNOUNCED length,
               before any buffer is sized from it: allocating from a 64-bit integer the
               peer chose is a denial of service in one line.
+            exit: DATAERR
             name: WSMessageTooLarge
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/net: the frame or the accumulated message exceeded the configured ceiling"
             public: The WebSocket message is larger than the accepted size
             reason: WS_MESSAGE_TOO_LARGE
@@ -1143,9 +1113,8 @@ packages:
               that is not UTF-8, a close code that must never be sent, or a close reason
               past the control-frame ceiling. It is one sentinel for both directions on
               purpose — the rule a peer broke is the rule this endpoint must not break.
+            exit: DATAERR
             name: WSInvalidPayload
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/net: invalid UTF-8, an unsendable close code, or an oversized close reason"
             public: The WebSocket payload is not valid
             reason: WS_INVALID_PAYLOAD
@@ -1154,9 +1123,8 @@ packages:
               WSConnClosed is returned by any operation on a connection that has ended.
               It is the terminal outcome a receive loop runs until, and it carries the
               close code the peer sent when there was one.
+            exit: UNAVAILABLE
             name: WSConnClosed
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "core/net: the connection ended — peer close, server draining, closed by the handler, or a dead socket"
             public: The WebSocket connection is closed
             reason: WS_CONN_CLOSED
@@ -1166,9 +1134,8 @@ packages:
               interpret rather than guess at (ADR 0031). A zero ping interval is CLAMPED
               to the domain default, because a working heartbeat needs no explanation; a
               negative one is REFUSED, and "never" has its own spelling.
+            exit: CONFIG
             name: WSConnMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/net: a negative interval or budget, or a non-positive size ceiling, was supplied"
             public: The WebSocket options are not valid
             reason: WS_CONN_MISCONFIGURED
@@ -1179,9 +1146,8 @@ packages:
               control character, or a Referrer-Policy token no browser knows — which a
               browser ignores, silently falling back to a weaker default. The "option"
               field names which (ADR 0130).
+            exit: CONFIG
             name: StaticMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/net: a nil file tree, a header value with a control character, or an unknown Referrer-Policy token"
             public: The static file handler configuration is not valid
             reason: STATIC_MISCONFIGURED

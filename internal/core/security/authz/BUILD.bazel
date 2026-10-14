@@ -10,7 +10,6 @@ go_library(
         "codes_gen.go",
         "decision.go",
         "doc.go",
-        "errors.go",
         "request_value.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/security/authz",

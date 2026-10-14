@@ -45,8 +45,8 @@ JWK carries key material, and an error message is the one place it must never
 surface. The Private strings name `service/crypto/key/jwk`, where each
 condition is detected, and the rule — never a member's contents.
 
-The two HTTP statuses are named integer constants (`httpBadRequest`,
-`httpNotFound`), so this package does not import `net/http` for two numbers.
+The two HTTP statuses (400, 404) are the sentinels' `http:` fields in the
+design (ADR 0176), so this package does not import `net/http` for two numbers.
 
 ## Do NOT
 

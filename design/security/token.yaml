@@ -400,10 +400,9 @@ packages:
               Malformed is returned when the input cannot be read as a token: the
               wrong segment count, a segment that is not unpadded base64url, a header
               or payload that is not a JSON object.
+            exit: DATAERR
+            http: 401
             name: Malformed
-            options:
-              - errs.WithExitCode(exitDataErr)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "core/security/token: token structure unreadable — segment count, base64url decode, or JSON shape"
             public: The token is malformed
             reason: MALFORMED
@@ -412,10 +411,9 @@ packages:
               AlgorithmNone is returned for a token presenting the unsecured "none"
               algorithm (RFC 7519 §6), in any capitalisation. It is unconditional:
               this domain has no Algorithm value for "none" and no option enabling it.
+            exit: NOPERM
+            http: 401
             name: AlgorithmNone
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "core/security/token: alg=none refused unconditionally; there is no configuration that accepts it"
             public: The token declares the unsecured none algorithm
             reason: ALGORITHM_NONE
@@ -425,10 +423,9 @@ packages:
               something other than the algorithm the verifier is bound to. It is the
               verdict an algorithm-confusion attempt produces, and it is reached
               BEFORE any key is handed to any primitive.
+            exit: NOPERM
+            http: 401
             name: AlgorithmMismatch
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "core/security/token: header alg differs from the bound algorithm; the header never selects a key"
             public: The token algorithm is not the one this verifier accepts
             reason: ALGORITHM_MISMATCH
@@ -437,10 +434,9 @@ packages:
               SignatureInvalid is returned when the signature or MAC tag did not
               authenticate the token under the bound key. It is deliberately the same
               verdict for "wrong key" and "tampered bytes": the two are the same event.
+            exit: NOPERM
+            http: 401
             name: SignatureInvalid
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "core/security/token: signature or MAC tag did not verify under the bound key"
             public: The token signature is not valid
             reason: SIGNATURE_INVALID
@@ -449,10 +445,9 @@ packages:
               Expired is returned when an AUTHENTICATED token's exp claim is in the
               past. Reaching it means the signature already verified — claim verdicts
               are never reported for a token that failed authentication.
+            exit: NOPERM
+            http: 401
             name: Expired
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "core/security/token: exp is in the past after leeway; signature had already verified"
             public: The token has expired
             reason: EXPIRED
@@ -460,10 +455,9 @@ packages:
             doc: |-
               NotYetValid is returned when an authenticated token's nbf claim is in
               the future after leeway.
+            exit: NOPERM
+            http: 401
             name: NotYetValid
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "core/security/token: nbf is in the future after leeway"
             public: The token is not valid yet
             reason: NOT_YET_VALID
@@ -472,10 +466,9 @@ packages:
               ExpiryRequired is returned when a token carries no exp claim and the
               profile requires one — which is the default, because RFC 7519 §4.1.4
               makes exp OPTIONAL and a token that never expires is a password.
+            exit: NOPERM
+            http: 401
             name: ExpiryRequired
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "core/security/token: exp absent and the profile requires it; set AllowMissingExpiry to opt out"
             public: The token carries no expiry
             reason: EXPIRY_REQUIRED
@@ -484,10 +477,9 @@ packages:
               AudienceMismatch is returned when an authenticated token's aud claim
               does not contain this recipient. A correctly signed token addressed to
               another API is not a valid token here (RFC 8725 §3.9).
+            exit: NOPERM
+            http: 401
             name: AudienceMismatch
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "core/security/token: configured audience absent from the aud claim"
             public: The token is not addressed to this audience
             reason: AUDIENCE_MISMATCH
@@ -495,10 +487,9 @@ packages:
             doc: |-
               IssuerMismatch is returned when an authenticated token's iss claim is
               not the configured issuer (RFC 8725 §3.8).
+            exit: NOPERM
+            http: 401
             name: IssuerMismatch
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "core/security/token: iss differs from the configured issuer"
             public: The token issuer is not the expected one
             reason: ISSUER_MISMATCH
@@ -508,10 +499,9 @@ packages:
               any parsing happens — the token string, the decoded header, the claim
               count. The bound is checked FIRST so a hostile input never funds the
               work of discovering that it is hostile.
+            exit: DATAERR
+            http: 401
             name: TooLarge
-            options:
-              - errs.WithExitCode(exitDataErr)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "core/security/token: input past a declared bound (token length, header size, or claim count)"
             public: The token exceeds the accepted size
             reason: TOO_LARGE
@@ -520,10 +510,9 @@ packages:
               TooDeep is returned when the claims payload nests deeper than the
               configured bound. The depth is measured by a linear scan of the raw
               bytes, before encoding/json ever sees them.
+            exit: DATAERR
+            http: 401
             name: TooDeep
-            options:
-              - errs.WithExitCode(exitDataErr)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "core/security/token: claim nesting past MaxClaimDepth, measured before JSON decoding"
             public: The token claims are nested too deeply
             reason: TOO_DEEP
@@ -532,9 +521,8 @@ packages:
               KeyUnsuitable is returned when a key cannot serve the algorithm it was
               handed to: wrong length, wrong curve, or a key type for which this
               domain implements nothing.
+            exit: CONFIG
             name: KeyUnsuitable
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/security/token: key type, curve or length does not match the bound algorithm"
             public: The key cannot be used for this token algorithm
             reason: KEY_UNSUITABLE
@@ -544,9 +532,8 @@ packages:
               built with a configuration it cannot honour. Like its resilience
               namesake it is permanent, not transient: the fix is at the construction
               site, never a retry (ADR 0031).
+            exit: CONFIG
             name: PolicyMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/security/token: issuer or verifier built with a configuration it cannot honour; fields name the knob"
             public: The token policy is misconfigured
             reason: POLICY_MISCONFIGURED
@@ -554,9 +541,8 @@ packages:
             doc: |-
               IssueFailed is returned when an issuer cannot render the claims it was
               given — a claim the target format cannot express, or a signing fault.
+            exit: CONFIG
             name: IssueFailed
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/security/token: claims unrenderable in the target format, or the signing primitive failed"
             public: The token could not be issued
             reason: ISSUE_FAILED
@@ -564,9 +550,8 @@ packages:
             doc: |-
               ClaimNameInvalid is returned by ClaimsValue.WithPrivateRaw for an empty
               name or one shadowing a registered claim.
+            exit: DATAERR
             name: ClaimNameInvalid
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/security/token: private claim name empty or colliding with a registered claim name"
             public: The claim name is empty or reserved
             reason: CLAIM_NAME_INVALID
@@ -576,10 +561,9 @@ packages:
               exceeds the maximum the verifier accepts. A long-lived bearer token is
               a credential with no revocation story, so a recipient is allowed to say
               no to one even when its issuer said yes.
+            exit: NOPERM
+            http: 401
             name: LifetimeTooLong
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "core/security/token: exp-iat span past MaxLifetime"
             public: The token lifetime exceeds what this recipient accepts
             reason: LIFETIME_TOO_LONG
@@ -592,6 +576,8 @@ packages:
               §4.1.11 says so: the parameters it names MUST be understood, the engine
               understands none of them, and "ignore what you do not understand" is how
               a security-relevant extension gets silently dropped.
+            exit: NOPERM
+            http: 401
             name: HeaderUnsupported
             note: |-
               The refusals specific to the two concrete formats (0.3.44.*). They are
@@ -600,18 +586,14 @@ packages:
               every code of the domain is in one place. As above, the Public half names
               the check that refused the token and never echoes a value out of it — not
               a kid, not a footer, not a claim.
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "service/security/token: non-empty crit, or typ differs from the required value"
             public: The token header carries parameters this verifier will not accept
             reason: HEADER_UNSUPPORTED
           - code: CodeKeyNotFound
             doc: KeyNotFound is returned when the token's kid names no key in the set.
+            exit: NOPERM
+            http: 401
             name: KeyNotFound
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "service/security/token: kid absent from the JWK Set"
             public: No key in the key set matches this token
             reason: KEY_NOT_FOUND
@@ -621,10 +603,9 @@ packages:
               no kid header. Selecting by id is the contract; trying every key in the
               set instead would turn a large published JWKS into a work multiplier and
               would quietly accept a token the publisher never routed to that key.
+            exit: NOPERM
+            http: 401
             name: KeyIDMissing
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "service/security/token: set verifier requires a kid header; use a single-key verifier when tokens carry none"
             public: The token carries no key identifier
             reason: KEY_ID_MISSING
@@ -634,10 +615,9 @@ packages:
               verifier will try. jwk.Set refuses to pick between duplicate kids
               because nothing distinguishes them; a signature does distinguish them,
               so the engine tries the candidates — but a bounded number of them.
+            exit: NOPERM
+            http: 401
             name: KeyIDAmbiguous
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "service/security/token: candidate count past MaxKeyCandidates; a bounded rotation window is the supported case"
             public: Too many keys share this token key identifier
             reason: KEY_ID_AMBIGUOUS
@@ -647,10 +627,9 @@ packages:
               one, including a footer present where the verifier expects none. The
               footer is authenticated but is not returned through the Verifier port,
               so accepting an arbitrary one would authenticate data and then drop it.
+            exit: NOPERM
+            http: 401
             name: FooterMismatch
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "service/security/token: PASETO footer differs from the configured value, or is present with none configured"
             public: The token footer is not the expected one
             reason: FOOTER_MISMATCH
@@ -660,10 +639,9 @@ packages:
               does not implement — every local (encrypted) purpose, and every version
               other than v4. It is returned instead of Malformed so an operator can
               tell "this is not a token" from "this is a token I did not build for".
+            exit: NOPERM
+            http: 401
             name: SchemeUnsupported
-            options:
-              - errs.WithExitCode(exitNoPerm)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "service/security/token: only PASETO v4.public is implemented; v4.local needs primitives the SDK keeps in third-party"
             public: This token version and purpose are not supported
             reason: SCHEME_UNSUPPORTED
@@ -673,10 +651,9 @@ packages:
               carries the same member name twice. encoding/json would silently keep
               the last, so a token could say one thing to this reader and another to
               the next (RFC 8725 §2.6).
+            exit: DATAERR
+            http: 401
             name: DuplicateMember
-            options:
-              - errs.WithExitCode(exitDataErr)
-              - errs.WithHTTPStatus(statusUnauthorized)
             private: "service/security/token: duplicate JSON member in the header or the claims object"
             public: The token repeats a member name
             reason: DUPLICATE_MEMBER

@@ -65,9 +65,8 @@ packages:
             reason: PATH_EMPTY
           - code: CodeOpenFailed
             doc: OpenFailed wraps an os.OpenFile failure at construction time.
+            exit: IOERR
             name: OpenFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "service/observe/logger/sink/file.New: os.OpenFile returned an error"
             public: File sink could not open the destination file
             reason: OPEN_FAILED
@@ -79,25 +78,22 @@ packages:
             reason: CTX_CANCELLED
           - code: CodeWriteFailed
             doc: WriteFailed wraps the underlying *os.File.Write error at Write time.
+            exit: IOERR
             name: WriteFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: service/observe/logger/sink/file.Write underlying *os.File returned an error
             public: File write failed
             reason: WRITE_FAILED
           - code: CodeSyncFailed
             doc: SyncFailed wraps the underlying *os.File.Sync error at Flush time.
+            exit: IOERR
             name: SyncFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: service/observe/logger/sink/file.Flush underlying *os.File.Sync returned an error
             public: File flush failed
             reason: SYNC_FAILED
           - code: CodeCloseFailed
             doc: CloseFailed wraps the underlying *os.File.Close error at Close time.
+            exit: IOERR
             name: CloseFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: service/observe/logger/sink/file.Close underlying *os.File.Close returned an error
             public: File close failed
             reason: CLOSE_FAILED
