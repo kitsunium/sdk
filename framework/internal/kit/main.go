@@ -34,7 +34,8 @@ Environment:
   KIT_TRUST_PROXY    on: kit.ClientIP reads the last X-Forwarded-For address
   KIT_RETENTION      what the stores' retention does: on (default), dry-run or off
   KIT_INDEX_KEY      pins kit's index key, which references a person's records
-                     (unset: made on first use and kept with the secrets)
+                     (unset: made on first use and kept with the secrets; kept in memory
+                     while the data persists, it is warned of at every start)
   KIT_DATA_KEY       pins kit's data-key, which wraps the keys personal data is sealed under
                      at rest: 32 bytes (unset: made on first use, kept with the secrets, rotated)
 `

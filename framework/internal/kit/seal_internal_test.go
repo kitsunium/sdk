@@ -528,6 +528,47 @@ func TestErasingAPersonsLastRecordDestroysTheirKey(t *testing.T) {
 	}
 }
 
+// kit's index key kept in memory alone — KIT_SECRETS=memory, KIT_INDEX_KEY
+// unset — while the app keeps its data on disk is warned of, at the start
+// and by config; with the data in memory, or the key pinned, it is not
+// (kitsunium/platform#35, kitsunium/sdk#274).
+func TestAnIndexKeyInMemoryIsWarnedOf(t *testing.T) {
+	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("KIT_INDEX_KEY", "")
+	t.Setenv("KIT_INDEX_KEY_FILE", "")
+	svc := NewService("indexed", "Cards kit references, for the index key's warning.")
+	svc.Store("cards", func(c card) string { return c.ID })
+	const said = "kit's index key lives in memory alone"
+	warned := func(app *App) bool {
+		return slices.ContainsFunc(app.Graph().Diagnostics, func(d model.Diagnostic) bool {
+			return d.Severity == "warning" && strings.Contains(d.Message, said) && strings.Contains(d.Texts["fr"], "ne vit qu’en mémoire")
+		})
+	}
+	run := func(opts ...AppConfigurer) bool {
+		app := NewApp("indexed", svc).With(append([]AppConfigurer{Listen("127.0.0.1:0"), Env(EnvProduction), Logs(io.Discard)}, opts...)...)
+		must(t, app.Start(t.Context()))
+		defer func() { must(t, app.Stop(context.Background())) }()
+		return warned(app)
+	}
+	dir := t.TempDir()
+	if !run(DataDir(dir)) {
+		t.Error("an index key in memory beside data on disk is not warned of")
+	}
+	var out, errOut bytes.Buffer
+	NewApp("indexed", svc).With(DataDir(dir), Env(EnvProduction), Logs(io.Discard)).configCommand(t.Context(), nil, &out, &errOut)
+	if !strings.Contains(errOut.String(), "warning: "+said) {
+		t.Errorf("config does not warn of the index key in memory:\n%s", errOut.String())
+	}
+	if run(InMemory()) {
+		t.Error("an app kept in memory is warned of its index key")
+	}
+	t.Setenv("KIT_INDEX_KEY", "an index key of thirty-two bytes")
+	if run(DataDir(t.TempDir())) {
+		t.Error("a pinned index key is warned of")
+	}
+}
+
 // The product's own Delete of a person's last record destroys their data
 // key, as an erasure or a retention's deletion does — a copy of what it
 // sealed stops opening, the journal says so —, but never while anything kit
