@@ -522,8 +522,8 @@ func signRoster(t *testing.T, priv ed25519.PrivateKey, roster entitlement.Roster
 // plausibly have made.
 //
 // Sequential, because each row clears the runner's OIDC variables with
-// t.Setenv: on a CI job granted id-token, ACTIONS_ID_TOKEN_REQUEST_URL is set,
-// Verify takes the CI path, and the roster here lists no CI account — so both
+// t.Setenv: on a CI job granted id-token, ACTIONS_ID_TOKEN_REQUEST_URL and
+// ACTIONS_ID_TOKEN_REQUEST_TOKEN are both set, Verify takes the CI path, and the roster here lists no CI account — so both
 // accepting rows failed CI_NOT_ENTITLED the first time the job held the grant.
 // The internal suite clears the same two variables for the same reason.
 func TestNewWithAnchorsAcceptsEitherAnchorDuringARotation(t *testing.T) {

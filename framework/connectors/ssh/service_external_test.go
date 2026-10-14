@@ -41,8 +41,9 @@ const sampleUUID string = "11111111-2222-3333-4444-555555555555"
 const otherUUID string = "99999999-8888-4777-8666-555544443333"
 
 // TestMain clears the runner's OIDC variables before any test of the package
-// runs. Verify takes the CI path whenever ACTIONS_ID_TOKEN_REQUEST_URL is set,
-// and a GitHub Actions job granted id-token sets it for every process — so on
+// runs. Verify takes the CI path when both ACTIONS_ID_TOKEN_REQUEST_URL and
+// ACTIONS_ID_TOKEN_REQUEST_TOKEN are set (InCI), and a GitHub Actions job
+// granted id-token sets both for every process — so on
 // such a job every device-path test below was sent down the CI path and failed
 // (thirteen of them, the first time the bazel job held the grant). The tests
 // that exercise the CI path set both with t.Setenv, which restores the cleared

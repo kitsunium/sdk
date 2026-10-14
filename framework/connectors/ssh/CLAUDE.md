@@ -136,8 +136,9 @@ otherwise.
 ## Verification
 
 The suite is hermetic to the runner's OIDC variables. `Verify` takes the CI
-path whenever `ACTIONS_ID_TOKEN_REQUEST_URL` is set, and a GitHub Actions job
-granted `id-token: write` sets it for every process it starts — so a
+path when both `ACTIONS_ID_TOKEN_REQUEST_URL` and `ACTIONS_ID_TOKEN_REQUEST_TOKEN`
+are set (`InCI`), and a GitHub Actions job granted `id-token: write` sets both
+for every process it starts — so a
 device-path test inherits the CI path from the job, not from its own setup.
 The package's `TestMain` (in `service_external_test.go`) unsets both before any test runs, so the device-path tests stay parallel; without it thirteen of them failed the first time a job held the grant. A test of the CI path sets both variables itself with `t.Setenv`. Reproduce
 the hostile environment with
