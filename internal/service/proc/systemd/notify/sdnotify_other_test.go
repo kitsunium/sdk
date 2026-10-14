@@ -4,7 +4,7 @@
 // relies on SO_PASSCRED / SCM_CREDENTIALS, a Linux facility, so Listen returns
 // the central UnsupportedPlatform sentinel off Linux. The Linux round-trip is
 // covered by sdnotify_external_test.go; this complement is built and run off
-// Linux (darwin/windows/the BSDs) so the e2e-vm CI binary validates the
+// Linux (darwin/windows/the BSDs) so the e2e-cross CI binary validates the
 // off-platform degrade on a real non-Linux kernel, with no runtime skip.
 package notify_test
 
@@ -20,7 +20,7 @@ import (
 // UnsupportedPlatform sentinel off Linux, returning no listener and no path. It
 // is the build-tagged complement of the untagged, runtime-gated
 // TestListenUnsupportedOffLinux: this one is compiled ONLY off Linux, so the
-// e2e-vm CI binary asserts the contract with no t.Skip on a real non-Linux kernel.
+// e2e-cross CI binary asserts the contract with no t.Skip on a real non-Linux kernel.
 func TestListenUnsupportedOffLinuxTagged(t *testing.T) {
 	t.Parallel()
 

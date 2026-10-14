@@ -21,7 +21,7 @@ import (
 //
 // Every check is written never to hang — bounded deadlines on every blocking
 // receive — and on real kernels one hung anyway: the debian-systemd and
-// fedora-systemd legs of e2e-vm.yml ran until the job's 25-minute cap cancelled
+// fedora-systemd legs of the former lab workflow ran until the job's 25-minute cap cancelled
 // them, and because the table is printed only once every check has returned,
 // the log said nothing about which check it was (#118). A check still running
 // after this is recorded as a Fail and every goroutine's stack is written out,

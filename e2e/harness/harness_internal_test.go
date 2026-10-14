@@ -106,7 +106,7 @@ func Test_safeRun(t *testing.T) {
 }
 
 // hangingCheckUntil is a check that blocks until release is closed — a stand-in
-// for the sd_notify or cgroup check that ran until e2e-vm's 25-minute cap. The
+// for the sd_notify or cgroup check that ran until a job's 25-minute cap. The
 // suite closes release at cleanup, so the abandoned goroutine does not outlive
 // the test that planted it.
 func hangingCheckUntil(release <-chan struct{}) Check {

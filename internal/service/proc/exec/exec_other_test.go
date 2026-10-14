@@ -4,7 +4,7 @@
 // fork/exec spawn primitive has no portable equivalent off Unix, so Start must
 // degrade to the central UnsupportedPlatform sentinel on every non-Unix target
 // (windows/plan9/js/wasip1) rather than acting or panicking. The unix build is
-// covered by exec_external_test.go; this is its complement so the e2e-vm CI
+// covered by exec_external_test.go; this is its complement so the e2e-cross CI
 // binary actually validates the off-platform path on a real non-Unix kernel.
 package exec_test
 
