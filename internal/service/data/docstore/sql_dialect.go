@@ -46,6 +46,9 @@ type sqlStatements struct {
 	// order, for Reindex: the keys above the first argument, at most the
 	// second argument of them.
 	pageAfter string
+	// keysAfter reads the next page of keys alone, in key order, for Keys:
+	// the keys above the first argument, at most the second argument of them.
+	keysAfter string
 	// lookup reads the document one index key files; find reads every one,
 	// in key order.
 	lookup, find string
@@ -106,6 +109,7 @@ func renderStatements(dialect coresql.Dialect, table string) sqlStatements {
 		deleteIndex:  "DELETE FROM " + ix + " WHERE doc_key = " + p1,
 		clearIndex:   "DELETE FROM " + ix,
 		pageAfter:    "SELECT doc_key, doc FROM " + docs + " WHERE doc_key > " + p1 + " ORDER BY doc_key LIMIT " + p2,
+		keysAfter:    "SELECT doc_key FROM " + docs + " WHERE doc_key > " + p1 + " ORDER BY doc_key LIMIT " + p2,
 		lookup:       join,
 		find:         join + " ORDER BY i.doc_key",
 		versionHead:  "SELECT num FROM " + vs + " WHERE doc_key = " + p1 + " AND doc IS NULL" + lock,
@@ -126,7 +130,7 @@ func renderStatements(dialect coresql.Dialect, table string) sqlStatements {
 		shareLock: shareLockClause(dialect),
 		dialect:   dialect,
 	}
-	s.exists = "SELECT 1 FROM " + docs + " WHERE doc_key = " + p1 + s.shareLock
+	s.exists = "SELECT 1 FROM " + docs + " WHERE doc_key = " + dialect.Placeholder(1) + s.shareLock
 	s.upsert, s.insert = writeModes(dialect, docs)
 	s.lockDoc, s.writeLocked = updateStatements(dialect, docs, s.replace)
 	//: rendered once, sent many times.

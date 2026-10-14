@@ -2,6 +2,7 @@ package docstore_test
 
 import (
 	"context"
+	"iter"
 	"slices"
 	"testing"
 
@@ -105,6 +106,20 @@ func (versionedContextDouble) RewriteVersions(context.Context, string, func([]co
 	return nil
 }
 
+// keyListerDouble carries exactly the methods KeyLister declares.
+type keyListerDouble struct{}
+
+func (keyListerDouble) Keys(string) iter.Seq2[string, error] {
+	return func(func(string, error) bool) {}
+}
+
+// keyListerContextDouble carries exactly the methods KeyListerContext declares.
+type keyListerContextDouble struct{}
+
+func (keyListerContextDouble) Keys(context.Context, string) iter.Seq2[string, error] {
+	return func(func(string, error) bool) {}
+}
+
 // TestDoublesStillSatisfyThePorts is the ADR 0039 guard, executable rather
 // than documentary: each double above holds exactly its port's methods, so a
 // method added to a port fails this file's compilation before review.
@@ -114,6 +129,8 @@ func TestDoublesStillSatisfyThePorts(t *testing.T) {
 	var versioned coredocstore.Versioned[doc] = versionedDouble{}
 	var withContext coredocstore.CollectionContext[doc] = contextDouble{}
 	var versionedWithContext coredocstore.VersionedContext[doc] = versionedContextDouble{}
+	var keys coredocstore.KeyLister = keyListerDouble{}
+	var keysWithContext coredocstore.KeyListerContext = keyListerContextDouble{}
 	announcers := []coredocstore.Announcer{collection, withContext}
 	if _, err := collection.Get("k"); err != nil {
 		t.Fatalf("Collection.Get = %v, want nil", err)
@@ -126,6 +143,12 @@ func TestDoublesStillSatisfyThePorts(t *testing.T) {
 	}
 	if _, err := versionedWithContext.Versions(t.Context(), "k"); err != nil {
 		t.Fatalf("VersionedContext.Versions = %v, want nil", err)
+	}
+	for range keys.Keys("") {
+		t.Fatal("KeyLister.Keys of the double yielded")
+	}
+	for range keysWithContext.Keys(t.Context(), "") {
+		t.Fatal("KeyListerContext.Keys of the double yielded")
 	}
 	for _, announcer := range announcers {
 		announcer.OnWrite(func(string) {})()

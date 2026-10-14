@@ -122,9 +122,10 @@
 // # The ports, for a double
 //
 // [Store] and [SQLStore] are engines. A caller that must stand a double in for
-// one depends instead on the port it implements: [Collection] and [Versioned]
-// for a [Store], whose calls take no context, [CollectionContext] and
-// [VersionedContext] for a [SQLStore], whose every call takes one, and
+// one depends instead on the port it implements: [Collection], [Versioned]
+// and [KeyLister] for a [Store], whose calls take no context,
+// [CollectionContext], [VersionedContext] and [KeyListerContext] for a
+// [SQLStore], whose every call takes one, and
 // [Announcer] — OnWrite and OnDelete — for either. Each pair carries the same
 // methods, the same documents and the same refusals; there is no single port
 // over both, because the file engine waits on nothing a context could abandon
@@ -163,4 +164,22 @@
 // store keeps them in a third table, which [SQLVersionsMigration] creates.
 // [Version].JSON is compact JSON; a version predating a change of the type
 // may no longer decode into it, which is why it is JSON and not a T.
+//
+// # Keys
+//
+// Keys lists the keys of the documents a store holds, in key order, and
+// reads no document — for a caller that must visit every record, a re-scan
+// after a crash, without paying for what the records weigh (ADR 0178):
+//
+//	for key, err := range pages.Keys("") {
+//		if err != nil {
+//			return err
+//		}
+//		…
+//	}
+//
+// [Store] sorts the keys it holds once, when the range starts; [SQLStore]
+// reads them in pages on the primary key, each resuming after the last key
+// read. Both resume after the key a caller names, so a listing stopped early
+// continues where it stopped.
 package docstore

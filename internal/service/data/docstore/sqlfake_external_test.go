@@ -497,6 +497,13 @@ func (e *sqlEngine) read(role, query string, args []driver.Value, work, latest *
 	// Reindex's next page.
 	case "pageAfter":
 		return rowsOf([]string{"doc_key", "doc"}, docRows(work, str(0), int(args[1].(int64)), true)), true
+	// Keys' next page: the keys alone, never a document.
+	case "keysAfter":
+		var rows [][]driver.Value
+		for _, row := range docRows(work, str(0), int(args[1].(int64)), true) {
+			rows = append(rows, row[:1])
+		}
+		return rowsOf([]string{"doc_key"}, rows), true
 	// How many documents.
 	case "count":
 		return rowsOf([]string{"n"}, [][]driver.Value{{int64(len(work.docs))}}), true

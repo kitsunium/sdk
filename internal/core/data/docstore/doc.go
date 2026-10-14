@@ -15,7 +15,8 @@
 //   - the ports. [Collection] is a store whose calls take no context, which
 //     the file engine is; [CollectionContext] is the same calls, each taking
 //     a context first, which the SQL engine is. [Versioned] and
-//     [VersionedContext] are their siblings for a document's versions, and
+//     [VersionedContext] are their siblings for a document's versions,
+//     [KeyLister] and [KeyListerContext] for the keys alone, and
 //     [Announcer] is the pair of hooks both engines answer exactly as they
 //     are;
 //   - the values both engines read and return — [EntryValue], [VersionValue],
@@ -36,8 +37,8 @@
 // statement live in internal/service/data/docstore.
 //
 // Package docstore — the siblings of Collection (ADR 0039): a document's
-// versions, and the same two ports with a context on every call, which the SQL
-// engine implements.
+// versions, the keys alone (ADR 0178), and the same ports with a context on
+// every call, which the SQL engine implements.
 //
 // Package docstore — declares the sentinel *errs.Error outcomes both engines
 // answer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE

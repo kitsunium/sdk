@@ -177,10 +177,40 @@ func TestFacadeVersions(t *testing.T) {
 var (
 	_ docstore.Collection[member]        = (*docstore.Store[member])(nil)
 	_ docstore.Versioned[member]         = (*docstore.Store[member])(nil)
+	_ docstore.KeyLister                 = (*docstore.Store[member])(nil)
 	_ docstore.CollectionContext[member] = (*docstore.SQLStore[member])(nil)
 	_ docstore.VersionedContext[member]  = (*docstore.SQLStore[member])(nil)
+	_ docstore.KeyListerContext          = (*docstore.SQLStore[member])(nil)
 	_ docstore.Announcer                 = (*docstore.SQLStore[member])(nil)
 )
+
+// TestFacadeKeys lists a store's keys through public names: in key order,
+// resumed after a key, and through the port a double stands in for.
+func TestFacadeKeys(t *testing.T) {
+	t.Parallel()
+	store := open(t, vfs.NewMem())
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close() = %v", err)
+		}
+	}()
+	for _, id := range []string{"m3", "m1", "m2"} {
+		if err := store.Put(member{ID: id}); err != nil {
+			t.Fatalf("Put() = %v", err)
+		}
+	}
+	var lister docstore.KeyLister = store
+	var keys []string
+	for key, err := range lister.Keys("m1") {
+		if err != nil {
+			t.Fatalf("Keys() yielded %v", err)
+		}
+		keys = append(keys, key)
+	}
+	if !slices.Equal(keys, []string{"m2", "m3"}) {
+		t.Fatalf("Keys(after m1) = %q, want [m2 m3]", keys)
+	}
+}
 
 // TestAStoreServesThroughItsPort holds the file engine as the port a double
 // stands in for, and finds through it the documents, the index, the refusal
