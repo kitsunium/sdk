@@ -125,6 +125,12 @@
 // document itself, and the former ones kept beside it, recorded and pruned in
 // the write that stores the document (ADR 0143).
 //
+// Package docstore — a document's trash, on a store that keeps versions: a
+// trashed document leaves every read and keeps its versions and its number,
+// until Restore brings it back or Purge empties it (ADR 0143, amended for
+// ADR 0178). The file engine keeps it in the document's versions, the SQL
+// engine in a version row numbered 0.
+//
 // Package docstore — the writes: prepared outside every lock, checked and
 // persisted under the writers' lock, applied under both.
 package docstore

@@ -216,6 +216,37 @@ func TestSQLTheVersionsStatements(t *testing.T) {
 	}
 }
 
+// TestSQLTheTrashStatements pins, per dialect, the four statements the trash
+// adds — all on the versions table, whose row numbered 0 is a trashed
+// document: the lowest row of a key, read locked where the engine locks rows;
+// the trash row's removal; the versions a trashed document kept, with it as
+// the current one's document; and the trash, in key order.
+func TestSQLTheTrashStatements(t *testing.T) {
+	t.Parallel()
+	type pinned struct {
+		role, text string
+		dialect    coresql.Dialect
+	}
+	for _, want := range []pinned{
+		{dialect: coresql.DialectPostgres, role: "firstVersion", text: `SELECT num, doc FROM "members__accounts___vs" WHERE doc_key = $1 ORDER BY num LIMIT 1 FOR UPDATE`},
+		{dialect: coresql.DialectMySQL, role: "firstVersion", text: "SELECT num, doc FROM `members__accounts___vs` WHERE doc_key = ? ORDER BY num LIMIT 1 FOR UPDATE"},
+		{dialect: coresql.DialectSQLite, role: "firstVersion", text: `SELECT num, doc FROM "members__accounts___vs" WHERE doc_key = ? ORDER BY num LIMIT 1`},
+		{dialect: coresql.DialectPostgres, role: "dropTombstone", text: `DELETE FROM "members__accounts___vs" WHERE doc_key = $1 AND num = 0`},
+		{dialect: coresql.DialectMySQL, role: "dropTombstone", text: "DELETE FROM `members__accounts___vs` WHERE doc_key = ? AND num = 0"},
+		{dialect: coresql.DialectPostgres, role: "readTrashed", text: `SELECT v.num, v.made_at, v.made_ns, v.meta, COALESCE(v.doc, t.doc) FROM "members__accounts___vs" t` +
+			` LEFT JOIN "members__accounts___vs" v ON v.doc_key = t.doc_key AND v.num > 0 WHERE t.doc_key = $1 AND t.num = 0 ORDER BY v.num DESC`},
+		{dialect: coresql.DialectMySQL, role: "readTrashed", text: "SELECT v.num, v.made_at, v.made_ns, v.meta, COALESCE(v.doc, t.doc) FROM `members__accounts___vs` t" +
+			" LEFT JOIN `members__accounts___vs` v ON v.doc_key = t.doc_key AND v.num > 0 WHERE t.doc_key = ? AND t.num = 0 ORDER BY v.num DESC"},
+		{dialect: coresql.DialectPostgres, role: "tombstones", text: `SELECT doc_key, made_at, made_ns FROM "members__accounts___vs" WHERE num = 0 ORDER BY doc_key`},
+		{dialect: coresql.DialectSQLite, role: "tombstones", text: `SELECT doc_key, made_at, made_ns FROM "members__accounts___vs" WHERE num = 0 ORDER BY doc_key`},
+	} {
+		rendered := docstore.RenderSQLForTest(want.dialect, accountsTable)
+		if got := statementFor(t, rendered, want.role); got != want.text {
+			t.Errorf("%s %s =\n%s\nwant\n%s", want.dialect, want.role, got, want.text)
+		}
+	}
+}
+
 // TestSQLVersionsMigrationCreatesTheVersionsTable pins the versions table's
 // DDL per dialect — a binary key, the number, the instant, the metadata and
 // the document, keyed by document and number — doing nothing when the table

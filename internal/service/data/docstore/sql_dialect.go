@@ -73,6 +73,18 @@ type sqlStatements struct {
 	// itself, newest first; lockFormers reads its former ones, locked, for a
 	// rewrite.
 	readVersions, lockFormers string
+	// firstVersion reads a document's lowest version row — its number and
+	// the document it holds — locked where the engine locks rows: number 0 is
+	// the trash's row (tombstone), any other the oldest version a document
+	// left.
+	firstVersion string
+	// dropTombstone removes a document's trash row, number 0.
+	dropTombstone string
+	// readTrashed reads every version a trashed document kept, with the
+	// trashed document as the current one's, newest first.
+	readTrashed string
+	// tombstones reads every trash row's key and instant, in key order.
+	tombstones string
 	// docTable, ixTable and vsTable are the three tables' quoted names.
 	docTable, ixTable, vsTable string
 	// shareLock ends a read that must see the latest committed rows inside a
@@ -129,8 +141,25 @@ func renderStatements(dialect coresql.Dialect, table string) sqlStatements {
 	s.exists = "SELECT 1 FROM " + docs + " WHERE doc_key = " + p1 + s.shareLock
 	s.upsert, s.insert = writeModes(dialect, docs)
 	s.lockDoc, s.writeLocked = updateStatements(dialect, docs, s.replace)
+	s.firstVersion, s.dropTombstone, s.readTrashed, s.tombstones = trashStatements(dialect, table)
 	//: rendered once, sent many times.
 	return s
+}
+
+// trashStatements renders the four statements of the trash, all on the
+// versions table, whose row numbered 0 — a number no version is given — is a
+// trashed document: the lowest row of a key, read locked where the engine
+// locks rows, which tells a trash row from a version row; the trash row's
+// removal; the versions a trashed document kept, with it as the current
+// one's document; and every trash row's key and instant, in key order.
+func trashStatements(dialect coresql.Dialect, table string) (firstVersion, dropTombstone, readTrashed, tombstones string) {
+	versions, key := dialect.QuoteIdent(versionsTable(table)), dialect.Placeholder(1)
+	//: rendered once, sent many times.
+	return "SELECT num, doc FROM " + versions + " WHERE doc_key = " + key + " ORDER BY num LIMIT 1" + dialect.ForUpdate(),
+		"DELETE FROM " + versions + " WHERE doc_key = " + key + " AND num = 0",
+		"SELECT v.num, v.made_at, v.made_ns, v.meta, COALESCE(v.doc, t.doc) FROM " + versions + " t LEFT JOIN " + versions +
+			" v ON v.doc_key = t.doc_key AND v.num > 0 WHERE t.doc_key = " + key + " AND t.num = 0 ORDER BY v.num DESC",
+		"SELECT doc_key, made_at, made_ns FROM " + versions + " WHERE num = 0 ORDER BY doc_key"
 }
 
 // writeModes renders the upsert and the insertion, the two statements whose
@@ -445,6 +474,11 @@ func createTableStatements(dialect coresql.Dialect, table string) []string {
 // there is none. The key is binary, as in the two other tables, and the table
 // has no index but its primary key: versions are read by document, never
 // looked up by what they hold.
+//
+// The trash lives in the same table, so it needs no migration of its own: a
+// trashed document is a row numbered 0 — a number no version is given — that
+// holds the document and, in made_at and made_ns, when it was trashed, beside
+// the version rows it kept.
 func createVersionsTableStatements(dialect coresql.Dialect, table string) []string {
 	vs := dialect.QuoteIdent(versionsTable(table))
 	//: the types and the table options are each engine's.

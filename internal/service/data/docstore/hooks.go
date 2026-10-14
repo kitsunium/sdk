@@ -59,16 +59,17 @@ func (h *hooks) call(key string) {
 }
 
 // OnWrite registers fn to be told the key of every document Put, Insert,
-// Replace or Update stored, once the write is durable, on the writer's
-// goroutine and outside every lock. It returns the function that removes the
-// registration. A panic in fn reaches the writer after its write stood.
+// Replace, Update or Restore stored, once the write is durable, on the
+// writer's goroutine and outside every lock. It returns the function that
+// removes the registration. A panic in fn reaches the writer after its write
+// stood.
 func (s *Store[T]) OnWrite(fn func(key string)) (remove func()) {
 	//: the write hooks.
 	return s.onWrite.add(fn)
 }
 
-// OnDelete registers fn to be told the key of every document Delete removed,
-// on the same terms as OnWrite.
+// OnDelete registers fn to be told the key of every document Delete or Trash
+// removed, on the same terms as OnWrite.
 func (s *Store[T]) OnDelete(fn func(key string)) (remove func()) {
 	//: the deletion hooks.
 	return s.onDelete.add(fn)

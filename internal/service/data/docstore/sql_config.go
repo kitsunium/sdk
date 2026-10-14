@@ -119,6 +119,8 @@ type SQLConfig[T any] struct {
 	// told nothing about: turned off, it leaves the table as it is, and a
 	// document deleted and written again meanwhile would find the rows of the
 	// one it replaced — so drop the table with the migration's Down (ADR 0143).
+	// A store that keeps versions has a trash, Trash's, in the same table; one
+	// that keeps none has none.
 	Versions int
 }
 

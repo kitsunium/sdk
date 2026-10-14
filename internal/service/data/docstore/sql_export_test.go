@@ -36,6 +36,8 @@ func RenderSQLForTest(dialect coresql.Dialect, table string) RenderedSQL {
 			s.claim: "claim", s.versionHead: "versionHead", s.retireHead: "retireHead", s.pruneCut: "pruneCut",
 			s.pruneVersions: "pruneVersions", s.dropVersions: "dropVersions", s.dropFormers: "dropFormers",
 			s.readVersions: "readVersions", s.lockFormers: "lockFormers",
+			s.firstVersion: "firstVersion", s.dropTombstone: "dropTombstone", s.readTrashed: "readTrashed",
+			s.tombstones: "tombstones",
 		},
 		InsertIndexRows: s.insertIndexRows,
 		UniqueTaken:     s.uniqueTaken,

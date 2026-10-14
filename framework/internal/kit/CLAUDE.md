@@ -488,7 +488,7 @@ pinning, file stores across starts, the default beside the data;
 `database_test.go` runs databases on `fakedb_internal_test.go`'s `FakeDB` (a
 `database/sql` driver and an engine with no network: the SDK checker's ping,
 the migrator's statements, the product's statements recorded, and the SDK's
-document tables — transactions serialised, each on a copy of the data,
+document tables, their versions and the trash's row numbered 0 — transactions serialised, each on a copy of the data,
 savepoints copies of that copy; its failures quote the URL on purpose); the
 engine modules run the same against PostgreSQL, MySQL and SQLite.
 `transact_test.go` runs `kit.Transact` on memory, files and the fake

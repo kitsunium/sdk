@@ -137,7 +137,8 @@ func (s *SQLStore[T]) UpdateStamped(ctx context.Context, key string, stamp cored
 }
 
 // Delete removes the document stored under key, or returns DocumentNotFound.
-// Its versions go with it, in the same transaction.
+// Its versions go with it, in the same transaction: a deletion never reaches
+// the trash, which is Trash's.
 func (s *SQLStore[T]) Delete(ctx context.Context, key string) error {
 	err := s.run(ctx, s.several(), func(txCtx context.Context, ex coresql.Executor) error {
 		//: the document, then its index rows and its versions.

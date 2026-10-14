@@ -16,11 +16,27 @@ import (
 // memory and in its files: the current version without its document — the
 // document is the document itself — and the former versions, newest first.
 // A record is never changed once stored: a write stores a new one.
+//
+// A document in the trash has no document any more: its record then holds
+// Trashed, the document its current version holds and when it was trashed,
+// and the store holds no document under its key.
 type versionsRecord struct {
+	// Trashed is the trashed document and its instant; nil for a document
+	// the store holds.
+	Trashed *trashedDocument `json:"trashed,omitempty"`
 	// Former are the former versions, newest first.
 	Former []formerVersion `json:"former,omitempty"`
 	// Current is the current version's number, instant and metadata.
 	Current versionHead `json:"current"`
+}
+
+// trashedDocument is what the trash holds of a document: the document its
+// current version holds, and when it was trashed.
+type trashedDocument struct {
+	// At is when the document was trashed.
+	At time.Time `json:"at"`
+	// Document is the trashed document, compact.
+	Document json.RawMessage `json:"doc"`
 }
 
 // versionHead is a version without its document.
@@ -56,7 +72,8 @@ func (s *Store[T]) PutStamped(v T, stamp coredocstore.StampValue) error {
 }
 
 // InsertStamped is Insert, with what the write says about the version it
-// makes: version 1, whatever stamp.InPlace says.
+// makes: version 1, whatever stamp.InPlace says — or, under the key of a
+// document in the trash, a write over that document.
 func (s *Store[T]) InsertStamped(v T, stamp coredocstore.StampValue) error {
 	//: nothing may be under the key.
 	return s.store(v, insertOnly, stamp)
@@ -83,8 +100,10 @@ func (s *Store[T]) UpdateStamped(key string, stamp coredocstore.StampValue, fn f
 
 // Versions returns the versions the store keeps of the document stored under
 // key, newest first: the current one — the document as it is now — then the
-// former ones. It returns DocumentNotFound when no document is stored under
-// key, and VersionsNotKept when the store keeps no versions.
+// former ones; a document in the trash answers the versions it kept, the
+// trashed document first. It returns DocumentNotFound when no document is
+// stored or trashed under key, and VersionsNotKept when the store keeps no
+// versions.
 func (s *Store[T]) Versions(key string) ([]coredocstore.VersionValue, error) {
 	//: a store that keeps none has none to read.
 	if s.keep == 0 {
@@ -99,6 +118,10 @@ func (s *Store[T]) Versions(key string) ([]coredocstore.VersionValue, error) {
 	if closed {
 		//: StoreClosed.
 		return nil, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
+	}
+	//: a document in the trash keeps its versions, the trashed one first.
+	if !found && record != nil && record.Trashed != nil {
+		raw, found = record.Trashed.Document, true
 	}
 	//: no document, so no version either.
 	if !found {
@@ -193,6 +216,12 @@ func (s *Store[T]) nextVersions(key string, raw json.RawMessage, stamp coredocst
 	}
 	old, existed := s.docs[key]
 	record := s.versions[key]
+	//: a creation under the key of a document in the trash is a write over
+	//: that document: it continues its versions, and the trash lets it go.
+	if !existed && record != nil && record.Trashed != nil {
+		old, existed = record.Trashed.Document, true
+		record = &versionsRecord{Current: record.Current, Former: record.Former}
+	}
 	//: a creation is version 1, whatever the stamp says.
 	if !existed {
 		//: the first version, the document itself.

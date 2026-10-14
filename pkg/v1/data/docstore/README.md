@@ -79,7 +79,7 @@ A failure of the database is StatementFailed, which a caller answers with a 503:
 
 ### The ports, for a double
 
-[Store](#Store) and [SQLStore](#SQLStore) are engines. A caller that must stand a double in for one depends instead on the port it implements: [Collection](#Collection) and [Versioned](#Versioned) for a [Store](#Store), whose calls take no context, [CollectionContext](#CollectionContext) and [VersionedContext](#VersionedContext) for a [SQLStore](#SQLStore), whose every call takes one, and [Announcer](#Announcer) — OnWrite and OnDelete — for either. Each pair carries the same methods, the same documents and the same refusals; there is no single port over both, because the file engine waits on nothing a context could abandon while the SQL engine waits on a database (ADR 0160).
+[Store](#Store) and [SQLStore](#SQLStore) are engines. A caller that must stand a double in for one depends instead on the port it implements: [Collection](#Collection), [Versioned](#Versioned) and [Trashable](#Trashable) for a [Store](#Store), whose calls take no context, [CollectionContext](#CollectionContext), [VersionedContext](#VersionedContext) and [TrashableContext](#TrashableContext) for a [SQLStore](#SQLStore), whose every call takes one, and [Announcer](#Announcer) — OnWrite and OnDelete — for either. Each pair carries the same methods, the same documents and the same refusals; there is no single port over both, because the file engine waits on nothing a context could abandon while the SQL engine waits on a database (ADR 0160).
 
 ### Versions
 
@@ -95,6 +95,19 @@ third, err := pages.Version(page.ID, revisions[3].Number)
 A creation is version 1, and every write that changes the document makes the next one, stamped with the instant of [Config](#Config).Clock and the metadata the Stamped writes carry — who, which command; the plain writes carry none. A number is never given twice while the document exists. A write storing the JSON already stored makes no version, and neither does one stamped InPlace: the document changes and its current version keeps its number. The former versions beyond Versions are pruned by the write that makes a newer one, in the same durable write as the document — the same overlay entry, the same transaction — so no crash ever leaves the versions ahead of or behind their document. [Config](#Config).Held keeps a document's versions from pruning, for a legal hold, until a write finds it released. RewriteVersions rewrites a document's former versions under the writers' lock, for an erasure: it may clear or drop them, never renumber or add one. A deletion takes every version with it. Versions are never indexed: Lookup and Find read the current version.
 
 The file store keeps them in memory, in each write's overlay entry and, at rest, in the file Path + ".versions"; a store opened without versions over files that keep them is refused, rather than left to drop them. The SQL store keeps them in a third table, which [SQLVersionsMigration](#SQLVersionsMigration) creates. [Version](#Version).JSON is compact JSON; a version predating a change of the type may no longer decode into it, which is why it is JSON and not a T.
+
+### The trash
+
+A store that keeps versions has a trash (ADR 0143, amended for ADR 0178):
+
+```
+err = pages.Trash(page.ID)            // gone from Get, List, Lookup and Find; its versions stay
+trash, err := pages.Tombstones()      // every trashed key, with when it was trashed
+err = pages.Restore(page.ID)          // back as it was, filed again
+err = pages.Purge(page.ID)            // or gone for good, its versions with it
+```
+
+A trashed document leaves every read and frees its unique keys, as a former version does; Versions still reads what it kept, the trashed document first. Its number is kept: a creation under its key is a write over the trashed document, which continues its versions. Restore brings it back exactly as it was, or refuses with UniqueKeyTaken when another document took one of its unique keys meanwhile. Purge removes it and its versions. Delete never reaches the trash: it takes a document and its versions at once, which is what an erasure needs, and finds no trashed document. How long a document stays in the trash is the caller's to decide; the store empties nothing by itself.
 
 ## Index
 
@@ -150,12 +163,16 @@ The file store keeps them in memory, in each write's overlay entry and, at rest,
   - [func \(\*SQLStore\) Lookup\(ctx context.Context, index string, key string\) \(T, error\)](<#SQLStore.Lookup>)
   - [func \(\*SQLStore\) OnDelete\(fn func\(key string\)\) \(remove func\(\)\)](<#SQLStore.OnDelete>)
   - [func \(\*SQLStore\) OnWrite\(fn func\(key string\)\) \(remove func\(\)\)](<#SQLStore.OnWrite>)
+  - [func \(\*SQLStore\) Purge\(ctx context.Context, key string\) error](<#SQLStore.Purge>)
   - [func \(\*SQLStore\) Put\(ctx context.Context, v T\) error](<#SQLStore.Put>)
   - [func \(\*SQLStore\) PutStamped\(ctx context.Context, v T, stamp coredocstore.StampValue\) error](<#SQLStore.PutStamped>)
   - [func \(\*SQLStore\) Reindex\(ctx context.Context\) error](<#SQLStore.Reindex>)
   - [func \(\*SQLStore\) Replace\(ctx context.Context, v T\) error](<#SQLStore.Replace>)
   - [func \(\*SQLStore\) ReplaceStamped\(ctx context.Context, v T, stamp coredocstore.StampValue\) error](<#SQLStore.ReplaceStamped>)
+  - [func \(\*SQLStore\) Restore\(ctx context.Context, key string\) error](<#SQLStore.Restore>)
   - [func \(\*SQLStore\) RewriteVersions\(ctx context.Context, key string, fn func\(former \[\]coredocstore.VersionValue\) \(\[\]coredocstore.VersionValue, error\)\) error](<#SQLStore.RewriteVersions>)
+  - [func \(\*SQLStore\) Tombstones\(ctx context.Context\) \(tombstones \[\]coredocstore.TombstoneValue, err error\)](<#SQLStore.Tombstones>)
+  - [func \(\*SQLStore\) Trash\(ctx context.Context, key string\) error](<#SQLStore.Trash>)
   - [func \(\*SQLStore\) Update\(ctx context.Context, key string, fn func\(\*T\) error\) \(T, error\)](<#SQLStore.Update>)
   - [func \(\*SQLStore\) UpdateStamped\(ctx context.Context, key string, stamp coredocstore.StampValue, fn func\(\*T\) error\) \(T, error\)](<#SQLStore.UpdateStamped>)
   - [func \(\*SQLStore\) Version\(ctx context.Context, key string, number uint64\) \(coredocstore.VersionValue, error\)](<#SQLStore.Version>)
@@ -176,16 +193,31 @@ The file store keeps them in memory, in each write's overlay entry and, at rest,
   - [func \(\*Store\) Lookup\(index string, key string\) \(T, error\)](<#Store.Lookup>)
   - [func \(\*Store\) OnDelete\(fn func\(key string\)\) \(remove func\(\)\)](<#Store.OnDelete>)
   - [func \(\*Store\) OnWrite\(fn func\(key string\)\) \(remove func\(\)\)](<#Store.OnWrite>)
+  - [func \(\*Store\) Purge\(key string\) error](<#Store.Purge>)
   - [func \(\*Store\) Put\(v T\) error](<#Store.Put>)
   - [func \(\*Store\) PutStamped\(v T, stamp coredocstore.StampValue\) error](<#Store.PutStamped>)
   - [func \(\*Store\) Replace\(v T\) error](<#Store.Replace>)
   - [func \(\*Store\) ReplaceStamped\(v T, stamp coredocstore.StampValue\) error](<#Store.ReplaceStamped>)
+  - [func \(\*Store\) Restore\(key string\) error](<#Store.Restore>)
   - [func \(\*Store\) RewriteVersions\(key string, fn func\(former \[\]coredocstore.VersionValue\) \(\[\]coredocstore.VersionValue, error\)\) error](<#Store.RewriteVersions>)
   - [func \(\*Store\) Stats\(\) StatsValue](<#Store.Stats>)
+  - [func \(\*Store\) Tombstones\(\) \(\[\]coredocstore.TombstoneValue, error\)](<#Store.Tombstones>)
+  - [func \(\*Store\) Trash\(key string\) error](<#Store.Trash>)
   - [func \(\*Store\) Update\(key string, fn func\(\*T\) error\) \(T, error\)](<#Store.Update>)
   - [func \(\*Store\) UpdateStamped\(key string, stamp coredocstore.StampValue, fn func\(\*T\) error\) \(T, error\)](<#Store.UpdateStamped>)
   - [func \(\*Store\) Version\(key string, number uint64\) \(coredocstore.VersionValue, error\)](<#Store.Version>)
   - [func \(\*Store\) Versions\(key string\) \(\[\]coredocstore.VersionValue, error\)](<#Store.Versions>)
+- [type Tombstone](<#Tombstone>)
+- [type Trashable](<#Trashable>)
+  - [func \(Trashable\) Purge\(key string\) error](<#Trashable.Purge>)
+  - [func \(Trashable\) Restore\(key string\) error](<#Trashable.Restore>)
+  - [func \(Trashable\) Tombstones\(\) \(\[\]TombstoneValue, error\)](<#Trashable.Tombstones>)
+  - [func \(Trashable\) Trash\(key string\) error](<#Trashable.Trash>)
+- [type TrashableContext](<#TrashableContext>)
+  - [func \(TrashableContext\) Purge\(ctx context.Context, key string\) error](<#TrashableContext.Purge>)
+  - [func \(TrashableContext\) Restore\(ctx context.Context, key string\) error](<#TrashableContext.Restore>)
+  - [func \(TrashableContext\) Tombstones\(ctx context.Context\) \(\[\]TombstoneValue, error\)](<#TrashableContext.Tombstones>)
+  - [func \(TrashableContext\) Trash\(ctx context.Context, key string\) error](<#TrashableContext.Trash>)
 - [type Version](<#Version>)
 - [type Versioned](<#Versioned>)
   - [func \(Versioned\) InsertStamped\(v T, stamp StampValue\) error](<#Versioned.InsertStamped>)
@@ -249,6 +281,17 @@ CodeDocumentNotFound: no document under the key, or nobody holds the key in a un
 Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.CodeDocumentNotFound`.
 
 Code `0.3.80.1`
+
+<a name="CodeDocumentNotTrashed"></a>
+```go
+const CodeDocumentNotTrashed errs.Code = 217109
+```
+
+CodeDocumentNotTrashed: no document is in the trash under the key.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.CodeDocumentNotTrashed`.
+
+Code `0.3.80.21`
 
 <a name="CodeDocumentUndecodable"></a>
 ```go
@@ -508,6 +551,17 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.DocumentN
 
 Code `0.3.80.1` · reason `DOCUMENT_NOT_FOUND` · public "No document has this key"
 
+<a name="DocumentNotTrashed"></a>
+```go
+var DocumentNotTrashed *errs.Error
+```
+
+DocumentNotTrashed is a miss on the trash: no document is trashed under the key.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.DocumentNotTrashed`.
+
+Code `0.3.80.21` · reason `DOCUMENT_NOT_TRASHED` · public "No document with this key is in the trash"
+
 <a name="DocumentUndecodable"></a>
 ```go
 var DocumentUndecodable *errs.Error
@@ -751,12 +805,12 @@ Announcer is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.A
 
 ```go
 type Announcer interface {
-	// OnDelete registers fn to be told the key of every document Delete
-	// removed, on the same terms as OnWrite.
+	// OnDelete registers fn to be told the key of every document Delete or
+	// Trash removed, on the same terms as OnWrite.
 	OnDelete(fn func(key string)) (remove func())
 	// OnWrite registers fn to be told the key of every document Put, Insert,
-	// Replace or Update stored, and returns the function that removes the
-	// registration. A nil fn registers nothing. A panic in fn reaches the
+	// Replace, Update or Restore stored, and returns the function that removes
+	// the registration. A nil fn registers nothing. A panic in fn reaches the
 	// writer after its write stood.
 	OnWrite(fn func(key string)) (remove func())
 }
@@ -769,7 +823,7 @@ type Announcer interface {
 func (Announcer) OnDelete(fn func(key string)) (remove func())
 ```
 
-OnDelete registers fn to be told the key of every document Delete removed, on the same terms as OnWrite.
+OnDelete registers fn to be told the key of every document Delete or Trash removed, on the same terms as OnWrite.
 
 <a name="Announcer.OnWrite"></a>
 ### func \(Announcer\) [OnWrite](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
@@ -778,7 +832,7 @@ OnDelete registers fn to be told the key of every document Delete removed, on th
 func (Announcer) OnWrite(fn func(key string)) (remove func())
 ```
 
-OnWrite registers fn to be told the key of every document Put, Insert, Replace or Update stored, and returns the function that removes the registration. A nil fn registers nothing. A panic in fn reaches the writer after its write stood.
+OnWrite registers fn to be told the key of every document Put, Insert, Replace, Update or Restore stored, and returns the function that removes the registration. A nil fn registers nothing. A panic in fn reaches the writer after its write stood.
 
 <a name="Collection"></a>
 ## type [Collection](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
@@ -1083,7 +1137,8 @@ type Config[T any] struct {
 	// wrote before versions existed — and a negative value is refused. A
 	// persistent store keeps them in the file Path + ".versions" once a fold
 	// ran, and a store opened with zero over files that keep versions is
-	// refused rather than left to drop or corrupt them (ADR 0143).
+	// refused rather than left to drop or corrupt them (ADR 0143). A store
+	// that keeps versions has a trash, Trash's; one that keeps none has none.
 	Versions int
 }
 ```
@@ -1187,6 +1242,8 @@ type SQLConfig[T any] struct {
 	// told nothing about: turned off, it leaves the table as it is, and a
 	// document deleted and written again meanwhile would find the rows of the
 	// one it replaced — so drop the table with the migration's Down (ADR 0143).
+	// A store that keeps versions has a trash, Trash's, in the same table; one
+	// that keeps none has none.
 	Versions   int
 }
 ```
@@ -1194,7 +1251,7 @@ type SQLConfig[T any] struct {
 <a name="SQLStore"></a>
 ## type [SQLStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
 
-SQLStore is the public alias for the document store over SQL: Get, List, Filter, Entries, Count, Lookup and Find read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version and RewriteVersions as for [Store](#Store); OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
+SQLStore is the public alias for the document store over SQL: Get, List, Filter, Entries, Count, Lookup and Find read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version and RewriteVersions, Trash, Restore, Purge and Tombstones as for [Store](#Store); OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
 
 ```go
 type SQLStore[T any] = svcdocstore.SQLStore[T]
@@ -1222,7 +1279,7 @@ Count returns how many documents the store holds.
 func (*SQLStore) Delete(ctx context.Context, key string) error
 ```
 
-Delete removes the document stored under key, or returns DocumentNotFound. Its versions go with it, in the same transaction.
+Delete removes the document stored under key, or returns DocumentNotFound. Its versions go with it, in the same transaction: a deletion never reaches the trash, which is Trash's.
 
 <a name="SQLStore.Entries"></a>
 ### func \(SQLStore\) [Entries](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_store.go>)
@@ -1276,7 +1333,7 @@ Insert stores v, which must be new: DocumentExists when its key is taken.
 func (*SQLStore) InsertStamped(ctx context.Context, v T, stamp coredocstore.StampValue) error
 ```
 
-InsertStamped is Insert, with what the write says about the version it makes: version 1, whatever stamp.InPlace says.
+InsertStamped is Insert, with what the write says about the version it makes: version 1, whatever stamp.InPlace says — or, under the key of a document in the trash, a write over that document.
 
 <a name="SQLStore.List"></a>
 ### func \(SQLStore\) [List](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_store.go>)
@@ -1303,7 +1360,7 @@ Lookup returns the document holding key in the unique index named index, Documen
 func (*SQLStore) OnDelete(fn func(key string)) (remove func())
 ```
 
-OnDelete registers fn to be told the key of every document Delete removed, on the same terms as OnWrite.
+OnDelete registers fn to be told the key of every document Delete or Trash removed, on the same terms as OnWrite.
 
 <a name="SQLStore.OnWrite"></a>
 ### func \(SQLStore\) [OnWrite](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_store.go>)
@@ -1312,7 +1369,16 @@ OnDelete registers fn to be told the key of every document Delete removed, on th
 func (*SQLStore) OnWrite(fn func(key string)) (remove func())
 ```
 
-OnWrite registers fn to be told the key of every document Put, Insert, Replace or Update stored, once the transaction that holds the write has committed — never for a write that is rolled back — on the goroutine that committed it, outside every lock. It returns the function that removes the registration.
+OnWrite registers fn to be told the key of every document Put, Insert, Replace, Update or Restore stored, once the transaction that holds the write has committed — never for a write that is rolled back — on the goroutine that committed it, outside every lock. It returns the function that removes the registration.
+
+<a name="SQLStore.Purge"></a>
+### func \(SQLStore\) [Purge](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_trash.go>)
+
+```go
+func (*SQLStore) Purge(ctx context.Context, key string) error
+```
+
+Purge empties the trash of the document trashed under key: the trashed document and every version row of its key go, in one transaction, and a document written later under the key starts again at version 1. It calls no hook and asks Held nothing, as Delete does not. DocumentNotTrashed when no document is trashed under key.
 
 <a name="SQLStore.Put"></a>
 ### func \(SQLStore\) [Put](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_write.go>)
@@ -1363,6 +1429,15 @@ func (*SQLStore) ReplaceStamped(ctx context.Context, v T, stamp coredocstore.Sta
 
 ReplaceStamped is Replace, with what the write says about the version it makes.
 
+<a name="SQLStore.Restore"></a>
+### func \(SQLStore\) [Restore](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_trash.go>)
+
+```go
+func (*SQLStore) Restore(ctx context.Context, key string) error
+```
+
+Restore brings the document trashed under key back exactly as it was — the same JSON, the same current version — files it again and calls OnWrite once its transaction commits. DocumentNotTrashed when no document is trashed under key, UniqueKeyTaken when another document took one of its unique keys meanwhile, DocumentUndecodable when it no longer decodes into the store's type; nothing changes on a refusal.
+
 <a name="SQLStore.RewriteVersions"></a>
 ### func \(SQLStore\) [RewriteVersions](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_version.go>)
 
@@ -1371,6 +1446,24 @@ func (*SQLStore) RewriteVersions(ctx context.Context, key string, fn func(former
 ```
 
 RewriteVersions rewrites the former versions of the document stored under key — every version but the current one, which is the document and which only a write changes — in one transaction, a savepoint of the caller's when ctx carries one, the document locked as a write locks it. fn receives copies of them, newest first, and returns those to keep, in the same order, under the rules of [Store](#Store).RewriteVersions: VersionsRewriteRefused otherwise, and fn's own error returned as it is, nothing changed either way. It calls no hook: the document did not change.
+
+<a name="SQLStore.Tombstones"></a>
+### func \(SQLStore\) [Tombstones](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_trash.go>)
+
+```go
+func (*SQLStore) Tombstones(ctx context.Context) (tombstones []coredocstore.TombstoneValue, err error)
+```
+
+Tombstones returns every document in the trash, in key order: its key and the instant it was trashed, read in one statement on the transaction ctx carries. The statement scans the versions table, as List scans the documents'.
+
+<a name="SQLStore.Trash"></a>
+### func \(SQLStore\) [Trash](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_trash.go>)
+
+```go
+func (*SQLStore) Trash(ctx context.Context, key string) error
+```
+
+Trash moves the document stored under key to the trash, in one transaction — a savepoint of the caller's when ctx carries one: its row and its index rows go, and a version row numbered 0 — no version's number — holds the document and the instant it was trashed beside its versions, which stay. It calls OnDelete once that transaction commits. DocumentNotFound when no document is stored under key, VersionsNotKept when the store keeps no versions: only a store that keeps versions has a trash.
 
 <a name="SQLStore.Update"></a>
 ### func \(SQLStore\) [Update](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_write.go>)
@@ -1408,7 +1501,7 @@ Version returns the version numbered number of the document stored under key, Ve
 func (*SQLStore) Versions(ctx context.Context, key string) (versions []coredocstore.VersionValue, err error)
 ```
 
-Versions returns the versions the store keeps of the document stored under key, newest first: the current one — the document as it is now — then the former ones, read in one statement on the transaction ctx carries. DocumentNotFound when no document is stored under key, VersionsNotKept when the store keeps no versions.
+Versions returns the versions the store keeps of the document stored under key, newest first: the current one — the document as it is now — then the former ones, read in one statement on the transaction ctx carries; a document in the trash answers the versions it kept, the trashed document first, in a second one. DocumentNotFound when no document is stored or trashed under key, VersionsNotKept when the store keeps no versions.
 
 <a name="Stamp"></a>
 ## type [Stamp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
@@ -1466,7 +1559,7 @@ type Stats struct {
 <a name="Store"></a>
 ## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
 
-Store is the public alias for the document store: Get, List, Filter, Entries, Lookup, Find and Stats read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones; OnWrite and OnDelete announce; Fold and Close bring it to rest.
+Store is the public alias for the document store: Get, List, Filter, Entries, Lookup, Find and Stats read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones; Trash, Restore, Purge and Tombstones keep its trash; OnWrite and OnDelete announce; Fold and Close bring it to rest.
 
 ```go
 type Store[T any] = svcdocstore.Store[T]
@@ -1494,7 +1587,7 @@ Close folds the overlay and closes the store: every later call is StoreClosed, e
 func (*Store) Delete(key string) error
 ```
 
-Delete removes the document stored under key, or returns DocumentNotFound. Its versions go with it.
+Delete removes the document stored under key, or returns DocumentNotFound. Its versions go with it: a deletion never reaches the trash, which is Trash's.
 
 <a name="Store.Entries"></a>
 ### func \(Store\) [Entries](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/docstore.go>)
@@ -1557,7 +1650,7 @@ Insert stores v, which must be new: DocumentExists when its key is taken.
 func (*Store) InsertStamped(v T, stamp coredocstore.StampValue) error
 ```
 
-InsertStamped is Insert, with what the write says about the version it makes: version 1, whatever stamp.InPlace says.
+InsertStamped is Insert, with what the write says about the version it makes: version 1, whatever stamp.InPlace says — or, under the key of a document in the trash, a write over that document.
 
 <a name="Store.List"></a>
 ### func \(Store\) [List](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/docstore.go>)
@@ -1584,7 +1677,7 @@ Lookup returns the document holding key in the unique index named index, Documen
 func (*Store) OnDelete(fn func(key string)) (remove func())
 ```
 
-OnDelete registers fn to be told the key of every document Delete removed, on the same terms as OnWrite.
+OnDelete registers fn to be told the key of every document Delete or Trash removed, on the same terms as OnWrite.
 
 <a name="Store.OnWrite"></a>
 ### func \(Store\) [OnWrite](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/hooks.go>)
@@ -1593,7 +1686,16 @@ OnDelete registers fn to be told the key of every document Delete removed, on th
 func (*Store) OnWrite(fn func(key string)) (remove func())
 ```
 
-OnWrite registers fn to be told the key of every document Put, Insert, Replace or Update stored, once the write is durable, on the writer's goroutine and outside every lock. It returns the function that removes the registration. A panic in fn reaches the writer after its write stood.
+OnWrite registers fn to be told the key of every document Put, Insert, Replace, Update or Restore stored, once the write is durable, on the writer's goroutine and outside every lock. It returns the function that removes the registration. A panic in fn reaches the writer after its write stood.
+
+<a name="Store.Purge"></a>
+### func \(Store\) [Purge](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/trash.go>)
+
+```go
+func (*Store) Purge(key string) error
+```
+
+Purge empties the trash of the document trashed under key: the trashed document and every version it kept go, in one durable write, and a document written later under the key starts again at version 1. It calls no hook and asks Held nothing, as Delete does not. DocumentNotTrashed when no document is trashed under key.
 
 <a name="Store.Put"></a>
 ### func \(Store\) [Put](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/write.go>)
@@ -1631,6 +1733,15 @@ func (*Store) ReplaceStamped(v T, stamp coredocstore.StampValue) error
 
 ReplaceStamped is Replace, with what the write says about the version it makes.
 
+<a name="Store.Restore"></a>
+### func \(Store\) [Restore](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/trash.go>)
+
+```go
+func (*Store) Restore(key string) error
+```
+
+Restore brings the document trashed under key back exactly as it was — the same JSON, the same current version — files it again and calls OnWrite. DocumentNotTrashed when no document is trashed under key, UniqueKeyTaken when another document took one of its unique keys meanwhile, DocumentUndecodable when it no longer decodes into the store's type; nothing changes on a refusal.
+
 <a name="Store.RewriteVersions"></a>
 ### func \(Store\) [RewriteVersions](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/version.go>)
 
@@ -1650,6 +1761,24 @@ func (*Store) Stats() StatsValue
 ```
 
 Stats reports what the store holds and where its overlay stands. It answers after Close too, with the state the store closed in.
+
+<a name="Store.Tombstones"></a>
+### func \(Store\) [Tombstones](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/trash.go>)
+
+```go
+func (*Store) Tombstones() ([]coredocstore.TombstoneValue, error)
+```
+
+Tombstones returns every document in the trash, in key order: its key and the instant it was trashed. It reads every document's versions, as List reads every document.
+
+<a name="Store.Trash"></a>
+### func \(Store\) [Trash](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/trash.go>)
+
+```go
+func (*Store) Trash(key string) error
+```
+
+Trash moves the document stored under key to the trash, in one durable write under the writers' lock: it leaves every read and its index keys are freed, while its versions are kept beside the trashed document and the instant it was trashed. It calls OnDelete. DocumentNotFound when no document is stored under key, VersionsNotKept when the store keeps no versions: only a store that keeps versions has a trash.
 
 <a name="Store.Update"></a>
 ### func \(Store\) [Update](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/write.go>)
@@ -1687,7 +1816,161 @@ Version returns the version numbered number of the document stored under key, Ve
 func (*Store) Versions(key string) ([]coredocstore.VersionValue, error)
 ```
 
-Versions returns the versions the store keeps of the document stored under key, newest first: the current one — the document as it is now — then the former ones. It returns DocumentNotFound when no document is stored under key, and VersionsNotKept when the store keeps no versions.
+Versions returns the versions the store keeps of the document stored under key, newest first: the current one — the document as it is now — then the former ones; a document in the trash answers the versions it kept, the trashed document first. It returns DocumentNotFound when no document is stored or trashed under key, and VersionsNotKept when the store keeps no versions.
+
+<a name="Tombstone"></a>
+## type [Tombstone](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+
+Tombstone is the public alias for a document in the trash, as Tombstones lists it: its Key, and the instant At it was trashed.
+
+```go
+type Tombstone = coredocstore.TombstoneValue
+```
+
+Tombstone is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.TombstoneValue`, declared as:
+
+```go
+type Tombstone struct {
+	// Key is the trashed document's key.
+	Key string
+	// At is when the document was trashed, in UTC, read from the store's
+	// clock and kept to the nanosecond, as a version's instant is.
+	At  time.Time
+}
+```
+
+<a name="Trashable"></a>
+## type [Trashable](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+
+Trashable is the public alias for the sibling of [Collection](#Collection) that keeps a document's trash without a context, which [Store](#Store) implements: Trash, Restore, Purge and Tombstones.
+
+```go
+type Trashable = coredocstore.Trashable
+```
+
+Trashable is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.Trashable`, declared as:
+
+```go
+type Trashable interface {
+	// Purge empties the trash of the document trashed under key: the
+	// trashed document and every version it kept go, and a document written
+	// later under the key starts again at version 1. It calls no hook — the
+	// document already left every read — and asks no hold, as Delete does
+	// not. DOCUMENT_NOT_TRASHED when no document is trashed under key.
+	Purge(key string) error
+	// Restore brings the document trashed under key back, exactly as it was
+	// — the same JSON, the same current version — and files it again. It
+	// calls OnWrite. DOCUMENT_NOT_TRASHED when no document is trashed under
+	// key, UNIQUE_KEY_TAKEN when another document took one of its unique
+	// keys meanwhile, which then stays in the trash.
+	Restore(key string) error
+	// Tombstones returns every document in the trash, in key order: its key
+	// and when it was trashed, for a caller that empties the trash after a
+	// while.
+	Tombstones() ([]TombstoneValue, error)
+	// Trash moves the document stored under key to the trash: it is gone from
+	// every read and its index keys are freed, while its versions are kept
+	// and the trash records the instant. It calls OnDelete.
+	// DOCUMENT_NOT_FOUND when no document is stored under key.
+	Trash(key string) error
+}
+```
+
+<a name="Trashable.Purge"></a>
+### func \(Trashable\) [Purge](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+
+```go
+func (Trashable) Purge(key string) error
+```
+
+Purge empties the trash of the document trashed under key: the trashed document and every version it kept go, and a document written later under the key starts again at version 1. It calls no hook — the document already left every read — and asks no hold, as Delete does not. DOCUMENT\_NOT\_TRASHED when no document is trashed under key.
+
+<a name="Trashable.Restore"></a>
+### func \(Trashable\) [Restore](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+
+```go
+func (Trashable) Restore(key string) error
+```
+
+Restore brings the document trashed under key back, exactly as it was — the same JSON, the same current version — and files it again. It calls OnWrite. DOCUMENT\_NOT\_TRASHED when no document is trashed under key, UNIQUE\_KEY\_TAKEN when another document took one of its unique keys meanwhile, which then stays in the trash.
+
+<a name="Trashable.Tombstones"></a>
+### func \(Trashable\) [Tombstones](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+
+```go
+func (Trashable) Tombstones() ([]TombstoneValue, error)
+```
+
+Tombstones returns every document in the trash, in key order: its key and when it was trashed, for a caller that empties the trash after a while.
+
+<a name="Trashable.Trash"></a>
+### func \(Trashable\) [Trash](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+
+```go
+func (Trashable) Trash(key string) error
+```
+
+Trash moves the document stored under key to the trash: it is gone from every read and its index keys are freed, while its versions are kept and the trash records the instant. It calls OnDelete. DOCUMENT\_NOT\_FOUND when no document is stored under key.
+
+<a name="TrashableContext"></a>
+## type [TrashableContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+
+TrashableContext is the public alias for [Trashable](#Trashable) with a context on every call, which [SQLStore](#SQLStore) implements.
+
+```go
+type TrashableContext = coredocstore.TrashableContext
+```
+
+TrashableContext is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.TrashableContext`, declared as:
+
+```go
+type TrashableContext interface {
+	// Purge is Trashable.Purge under ctx.
+	Purge(ctx context.Context, key string) error
+	// Restore is Trashable.Restore under ctx.
+	Restore(ctx context.Context, key string) error
+	// Tombstones is Trashable.Tombstones under ctx.
+	Tombstones(ctx context.Context) ([]TombstoneValue, error)
+	// Trash is Trashable.Trash under ctx.
+	Trash(ctx context.Context, key string) error
+}
+```
+
+<a name="TrashableContext.Purge"></a>
+### func \(TrashableContext\) [Purge](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+
+```go
+func (TrashableContext) Purge(ctx context.Context, key string) error
+```
+
+Purge is Trashable.Purge under ctx.
+
+<a name="TrashableContext.Restore"></a>
+### func \(TrashableContext\) [Restore](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+
+```go
+func (TrashableContext) Restore(ctx context.Context, key string) error
+```
+
+Restore is Trashable.Restore under ctx.
+
+<a name="TrashableContext.Tombstones"></a>
+### func \(TrashableContext\) [Tombstones](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+
+```go
+func (TrashableContext) Tombstones(ctx context.Context) ([]TombstoneValue, error)
+```
+
+Tombstones is Trashable.Tombstones under ctx.
+
+<a name="TrashableContext.Trash"></a>
+### func \(TrashableContext\) [Trash](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+
+```go
+func (TrashableContext) Trash(ctx context.Context, key string) error
+```
+
+Trash is Trashable.Trash under ctx.
 
 <a name="Version"></a>
 ## type [Version](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
@@ -1716,8 +1999,9 @@ type Version struct {
 	// caller owns. The newest version's is the document itself.
 	JSON   json.RawMessage
 	// Number counts a document's versions from 1. No number is given twice
-	// while the document exists, pruning included; a document deleted and
-	// written again is a new document, and starts again at 1.
+	// while the document exists or is in the trash, pruning included; a
+	// document deleted, or purged from the trash, and written again is a new
+	// document, and starts again at 1.
 	Number uint64
 }
 ```
@@ -1752,7 +2036,7 @@ type Versioned[T any] interface {
 func (Versioned) InsertStamped(v T, stamp StampValue) error
 ```
 
-InsertStamped is Insert, with what the write says about the version it makes: version 1, whatever stamp.InPlace says.
+InsertStamped is Insert, with what the write says about the version it makes: version 1, whatever stamp.InPlace says — or, under the key of a document in the trash, a write over that document.
 
 <a name="Versioned.PutStamped"></a>
 ### func \(Versioned\) [PutStamped](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
@@ -1806,7 +2090,7 @@ Version returns the version numbered number of the document stored under key: VE
 func (Versioned) Versions(key string) ([]VersionValue, error)
 ```
 
-Versions returns the versions kept of the document stored under key, newest first: the current one — the document as it is now — then the former ones. DOCUMENT\_NOT\_FOUND when no document is stored under key.
+Versions returns the versions kept of the document stored under key, newest first: the current one — the document as it is now — then the former ones. A document in the trash answers the versions it kept, the trashed document first. DOCUMENT\_NOT\_FOUND when no document is stored or trashed under key.
 
 <a name="VersionedContext"></a>
 ## type [VersionedContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
