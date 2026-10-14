@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue builds each entry on a gh-readonly-queue/main/pr-<n>-<sha>
+  # ref and waits for the REQUIRED checks (`bazel`, here) to report on it; a
+  # workflow without this trigger never reports and the entry waits until the
+  # queue times it out. checks_requested is the only type the event has. The
+  # push to main after the queue lands still runs this workflow, which is what
+  # sdk-release.yml waits for (see .github/workflows/CLAUDE.md §Merge queue).
+  merge_group:
+    types: [checks_requested]
 
 # Cancel in-progress runs when a newer commit on the same ref arrives so
 # rapid re-pushes do not spawn parallel builds that corrupt bazel caches
@@ -321,6 +329,10 @@ jobs:
       # the permission was lost, and a gate that skips itself quietly is not a
       # gate. A fork pull request cannot merge without a maintainer, whose own
       # pushes lint (scripts/CLAUDE.md §ktn-linter in CI).
+      # A merge_group run is neither: it is a run of this repository's own
+      # workflow on its own queue ref, so it receives an id-token like a push,
+      # `github.event.pull_request` is empty (HEAD_REPO is '') and EVENT is not
+      # pull_request, so the skip below does not apply and the token check does.
       - name: can this run prove it is CI (OIDC)
         id: ktnoidc
         env:
