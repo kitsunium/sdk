@@ -191,8 +191,9 @@ func resumeSuspended(pid int) error {
 		//: surface the snapshot failure through the central RLIMIT_FAILED.
 		return wrapRlimit(serrno, errs.Int("pid", pid))
 	}
-	//: release the snapshot once the walk is over.
-	defer swallowErr2(procCloseHandle.Call(snap))
+	//: release the snapshot once the walk is over — in a closure, as a deferred
+	//: call's arguments are evaluated at once and would close it now.
+	defer func() { swallowErr2(procCloseHandle.Call(snap)) }()
 	entry := threadEntry32{size: uint32(unsafe.Sizeof(threadEntry32{}))}
 	resumed := 0
 	ok, _, werrno := procThread32First.Call(snap, uintptr(unsafe.Pointer(&entry)))
@@ -231,8 +232,8 @@ func resumeThread(tid uint32, pid int) error {
 		//: surface the open failure through the central RLIMIT_FAILED.
 		return wrapRlimit(oerrno, errs.Int("pid", pid))
 	}
-	//: release the thread handle once it is resumed.
-	defer swallowErr2(procCloseHandle.Call(th))
+	//: release the thread handle once it is resumed (in a closure, as above).
+	defer func() { swallowErr2(procCloseHandle.Call(th)) }()
 	prev, _, rerrno := procResumeThread.Call(th)
 	//: (DWORD)-1 means the thread was not resumed.
 	if prev == resumeThreadFailed {

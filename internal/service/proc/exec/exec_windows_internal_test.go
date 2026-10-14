@@ -117,7 +117,7 @@ func Test_anExitedChildIsNotAssigned(t *testing.T) {
 		t.Fatalf("newJobLimit: %v", err)
 	}
 	defer job.close()
-	p, err := os.StartProcess(spec.Path, spec.Args, &os.ProcAttr{})
+	p, err := os.StartProcess(spec.Path, spec.Args, &os.ProcAttr{Files: []*os.File{nil, nil, nil}})
 	if err != nil {
 		t.Fatalf("StartProcess: %v", err)
 	}

@@ -30,7 +30,7 @@ process that already exists.
 | `exec.go` | all | `validateSpec` (empty Path ⇒ `InvalidSpec`) |
 | `exec_unix.go` | `unix` | `Start`: validate → check limits → resolve creds → `SysProcAttr` → `os.StartProcess` through `childwait.Spawn` (`forkClaimed`) → post-start attrs; `teardown` on attr failure; `awaitTrampoline` reaps a trampoline that failed before exec, through the claim |
 | `exec_other.go` | `!unix && !windows` | `Start` ⇒ `UnsupportedPlatform` (compiles everywhere) |
-| `exec_windows.go`, `handle_windows.go`, `joblimits_windows.go`, `cgroup_placement_windows.go` | `windows` | the CreateProcess backend: stdio, a console process group for `Setpgid`, rlimits through a Job Object; the Unix-only fields refused with `UnsupportedPlatform` |
+| `exec_windows.go`, `handle_windows.go`, `joblimits_windows.go`, `cgroup_placement_windows.go` | `windows` | the CreateProcess backend: stdio, a console process group for `Setpgid`, rlimits through a Job Object the child is assigned to while suspended (§A confined Windows child is created suspended); the Unix-only fields refused with `UnsupportedPlatform` |
 | `lookpath.go` | `unix \|\| windows` | `resolveSpec`: a bare `Spec.Path` searched in the CHILD's PATH (Spec.Env's, else the parent's), os/exec's rules — first executable wins, a relative match is `exec.ErrDot`, none is `exec.ErrNotFound`, both wrapped in `SpawnFailed`; argv[0] keeps the name as written |
 | `lookpath_unix.go` / `lookpath_windows.go` | per OS | the candidate spellings (PATHEXT on Windows), what "executable" means (an execute bit / the extension), and how variable names compare (case-insensitive on Windows) |
 | `handle_unix.go` | `unix` | the `handle` value: `PID`/`Wait`/`Signal`/`SignalGroup`/`Stop`, once-only reap through `collectExit` (claim first, own wait, `Reclaim` on ECHILD — it takes a `waiter`, the process's own wait and nothing else; `releaser` adds the handle release an aborted spawn needs), exit translation (`exitValue`), stdio-copier join |
@@ -247,4 +247,26 @@ grandchild, `Wait` is memoised, a signalled exit reports code −1, and a leader
 that died unreaped stops cleanly on darwin too (§Stop);
 `creds_unix_internal_test.go` pins `UnknownUser` / `UnknownGroup`.
 `exec_windows_test.go` covers the Windows backend (skipped where `cmd.exe` is
-not found) and `exec_other_test.go` the `UnsupportedPlatform` stub.
+not found) and `exec_other_test.go` the `UnsupportedPlatform` stub;
+`exec_windows_internal_test.go` pins the order of a confined spawn (below).
+
+### A confined Windows child is created suspended (#304)
+
+A `Spec` with mappable `Rlimits` spawns with `CREATE_SUSPENDED`; `confine`
+assigns the child to its Job Object through the handle CreateProcess returned
+(`Process.WithHandle`, never a pid reopened), then resumes it —
+`os.StartProcess` closes the primary thread's handle, so `resumeSuspended`
+finds the thread again in a toolhelp thread snapshot. A failed assignment or
+resume kills and reaps the child. The child therefore runs no instruction
+outside its job, and cannot exit before it is assigned.
+
+It used to run from CreateProcess on and be assigned afterwards. A process
+that has already exited is refused by `AssignProcessToJobObject` with
+`ERROR_ACCESS_DENIED`, so a `cmd /c exit 0` that was quick enough made `Start`
+return `RLIMIT_FAILED` for a spawn that did nothing wrong
+(`TestWindowsRlimitMemoryMapped`, run 38497960840; measured 9 of 2 000 spawns on
+windows-latest). `Test_confineRunsTheChildOnlyOnceAssigned` holds the suspended
+child for 500 ms and requires it not to have exited before `confine`;
+`Test_anExitedChildIsNotAssigned` pins the Windows refusal the order answers.
+The cgroup port's `Assign` (`proc/cgroup`) takes a pid it did not spawn and
+keeps its own contract.

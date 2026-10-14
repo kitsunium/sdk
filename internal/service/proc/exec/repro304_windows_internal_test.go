@@ -58,7 +58,7 @@ func TestRepro304AssignAfterExit(t *testing.T) {
 			t.Logf("PROBE304 newJobLimit: %v", err)
 			return
 		}
-		p, err := os.StartProcess(os.Getenv("ComSpec"), []string{"cmd", "/c", "exit 0"}, &os.ProcAttr{})
+		p, err := os.StartProcess(os.Getenv("ComSpec"), []string{"cmd", "/c", "exit 0"}, &os.ProcAttr{Files: []*os.File{nil, nil, nil}})
 		if err != nil {
 			t.Logf("PROBE304 StartProcess: %v", err)
 			return
@@ -108,7 +108,7 @@ func TestRepro304AB(t *testing.T) {
 			return "newJobLimit", err
 		}
 		defer job.close()
-		p, err := os.StartProcess(os.Getenv("ComSpec"), []string{"cmd", "/c", "exit 0"}, &os.ProcAttr{})
+		p, err := os.StartProcess(os.Getenv("ComSpec"), []string{"cmd", "/c", "exit 0"}, &os.ProcAttr{Files: []*os.File{nil, nil, nil}})
 		if err != nil {
 			return "StartProcess", err
 		}
