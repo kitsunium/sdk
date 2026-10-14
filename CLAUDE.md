@@ -228,7 +228,7 @@ pkg/
     │                 transform/ — compression without the codec package, the
     │                   caller's ceiling honoured — ADR 0014;
     │                 sql/ — ports over database/sql, no driver, no ORM — ADR 0055;
-    │                   Joiner/Deferrer — ADR 0139; SQLite migrations — ADR 0140;
+    │                   Joiner/Deferrer/Aborter — ADR 0139; SQLite migrations — ADR 0140;
     │                 docstore/ — typed JSON documents, indexes, one entry per write —
     │                   ADR 0110; the same store over SQL, OpenSQL — ADR 0139;
     │                   a document's versions, in its own write — ADR 0143;

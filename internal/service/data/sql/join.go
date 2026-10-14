@@ -40,3 +40,22 @@ func (t *transactor) Defer(ctx context.Context, fn func()) bool {
 	//: false once the root has settled — the commit is behind it.
 	return scope.state.hold(scope.id, fn)
 }
+
+// OnAbort holds fn until the work of the scope ctx carries for this
+// transactor is undone, and reports whether it did (core/data/sql.Aborter,
+// ADR 0139 as amended on 2026-10-14).
+//
+// fn is tagged with the scope ctx names, so a savepoint that rolls back runs
+// what was held inside it once its ROLLBACK TO SAVEPOINT ran, and one that is
+// released leaves it to the scope around it. The root runs what is left after
+// a ROLLBACK, and drops it with a COMMIT that stood.
+func (t *transactor) OnAbort(ctx context.Context, fn func(ctx context.Context)) bool {
+	scope := scopeFor(ctx, t)
+	//: no transaction of ours: nothing to undo, fn stays the caller's.
+	if scope == nil {
+		//: not held.
+		return false
+	}
+	//: false once the root has settled — its outcome is behind it.
+	return scope.state.holdAbort(ctx, scope.id, fn)
+}

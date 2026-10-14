@@ -483,6 +483,54 @@ packages:
                 type: bool
         name: Deferrer
       - doc: |-
+          Aborter is an ADR 0039 sibling of [Transactor], and the complement of
+          [Deferrer]: a transactor that holds a function until the work a context
+          carries is undone. Discover it by type assertion; the SDK's own transactor
+          implements it.
+
+          It is how a callee that announced something BEFORE the commit — a
+          registration a later delivery waits on, a resource reserved for the
+          commit — takes it back when the commit never comes, since a function held
+          with Defer is then dropped without a word (ADR 0139, amended 2026-10-14).
+        methods:
+          - doc: |-
+              OnAbort holds fn until the work of the scope ctx carries for this
+              transactor is undone, and reports true.
+
+              The work is undone when the scope's savepoint rolls back, or when any
+              scope around it does, the root included: the root's unit of work
+              returned an error or panicked, its commit was refused — a poisoned
+              transaction — or the COMMIT itself failed, which [CommitFailed] reports
+              as a unit of work that had no effect. A savepoint that is released
+              hands what it held to the scope around it, which decides in turn; a
+              commit that stands drops every function still held, unrun.
+
+              The held functions run once, newest first, on the goroutine that ends
+              the scope, after its ROLLBACK or ROLLBACK TO SAVEPOINT and before that
+              scope's Transact returns — or before its panic continues. Each is
+              handed ctx without its cancellation or deadline: a function that
+              cleans up after a rollback must not die of the cancellation that
+              caused it. It must not panic, and it must not open a transaction on
+              ctx, which is over.
+
+              For a function held with OnAbort and another with Defer under the same
+              scope, exactly one of the two runs, unless a function held with Defer
+              before it panics.
+
+              OnAbort reports false and holds nothing when ctx carries no open
+              transaction of this transactor. There is nothing to undo, so fn is the
+              caller's again. A nil fn holds nothing and gets the same answer.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: fn
+                type: func(ctx context.Context)
+            name: OnAbort
+            out:
+              - name: held
+                type: bool
+        name: Aborter
+      - doc: |-
           Checker reports whether the database is reachable. Implementations MUST be
           safe for concurrent use.
         methods:
@@ -1221,13 +1269,17 @@ packages:
 
       # Joining a transaction, and holding what waits for its commit
 
-      The manager is also a core/data/sql Joiner and a Deferrer (ADR 0139). Join answers
+      The manager is also a core/data/sql Joiner, Deferrer and Aborter (ADR 0139). Join answers
       the executor of the innermost scope of the transaction a context carries for
       THIS manager — a retired one, which refuses, when that scope has returned,
       and never the pool in its place — or the pool when the context carries none.
       Defer holds a function until that transaction commits; each held function
       carries the id of the scope that held it, a failed savepoint drops what was
       held at or above its own id, and the root runs what is left after its COMMIT.
+      OnAbort is the complement: a failed savepoint runs, newest first, what was
+      held for an abort at or above its own id once its ROLLBACK TO SAVEPOINT ran,
+      a root that does not commit runs what is left after its ROLLBACK — a panic
+      included —, and a root that commits drops it.
 
       # SQLite's migrations
 
@@ -1634,11 +1686,12 @@ packages:
 
       # Joining the caller's transaction, and waiting for its commit
 
-      The transactor [NewTransactor] returns has two more capabilities, each an
+      The transactor [NewTransactor] returns has three more capabilities, each an
       interface of its own beside [Transactor], found by type assertion (ADR 0139):
 
-      	ex, inTx := tm.(sql.Joiner).Join(ctx)       // where a statement under ctx runs
-      	held := tm.(sql.Deferrer).Defer(ctx, notify) // notify runs once ctx's transaction commits
+      	ex, inTx := tm.(sql.Joiner).Join(ctx)          // where a statement under ctx runs
+      	held := tm.(sql.Deferrer).Defer(ctx, notify)    // notify runs once ctx's transaction commits
+      	held = tm.(sql.Aborter).OnAbort(ctx, takeBack) // takeBack runs once ctx's work is undone
 
       [Joiner] answers the executor of the transaction ctx carries — so a
       repository called inside its caller's transaction reads what that
@@ -1648,7 +1701,12 @@ packages:
       transaction commits: a rollback drops it, and so does the rollback of the
       savepoint it was held in. It is how a message, a mail or a store's write
       hook waits for the work it announces to be committed. The SDK's document
-      store over SQL is built on both.
+      store over SQL is built on both. [Aborter] is the complement of [Deferrer]:
+      it holds a function until that work is undone — the savepoint it was held
+      in rolls back, or the transaction does not commit — and runs it then, on a
+      context the rollback's cancellation does not reach; a commit drops it. It is
+      how something announced before the commit is taken back when the commit
+      never comes.
 
       # Migrations
 
@@ -1765,6 +1823,14 @@ packages:
               drops it with a rollback. Discover it by type assertion.
             name: Deferrer
             target: coresql.Deferrer
+      - alias:
+          - doc: |-
+              Aborter is the public alias for the ADR 0039 sibling of [Transactor] that
+              holds a function until the work a context carries is undone — its
+              savepoint or its transaction rolled back — and drops it with a commit: the
+              complement of [Deferrer]. Discover it by type assertion.
+            name: Aborter
+            target: coresql.Aborter
       - alias:
           - doc: |-
               TxOptions is the public alias for one transaction's isolation and

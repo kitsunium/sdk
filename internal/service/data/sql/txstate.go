@@ -1,6 +1,7 @@
 package sql
 
 import (
+	"context"
 	"slices"
 	"sync"
 
@@ -14,6 +15,19 @@ import (
 type heldFn struct {
 	// fn runs after the commit.
 	fn func()
+	// scope is the id of the scope ctx named when fn was held.
+	scope uint64
+}
+
+// abortFn is one function held until the work of its scope is undone, tagged
+// with that scope and handed the context it was held under, detached.
+type abortFn struct {
+	// ctx is the context OnAbort was given, without its ending: a function
+	// that cleans up after a rollback must not die of the cancellation that
+	// caused it.
+	ctx context.Context
+	// fn runs after the rollback.
+	fn func(ctx context.Context)
 	// scope is the id of the scope ctx named when fn was held.
 	scope uint64
 }
@@ -42,6 +56,10 @@ type txState struct {
 	// held are the functions waiting for the commit, in the order they were
 	// held (the Deferrer sibling, ADR 0139).
 	held []heldFn
+	// aborted are the functions waiting for the work of their scope to be
+	// undone, in the order they were held (the Aborter sibling, ADR 0139 as
+	// amended on 2026-10-14).
+	aborted []abortFn
 	// counter numbers savepoints and NEVER resets inside one transaction, so
 	// a name is never reused — see savepointName for why reuse is a trap.
 	counter uint64
@@ -102,33 +120,79 @@ func (s *txState) hold(scope uint64, fn func()) bool {
 	return true
 }
 
-// dropFrom drops every function held in the scope a failed savepoint opened,
-// or in a scope opened inside it.
+// holdAbort keeps fn until the work of scope is undone, with ctx detached,
+// and reports whether the transaction is still open to take it.
+func (s *txState) holdAbort(ctx context.Context, scope uint64, fn func(ctx context.Context)) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	//: a settled transaction has nothing left to undo.
+	if s.ended {
+		//: the caller keeps fn.
+		return false
+	}
+	//: a nil fn holds nothing, and the answer stays the same.
+	if fn != nil {
+		s.aborted = append(s.aborted, abortFn{ctx: context.WithoutCancel(ctx), fn: fn, scope: scope})
+	}
+	//: held until the work is undone, or dropped by a commit.
+	return true
+}
+
+// dropFrom drops every function held for the commit in the scope a failed
+// savepoint opened, or in a scope opened inside it, and hands back the
+// functions those scopes held for an abort, to run once the savepoint has
+// rolled back.
 //
 // Scopes are a stack and their ids grow with every savepoint, so while the
 // scope numbered from is unwinding, everything held with an id at or above it
 // was held inside it. A savepoint that is released drops nothing: what it held
 // stays, and now belongs to the scope around it.
-func (s *txState) dropFrom(from uint64) {
+func (s *txState) dropFrom(from uint64) []abortFn {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	inside := func(scope uint64) bool { return scope >= from }
 	//: what the failed scope held goes with its work.
-	s.held = slices.DeleteFunc(s.held, func(h heldFn) bool { return h.scope >= from })
+	s.held = slices.DeleteFunc(s.held, func(h heldFn) bool { return inside(h.scope) })
+	var undone []abortFn
+	kept := s.aborted[:0]
+	//: what it held for an abort is due now, and leaves the transaction.
+	for _, held := range s.aborted {
+		//: held inside the failed scope.
+		if inside(held.scope) {
+			undone = append(undone, held)
+			continue
+		}
+		kept = append(kept, held)
+	}
+	clear(s.aborted[len(kept):])
+	s.aborted = kept
+	//: in the order they were held; runAborted reverses it.
+	return undone
 }
 
-// drain closes the transaction to Defer and hands back what was held: to run
-// when committed is true, and dropped otherwise.
-func (s *txState) drain(committed bool) []heldFn {
+// drain closes the transaction to Defer and OnAbort and hands back what is
+// due: the functions held for the commit when committed is true, the ones
+// held for an abort otherwise. The other list is dropped.
+func (s *txState) drain(committed bool) (held []heldFn, aborted []abortFn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ended = true
-	held := s.held
-	s.held = nil
-	//: a rollback drops every held function.
+	held, aborted = s.held, s.aborted
+	s.held, s.aborted = nil, nil
+	//: a rollback drops every function held for the commit.
 	if !committed {
-		//: nothing to run.
-		return nil
+		//: what was held for an abort is due.
+		return nil, aborted
 	}
-	//: in the order they were held.
-	return held
+	//: in the order they were held; a commit drops what waited for an abort.
+	return held, nil
+}
+
+// runAborted runs the functions held for an abort, newest first — the order
+// in which work is undone —, each on its own detached context.
+func runAborted(aborted []abortFn) {
+	//: newest first.
+	for _, held := range slices.Backward(aborted) {
+		held.fn(held.ctx)
+	}
 }

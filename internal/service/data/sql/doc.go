@@ -93,13 +93,17 @@
 //
 // # Joining a transaction, and holding what waits for its commit
 //
-// The manager is also a core/data/sql Joiner and a Deferrer (ADR 0139). Join answers
+// The manager is also a core/data/sql Joiner, Deferrer and Aborter (ADR 0139). Join answers
 // the executor of the innermost scope of the transaction a context carries for
 // THIS manager — a retired one, which refuses, when that scope has returned,
 // and never the pool in its place — or the pool when the context carries none.
 // Defer holds a function until that transaction commits; each held function
 // carries the id of the scope that held it, a failed savepoint drops what was
 // held at or above its own id, and the root runs what is left after its COMMIT.
+// OnAbort is the complement: a failed savepoint runs, newest first, what was
+// held for an abort at or above its own id once its ROLLBACK TO SAVEPOINT ran,
+// a root that does not commit runs what is left after its ROLLBACK — a panic
+// included —, and a root that commits drops it.
 //
 // # SQLite's migrations
 //
