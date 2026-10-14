@@ -14,18 +14,17 @@ GitHub-side configuration for the SDK repo: the workflows — the SDK lanes, the
 | `workflows/sdk-release.yml`     | Tags a release after a green `SDK CI (Bazel)` run on `main` |
 | `workflows/release-size.yml`    | The size a pull request would publish, asked before it merges |
 | `workflows/vuln-scan.yml`       | Daily govulncheck over every module |
-| `workflows/e2e-cross.yml`       | Runtime tests on Linux (unprivileged, and as root under systemd and OpenRC), macOS, Windows, the three BSDs, illumos and Solaris |
-| `workflows/e2e-vm.yml`          | Manual runs on the lab's three Linux VMs, for the distros' own kernels (ADR 0177) |
+| `workflows/e2e-cross.yml`       | Runtime tests on Linux (unprivileged, as root under systemd and OpenRC, and on the Debian, Fedora and Alpine kernels in QEMU/KVM guests), macOS, Windows, the three BSDs, illumos and Solaris |
 | `workflows/docs-deploy.yml`     | Builds and deploys the versioned docs portal |
 | `workflows/bazel-bench.yml`     | Kernel benchmarks, on demand, weekly or on a `run-bench` label |
 | `dependabot.yml`                | Weekly `github-actions` ecosystem updates, `chore:` commit prefix, `dependencies` label |
 
 ## Conventions
 
-- `ubuntu-latest` runners, except where the platform is the point (`e2e-cross.yml`'s macOS and Windows cells — its BSDs, illumos and Solaris run in VMs on `ubuntu-latest` — and `e2e-vm.yml`'s `kitsunium-runner` scale set, the one workflow left on the lab); action references SHA-pinned with a trailing `# vX` version comment, except `kodflow/post-commit@main`, unpinned on purpose.
+- `ubuntu-latest` runners, except where the platform is the point (`e2e-cross.yml`'s macOS and Windows cells — its BSDs, illumos, Solaris and distro-kernel legs run in VMs on `ubuntu-latest`); no workflow uses a self-hosted runner); action references SHA-pinned with a trailing `# vX` version comment, except `kodflow/post-commit@main`, unpinned on purpose.
 - `permissions: contents: read` at the workflow root unless a step needs more; a grant one job needs is made at that job, never at the root — `bazel-ci.yml`'s `lint-ktn` job alone holds `id-token: write`, for ktn-linter's OIDC licence check — never the `bazel` job, whose entitlement suites read the variable that grant exports.
-- Concurrency group `${{ github.workflow }}-${{ github.ref }}` with `cancel-in-progress: true` so rapid re-pushes do not corrupt Bazel caches — except where a run must never be cut short: `sdk-release.yml` (a tag push in flight), `docs-deploy.yml` and `e2e-vm.yml` (one shared lab) do not cancel.
-- Authenticate via `GITHUB_TOKEN`, the runner's OIDC token where a third party verifies the run itself (`kodflow/ktn/setup`, ktn-linter's licence), or a repository secret where neither reaches (the lab's secrets in `e2e-vm.yml`); never inline secrets.
+- Concurrency group `${{ github.workflow }}-${{ github.ref }}` with `cancel-in-progress: true` so rapid re-pushes do not corrupt Bazel caches — except where a run must never be cut short: `sdk-release.yml` (a tag push in flight), and `docs-deploy.yml` do not cancel.
+- Authenticate via `GITHUB_TOKEN`, the runner's OIDC token where a third party verifies the run itself (`kodflow/ktn/setup`, ktn-linter's licence), or a repository secret where neither reaches; never inline secrets.
 
 ## Do NOT
 

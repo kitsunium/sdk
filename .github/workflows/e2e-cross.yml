@@ -1,6 +1,6 @@
-name: Cross-platform runtime tests (real kernels, no lab)
+name: Cross-platform runtime tests (real kernels)
 
-# ADR 0018 runtime bar WITHOUT the Proxmox lab. Every platform-sensitive proc
+# ADR 0018 runtime bar, on GitHub-hosted runners only (ADR 0177). Every platform-sensitive proc
 # package's unit tests + the e2e conformance binary run on the REAL kernel of
 # each target OS, driven by `go test` — the uniform cross-platform driver,
 # because Bazel cannot host the BSDs (bazelisk #150 refuses freebsd; bazel
@@ -215,13 +215,12 @@ jobs:
           set -uo pipefail
           cd e2e && go run .
 
-  # ── Linux with a REAL init: systemd and OpenRC, as root, cgroup v2 delegated ──
-  # Issue #118 / ADR 0177. e2e-vm.yml booted Debian and Fedora (systemd) and
-  # Alpine (OpenRC) on the lab's Proxmox to reach what the unprivileged `native`
-  # leg above cannot: root, a delegated cgroup v2 subtree (cgroup.Available is an
-  # honest write probe, so `native` reports NotSupported for the cgroup rows),
-  # a real systemd or OpenRC as PID 1 (the reaper and sd_notify rows), and the
-  # distro's userland (glibc, musl). Hosted runners give all of it:
+  # ── Linux with a REAL init, and a real distro kernel: root, cgroup v2 delegated ──
+  # Issue #118 / ADR 0177. The unprivileged `native` leg above cannot reach root,
+  # a delegated cgroup v2 subtree (cgroup.Available is an honest write probe, so
+  # `native` reports NotSupported for the cgroup rows), a real systemd or OpenRC
+  # as PID 1 (the reaper and sd_notify rows), nor the distro's userland (glibc,
+  # musl) and kernel. Hosted runners give all of it, in two shapes:
   #
   #   - ubuntu-systemd : the runner itself. Its PID 1 is systemd on cgroup v2;
   #                      `systemd-run -p Delegate=yes` hands the suites a
@@ -230,14 +229,17 @@ jobs:
   #                      the distro's own systemd.
   #   - alpine-openrc  : a privileged container whose PID 1 is busybox init
   #                      running OpenRC (sysinit, boot, default), musl userland.
-  #
-  # What this does NOT give: the distro's own KERNEL. A container shares the
-  # runner's kernel; the lab VMs ran each distro's. That residue is what
-  # e2e-vm.yml keeps (ADR 0177).
+  #     (a container shares the runner's kernel; the three legs below do not)
+  #   - debian-kernel, fedora-kernel, alpine-kernel : the distro's official
+  #                      cloud image booted under QEMU/KVM (/dev/kvm is exposed
+  #                      on ubuntu-latest), digest pinned, configured by
+  #                      cloud-init, the binaries run over ssh as root. The
+  #                      guest runs the distro's OWN kernel with its own init
+  #                      as PID 1 from power-on.
   linux-init:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -246,6 +248,35 @@ jobs:
           - { name: debian-systemd, kind: systemd, image: "debian:trixie" }
           - { name: fedora-systemd, kind: systemd, image: "fedora:42" }
           - { name: alpine-openrc, kind: openrc, image: "alpine:3.22" }
+          # Images are pinned by URL AND digest: a republished file fails the
+          # download step instead of changing what is tested. Debian and
+          # Alpine keep a release's images in place; Fedora's are read from
+          # its archive tree, which does not move. Alpine's sshd refuses root,
+          # so that guest is entered as its cloud-init user and escalated by doas.
+          - name: debian-kernel
+            kind: vm
+            init: systemd
+            user: root
+            pre: ""
+            url: https://cloud.debian.org/images/cloud/trixie/20261001-2618/debian-13-genericcloud-amd64-20261001-2618.qcow2
+            algo: sha512
+            sum: f46f0671a6e5bdec5291ab8972bae2f10e5408c2f64a74078f11efc2f06a436a9d0313ed50e0472542eeabf780e9f7c792ac0a314c6c20507fcd9fd81b468c3d
+          - name: fedora-kernel
+            kind: vm
+            init: systemd
+            user: root
+            pre: ""
+            url: https://dl.fedoraproject.org/pub/archive/fedora/linux/releases/42/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-42-1.1.x86_64.qcow2
+            algo: sha256
+            sum: e401a4db2e5e04d1967b6729774faa96da629bcf3ba90b67d8d9cce9906bec0f
+          - name: alpine-kernel
+            kind: vm
+            init: openrc
+            user: alpine
+            pre: doas
+            url: https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/cloud/alpine-3.22.6-x86_64-bios-cloudinit-r0.qcow2
+            algo: sha512
+            sum: 864ad8b9e3d14272d592f380c814c647bb6666fcd5b73c86dc21528da71306a93f2ce29b89ea8e6099b76786bb7835f0e27ca1824ec7f4b0b243160a13ba262d
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -324,7 +355,7 @@ jobs:
             sh bins/run.sh
 
       - name: Build the ${{ matrix.name }} image
-        if: matrix.kind != 'host'
+        if: matrix.kind == 'systemd' || matrix.kind == 'openrc'
         env:
           IMAGE: ${{ matrix.image }}
         run: |
@@ -352,7 +383,7 @@ jobs:
           DOCKERFILE
 
       - name: Boot ${{ matrix.name }} with its own init as PID 1
-        if: matrix.kind != 'host'
+        if: matrix.kind == 'systemd' || matrix.kind == 'openrc'
         env:
           KIND: ${{ matrix.kind }}
         run: |
@@ -372,7 +403,7 @@ jobs:
           echo "::error::init never came up"; docker logs init | tail -50; exit 1
 
       - name: Run inside ${{ matrix.name }}
-        if: matrix.kind != 'host'
+        if: matrix.kind == 'systemd' || matrix.kind == 'openrc'
         env:
           KIND: ${{ matrix.kind }}
         run: |
@@ -394,8 +425,102 @@ jobs:
               exec sh /work/bins/run.sh'
           fi
 
+      # ── The distro's own kernel: its cloud image under QEMU/KVM ───────────────
+      - name: Fetch the ${{ matrix.name }} image and verify its digest
+        if: matrix.kind == 'vm'
+        env:
+          URL: ${{ matrix.url }}
+          ALGO: ${{ matrix.algo }}
+          SUM: ${{ matrix.sum }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils
+          mkdir -p vm
+          curl -fsSL --retry 5 --retry-all-errors -o vm/base.qcow2 "$URL"
+          echo "$SUM  vm/base.qcow2" | "${ALGO}sum" -c -
+          ls -l /dev/kvm
+          sudo chmod 666 /dev/kvm
+
+      - name: Boot ${{ matrix.name }} (cloud-init seed, ssh key)
+        if: matrix.kind == 'vm'
+        env:
+          GUEST_USER: ${{ matrix.user }}
+        run: |
+          set -euo pipefail
+          cd vm
+          ssh-keygen -q -t ed25519 -N '' -f key
+          # The key goes to the distro's default user and to root (disable_root
+          # false: Debian's default prefixes root's key with a refusal); no password.
+          {
+            echo '#cloud-config'
+            echo 'disable_root: false'
+            echo 'ssh_pwauth: false'
+            echo 'ssh_authorized_keys:'
+            echo "  - $(cat key.pub)"
+            echo 'users:'
+            echo '  - default'
+            echo '  - name: root'
+            echo '    ssh_authorized_keys:'
+            echo "      - $(cat key.pub)"
+          } > user-data
+          printf 'instance-id: sdk-e2e\nlocal-hostname: sdk-e2e\n' > meta-data
+          cloud-localds seed.iso user-data meta-data
+          qemu-img create -q -f qcow2 -F qcow2 -b base.qcow2 disk.qcow2
+          # Room for the checkout: cloud-init grows the root partition into it.
+          qemu-img resize -q disk.qcow2 8G
+          qemu-system-x86_64 -enable-kvm -cpu host -smp 2 -m 3072 \
+            -display none -serial file:console.log -daemonize -pidfile qemu.pid \
+            -drive file=disk.qcow2,if=virtio -drive file=seed.iso,if=virtio,format=raw,readonly=on \
+            -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=n0
+          for _ in $(seq 1 60); do
+            if ssh -i key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                 -o ConnectTimeout=5 "$GUEST_USER@127.0.0.1" true 2>/dev/null; then
+              echo "guest is up"; exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::guest never accepted ssh"
+          ssh -v -i key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=5 "$GUEST_USER@127.0.0.1" true 2>&1 | tail -25 || true
+          tail -60 console.log; exit 1
+
+      - name: Run inside ${{ matrix.name }} on the guest's own kernel
+        if: matrix.kind == 'vm'
+        env:
+          INIT: ${{ matrix.init }}
+          GUEST_USER: ${{ matrix.user }}
+          PRE: ${{ matrix.pre }}
+        run: |
+          set -uo pipefail
+          cd vm
+          s="ssh -i key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $GUEST_USER@127.0.0.1"
+          echo "runner kernel: $(uname -r)"
+          echo "guest kernel : $($s uname -r)"
+          W="$($s pwd)/work"
+          # The whole checkout, as the containers mount it: some suites audit the
+          # sources above the working directory (they look for go.work).
+          tar -C .. --exclude=./.git --exclude=./vm -cf - . | $s "rm -rf '$W' && mkdir '$W' && tar -C '$W' -xf -"
+          if [ "$INIT" = systemd ]; then
+            $s $PRE systemd-run --quiet --wait --pipe --collect -p Delegate=yes -p WorkingDirectory="$W" sh bins/run.sh
+          else
+            # OpenRC is PID 1 here and root's session sits in the cgroup root,
+            # which may hold processes and enable controllers. Make sure the
+            # unified hierarchy is mounted and the controllers are on.
+            $s $PRE sh -s <<GUEST
+          rc-service cgroups start >/dev/null 2>&1 || true
+          grep -q " /sys/fs/cgroup cgroup2 " /proc/mounts || mount -t cgroup2 none /sys/fs/cgroup
+          echo "+cpu +memory +pids +io" > /sys/fs/cgroup/cgroup.subtree_control || true
+          cd '$W' && sh bins/run.sh
+          GUEST
+          fi
+
+      - name: Guest console (on failure)
+        if: ${{ failure() && matrix.kind == 'vm' }}
+        run: tail -120 vm/console.log || true
+
       - name: Container log (on failure)
-        if: ${{ failure() && matrix.kind != 'host' }}
+        if: ${{ failure() && (matrix.kind == 'systemd' || matrix.kind == 'openrc') }}
         run: docker logs init 2>&1 | tail -80 || true
 
   # ── BSD via cross-platform-actions: cross-compile on host, run in the VM ────

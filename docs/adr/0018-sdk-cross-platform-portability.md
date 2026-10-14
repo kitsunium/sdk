@@ -64,15 +64,14 @@ package **always compiles**; only behaviour degrades.
   non-zero on any failing cell) and its CI mirror the `cross-build` job in `.github/workflows/bazel-ci.yml`
   (a GitHub-hosted `GOOS/GOARCH` matrix, no infra dependency, `CGO_ENABLED=0`). A
   new platform-specific call that drops a package fails the matrix before merge.
-- **Runtime bar** is validated on **real OS kernels** — since ADR 0177 by
-  `.github/workflows/e2e-cross.yml` on GitHub's runners (the text below describes
-  the lab mechanism of `e2e-vm.yml`, which now keeps only the three Linux distro
-  VMs). Bazel remains the canonical Linux gate (ADR 0004); the BSDs and
-  Windows have no Bazel, so the platform-selected test suites run via
-  `go test -c` (cross-compiled standalone binaries, no Go on the target) → SCP →
-  SSH-execute on a persistent Proxmox VM (kodflow/labs infra: `[self-hosted, proxmox]`
-  runners, ZFS-snapshot rollback per run). Only platform-sensitive `proc` packages
-  run here; pure-Go packages behave identically everywhere and stay on the Linux lane.
+- **Runtime bar** is validated on **real OS kernels** by
+  `.github/workflows/e2e-cross.yml` on GitHub's hosted runners (ADR 0177). Bazel
+  remains the canonical Linux gate (ADR 0004); the BSDs and Windows have no Bazel,
+  so the platform-selected test suites run via `go test -c` (cross-compiled
+  standalone binaries, no Go on the target) executed on the real kernel — natively
+  on a hosted runner, or inside a VM booted on one. Only platform-sensitive `proc`
+  packages run here; pure-Go packages behave identically everywhere and stay on
+  the Linux lane.
 
 ### (c) The OpenBSD `RLIMIT_AS` precedent — the worked example
 
@@ -96,7 +95,7 @@ Today every package clears the build bar and returns a uniform `UnsupportedPlatf
 (or `UnknownResource`) where it has no native mechanic. The gaps are resource
 control (`cgroup` / `rlimit`) and process reaping (`reaper`) off Linux. The
 adequate native mechanics, researched, are upgraded **incrementally** — each lands
-behind the existing port and is validated on the real kernel by `e2e-vm`.
+behind the existing port and is validated on the real kernel by `e2e-cross`.
 
 ### Per-domain portability verdict
 
@@ -148,16 +147,13 @@ behind one Go API — a model for the `Group` port's native backends, not a depe
   `UnsupportedPlatform` / `UnknownResource` everywhere a native mechanic is
   missing — so downstream code branches on a typed error, never on a build tag.
 - **Positive.** Native backends land **incrementally** behind the unchanged port;
-  each is validated on the real kernel by `e2e-vm`, so a backend is never declared
+  each is validated on the real kernel by `e2e-cross`, so a backend is never declared
   done on a green cross-compile alone.
-- **Negative / accepted.** The runtime-bar workflow (`e2e-vm.yml`) is
-  `workflow_dispatch`-only until the org's self-hosted runners are registered and
-  the Proxmox secrets (`CI_RUNNER_API_TOKEN_ID/SECRET`, `PROXMOX_NODE`,
-  `ADMIN_USERNAME`) are wired. A missing-infra org must not hard-fail every PR; it
-  is promoted to `pull_request` once the labs runners are live.
+- **Negative / accepted.** The runtime bar runs on every push, on hosted runners
+  only; it first ran on a manual lab workflow, retired by ADR 0177.
 - **Negative / accepted.** Hand-defined ABI constants for the native backends must
   be kept in sync with each kernel's headers by hand (the `x/sys` ban's cost). The
-  citations in source are the mitigation; the e2e-vm runtime bar is the safety net.
+  citations in source are the mitigation; the e2e-cross runtime bar is the safety net.
 
 ## Why not …
 
@@ -171,13 +167,13 @@ behind one Go API — a model for the `Group` port's native backends, not a depe
   the cross-compile green. Rejected as a general rule.
 - **Skip the runtime bar; trust the cross-compile.** A green `go build` proves the
   symbols resolve, not that the syscall behaves. The `proc` primitives are exactly
-  the class where behaviour diverges per kernel. Rejected — hence `e2e-vm`.
+  the class where behaviour diverges per kernel. Rejected — hence `e2e-cross`.
 
 ## References
 
 - ADR 0016 (process-supervision domain), ADR 0004 (Bazel / Linux CI), ADR 0005 (`UnsupportedPlatform` sentinel)
 - `scripts/cross-platform-audit.sh` — local build-bar matrix
 - the `cross-build` job in `.github/workflows/bazel-ci.yml` — build-bar CI gate
-- `.github/workflows/e2e-vm.yml` — runtime-bar real-kernel gate
+- `.github/workflows/e2e-cross.yml` — runtime-bar real-kernel gate
 - FreeBSD `rctl(8)` / RACCT/RCTL; `procctl(2)` `PROC_REAP_ACQUIRE`
 - Windows Job Objects — `SetInformationJobObject`, `JOBOBJECT_EXTENDED_LIMIT_INFORMATION`, `JOBOBJECT_CPU_RATE_CONTROL_INFORMATION`
