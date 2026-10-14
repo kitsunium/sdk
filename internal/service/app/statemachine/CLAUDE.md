@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T00:00:00Z -->
+<!-- updated: 2026-10-14T17:20:00Z -->
 # internal/service/app/statemachine/
 
 ## Purpose
@@ -58,13 +58,17 @@ declares none and raises the core's.
   writer still waits for the lock. `land` is keyed by the flight's pointer, so
   a late landing never ends a later holder's flight.
 - **The journal is ordered per key, not under `book.mu`.** `step`,
-  `reconcile` and `forget` take the key's gate (`book.gates`, `journalGates` plain
-  `sync.Mutex`es picked by the key's hash, which no context abandons) BEFORE `book.mu`, change the
-  record under `book.mu`, release it, and call the journal holding the gate
-  alone. Two writes of one key reach the journal in the book's order; a slow
-  journal holds back one entity; a journal may read the census
-  (`TestAJournalWriteHoldsOnlyItsOwnKey`, `TestAJournalMayReadTheMachine`).
-  Without a journal no gate is taken.
+  `reconcile` and `forget` take the key's gate (`book.lockGate`: that key's
+  own lock in a `keyLocks` table of the book's, waited for on a context that
+  never ends, forgotten when nobody holds or waits for it) BEFORE `book.mu`, change the record under
+  `book.mu`, release it, and call the journal holding the gate alone. Two
+  writes of one key reach the journal in the book's order; a slow journal
+  holds back one entity and no other; a journal may read the census
+  (`TestAJournalWriteHoldsOnlyItsOwnKey`, `TestAJournalMayReadTheMachine`,
+  `TestNoTwoKeysShareAJournalGate`). The gates were once 256 mutexes picked by
+  the key's hash: two keys shared one a time in 256, and the test above
+  failed that often (#304). Without a journal the gate is still taken, and
+  costs one uncontended lock.
 - **Gone is the store's word, not a code.** `commit` sets `landing.gone` only
   when the store's `Replace` REFUSED the write; the loop then forgets the
   entity as `Deleted` would. A hook's error carrying `ENTITY_MISSING` is a
@@ -76,6 +80,14 @@ declares none and raises the core's.
 - **The dirty set is the truth, the wake token a hint.** A token left by a
   write the previous run already served is ignored (`agenda.pending`), which is
   what keeps an idle loop from running once for nothing.
+- **A wait reads the clock again once armed.** The `clock.Timed` port arms a
+  timer for a duration, so `arm` reads the instant, then arms: a clock that
+  passes the target in between — a test's `Set`, a descheduled goroutine —
+  would make the timer count the duration again from there. `arm` reads the
+  clock once the timer is armed and treats a target that came as due
+  (`TestATargetTheClockPassesWhileArmingIsDueAtOnce`; #304, where
+  `TestAWriteThatBringsADeadlineForwardWakesTheLoop` slept through its
+  deadline).
 - **One transition per entity per run.** `take` hands out each key once; a key
   fired in a run is looked at again at the NEXT run, so a cycle of guards turns
   once per `MinGap` instead of spinning.

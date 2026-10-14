@@ -3,7 +3,6 @@ package statemachine
 import (
 	"cmp"
 	"context"
-	"hash/maphash"
 	"maps"
 	"slices"
 	"sync"
@@ -12,12 +11,6 @@ import (
 	corestm "github.com/kitsunium/sdk/internal/core/app/statemachine"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
-
-// journalGates is how many gates order the journal's writes. A key always
-// takes the gate its hash names, so two writes of one key are ordered; two
-// keys share a gate one time in journalGates, and then only wait for each
-// other's journal call.
-const journalGates uint64 = 256
 
 // What holds an entity during a flight.
 const (
@@ -68,8 +61,6 @@ type record[S comparable] struct {
 type book[S comparable] struct {
 	// journal persists the records; nil keeps them in memory only.
 	journal corestm.Journal[S]
-	// seed hashes a key to its gate.
-	seed maphash.Seed
 	// records holds one record per entity the machine knows.
 	records map[string]*record[S]
 	// census counts entities per state; every declared state is present.
@@ -82,9 +73,10 @@ type book[S comparable] struct {
 	flights map[string]*flight
 	// limit is how many steps a record keeps.
 	limit int
+	// gates orders the journal writes of one key: each key its own gate,
+	// forgotten once nobody holds it or waits for it; see lockGate.
+	gates *keyLocks
 	mu    sync.Mutex
-	// gates order the journal writes of one key; see journalGates.
-	gates [journalGates]sync.Mutex
 }
 
 // newBook returns an empty book counting every declared state at zero.
@@ -96,7 +88,7 @@ func newBook[S comparable](journal corestm.Journal[S], census map[S]int, limit i
 	}
 	//: ready for the opening reconciliation.
 	return &book[S]{
-		journal: journal, seed: maphash.MakeSeed(), records: make(map[string]*record[S]), census: census,
+		journal: journal, records: make(map[string]*record[S]), census: census, gates: newKeyLocks(),
 		declared: declared, flights: make(map[string]*flight), limit: limit,
 	}
 }
@@ -188,9 +180,7 @@ func (b *book[S]) touch(key string) bool {
 // for the caller to report once it holds no lock. Nothing is recorded when the
 // entity was deleted during the flight.
 func (b *book[S]) step(ctx context.Context, key string, s corestm.StepValue[S], f *flight) error {
-	gate := b.gate(key)
-	gate.Lock()
-	defer gate.Unlock()
+	defer b.lockGate(key)()
 	rec, recorded := b.stepped(key, s, f)
 	//: the entity is gone: nothing recorded, nothing to write.
 	if !recorded {
@@ -238,9 +228,7 @@ func (b *book[S]) stepped(key string, s corestm.StepValue[S], f *flight) (corest
 // deleted since the read is left forgotten. It reports whether the state
 // changed, and the journal's failure to write it, for the caller to report.
 func (b *book[S]) reconcile(ctx context.Context, key string, state S, now time.Time, f *flight) (bool, error) {
-	gate := b.gate(key)
-	gate.Lock()
-	defer gate.Unlock()
+	defer b.lockGate(key)()
 	rec, changed := b.moved(key, state, now, f)
 	//: nothing moved, or the entity is gone: nothing to write.
 	if !changed {
@@ -285,9 +273,7 @@ func (b *book[S]) moved(key string, state S, now time.Time, f *flight) (corestm.
 // forget drops key's record — the entity was deleted — and tells a flight
 // holding it, so what its holder records next does not bring the record back.
 func (b *book[S]) forget(ctx context.Context, key string) error {
-	gate := b.gate(key)
-	gate.Lock()
-	defer gate.Unlock()
+	defer b.lockGate(key)()
 	known := b.dropped(key)
 	//: an entity the book never met, or already forgot, or memory only.
 	if !known || b.journal == nil {
@@ -319,12 +305,22 @@ func (b *book[S]) dropped(key string) bool {
 	return true
 }
 
-// gate returns the mutex that orders the journal writes of key: taken before
-// mu, held across the journal call, never held while waiting for anything
-// else — so two gates are never held at once.
-func (b *book[S]) gate(key string) *sync.Mutex {
-	//: a key always lands on the same gate.
-	return &b.gates[maphash.String(b.seed, key)%journalGates]
+// lockGate takes the gate that orders the journal writes of key — taken
+// before mu, held across the journal call, never held while waiting for
+// anything else, so two gates are never held at once — and returns the
+// function that releases it. The gate is the key's alone: a table of 256
+// mutexes picked by the key's hash made two keys share one a time in 256 and
+// wait for each other's journal call, which
+// TestAJournalWriteHoldsOnlyItsOwnKey caught (#304).
+func (b *book[S]) lockGate(key string) func() {
+	release, err := b.gates.acquire(context.Background(), key)
+	//: a context that never ends never abandons the wait; kept for the type.
+	if err != nil {
+		//: nothing was taken, so nothing to give back.
+		return func() {}
+	}
+	//: held until the journal call returns.
+	return release
 }
 
 // stateOf returns the state key's record holds.
