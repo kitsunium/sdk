@@ -139,6 +139,23 @@ func (a *App) makeIndexKey(ctx context.Context) ([]byte, error) {
 	return nil, failure(CodePrivacyKey, "INDEX_KEY_MAKE", "kit's index key could not be made", err)
 }
 
+// usesIndexKey reports whether the app makes and reads index-key: it keeps
+// personal data — its subjects' references, its records' in the holds and
+// the journal —, seals what it keeps on disk — its data keys are named by
+// references —, or keeps an indexed store on a database, whose index keys
+// the table files hashed under it (ADR 0004).
+func (a *App) usesIndexKey() bool {
+	if a.keepsPersonalData() || a.privacyKeyStore() != nil {
+		return true
+	}
+	for _, st := range a.placedStores() {
+		if p := a.placementOf(st); p.db != nil && !p.memory && st.indexed() && a.storesOnDatabase(p.db) {
+			return true
+		}
+	}
+	return false
+}
+
 // subjectRef is the reference of a person's identity, as the product
 // stores it.
 func (k *referenceKeys) subjectRef(identity string) string {

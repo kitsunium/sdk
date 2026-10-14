@@ -156,6 +156,13 @@ func (s *StoreService[T]) declareIndexes(svc *Service, opts []indexOption) {
 	}
 }
 
+// indexed reports whether the store files index keys: an index it
+// declares, or kit's subject index (privacy_keys.go) — what a database's
+// table files under kit's index key.
+func (s *StoreService[T]) indexed() bool {
+	return len(s.decls) > 0 || (s.plan().subject != nil && !kitOwn(s.svc))
+}
+
 // specs are the declared indexes as the engine takes them: the document
 // store's IndexSpec, which the SQL engine will take too.
 func (s *StoreService[T]) specs() []docstore.IndexSpec[T] {
