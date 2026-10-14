@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-13T20:00:00Z -->
+<!-- updated: 2026-10-14T16:40:00Z -->
 # internal/service/app/consensus/raft/
 
 ## Purpose
@@ -14,6 +14,13 @@ The deterministic simulator (`sim_internal_test.go`), the constructed checks
 and `TestMutationsAreCaught` (one mutation per cited bug, behind the
 unexported `Config.mut`), and the linearizability checker with its negative
 control (`lincheck_internal_test.go`).
+
+The suites cost ~300 CPU-seconds under race and coverage against a 60 s cap
+per target, so `raft_test` has 26 shards and Bazel deals them TOP-LEVEL tests:
+a seed suite is split into top-level parts (`seedPart`) and a loop of seeds
+runs them as parallel subtests (`eachSeed`) — never fewer seeds (#126, #304).
+A new heavy suite follows the same shape; measure every shard side by side
+under coverage before touching `shard_count`.
 
 ## Do NOT
 

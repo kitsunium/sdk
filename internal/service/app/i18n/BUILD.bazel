@@ -58,6 +58,10 @@ go_test(
         "store_external_test.go",
         "tag_external_test.go",
     ],
+    # The category sweep is ~17 CPU-seconds under race and coverage and
+    # overran .bazelrc's 60 s as one top-level test on a loaded runner
+    # (#304); it is four top-level tests (tagQuarter), one per shard.
+    shard_count = 4,
     deps = [
         ":i18n",
         "//internal/core/app/i18n",

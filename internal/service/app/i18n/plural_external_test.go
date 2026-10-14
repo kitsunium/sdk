@@ -231,42 +231,80 @@ func TestEveryRuleOnlyEverReturnsACategoryItDeclares(t *testing.T) {
 	}
 }
 
-func TestEveryDeclaredCategoryIsActuallyReachable(t *testing.T) {
+// The sweep is a million quantities per language, about 17 CPU-seconds for
+// the thirteen under race and coverage: as one top-level test it overran
+// .bazelrc's 60 s on a loaded CI runner (#304, run 38549751367). Bazel shards
+// by top-level test, so it is four of them over quarters of the supported set
+// (tagQuarter), each language its own parallel subtest, and i18n_test has
+// four shards.
+func TestEveryDeclaredCategoryIsActuallyReachableQ1(t *testing.T) {
 	t.Parallel()
+	everyDeclaredCategoryIsActuallyReachable(t, tagQuarter(0))
+}
 
+func TestEveryDeclaredCategoryIsActuallyReachableQ2(t *testing.T) {
+	t.Parallel()
+	everyDeclaredCategoryIsActuallyReachable(t, tagQuarter(1))
+}
+
+func TestEveryDeclaredCategoryIsActuallyReachableQ3(t *testing.T) {
+	t.Parallel()
+	everyDeclaredCategoryIsActuallyReachable(t, tagQuarter(2))
+}
+
+func TestEveryDeclaredCategoryIsActuallyReachableQ4(t *testing.T) {
+	t.Parallel()
+	everyDeclaredCategoryIsActuallyReachable(t, tagQuarter(3))
+}
+
+// tagQuarter is the q-th of four slices (q = 0..3) of SupportedTags, which
+// is sorted: the four together are exactly the supported set, each tag once.
+func tagQuarter(q int) []corei18n.TagValue {
+	tags := svci18n.SupportedTags()
+	return tags[q*len(tags)/4 : (q+1)*len(tags)/4]
+}
+
+func everyDeclaredCategoryIsActuallyReachable(t *testing.T, tags []corei18n.TagValue) {
 	// The other half: a language that DECLARED `few` and never returns it
 	// would force every translator to write a form the renderer can never
 	// show, and the completeness check would be demanding work for nothing.
-	for _, tag := range svci18n.SupportedTags() {
-		rules, ok := svci18n.Rules(tag)
-		if !ok {
-			t.Fatalf("Rules(%q) = false", tag)
-		}
+	for _, tag := range tags {
+		t.Run(tag.String(), func(t *testing.T) {
+			t.Parallel()
+			categoryReachable(t, tag)
+		})
+	}
+}
 
-		seen := map[corei18n.Form]bool{}
-		for n := int64(0); n <= 2_000_000; n++ {
-			seen[rules.Select(corei18n.Int(n))] = true
-			if n == 250 {
-				n = 999_998 // jump to the compact-decimal boundary
-			}
-		}
-		// Decimals are swept too, and they are not decoration: in Polish and
-		// Russian EVERY clause carries "v = 0", so `other` is unreachable for
-		// an integer quantity and exists solely for "1,5 pliku". A sweep of
-		// integers alone reports those two languages as declaring a category
-		// nothing produces — which is how this loop found the fact.
-		for n := 0; n <= 250; n++ {
-			value, decErr := corei18n.Decimal(float64(n)+0.5, 1)
-			if decErr != nil {
-				t.Fatalf("Decimal = %v", decErr)
-			}
-			seen[rules.Select(value)] = true
-		}
+func categoryReachable(t *testing.T, tag corei18n.TagValue) {
+	rules, ok := svci18n.Rules(tag)
+	if !ok {
+		t.Fatalf("Rules(%q) = false", tag)
+	}
 
-		for _, form := range rules.Forms() {
-			if !seen[form] {
-				t.Errorf("%s declares %v and no quantity in the sweep produces it", tag, form)
-			}
+	seen := map[corei18n.Form]bool{}
+	for n := int64(0); n <= 2_000_000; n++ {
+		seen[rules.Select(corei18n.Int(n))] = true
+		if n == 250 {
+			n = 999_998 // jump to the compact-decimal boundary
+		}
+	}
+	// Decimals are swept too, and they are not decoration: in Polish and
+	// Russian EVERY clause carries "v = 0", so `other` is unreachable for
+	// an integer quantity and exists solely for "1,5 pliku". A sweep of
+	// integers alone reports those two languages as declaring a category
+	// nothing produces — which is how this loop found the fact.
+	for n := 0; n <= 250; n++ {
+		value, decErr := corei18n.Decimal(float64(n)+0.5, 1)
+		if decErr != nil {
+			t.Fatalf("Decimal = %v", decErr)
+		}
+		seen[rules.Select(value)] = true
+	}
+
+	for _, form := range rules.Forms() {
+		if !seen[form] {
+			t.Errorf("%s declares %v and no quantity in the sweep produces it", tag, form)
 		}
 	}
 }

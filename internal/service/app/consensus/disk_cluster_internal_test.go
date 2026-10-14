@@ -135,8 +135,18 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 	if tok2.Index <= tok.Index {
 		t.Fatalf("index went back: %d then %d", tok.Index, tok2.Index)
 	}
+	// A cut the restart's replay started may still be between publishing
+	// its snapshot and removing the oldest: the count is waited for, on a
+	// bound, rather than read once (#304). A third snapshot that stays is a
+	// retention that never ran — an install used to leave one.
 	for _, dn := range nodes {
-		if metas := must(dn.dd.Snapshots().List())(t); len(metas) == 0 || len(metas) > 2 {
+		deadline := time.Now().Add(5 * time.Second)
+		metas := must(dn.dd.Snapshots().List())(t)
+		for len(metas) > 2 && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+			metas = must(dn.dd.Snapshots().List())(t)
+		}
+		if len(metas) == 0 || len(metas) > 2 {
 			t.Fatalf("node %d keeps %d snapshots", dn.id, len(metas))
 		}
 		if f, _ := dn.dd.Log().Bounds(); f < 100 {

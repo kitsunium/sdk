@@ -313,11 +313,11 @@ func (w *kvWorld) history() []kvOp {
 // TestLinearizableUnderFaults runs clients reading through ReadIndex, on
 // every node, with partitions, drops and crashes, and checks the history.
 func TestLinearizableUnderFaults(t *testing.T) {
-	for _, seed := range seeds(t, 12) {
+	eachSeed(t, seeds(t, 12), func(t *testing.T, seed uint64) {
 		if err := linearizableRun(seed, 0); err != nil {
 			t.Fatal(err)
 		}
-	}
+	})
 }
 
 // linearizableRun runs one seed of the client workload and checks it.

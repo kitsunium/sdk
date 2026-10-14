@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,28 +27,46 @@ func seeds(t *testing.T, n int) []uint64 {
 	return out
 }
 
-// seedQuarter is the q-th of four equal slices (q = 0..3) of seeds(t, n):
-// the four together are exactly seeds(t, n), each seed once. A suite whose
-// seeds are its strength is split into four top-level tests rather than
-// trimmed, because Bazel shards a target by TOP-LEVEL test (rules_go deals
-// them out by index modulo shard_count), so one test of 60 parallel seeds is
-// one shard's whole CPU while the shards run side by side, and under race
-// and coverage that one shard alone overran .bazelrc's 60 s per target.
-// Under CONSENSUS_SIM_SEED the single seed belongs to the quarter n's slice
-// would have put it in, so it still runs exactly once.
-func seedQuarter(t *testing.T, n, q int) []uint64 {
+// seedPart is the p-th of `parts` equal slices (p = 0..parts-1) of
+// seeds(t, n): the parts together are exactly seeds(t, n), each seed once. A
+// suite whose seeds are its strength is split into top-level tests rather
+// than trimmed, because Bazel shards a target by TOP-LEVEL test (rules_go
+// deals them out by index modulo shard_count), so one test of many seeds is
+// one shard's whole CPU while the shards run side by side, and under race and
+// coverage such a shard overran .bazelrc's 60 s per target: four parts of
+// the 60-seed suites at eight shards still timed out on CI (#304, run
+// 38549751367), so they are twelve parts each at shard_count 26. Under
+// CONSENSUS_SIM_SEED the single seed belongs to the part n's slicing would
+// have put it in, so it still runs exactly once.
+func seedPart(t *testing.T, n, p, parts int) []uint64 {
 	all := seeds(t, n)
 	if len(all) == 1 && n > 1 {
-		if int((all[0]-1)%uint64(n))*4/n != q {
+		i := int((all[0] - 1) % uint64(n))
+		if i < p*n/parts || i >= (p+1)*n/parts {
 			return nil
 		}
 		return all
 	}
-	return all[q*n/4 : (q+1)*n/4]
+	return all[p*n/parts : (p+1)*n/parts]
+}
+
+// eachSeed runs body once per seed, each seed its own parallel subtest: every
+// seed is a simulation with no shared state, so a loop of them run one after
+// another is one thread of a shard's CPU, and a serial thread is what the
+// scheduler starves when the other shards' parallel seeds fill the runner
+// (#304: a shard of serial seeds overran 60 s under coverage where the same
+// CPU spread over threads did not).
+func eachSeed(t *testing.T, seeds []uint64, body func(t *testing.T, seed uint64)) {
+	for _, seed := range seeds {
+		t.Run("seed="+strconv.FormatUint(seed, 10), func(t *testing.T) {
+			t.Parallel()
+			body(t, seed)
+		})
+	}
 }
 
 func TestSimElectsAndReplicates(t *testing.T) {
-	for _, seed := range seeds(t, 20) {
+	eachSeed(t, seeds(t, 20), func(t *testing.T, seed uint64) {
 		s := newSim(simOptions{seed: seed})
 		s.run(s.after(10*time.Second), true)
 		if s.err != nil {
@@ -66,62 +85,67 @@ func TestSimElectsAndReplicates(t *testing.T) {
 				t.Fatalf("seed %d: node %d applied %d of %d", seed, id, got, want)
 			}
 		}
-	}
+	})
 }
 
-// The 60 seeds of the safety suite, in four top-level tests (seedQuarter).
-func TestSimSafetyUnderFaultsQ1(t *testing.T) { simSafetyUnderFaults(t, seedQuarter(t, 60, 0)) }
-func TestSimSafetyUnderFaultsQ2(t *testing.T) { simSafetyUnderFaults(t, seedQuarter(t, 60, 1)) }
-func TestSimSafetyUnderFaultsQ3(t *testing.T) { simSafetyUnderFaults(t, seedQuarter(t, 60, 2)) }
-func TestSimSafetyUnderFaultsQ4(t *testing.T) { simSafetyUnderFaults(t, seedQuarter(t, 60, 3)) }
+// The 60 seeds of the safety suite, in twelve top-level tests (seedPart).
+func TestSimSafetyUnderFaultsP01(t *testing.T) { simSafetyUnderFaults(t, seedPart(t, 60, 0, 12)) }
+func TestSimSafetyUnderFaultsP02(t *testing.T) { simSafetyUnderFaults(t, seedPart(t, 60, 1, 12)) }
+func TestSimSafetyUnderFaultsP03(t *testing.T) { simSafetyUnderFaults(t, seedPart(t, 60, 2, 12)) }
+func TestSimSafetyUnderFaultsP04(t *testing.T) { simSafetyUnderFaults(t, seedPart(t, 60, 3, 12)) }
+func TestSimSafetyUnderFaultsP05(t *testing.T) { simSafetyUnderFaults(t, seedPart(t, 60, 4, 12)) }
+func TestSimSafetyUnderFaultsP06(t *testing.T) { simSafetyUnderFaults(t, seedPart(t, 60, 5, 12)) }
+func TestSimSafetyUnderFaultsP07(t *testing.T) { simSafetyUnderFaults(t, seedPart(t, 60, 6, 12)) }
+func TestSimSafetyUnderFaultsP08(t *testing.T) { simSafetyUnderFaults(t, seedPart(t, 60, 7, 12)) }
+func TestSimSafetyUnderFaultsP09(t *testing.T) { simSafetyUnderFaults(t, seedPart(t, 60, 8, 12)) }
+func TestSimSafetyUnderFaultsP10(t *testing.T) { simSafetyUnderFaults(t, seedPart(t, 60, 9, 12)) }
+func TestSimSafetyUnderFaultsP11(t *testing.T) { simSafetyUnderFaults(t, seedPart(t, 60, 10, 12)) }
+func TestSimSafetyUnderFaultsP12(t *testing.T) { simSafetyUnderFaults(t, seedPart(t, 60, 11, 12)) }
 
 func simSafetyUnderFaults(t *testing.T, seeds []uint64) {
 	// Each seed is its own simulation with no shared state, so the seeds run
 	// in parallel: the 60 of them are the test's strength and are all kept,
 	// while the wall time fits the 60 s per-target budget .bazelrc imposes,
 	// coverage instrumentation included.
-	for _, seed := range seeds {
-		t.Run("seed="+strconv.FormatUint(seed, 10), func(t *testing.T) {
-			t.Parallel()
-			s := newSim(simOptions{seed: seed, drop: 0.05, dup: 0.02, crashRate: 0.5, diskMax: 20 * time.Millisecond})
-			for k := 0; k < 6 && s.err == nil; k++ {
-				switch k % 3 {
-				case 0:
-					s.partition([]core.NodeID{1}, []core.NodeID{2, 3})
-				case 1:
-					s.partition([]core.NodeID{1, 2}, []core.NodeID{3})
-				default:
-					s.heal()
-				}
-				s.run(s.after(5*time.Second), true)
+	eachSeed(t, seeds, func(t *testing.T, seed uint64) {
+		s := newSim(simOptions{seed: seed, drop: 0.05, dup: 0.02, crashRate: 0.5, diskMax: 20 * time.Millisecond})
+		for k := 0; k < 6 && s.err == nil; k++ {
+			switch k % 3 {
+			case 0:
+				s.partition([]core.NodeID{1}, []core.NodeID{2, 3})
+			case 1:
+				s.partition([]core.NodeID{1, 2}, []core.NodeID{3})
+			default:
+				s.heal()
 			}
-			if s.err != nil {
-				t.Fatalf("seed %d: %v", seed, s.err)
+			s.run(s.after(5*time.Second), true)
+		}
+		if s.err != nil {
+			t.Fatalf("seed %d: %v", seed, s.err)
+		}
+		// Liveness after healing: no more faults, every node back.
+		s.heal()
+		s.opt.crashRate, s.opt.drop, s.opt.dup = 0, 0, 0
+		for _, id := range s.ids {
+			if !s.nodes[id].alive {
+				s.start(s.nodes[id])
 			}
-			// Liveness after healing: no more faults, every node back.
-			s.heal()
-			s.opt.crashRate, s.opt.drop, s.opt.dup = 0, 0, 0
-			for _, id := range s.ids {
-				if !s.nodes[id].alive {
-					s.start(s.nodes[id])
-				}
-			}
-			before := s.maxCommit()
-			s.run(s.after(10*time.Second), true)
-			if s.err != nil {
-				t.Fatalf("seed %d after heal: %v", seed, s.err)
-			}
-			if s.maxCommit() <= before {
-				t.Fatalf("seed %d: no progress after healing (commit %d)", seed, before)
-			}
-		})
-	}
+		}
+		before := s.maxCommit()
+		s.run(s.after(10*time.Second), true)
+		if s.err != nil {
+			t.Fatalf("seed %d after heal: %v", seed, s.err)
+		}
+		if s.maxCommit() <= before {
+			t.Fatalf("seed %d: no progress after healing (commit %d)", seed, before)
+		}
+	})
 }
 
 // All three nodes lose power at once with writes in flight; the cluster must
 // elect and commit again (D15, R2-01).
 func TestSimPowerCutAllThree(t *testing.T) {
-	for _, seed := range seeds(t, 20) {
+	eachSeed(t, seeds(t, 20), func(t *testing.T, seed uint64) {
 		s := newSim(simOptions{seed: seed, diskMax: 30 * time.Millisecond})
 		s.run(s.after(5*time.Second), true)
 		for _, id := range s.ids {
@@ -139,7 +163,7 @@ func TestSimPowerCutAllThree(t *testing.T) {
 		if s.leader() == nil || s.maxCommit() <= before {
 			t.Fatalf("seed %d: no election or commit after the power cut", seed)
 		}
-	}
+	})
 }
 
 // CheckQuorum: a leader cut from both followers steps down within an
@@ -244,7 +268,7 @@ func TestSimLeadershipTransfer(t *testing.T) {
 // an entry, and completes: the follower gets the entry's position, that
 // entry commits with that term, and the target leads.
 func TestSimTransferForwardedFromFollower(t *testing.T) {
-	for _, seed := range seeds(t, 20) {
+	eachSeed(t, seeds(t, 20), func(t *testing.T, seed uint64) {
 		s := newSim(simOptions{seed: seed})
 		s.run(s.after(3*time.Second), true)
 		l := s.leader()
@@ -282,19 +306,30 @@ func TestSimTransferForwardedFromFollower(t *testing.T) {
 		if !ok || e.Position.Term != resp.LogTerm || e.Kind != core.EntryTransfer || f.r.Status().Commit < resp.Index {
 			t.Fatalf("seed %d: the transfer entry is not committed at its answered position", seed)
 		}
-	}
+	})
 }
 
 // RecentEntriesBytes bounds the payloads in memory: a peer that falls
 // behind is fed from the store, and safety and progress hold.
-func TestSimBoundedRecentEntries(t *testing.T) {
-	fetches := 0
-	defer func() {
-		if !t.Failed() && fetches == 0 {
+// The 30 seeds in three top-level tests (seedPart); each part must feed a
+// peer from the store at least once, which every part of the deterministic
+// schedule does.
+func TestSimBoundedRecentEntriesP1(t *testing.T) { simBoundedRecentEntries(t, seedPart(t, 30, 0, 3)) }
+
+func TestSimBoundedRecentEntriesP2(t *testing.T) { simBoundedRecentEntries(t, seedPart(t, 30, 1, 3)) }
+
+func TestSimBoundedRecentEntriesP3(t *testing.T) { simBoundedRecentEntries(t, seedPart(t, 30, 2, 3)) }
+
+func simBoundedRecentEntries(t *testing.T, seeds []uint64) {
+	var fetches atomic.Int64
+	// A Cleanup, not a defer: the parallel seeds run after this function
+	// returns, and a Cleanup runs once they have all finished.
+	t.Cleanup(func() {
+		if len(seeds) > 0 && !t.Failed() && fetches.Load() == 0 {
 			t.Error("no peer was ever fed from the store")
 		}
-	}()
-	for _, seed := range seeds(t, 30) {
+	})
+	eachSeed(t, seeds, func(t *testing.T, seed uint64) {
 		s := newSim(simOptions{seed: seed, drop: 0.02, crashRate: 0.3, recent: 512})
 		for k := 0; k < 4 && s.err == nil; k++ {
 			if k%2 == 0 {
@@ -317,7 +352,7 @@ func TestSimBoundedRecentEntries(t *testing.T) {
 		}
 		want := s.maxCommit()
 		s.run(s.after(3*time.Second), false)
-		fetches += s.fetches
+		fetches.Add(int64(s.fetches))
 		for _, id := range s.ids {
 			n := s.nodes[id]
 			if got := n.r.Status().Commit; got < want {
@@ -327,7 +362,7 @@ func TestSimBoundedRecentEntries(t *testing.T) {
 				t.Fatalf("seed %d: node %d holds %d payload bytes", seed, id, n.r.log.window)
 			}
 		}
-	}
+	})
 }
 
 // snapSim runs one seed of the snapshot schedule: snapshots every 16
@@ -352,45 +387,62 @@ func snapSim(seed uint64, mut mutation) *sim {
 	return s
 }
 
-// The 60 seeds of the snapshot schedule, in four top-level tests
-// (seedQuarter).
-func TestSimSnapshotsUnderFaultsQ1(t *testing.T) { simSnapshotsUnderFaults(t, seedQuarter(t, 60, 0)) }
+// The 60 seeds of the snapshot schedule, in twelve top-level tests
+// (seedPart).
+func TestSimSnapshotsUnderFaultsP01(t *testing.T) { simSnapshotsUnderFaults(t, seedPart(t, 60, 0, 12)) }
 
-func TestSimSnapshotsUnderFaultsQ2(t *testing.T) { simSnapshotsUnderFaults(t, seedQuarter(t, 60, 1)) }
+func TestSimSnapshotsUnderFaultsP02(t *testing.T) { simSnapshotsUnderFaults(t, seedPart(t, 60, 1, 12)) }
 
-func TestSimSnapshotsUnderFaultsQ3(t *testing.T) { simSnapshotsUnderFaults(t, seedQuarter(t, 60, 2)) }
+func TestSimSnapshotsUnderFaultsP03(t *testing.T) { simSnapshotsUnderFaults(t, seedPart(t, 60, 2, 12)) }
 
-func TestSimSnapshotsUnderFaultsQ4(t *testing.T) { simSnapshotsUnderFaults(t, seedQuarter(t, 60, 3)) }
+func TestSimSnapshotsUnderFaultsP04(t *testing.T) { simSnapshotsUnderFaults(t, seedPart(t, 60, 3, 12)) }
+
+func TestSimSnapshotsUnderFaultsP05(t *testing.T) { simSnapshotsUnderFaults(t, seedPart(t, 60, 4, 12)) }
+
+func TestSimSnapshotsUnderFaultsP06(t *testing.T) { simSnapshotsUnderFaults(t, seedPart(t, 60, 5, 12)) }
+
+func TestSimSnapshotsUnderFaultsP07(t *testing.T) { simSnapshotsUnderFaults(t, seedPart(t, 60, 6, 12)) }
+
+func TestSimSnapshotsUnderFaultsP08(t *testing.T) { simSnapshotsUnderFaults(t, seedPart(t, 60, 7, 12)) }
+
+func TestSimSnapshotsUnderFaultsP09(t *testing.T) { simSnapshotsUnderFaults(t, seedPart(t, 60, 8, 12)) }
+
+func TestSimSnapshotsUnderFaultsP10(t *testing.T) { simSnapshotsUnderFaults(t, seedPart(t, 60, 9, 12)) }
+
+func TestSimSnapshotsUnderFaultsP11(t *testing.T) {
+	simSnapshotsUnderFaults(t, seedPart(t, 60, 10, 12))
+}
+
+func TestSimSnapshotsUnderFaultsP12(t *testing.T) {
+	simSnapshotsUnderFaults(t, seedPart(t, 60, 11, 12))
+}
 
 func simSnapshotsUnderFaults(t *testing.T, seeds []uint64) {
-	for _, seed := range seeds {
-		t.Run("seed="+strconv.FormatUint(seed, 10), func(t *testing.T) {
-			t.Parallel()
-			s := snapSim(seed, 0)
-			if s.err != nil {
-				t.Fatalf("seed %d: %v", seed, s.err)
+	eachSeed(t, seeds, func(t *testing.T, seed uint64) {
+		s := snapSim(seed, 0)
+		if s.err != nil {
+			t.Fatalf("seed %d: %v", seed, s.err)
+		}
+		s.heal()
+		s.opt.crashRate, s.opt.drop, s.opt.dup = 0, 0, 0
+		for _, id := range s.ids {
+			if !s.nodes[id].alive {
+				s.start(s.nodes[id])
 			}
-			s.heal()
-			s.opt.crashRate, s.opt.drop, s.opt.dup = 0, 0, 0
-			for _, id := range s.ids {
-				if !s.nodes[id].alive {
-					s.start(s.nodes[id])
-				}
+		}
+		s.run(s.after(10*time.Second), true)
+		if s.err != nil {
+			t.Fatalf("seed %d after heal: %v", seed, s.err)
+		}
+		// Every node is back to a table and caught up.
+		s.run(s.after(5*time.Second), false)
+		for _, id := range s.ids {
+			n := s.nodes[id]
+			if n.noTable || n.r.Status().Commit != s.maxCommit() {
+				t.Fatalf("seed %d: node %d noTable=%v commit %d of %d", seed, id, n.noTable, n.r.Status().Commit, s.maxCommit())
 			}
-			s.run(s.after(10*time.Second), true)
-			if s.err != nil {
-				t.Fatalf("seed %d after heal: %v", seed, s.err)
-			}
-			// Every node is back to a table and caught up.
-			s.run(s.after(5*time.Second), false)
-			for _, id := range s.ids {
-				n := s.nodes[id]
-				if n.noTable || n.r.Status().Commit != s.maxCommit() {
-					t.Fatalf("seed %d: node %d noTable=%v commit %d of %d", seed, id, n.noTable, n.r.Status().Commit, s.maxCommit())
-				}
-			}
-		})
-	}
+		}
+	})
 }
 
 // The negative controls of the snapshot schedule: each bug it was built to
@@ -401,16 +453,20 @@ func TestSimSnapshotsCatchTheirBugs(t *testing.T) {
 		"install below the log's base": mutInstallBelowBase,
 		"snapshot ack at lastIndex":    mutSnapshotAckLastIndex,
 	} {
-		caught := ""
-		for seed := uint64(1); seed <= 200 && caught == ""; seed++ {
-			if s := snapSim(seed, m); s.err != nil {
-				caught = fmt.Sprintf("seed %d: %v", seed, s.err)
+		// One parallel subtest per bug, for the reason eachSeed gives.
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			caught := ""
+			for seed := uint64(1); seed <= 200 && caught == ""; seed++ {
+				if s := snapSim(seed, m); s.err != nil {
+					caught = fmt.Sprintf("seed %d: %v", seed, s.err)
+				}
 			}
-		}
-		if caught == "" {
-			t.Errorf("%s: no seed of 200 caught it", name)
-			continue
-		}
-		t.Logf("%s caught, %s", name, caught)
+			if caught == "" {
+				t.Errorf("%s: no seed of 200 caught it", name)
+				return
+			}
+			t.Logf("%s caught, %s", name, caught)
+		})
 	}
 }

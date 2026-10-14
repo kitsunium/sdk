@@ -70,9 +70,11 @@ One change, four parts, none optional:
    asserted so the addition cannot be silent.
 
 `TestEveryRuleOnlyEverReturnsACategoryItDeclares` and
-`TestEveryDeclaredCategoryIsActuallyReachable` then hold the new entry to the
-same bar as the thirteen: the set it declares and the set it produces must be
-the same set.
+`TestEveryDeclaredCategoryIsActuallyReachableQ1`…`Q4` then hold the new entry
+to the same bar as the thirteen: the set it declares and the set it produces
+must be the same set. The reachability sweep is four top-level tests over
+quarters of the supported set (`tagQuarter`), one per shard of `i18n_test`,
+because as one test it overran the 60 s cap under coverage (#304).
 
 ## Conventions
 

@@ -288,6 +288,18 @@ func (m *StateMachine[E, S]) arm(at time.Time) (clock.Timer, <-chan time.Time) {
 		return nil, nil
 	}
 	timer := m.cfg.clock.NewTimer(at.Sub(m.cfg.clock.Now()))
+	//: the duration was read before the timer started counting: a clock that
+	//: passed at in between — a test's Set, a descheduled goroutine on the
+	//: system clock — would count it again from there, and the loop would
+	//: sleep through the target. Read again now the timer is armed: a target
+	//: that came is due at once (#304).
+	if now := m.cfg.clock.Now(); !now.Before(at) {
+		timer.Stop()
+		due := make(chan time.Time, 1)
+		due <- now
+		//: no timer left to stop, and a channel that already delivered.
+		return nil, due
+	}
 	//: a past target fires at once, on both clocks.
 	return timer, timer.C()
 }
