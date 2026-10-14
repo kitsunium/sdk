@@ -255,6 +255,7 @@ go_test(
         "introspect_internal_test.go",
         "introspect_runtime_test.go",
         "introspect_unix_internal_test.go",
+        "journal_key_internal_test.go",
         "key_test.go",
         "key_transaction_test.go",
         "listener_internal_test.go",

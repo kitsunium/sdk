@@ -288,8 +288,14 @@ func heldToTheEnd(ctx context.Context, release func()) func() {
 // subject's, else its own. A record a hold keeps — placed, or the store's
 // HeldUntil — is sealed under its own: its person's erasure destroys their
 // key, and a held record is kept whoever asks. When kit cannot tell whether
-// a hold keeps it, its own key is the one that keeps it readable.
+// a hold keeps it, its own key is the one that keeps it readable. An entry
+// of the privacy journal is sealed under its month's key (journalRef): it
+// is about nobody, no hold keeps it, and a key per entry would grow kit's
+// store of keys with every entry (ADR 0178 §C3).
 func (e *sealedEngine[T]) refOf(ctx context.Context, key string, v T) (string, error) {
+	if entry, ok := any(v).(journalRecord); ok {
+		return journalRef(entry.At), nil
+	}
 	keys, err := e.a.referenceKeys(ctx)
 	if err != nil {
 		return "", err

@@ -31,7 +31,9 @@ import (
 // journal is a store of kit's own, kit.privacy/store/journal, on the SDK's
 // document store, until the SDK has one (step 4). The chain is computed over
 // an entry's JSON before anything seals it: sealing (step 3) must hash
-// first, and verify what it opened.
+// first, and verify what it opened. An entry's reason is sealed under the
+// journal's key for the month of its instant, in UTC (journalRef, ADR 0178
+// §C3): a key per month, never per entry.
 
 // journalRecord is one entry, in kit's own store.
 type journalRecord struct {
