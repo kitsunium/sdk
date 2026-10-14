@@ -38,7 +38,7 @@ func TestAMySQLServerBelowTheFloorRefusesTheStart(t *testing.T) {
 			db.SetVersion(answer)
 			t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
 			var logs syncBuffer
-			app := ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine()))
+			app := floorApp(t, &logs, kit.Database("database", db.Engine()))
 			err := app.Start(t.Context())
 			if err == nil {
 				stopped, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -57,6 +57,20 @@ func TestAMySQLServerBelowTheFloorRefusesTheStart(t *testing.T) {
 			}
 		})
 	}
+}
+
+// floorApp is the ledger in production with no data directory, its secrets
+// in memory: the server's version is checked when its database opens, which
+// needs no file store — on Windows and Plan 9 the SDK refuses one (vfs,
+// ADR 0018), and a data directory would refuse the start before the floor
+// is reached.
+func floorApp(t *testing.T, logs *syncBuffer, opts ...kit.AppConfigurer) *kit.App {
+	t.Helper()
+	t.Setenv("KIT_SECRETS", "memory")
+	l := newLedger()
+	return kit.NewApp("ledger", l.books, l.audit).With(append([]kit.AppConfigurer{
+		kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvProduction), kit.Logs(logs),
+	}, opts...)...)
 }
 
 // waiting is an engine whose connections wait for a lock: what kit gave it.
