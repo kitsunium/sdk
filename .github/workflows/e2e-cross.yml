@@ -447,7 +447,10 @@ jobs:
             echo '#cloud-config'
             echo 'disable_root: false'
             echo 'ssh_pwauth: false'
+            echo 'ssh_authorized_keys:'
+            echo "  - $(cat key.pub)"
             echo 'users:'
+            echo '  - default'
             echo '  - name: root'
             echo '    ssh_authorized_keys:'
             echo "      - $(cat key.pub)"
@@ -466,7 +469,7 @@ jobs:
             -display none -serial file:console.log -daemonize -pidfile qemu.pid \
             -drive file=disk.qcow2,if=virtio -drive file=seed.iso,if=virtio,format=raw,readonly=on \
             -netdev user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22 -device virtio-net-pci,netdev=n0
-          for _ in $(seq 1 90); do
+          for _ in $(seq 1 60); do
             if ssh -i key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
                  -o ConnectTimeout=5 root@127.0.0.1 true 2>/dev/null; then
               echo "guest is up"; exit 0
@@ -476,6 +479,11 @@ jobs:
           echo "::error::guest never accepted ssh"
           ssh -v -i key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=5 root@127.0.0.1 true 2>&1 | tail -25 || true
+          for u in alpine admin; do
+            echo "== as $u =="
+            ssh -i key -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -o ConnectTimeout=5 "$u@127.0.0.1" 'id; doas tail -40 /var/log/cloud-init.log; doas cat /var/log/cloud-init-output.log | tail -30' 2>&1 | tail -80 || true
+          done
           tail -60 console.log; exit 1
 
       - name: Run inside ${{ matrix.name }} on the guest's own kernel
