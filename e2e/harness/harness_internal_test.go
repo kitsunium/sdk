@@ -4,6 +4,7 @@ package harness
 import (
 	"bytes"
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +42,9 @@ func Test_safeRun(t *testing.T) {
 		wantStatus Status
 		// wantName is the check name the Result must carry.
 		wantName string
+		// hardwareFault is whether the check panics through a hardware fault
+		// rather than a panic the runtime raises itself.
+		hardwareFault bool
 	}
 	tests := []tc{
 		{
@@ -66,18 +70,38 @@ func Test_safeRun(t *testing.T) {
 			wantStatus: Fail, wantName: "panic",
 		},
 		{
-			//: a nil dereference is what a real check panics with, and it is not
-			//: a string.
+			//: a runtime error is what a real check panics with, and it is not a
+			//: string. A nil-map write is one the runtime raises itself, without a
+			//: hardware fault, so it runs on every platform.
+			name: "a check that writes to a nil map",
+			check: func() Result {
+				var seen map[string]int
+				seen["codec"]++
+				return Passed("codec", "unreachable", "the write did not panic")
+			},
+			wantStatus: Fail, wantName: "panic",
+		},
+		{
+			//: a nil dereference is the other one, and it is a hardware fault.
 			name: "a check that dereferences nil",
 			check: func() Result {
 				var r *Result
 				return *r
 			},
-			wantStatus: Fail, wantName: "panic",
+			wantStatus: Fail, wantName: "panic", hardwareFault: true,
 		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
+		//: on a Windows host whose exception frame carries the AMX tile state, the
+		//: runtime dispatches a recovered access violation below the goroutine
+		//: stack and corrupts the heap span beneath it (golang/go#81238, open in
+		//: go1.27.2), which killed this binary with
+		//: "receive on synctest channel from outside bubble" (#304). The case runs
+		//: on Linux and macOS; the nil-map case above pins containment here.
+		if c.hardwareFault && runtime.GOOS == "windows" {
+			t.Skip("a recovered hardware fault corrupts the heap on windows (golang/go#81238)")
+		}
 		got := safeRun("codec", c.check)
 
 		//: reaching this line at all is the containment property.

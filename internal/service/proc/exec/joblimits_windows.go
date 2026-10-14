@@ -3,6 +3,8 @@
 package exec
 
 import (
+	"errors"
+	"os"
 	"syscall"
 	"unsafe"
 
@@ -10,25 +12,44 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// kernel32 Job Object entry points, bound lazily.
+// kernel32 Job Object and thread entry points, bound lazily.
 var (
 	modKernel32 = syscall.NewLazyDLL("kernel32.dll")
 
 	procCreateJobObjectW         = modKernel32.NewProc("CreateJobObjectW")
 	procSetInformationJobObject  = modKernel32.NewProc("SetInformationJobObject")
 	procAssignProcessToJobObject = modKernel32.NewProc("AssignProcessToJobObject")
-	procOpenProcess              = modKernel32.NewProc("OpenProcess")
 	procCloseHandle              = modKernel32.NewProc("CloseHandle")
+	procCreateToolhelp32Snapshot = modKernel32.NewProc("CreateToolhelp32Snapshot")
+	procThread32First            = modKernel32.NewProc("Thread32First")
+	procThread32Next             = modKernel32.NewProc("Thread32Next")
+	procOpenThread               = modKernel32.NewProc("OpenThread")
+	procResumeThread             = modKernel32.NewProc("ResumeThread")
 )
 
-// Job Object info class + limit flags (winnt.h) and OpenProcess rights.
+// Job Object info class + limit flags (winnt.h), the suspended creation flag
+// (winbase.h), the thread snapshot class (tlhelp32.h) and the thread right
+// ResumeThread requires (winnt.h).
 const (
 	jobObjectExtendedLimitInformation uintptr = 9
 	jobLimitActiveProcess             uint32  = 0x00000008
 	jobLimitProcessMemory             uint32  = 0x00000100
-	processSetQuota                   uintptr = 0x0100
-	processTerminate                  uintptr = 0x0001
+	createSuspended                   uint32  = 0x00000004
+	th32csSnapThread                  uintptr = 0x00000004
+	threadSuspendResume               uintptr = 0x0002
+	resumeThreadFailed                uintptr = 0xFFFFFFFF
 )
+
+// threadEntry32 is tlhelp32.h THREADENTRY32.
+type threadEntry32 struct {
+	size           uint32
+	usage          uint32
+	threadID       uint32
+	ownerProcessID uint32
+	basePri        int32
+	deltaPri       int32
+	flags          uint32
+}
 
 // ioCounters is winnt.h IO_COUNTERS — padding inside the extended-limit struct.
 type ioCounters struct {
@@ -129,26 +150,97 @@ func buildExtendedLimits(limits map[coreproc.Resource]coreproc.LimitValue) (exte
 	return ext, nil
 }
 
-// assign attaches pid to the job so the limits bind it. It opens the target with
-// the set-quota + terminate rights AssignProcessToJobObject requires.
-func (j *jobLimit) assign(pid int) error {
-	//: open the freshly spawned child with the rights the assign needs.
-	hp, _, errno := procOpenProcess.Call(processSetQuota|processTerminate, 0, uintptr(pid))
-	//: a zero handle means the child is already gone or access was denied.
-	if hp == 0 {
-		//: surface the open failure through the central RLIMIT_FAILED.
-		return wrapRlimit(errno, errs.Int("pid", pid))
+// assign attaches p to the job so the limits bind it, through the handle
+// CreateProcess returned (PROCESS_ALL_ACCESS, so the set-quota and terminate
+// rights AssignProcessToJobObject requires are held, and no pid is reopened).
+//
+// p must have been created suspended. Assigning a child that already runs
+// raced its exit: a `cmd /c exit 0` could be gone before the assignment, and
+// AssignProcessToJobObject refuses a process that has exited with
+// ERROR_ACCESS_DENIED — 12 to 26 of 3 000 spawns on windows-latest (#304).
+func (j *jobLimit) assign(p *os.Process) error {
+	var r1 uintptr
+	var aerrno error
+	//: the handle stays valid until the callback returns, even if p exits.
+	hErr := p.WithHandle(func(handle uintptr) {
+		//: AssignProcessToJobObject(job, child) binds the child to the limits.
+		r1, _, aerrno = procAssignProcessToJobObject.Call(uintptr(j.handle), handle)
+	})
+	//: no handle to assign through: the process was already released.
+	if hErr != nil {
+		//: surface it through the central RLIMIT_FAILED.
+		return wrapRlimit(hErr, errs.Int("pid", p.Pid))
 	}
-	//: release the process handle once the assign returns.
-	defer procCloseHandle.Call(hp)
-	//: AssignProcessToJobObject(job, child) binds the child to the limits.
-	r1, _, aerrno := procAssignProcessToJobObject.Call(uintptr(j.handle), hp)
 	//: a zero return means the assignment was refused.
 	if r1 == 0 {
 		//: surface the assign failure through the central RLIMIT_FAILED.
-		return wrapRlimit(aerrno, errs.Int("pid", pid))
+		return wrapRlimit(aerrno, errs.Int("pid", p.Pid))
 	}
 	//: the child is now confined by the job's limits.
+	return nil
+}
+
+// resumeSuspended resumes the threads of pid, a process created suspended:
+// os.StartProcess closes the primary thread's handle, so the thread is found
+// again in a thread snapshot. A process created suspended has run no code and
+// started no thread of its own, so the thread found is its primary thread.
+func resumeSuspended(pid int) error {
+	snap, _, serrno := procCreateToolhelp32Snapshot.Call(th32csSnapThread, 0)
+	//: INVALID_HANDLE_VALUE means no snapshot was taken.
+	if syscall.Handle(snap) == syscall.InvalidHandle {
+		//: surface the snapshot failure through the central RLIMIT_FAILED.
+		return wrapRlimit(serrno, errs.Int("pid", pid))
+	}
+	//: release the snapshot once the walk is over — in a closure, as a deferred
+	//: call's arguments are evaluated at once and would close it now.
+	defer func() { swallowErr2(procCloseHandle.Call(snap)) }()
+	entry := threadEntry32{size: uint32(unsafe.Sizeof(threadEntry32{}))}
+	resumed := 0
+	ok, _, werrno := procThread32First.Call(snap, uintptr(unsafe.Pointer(&entry)))
+	//: walk every thread of the system, resuming the child's.
+	for ok != 0 {
+		//: only the child's threads are resumed.
+		if entry.ownerProcessID == uint32(pid) {
+			//: resume this thread of the child.
+			if rErr := resumeThread(entry.threadID, pid); rErr != nil {
+				//: the child stays suspended; the caller kills it.
+				return rErr
+			}
+			resumed++
+		}
+		ok, _, werrno = procThread32Next.Call(snap, uintptr(unsafe.Pointer(&entry)))
+	}
+	//: the walk must end on ERROR_NO_MORE_FILES, never on a fault.
+	if !errors.Is(werrno, syscall.ERROR_NO_MORE_FILES) {
+		//: surface the walk failure through the central RLIMIT_FAILED.
+		return wrapRlimit(werrno, errs.Int("pid", pid))
+	}
+	//: a child with no thread in the snapshot cannot be resumed.
+	if resumed == 0 {
+		//: surface the missing thread through the central RLIMIT_FAILED.
+		return wrapRlimit(syscall.ERROR_NOT_FOUND, errs.Int("pid", pid))
+	}
+	//: the child runs, confined.
+	return nil
+}
+
+// resumeThread opens thread tid with THREAD_SUSPEND_RESUME and resumes it once.
+func resumeThread(tid uint32, pid int) error {
+	th, _, oerrno := procOpenThread.Call(threadSuspendResume, 0, uintptr(tid))
+	//: a zero handle means the thread could not be opened.
+	if th == 0 {
+		//: surface the open failure through the central RLIMIT_FAILED.
+		return wrapRlimit(oerrno, errs.Int("pid", pid))
+	}
+	//: release the thread handle once it is resumed (in a closure, as above).
+	defer func() { swallowErr2(procCloseHandle.Call(th)) }()
+	prev, _, rerrno := procResumeThread.Call(th)
+	//: (DWORD)-1 means the thread was not resumed.
+	if prev == resumeThreadFailed {
+		//: surface the resume failure through the central RLIMIT_FAILED.
+		return wrapRlimit(rerrno, errs.Int("pid", pid))
+	}
+	//: the thread's suspend count is one lower.
 	return nil
 }
 
