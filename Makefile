@@ -213,7 +213,7 @@ lint-ktn-check:
 # anchor empty, which upstream documents as the maintainers' mode ("repository
 # access IS the entitlement", cmd/ktn-linter/cmd/vendor_key.go), so its licence
 # gate is inert by construction. The commit is pinned, not the tag: a tag can be
-# moved, a commit cannot (#223). KTN_LINTER_COMMIT is the commit tag v1.45.4
+# moved, a commit cannot (#223). KTN_LINTER_COMMIT is the commit tag v1.45.7
 # points at; KTN_LINTER_VERSION is stamped into `main.Version` (for a main
 # package `-X` takes `main.`, not the import path — measured, the import path
 # leaves `--version` at `dev`). The release CI installs is the vendor's latest
@@ -230,8 +230,8 @@ lint-ktn-check:
 #
 # It refuses a checkout at any other commit, or with any local change, because
 # either would install a different linter under the pinned version string.
-KTN_LINTER_VERSION := 1.45.4
-KTN_LINTER_COMMIT := 59856d30900ceb3b5976d6713b052313b522185b
+KTN_LINTER_VERSION := 1.45.7
+KTN_LINTER_COMMIT := ce8d91f59e7e10afc47caf4b37ef14bea08efe24
 
 lint-ktn-install:
 	@test -n "$(KTN_LINTER_SRC)" || { echo "lint-ktn-install: set KTN_LINTER_SRC to a kodflow/ktn-linter checkout at $(KTN_LINTER_COMMIT)"; exit 2; }

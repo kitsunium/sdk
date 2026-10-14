@@ -502,34 +502,30 @@ rules:
       # file alone, the bench's two signatures, nothing else of the package.
       - "**/internal/kernel/collections/heap/heap_bench_test.go"
       - "internal/kernel/collections/heap/heap_bench_test.go"
-    # Function-level, never a file: the consensus StateMachine port fixes
-    # Apply's result to `any` (the value the caller's machine computed, handed
-    # back to the proposer unchanged), and Replicated fixes Propose's — both
-    # frozen ports (ADR 0039), with ProposeAs[T] as the typed sibling. Each
-    # entry below implements one of those signatures or carries that value
-    # unchanged to the waiter (submit, applied1); no narrower type exists.
-    # False positive reported as kodflow/ktn-linter#726: the rule exempts
-    # implementations of stdlib interfaces only. RETIRE these entries when it
-    # ships, and re-run the linter on the consensus tree.
+    # Function-level, never a file. Since ktn-linter v1.45.7 (#726, #732) the
+    # finding sits on the DECLARATION of a module-local interface that pins an
+    # `any`, and the methods that must honour it are exempt (Go requires the
+    # identical signature): Node.Propose and the test machines' Apply entries
+    # that stood here are gone. The declarations the rule would report in
+    # design_gen.go (StateMachine.Apply, Replicated.Propose) are generated and
+    # skipped. Three sites remain, none of them an implementation of a local
+    # interface:
+    #   - Node.submit and Node.applied1 carry the value the caller's machine
+    #     computed to the proposer's waiter unchanged (the StateMachine port
+    #     fixes Apply's result to `any`, ADR 0039; ProposeAs[T] is the typed
+    #     sibling); they are plain helpers with no contract to inherit the
+    #     exemption from.
+    #   - settingDecl.fromCode is the interface method itself, now reported at
+    #     its declaration: it takes the value public kit.Set(name string,
+    #     value any) stored for a setting whose type parameter T is known only
+    #     to the implementation behind settingDecl, so it arrives without a
+    #     static type and the method asserts it to T. `any` is the type the
+    #     value has here, not a missing abstraction.
     exclude_functions:
-      - "**/internal/service/app/consensus/ops.go:Node.Propose"
-      - "internal/service/app/consensus/ops.go:Node.Propose"
       - "**/internal/service/app/consensus/ops.go:Node.submit"
       - "internal/service/app/consensus/ops.go:Node.submit"
       - "**/internal/service/app/consensus/apply.go:Node.applied1"
       - "internal/service/app/consensus/apply.go:Node.applied1"
-      - "**/internal/service/app/consensus/cluster_internal_test.go:kv.Apply"
-      - "internal/service/app/consensus/cluster_internal_test.go:kv.Apply"
-      - "**/internal/service/app/consensus/cluster_internal_test.go:gatedKV.Apply"
-      - "internal/service/app/consensus/cluster_internal_test.go:gatedKV.Apply"
-      - "**/pkg/v1/app/consensus/consensus_external_test.go:counter.Apply"
-      - "pkg/v1/app/consensus/consensus_external_test.go:counter.Apply"
-      # The interface METHOD, declared in a local interface (kodflow/ktn-linter#726
-      # moved the finding onto the declaration, #732 shipped it): fromCode takes
-      # the value public kit.Set(name string, value any) stored for a setting
-      # whose type parameter T is known only to the implementation behind
-      # settingDecl, so it arrives without a static type and the method asserts
-      # it to T — `any` is the type the value has here, not a missing abstraction.
       - "**/framework/internal/kit/setting_interface.go:settingDecl.fromCode"
       - "framework/internal/kit/setting_interface.go:settingDecl.fromCode"
 
