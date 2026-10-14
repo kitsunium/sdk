@@ -312,8 +312,9 @@ framework/         the layer above pkg/v1, packages of the root module — ADR 0
                    model (the graph types + the ID grammar, Version 5),
                    kit (the runtime a product imports; beneath it the
                      opt-in subsystems config/{toml,yaml}, server and
-                     studio, and storetest, the stores' conformance
-                     suite; its engine internal/kit, + plug, serverkit,
+                     studio, storetest, the stores' conformance
+                     suite, and kittest, a product's tests on disk —
+                     ADR 0175; its engine internal/kit, + plug, serverkit,
                      studiokit), telemetry (the telemetry port + exporter
                      — ADR 0149),
                    entitlement, selfupdate, gate, git (the distribution
@@ -599,5 +600,6 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0172 — a product initialises what it imports, and the stores stay in the core — `docs/adr/0172-a-product-initialises-what-it-imports-and-the-stores-stay-in-the-core.md`
 - ADR 0173 — divergence of replicated state, proposed, split from ADR 0152 by the owner's decision Q12 and depending on it: a canonical incremental state hash compared at fixed indexes, self-proposed signed digests decided in Apply, automatic repair with guardrails (a twice-agreeing rebuild that matches a validated digest, no rebuild storm, a defined self-withdrawal), anchors on top of 0152's checksummed snapshots, a behavioural Apply fingerprint and replay gate, a stdlib determinism checker; codes keep their serials in 0152's 0.2.57 range; the open objections of 0152's challenge are the input of its own challenge, still pending; ADR 0152's R7 contract recorded (paths, code ownership in the same core package, the snapshot pin, `Message` v2 fields in the encoded frame) — `docs/adr/0173-divergence-is-prevented-by-construction-and-repaired-automatically.md`
 - ADR 0174 — TLS identity and pre-handshake admission, accepted on 2026-10-13 with ADR 0152, reserved by ADR 0152 for its two siblings outside the consensus domain: a `net/tlsid` identity checked on every handshake (fail-closed `VerifyConnection`, the verified peer and its SPKI handed to the caller, a reloadable source refusing a new key or SAN, a CA rollover trusting the union), and a `net/server` `Admission` that closes a connection over its IPv4 address's or IPv6 /64's budget before any TLS byte is read, with a reserved budget for declared member addresses — `docs/adr/0174-a-tls-identity-is-checked-on-every-handshake-and-reloaded-in-place.md`
+- ADR 0175 — a product's tests reach the disk with one option, and the last of InMemory and DataDir wins: `framework/kit/kittest`, ported from kitsunium/platform `d1e5961` (platform#35 item 6, sdk#274): `kittest.NewDisk(t)` is a data directory of the test's own with the secrets kit keeps beside it, and an `AppOption` that runs the suite's in-memory helper on disk, where kit seals and transactions write files; `Disk.Holding` names the files that keep a word in clear; it skips where the SDK's disk file system refuses the platform (Windows). `kit.DataDir` given after `kit.InMemory()` now wins — the last of the two says where the data is; an `InMemory` after a `DataDir` still keeps everything in memory — `docs/adr/0175-a-products-tests-reach-the-disk-with-one-option.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`
