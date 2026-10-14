@@ -67,7 +67,8 @@ func (s *Store[T]) Update(key string, fn func(*T) error) (T, error) {
 }
 
 // Delete removes the document stored under key, or returns DocumentNotFound.
-// Its versions go with it.
+// Its versions go with it: a deletion never reaches the trash, which is
+// Trash's.
 func (s *Store[T]) Delete(key string) error {
 	applied, err := s.remove(key)
 	//: a deletion that took effect is announced, WriteUnconfirmed included.

@@ -65,7 +65,8 @@ type Config[T any] struct {
 	// wrote before versions existed — and a negative value is refused. A
 	// persistent store keeps them in the file Path + ".versions" once a fold
 	// ran, and a store opened with zero over files that keep versions is
-	// refused rather than left to drop or corrupt them (ADR 0143).
+	// refused rather than left to drop or corrupt them (ADR 0143). A store
+	// that keeps versions has a trash, Trash's; one that keeps none has none.
 	Versions int
 }
 

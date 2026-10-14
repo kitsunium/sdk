@@ -335,7 +335,7 @@
       "dir": "core/data/docstore",
       "layer": "core",
       "family": "data",
-      "doc": "Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;\nADR 0139 added 16 and 17, ADR 0143 18 to 20). Both engines answer every one\nof them alike, and the range keeps the LL = 3 its engine allocated it under\nnow that it is declared here (ADR 0160).\n\nPackage docstore declares the document-store domain: typed, keyed JSON\ndocuments with unique and multi-valued secondary indexes, kept by two\nengines under one contract — the file engine in memory or through\ncore/data/vfs (ADR 0110), the SQL engine in a database the caller owns\n(ADR 0139), both keeping a document's versions in its own write when asked\n(ADR 0143).\n\nIt holds what the two engines share and nothing only one of them has:\n\n  - the ports. [Collection] is a store whose calls take no context, which\n    the file engine is; [CollectionContext] is the same calls, each taking\n    a context first, which the SQL engine is. [Versioned] and\n    [VersionedContext] are their siblings for a document's versions, and\n    [Announcer] is the pair of hooks both engines answer exactly as they\n    are;\n  - the values both engines read and return — [EntryValue], [VersionValue],\n    [StampValue] — and [IndexSpec], the declaration both take, with its two\n    constructors [Unique] and [Index];\n  - the codes of the 0.3.80.* range and their sentinels: both engines answer\n    the same refusals under the same codes (ADR 0160).\n\nThere are two ports and not one because the engines differ on the one\nthing a single interface would have to fix: the file engine waits on\nnothing a caller could abandon and takes no context (ADR 0110 §D6), while\nevery call of the SQL engine waits on a database and takes one. A single\nport would give the file engine a context it cannot honour, or take the SQL\nengine's away (ADR 0139 §D2). So each port is the contract of one shape of\ncall, with the same methods, the same documents and the same refusals.\n\nThe engines, their configurations, the file engine's statistics and every\nstatement live in internal/service/data/docstore.\n\nPackage docstore — the siblings of Collection (ADR 0039): a document's\nversions, and the same two ports with a context on every call, which the SQL\nengine implements.\n\nPackage docstore — declares the sentinel *errs.Error outcomes both engines\nanswer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE\nform.\n\nNo Public and no Private below carries a key or a document. A store key is\nroutinely an e-mail address or the hash of a token, and an index key is\nusually exactly the value a caller must not learn back from a refusal: the\nfields name the index and the operation, never what was looked up.\n\nThe HTTP statuses are spelled as the integers errs.WithHTTPStatus takes,\neach named after its status: the core imports no net/http to read five\nnumbers (ADR 0160).\n\nPackage docstore — the declaration of a secondary index, which both engines\ntake at construction and file by the same rule.\n\nPackage docstore — the values both engines read and return: a stored\ndocument as JSON, one version of a document, and what a write says about the\nversion it makes.\n"
+      "doc": "Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;\nADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21). Both\nengines answer every one of them alike, and the range keeps the LL = 3 its\nengine allocated it under now that it is declared here (ADR 0160).\n\nPackage docstore declares the document-store domain: typed, keyed JSON\ndocuments with unique and multi-valued secondary indexes, kept by two\nengines under one contract — the file engine in memory or through\ncore/data/vfs (ADR 0110), the SQL engine in a database the caller owns\n(ADR 0139), both keeping a document's versions in its own write when asked\n(ADR 0143).\n\nIt holds what the two engines share and nothing only one of them has:\n\n  - the ports. [Collection] is a store whose calls take no context, which\n    the file engine is; [CollectionContext] is the same calls, each taking\n    a context first, which the SQL engine is. [Versioned] and\n    [VersionedContext] are their siblings for a document's versions,\n    [Trashable] and [TrashableContext] for its trash, and [Announcer] is\n    the pair of hooks both engines answer exactly as they are;\n  - the values both engines read and return — [EntryValue], [VersionValue],\n    [StampValue], [TombstoneValue] — and [IndexSpec], the declaration both\n    take, with its two constructors [Unique] and [Index];\n  - the codes of the 0.3.80.* range and their sentinels: both engines answer\n    the same refusals under the same codes (ADR 0160).\n\nThere are two ports and not one because the engines differ on the one\nthing a single interface would have to fix: the file engine waits on\nnothing a caller could abandon and takes no context (ADR 0110 §D6), while\nevery call of the SQL engine waits on a database and takes one. A single\nport would give the file engine a context it cannot honour, or take the SQL\nengine's away (ADR 0139 §D2). So each port is the contract of one shape of\ncall, with the same methods, the same documents and the same refusals.\n\nThe engines, their configurations, the file engine's statistics and every\nstatement live in internal/service/data/docstore.\n\nPackage docstore — the siblings of Collection (ADR 0039): a document's\nversions, its trash, and the same ports with a context on every call, which\nthe SQL engine implements.\n\nPackage docstore — declares the sentinel *errs.Error outcomes both engines\nanswer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE\nform.\n\nNo Public and no Private below carries a key or a document. A store key is\nroutinely an e-mail address or the hash of a token, and an index key is\nusually exactly the value a caller must not learn back from a refusal: the\nfields name the index and the operation, never what was looked up.\n\nThe HTTP statuses are spelled as the integers errs.WithHTTPStatus takes,\neach named after its status: the core imports no net/http to read five\nnumbers (ADR 0160).\n\nPackage docstore — the declaration of a secondary index, which both engines\ntake at construction and file by the same rule.\n\nPackage docstore — the values both engines read and return: a stored\ndocument as JSON, one version of a document, what a write says about the\nversion it makes, and a document in the trash.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/core/data/queue",
@@ -1167,7 +1167,7 @@
       "dir": "service/data/docstore",
       "layer": "service",
       "family": "data",
-      "doc": "Package docstore — the store's construction parameters, and the refusals a\nconfiguration no store could honour gets, the index declarations' included:\nan IndexSpec is core/data/docstore's, which both engines take (ADR 0160).\n\nPackage docstore is a typed, keyed store of JSON documents with secondary\nindexes, kept in memory and, when given a filesystem, persisted to it —\nevery write durable before it returns. ADR 0110.\n\n# What it is\n\nA Store[T] holds documents of one Go type, each under the key a function of\nthe document returns. Every read returns a copy and every write stores one:\na document is kept as its JSON encoding, so what a caller holds can never\nalias what the store holds, and the memory and file backends behave alike.\nWrites come in three modes — Put creates or replaces, Insert refuses an\nexisting key, Replace refuses a missing one and never resurrects a deleted\ndocument — plus Update, a read-modify-write, and Delete.\n\nSecondary indexes are declared at Open: Unique files at most one document\nper key and refuses a write that would file a second, Index files any\nnumber. Lookup reads a unique index, Find reads any index, Filter reads\nevery document. The indexes are rebuilt when the store opens, and a load\nwhose documents break a unique index is refused rather than served. So is\na load holding a document the type no longer decodes, or one stored under\nanother key than its own Key gives: a store opens only over documents it\ncan serve.\n\n# How it persists, and what that costs\n\nThe resting state is ONE file, the snapshot: a JSON object mapping each key\nto its document. A write does not rewrite it. It publishes one small file —\nan overlay entry, named by the SHA-256 of the key, holding the key and its\ndocument or its deletion — atomically, through vfs.AtomicWriter, before it\nreturns. A write therefore costs what one document costs, whatever the\nstore holds. When the overlay holds as many entries as the store holds\ndocuments (at least DefaultFoldAt), the write that reaches that count folds\nit: the snapshot is rewritten once and the entries it now contains are\nremoved. Folding N documents once per N writes keeps the average write a\nconstant. Close folds, so a store that was closed rests as a single\nsnapshot a person can read.\n\nLoading reads the snapshot and replays the overlay on top of it. Replay\norder does not matter — one entry per key, each holding that key's whole\nlatest state — and an entry the last fold already folded holds exactly what\nthe snapshot holds, so a crash anywhere in a fold, or between a fold and\nthe removals that follow it, loads the same documents.\n\n# Concurrency\n\nReaders never wait for a disk. Writers are serialised by one lock and do\ntheir filesystem work under it alone; the documents and the indexes are\nchanged only once the write is durable, under a second lock readers share.\nA reader sees the state before the write or after it, never a document and\nan index that disagree.\n\n# What it is not\n\nOne process. The store detects no second process opening the same files,\nand two would each believe their own memory. It keeps every document in\nmemory and sorts the keys for every List. It has no transaction across\ndocuments. It is a store for the documents a service owns, not a database.\n\n# The same store over SQL\n\nOpenSQL builds the second engine, SQLStore, for when a store must outgrow\nthat: the same documents, keys, index declarations, write modes, hooks and\nrefusals, kept in two tables of a PostgreSQL, MySQL or SQLite database the\ncaller owns and hands over as a core/data/sql Transactor. Every call takes a\ncontext and runs on the transaction it carries — a write in a savepoint of\nit, its hooks after its commit — and nothing is held in memory. ADR 0139.\n\nPackage docstore — hosts the compile-time interface assertions, keeping them\nout of the production source so the runtime binary carries no\ndiagnostic-only declarations.\n\nPackage docstore — the functions told about a write or a deletion once it\nis durable, outside every lock.\n\nPackage docstore — the secondary indexes, kept beside the documents under\nthe store's own locks.\n\nAn index is rebuilt from the documents when the store opens, and every\nwrite — Put, Insert, Replace, Update, Delete — maintains it in the same\ncritical section that changes the document. A reader therefore never sees a\ndocument and an index that disagree, and a write a unique index refuses\nleaves both exactly as they were.\n\nPackage docstore — opening a persistent store: the snapshot and the\nversions file read, the overlay replayed on top, and the resting state\nrestored.\n\nPackage docstore — opening a store: the configuration checked, the indexes\ndeclared, and a persistent store loaded.\n\nPackage docstore — the files: one snapshot at rest, and an overlay of one\nentry per key written since, folded back into the snapshot.\n\nPackage docstore — the SQL store's construction parameters, and the\nrefusals a configuration no SQL store could honour gets.\n\nPackage docstore — the only place the SQL store renders SQL. Every statement\nit sends is built here, once, at OpenSQL, for its dialect and its tables,\nspelled with the vocabulary core/data/sql's Dialect owns: the bind markers, the\nquoting and the row lock.\n\nPackage docstore — the SQL store's tables, as a migration the caller runs\nunder its own version table.\n\nPackage docstore — the SQL store's index rows rebuilt from its documents,\nfor when the declarations that filed them changed.\n\nPackage docstore — the SQL store: the same documents, keys, indexes and\nrefusals as Store, kept in a database the caller owns, each call on the\ntransaction its context carries (ADR 0139).\n\nPackage docstore — the SQL store's versions: a third table, written by the\nstatements of the write that stores the document, in its transaction\n(ADR 0143).\n\nPackage docstore — the SQL store's writes: each one atomic on its own, in a\ntransaction of the store's or a savepoint of the caller's, and announced\nonce the transaction that holds it has committed.\n\nPackage docstore — a document's versions: the current one, which is the\ndocument itself, and the former ones kept beside it, recorded and pruned in\nthe write that stores the document (ADR 0143).\n\nPackage docstore — the writes: prepared outside every lock, checked and\npersisted under the writers' lock, applied under both.\n"
+      "doc": "Package docstore — the store's construction parameters, and the refusals a\nconfiguration no store could honour gets, the index declarations' included:\nan IndexSpec is core/data/docstore's, which both engines take (ADR 0160).\n\nPackage docstore is a typed, keyed store of JSON documents with secondary\nindexes, kept in memory and, when given a filesystem, persisted to it —\nevery write durable before it returns. ADR 0110.\n\n# What it is\n\nA Store[T] holds documents of one Go type, each under the key a function of\nthe document returns. Every read returns a copy and every write stores one:\na document is kept as its JSON encoding, so what a caller holds can never\nalias what the store holds, and the memory and file backends behave alike.\nWrites come in three modes — Put creates or replaces, Insert refuses an\nexisting key, Replace refuses a missing one and never resurrects a deleted\ndocument — plus Update, a read-modify-write, and Delete.\n\nSecondary indexes are declared at Open: Unique files at most one document\nper key and refuses a write that would file a second, Index files any\nnumber. Lookup reads a unique index, Find reads any index, Filter reads\nevery document. The indexes are rebuilt when the store opens, and a load\nwhose documents break a unique index is refused rather than served. So is\na load holding a document the type no longer decodes, or one stored under\nanother key than its own Key gives: a store opens only over documents it\ncan serve.\n\n# How it persists, and what that costs\n\nThe resting state is ONE file, the snapshot: a JSON object mapping each key\nto its document. A write does not rewrite it. It publishes one small file —\nan overlay entry, named by the SHA-256 of the key, holding the key and its\ndocument or its deletion — atomically, through vfs.AtomicWriter, before it\nreturns. A write therefore costs what one document costs, whatever the\nstore holds. When the overlay holds as many entries as the store holds\ndocuments (at least DefaultFoldAt), the write that reaches that count folds\nit: the snapshot is rewritten once and the entries it now contains are\nremoved. Folding N documents once per N writes keeps the average write a\nconstant. Close folds, so a store that was closed rests as a single\nsnapshot a person can read.\n\nLoading reads the snapshot and replays the overlay on top of it. Replay\norder does not matter — one entry per key, each holding that key's whole\nlatest state — and an entry the last fold already folded holds exactly what\nthe snapshot holds, so a crash anywhere in a fold, or between a fold and\nthe removals that follow it, loads the same documents.\n\n# Concurrency\n\nReaders never wait for a disk. Writers are serialised by one lock and do\ntheir filesystem work under it alone; the documents and the indexes are\nchanged only once the write is durable, under a second lock readers share.\nA reader sees the state before the write or after it, never a document and\nan index that disagree.\n\n# What it is not\n\nOne process. The store detects no second process opening the same files,\nand two would each believe their own memory. It keeps every document in\nmemory and sorts the keys for every List. It has no transaction across\ndocuments. It is a store for the documents a service owns, not a database.\n\n# The same store over SQL\n\nOpenSQL builds the second engine, SQLStore, for when a store must outgrow\nthat: the same documents, keys, index declarations, write modes, hooks and\nrefusals, kept in two tables of a PostgreSQL, MySQL or SQLite database the\ncaller owns and hands over as a core/data/sql Transactor. Every call takes a\ncontext and runs on the transaction it carries — a write in a savepoint of\nit, its hooks after its commit — and nothing is held in memory. ADR 0139.\n\nPackage docstore — hosts the compile-time interface assertions, keeping them\nout of the production source so the runtime binary carries no\ndiagnostic-only declarations.\n\nPackage docstore — the functions told about a write or a deletion once it\nis durable, outside every lock.\n\nPackage docstore — the secondary indexes, kept beside the documents under\nthe store's own locks.\n\nAn index is rebuilt from the documents when the store opens, and every\nwrite — Put, Insert, Replace, Update, Delete — maintains it in the same\ncritical section that changes the document. A reader therefore never sees a\ndocument and an index that disagree, and a write a unique index refuses\nleaves both exactly as they were.\n\nPackage docstore — opening a persistent store: the snapshot and the\nversions file read, the overlay replayed on top, and the resting state\nrestored.\n\nPackage docstore — opening a store: the configuration checked, the indexes\ndeclared, and a persistent store loaded.\n\nPackage docstore — the files: one snapshot at rest, and an overlay of one\nentry per key written since, folded back into the snapshot.\n\nPackage docstore — the SQL store's construction parameters, and the\nrefusals a configuration no SQL store could honour gets.\n\nPackage docstore — the only place the SQL store renders SQL. Every statement\nit sends is built here, once, at OpenSQL, for its dialect and its tables,\nspelled with the vocabulary core/data/sql's Dialect owns: the bind markers, the\nquoting and the row lock.\n\nPackage docstore — the SQL store's tables, as a migration the caller runs\nunder its own version table.\n\nPackage docstore — the SQL store's index rows rebuilt from its documents,\nfor when the declarations that filed them changed.\n\nPackage docstore — the SQL store: the same documents, keys, indexes and\nrefusals as Store, kept in a database the caller owns, each call on the\ntransaction its context carries (ADR 0139).\n\nPackage docstore — the SQL store's versions: a third table, written by the\nstatements of the write that stores the document, in its transaction\n(ADR 0143).\n\nPackage docstore — the SQL store's writes: each one atomic on its own, in a\ntransaction of the store's or a savepoint of the caller's, and announced\nonce the transaction that holds it has committed.\n\nPackage docstore — a document's versions: the current one, which is the\ndocument itself, and the former ones kept beside it, recorded and pruned in\nthe write that stores the document (ADR 0143).\n\nPackage docstore — a document's trash, on a store that keeps versions: a\ntrashed document leaves every read and keeps its versions and its number,\nuntil Restore brings it back or Purge empties it (ADR 0143, amended for\nADR 0178). The file engine keeps it in the document's versions, the SQL\nengine in a version row numbered 0.\n\nPackage docstore — the writes: prepared outside every lock, checked and\npersisted under the writers' lock, applied under both.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/service/data/queue",
@@ -19314,7 +19314,7 @@
       "recv": "Announcer",
       "spelled": "func(fn func(key string)) (remove func())",
       "canonical": "func(fn func(key string)) (remove func())",
-      "doc": "OnDelete registers fn to be told the key of every document Delete\nremoved, on the same terms as OnWrite.\n",
+      "doc": "OnDelete registers fn to be told the key of every document Delete or\nTrash removed, on the same terms as OnWrite.\n",
       "file": "core/data/docstore/design_gen.go",
       "layer": "core",
       "family": "data"
@@ -19327,7 +19327,7 @@
       "recv": "Announcer",
       "spelled": "func(fn func(key string)) (remove func())",
       "canonical": "func(fn func(key string)) (remove func())",
-      "doc": "OnWrite registers fn to be told the key of every document Put, Insert,\nReplace or Update stored, and returns the function that removes the\nregistration. A nil fn registers nothing. A panic in fn reaches the\nwriter after its write stood.\n",
+      "doc": "OnWrite registers fn to be told the key of every document Put, Insert,\nReplace, Update or Restore stored, and returns the function that removes\nthe registration. A nil fn registers nothing. A panic in fn reaches the\nwriter after its write stood.\n",
       "file": "core/data/docstore/design_gen.go",
       "layer": "core",
       "family": "data"
@@ -19392,6 +19392,22 @@
         "value": "0.3.80.1"
       },
       "doc": "CodeDocumentNotFound identifies a read, an update, a replacement or a\ndeletion of a key the store holds no document under, and a unique-index\nlookup that finds nobody.\n",
+      "file": "core/data/docstore/codes_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.CodeDocumentNotTrashed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "CodeDocumentNotTrashed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "217109",
+      "code": {
+        "value": "0.3.80.21"
+      },
+      "doc": "CodeDocumentNotTrashed identifies a restoration or a purge of a key the\nstore holds no trashed document under.\n",
       "file": "core/data/docstore/codes_gen.go",
       "layer": "core",
       "family": "data"
@@ -20031,6 +20047,23 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.DocumentNotTrashed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "DocumentNotTrashed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.80.21",
+        "reason": "DOCUMENT_NOT_TRASHED",
+        "public": "No document with this key is in the trash"
+      },
+      "doc": "DocumentNotTrashed is a miss on the trash: no document is trashed under\nthat key — it never was, it was restored, purged, or written again.\n",
+      "file": "core/data/docstore/codes_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.DocumentUndecodable",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
@@ -20307,6 +20340,158 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.TombstoneValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "TombstoneValue",
+      "spelled": "struct{Key string; At time.Time}",
+      "canonical": "struct{Key string; At time.Time}",
+      "fields": [
+        {
+          "name": "Key",
+          "type": "string",
+          "doc": "Key is the trashed document's key.\n"
+        },
+        {
+          "name": "At",
+          "type": "time.Time",
+          "doc": "At is when the document was trashed, in UTC, read from the store's\nclock and kept to the nanosecond, as a version's instant is.\n"
+        }
+      ],
+      "doc": "TombstoneValue is a document in the trash, as [Trashable].Tombstones\nlists it: its key and when it was trashed. The document and its versions\nare read through [Versioned].Versions.\n",
+      "file": "core/data/docstore/value.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Trashable",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "Trashable",
+      "spelled": "interface{Purge(key string) error; Restore(key string) error; Tombstones() ([]TombstoneValue, error); Trash(key string) error}",
+      "canonical": "interface{Purge(key string) error; Restore(key string) error; Tombstones() ([]github.com/kitsunium/sdk/internal/core/data/docstore.TombstoneValue, error); Trash(key string) error}",
+      "doc": "Trashable is a document's trash, on a store whose calls take no context:\nthe sibling of [Collection] and [Versioned] the file engine implements\nbeside them (ADR 0143, amended for ADR 0178). Only a store that keeps\nversions has a trash; one that keeps none answers every call with\nVERSIONS_NOT_KEPT.\n\nA document in the trash is gone from every read — Get, List, Lookup,\nFind — and its unique keys are free, as a former version's are; its\nversions stay, readable through Versioned, and its number is kept: a\ncreation under its key is a write over the trashed document, which takes\nit out of the trash and continues its versions. Delete never reaches the\ntrash, and a trashed document is not Delete's to find: Delete takes a\ndocument and its versions at once, which is what an erasure needs. How\nlong a document stays in the trash is the caller's to decide, through\nTombstones and Purge.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Trashable.Purge",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "Purge",
+      "recv": "Trashable",
+      "spelled": "func(key string) error",
+      "canonical": "func(key string) error",
+      "doc": "Purge empties the trash of the document trashed under key: the\ntrashed document and every version it kept go, and a document written\nlater under the key starts again at version 1. It calls no hook — the\ndocument already left every read — and asks no hold, as Delete does\nnot. DOCUMENT_NOT_TRASHED when no document is trashed under key.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Trashable.Restore",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "Restore",
+      "recv": "Trashable",
+      "spelled": "func(key string) error",
+      "canonical": "func(key string) error",
+      "doc": "Restore brings the document trashed under key back, exactly as it was\n— the same JSON, the same current version — and files it again. It\ncalls OnWrite. DOCUMENT_NOT_TRASHED when no document is trashed under\nkey, UNIQUE_KEY_TAKEN when another document took one of its unique\nkeys meanwhile, which then stays in the trash.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Trashable.Tombstones",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "Tombstones",
+      "recv": "Trashable",
+      "spelled": "func() ([]TombstoneValue, error)",
+      "canonical": "func() ([]github.com/kitsunium/sdk/internal/core/data/docstore.TombstoneValue, error)",
+      "doc": "Tombstones returns every document in the trash, in key order: its key\nand when it was trashed, for a caller that empties the trash after a\nwhile.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Trashable.Trash",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "Trash",
+      "recv": "Trashable",
+      "spelled": "func(key string) error",
+      "canonical": "func(key string) error",
+      "doc": "Trash moves the document stored under key to the trash: it is gone from\nevery read and its index keys are freed, while its versions are kept\nand the trash records the instant. It calls OnDelete.\nDOCUMENT_NOT_FOUND when no document is stored under key.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.TrashableContext",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "TrashableContext",
+      "spelled": "interface{Purge(ctx context.Context, key string) error; Restore(ctx context.Context, key string) error; Tombstones(ctx context.Context) ([]TombstoneValue, error); Trash(ctx context.Context, key string) error}",
+      "canonical": "interface{Purge(ctx context.Context, key string) error; Restore(ctx context.Context, key string) error; Tombstones(ctx context.Context) ([]github.com/kitsunium/sdk/internal/core/data/docstore.TombstoneValue, error); Trash(ctx context.Context, key string) error}",
+      "doc": "TrashableContext is [Trashable] with a context on every call: the sibling\nof [CollectionContext] and [VersionedContext] the SQL engine implements\nbeside them. Each call is one transaction, a savepoint of the caller's\nwhen the context carries one.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.TrashableContext.Purge",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "Purge",
+      "recv": "TrashableContext",
+      "spelled": "func(ctx context.Context, key string) error",
+      "canonical": "func(ctx context.Context, key string) error",
+      "doc": "Purge is Trashable.Purge under ctx.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.TrashableContext.Restore",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "Restore",
+      "recv": "TrashableContext",
+      "spelled": "func(ctx context.Context, key string) error",
+      "canonical": "func(ctx context.Context, key string) error",
+      "doc": "Restore is Trashable.Restore under ctx.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.TrashableContext.Tombstones",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "Tombstones",
+      "recv": "TrashableContext",
+      "spelled": "func(ctx context.Context) ([]TombstoneValue, error)",
+      "canonical": "func(ctx context.Context) ([]github.com/kitsunium/sdk/internal/core/data/docstore.TombstoneValue, error)",
+      "doc": "Tombstones is Trashable.Tombstones under ctx.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.TrashableContext.Trash",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "Trash",
+      "recv": "TrashableContext",
+      "spelled": "func(ctx context.Context, key string) error",
+      "canonical": "func(ctx context.Context, key string) error",
+      "doc": "Trash is Trashable.Trash under ctx.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Unique[...]",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
@@ -20378,7 +20563,7 @@
         {
           "name": "Number",
           "type": "uint64",
-          "doc": "Number counts a document's versions from 1. No number is given twice\nwhile the document exists, pruning included; a document deleted and\nwritten again is a new document, and starts again at 1.\n"
+          "doc": "Number counts a document's versions from 1. No number is given twice\nwhile the document exists or is in the trash, pruning included; a\ndocument deleted, or purged from the trash, and written again is a new\ndocument, and starts again at 1.\n"
         }
       ],
       "doc": "VersionValue is one version of a document: its number, when the write that\nmade it ran, what that write's caller said about it, and the document as the\nversion holds it.\n",
@@ -20406,7 +20591,7 @@
       "recv": "Versioned",
       "spelled": "func(v T, stamp StampValue) error",
       "canonical": "func(v T, stamp github.com/kitsunium/sdk/internal/core/data/docstore.StampValue) error",
-      "doc": "InsertStamped is Insert, with what the write says about the version it\nmakes: version 1, whatever stamp.InPlace says.\n",
+      "doc": "InsertStamped is Insert, with what the write says about the version it\nmakes: version 1, whatever stamp.InPlace says — or, under the key of a\ndocument in the trash, a write over that document.\n",
       "file": "core/data/docstore/design_gen.go",
       "layer": "core",
       "family": "data"
@@ -20484,7 +20669,7 @@
       "recv": "Versioned",
       "spelled": "func(key string) ([]VersionValue, error)",
       "canonical": "func(key string) ([]github.com/kitsunium/sdk/internal/core/data/docstore.VersionValue, error)",
-      "doc": "Versions returns the versions kept of the document stored under key,\nnewest first: the current one — the document as it is now — then the\nformer ones. DOCUMENT_NOT_FOUND when no document is stored under key.\n",
+      "doc": "Versions returns the versions kept of the document stored under key,\nnewest first: the current one — the document as it is now — then the\nformer ones. A document in the trash answers the versions it kept, the\ntrashed document first. DOCUMENT_NOT_FOUND when no document is stored\nor trashed under key.\n",
       "file": "core/data/docstore/design_gen.go",
       "layer": "core",
       "family": "data"
@@ -54721,7 +54906,7 @@
         {
           "name": "Versions",
           "type": "int",
-          "doc": "Versions is how many former versions each document keeps beside its\ncurrent one, the newest: a write that changes a document makes a new\nversion, and prunes the oldest beyond Versions in the same durable\nwrite. Zero keeps no versions — the store writes exactly the files it\nwrote before versions existed — and a negative value is refused. A\npersistent store keeps them in the file Path + \".versions\" once a fold\nran, and a store opened with zero over files that keep versions is\nrefused rather than left to drop or corrupt them (ADR 0143).\n"
+          "doc": "Versions is how many former versions each document keeps beside its\ncurrent one, the newest: a write that changes a document makes a new\nversion, and prunes the oldest beyond Versions in the same durable\nwrite. Zero keeps no versions — the store writes exactly the files it\nwrote before versions existed — and a negative value is refused. A\npersistent store keeps them in the file Path + \".versions\" once a fold\nran, and a store opened with zero over files that keep versions is\nrefused rather than left to drop or corrupt them (ADR 0143). A store\nthat keeps versions has a trash, Trash's; one that keeps none has none.\n"
         }
       ],
       "doc": "Config configures [Open]. Key is required; every other field is optional,\nand leaving all of them empty opens a working store kept in memory. The\nsecondary indexes are Open's other arguments.\n",
@@ -54851,7 +55036,7 @@
         {
           "name": "Versions",
           "type": "int",
-          "doc": "Versions is how many former versions each document keeps beside its\ncurrent one, as for [Open]: a write that changes a document makes a\nnew version and prunes the oldest beyond Versions, in its own\ntransaction. They live in a third table, <Table>___vs, which\n[SQLVersionsMigration] creates. Zero keeps no versions and sends\nexactly the statements the store sent before versions existed; a\nnegative value is refused. The store cannot see a versions table it was\ntold nothing about: turned off, it leaves the table as it is, and a\ndocument deleted and written again meanwhile would find the rows of the\none it replaced — so drop the table with the migration's Down (ADR 0143).\n"
+          "doc": "Versions is how many former versions each document keeps beside its\ncurrent one, as for [Open]: a write that changes a document makes a\nnew version and prunes the oldest beyond Versions, in its own\ntransaction. They live in a third table, <Table>___vs, which\n[SQLVersionsMigration] creates. Zero keeps no versions and sends\nexactly the statements the store sent before versions existed; a\nnegative value is refused. The store cannot see a versions table it was\ntold nothing about: turned off, it leaves the table as it is, and a\ndocument deleted and written again meanwhile would find the rows of the\none it replaced — so drop the table with the migration's Down (ADR 0143).\nA store that keeps versions has a trash, Trash's, in the same table; one\nthat keeps none has none.\n"
         }
       ],
       "doc": "SQLConfig configures [OpenSQL]. Key, Transactor, Dialect and Table are\nrequired. The secondary indexes are OpenSQL's other arguments, declared\nwith [coredocstore.Unique] and [coredocstore.Index] exactly as for [Open].\n",
@@ -54904,7 +55089,7 @@
       "recv": "SQLStore",
       "spelled": "func(ctx context.Context, key string) error",
       "canonical": "func(ctx context.Context, key string) error",
-      "doc": "Delete removes the document stored under key, or returns DocumentNotFound.\nIts versions go with it, in the same transaction.\n",
+      "doc": "Delete removes the document stored under key, or returns DocumentNotFound.\nIts versions go with it, in the same transaction: a deletion never reaches\nthe trash, which is Trash's.\n",
       "file": "service/data/docstore/sql_write.go",
       "layer": "service",
       "family": "data"
@@ -54982,7 +55167,7 @@
       "recv": "SQLStore",
       "spelled": "func(ctx context.Context, v T, stamp coredocstore.StampValue) error",
       "canonical": "func(ctx context.Context, v T, stamp github.com/kitsunium/sdk/internal/core/data/docstore.StampValue) error",
-      "doc": "InsertStamped is Insert, with what the write says about the version it\nmakes: version 1, whatever stamp.InPlace says.\n",
+      "doc": "InsertStamped is Insert, with what the write says about the version it\nmakes: version 1, whatever stamp.InPlace says — or, under the key of a\ndocument in the trash, a write over that document.\n",
       "file": "service/data/docstore/sql_version.go",
       "layer": "service",
       "family": "data"
@@ -55021,7 +55206,7 @@
       "recv": "SQLStore",
       "spelled": "func(fn func(key string)) (remove func())",
       "canonical": "func(fn func(key string)) (remove func())",
-      "doc": "OnDelete registers fn to be told the key of every document Delete removed,\non the same terms as OnWrite.\n",
+      "doc": "OnDelete registers fn to be told the key of every document Delete or Trash\nremoved, on the same terms as OnWrite.\n",
       "file": "service/data/docstore/sql_store.go",
       "layer": "service",
       "family": "data"
@@ -55034,8 +55219,21 @@
       "recv": "SQLStore",
       "spelled": "func(fn func(key string)) (remove func())",
       "canonical": "func(fn func(key string)) (remove func())",
-      "doc": "OnWrite registers fn to be told the key of every document Put, Insert,\nReplace or Update stored, once the transaction that holds the write has\ncommitted — never for a write that is rolled back — on the goroutine that\ncommitted it, outside every lock. It returns the function that removes the\nregistration.\n",
+      "doc": "OnWrite registers fn to be told the key of every document Put, Insert,\nReplace, Update or Restore stored, once the transaction that holds the\nwrite has committed — never for a write that is rolled back — on the\ngoroutine that committed it, outside every lock. It returns the function\nthat removes the registration.\n",
       "file": "service/data/docstore/sql_store.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*SQLStore[...]).Purge",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
+      "name": "Purge",
+      "recv": "SQLStore",
+      "spelled": "func(ctx context.Context, key string) error",
+      "canonical": "func(ctx context.Context, key string) error",
+      "doc": "Purge empties the trash of the document trashed under key: the trashed\ndocument and every version row of its key go, in one transaction, and a\ndocument written later under the key starts again at version 1. It calls\nno hook and asks Held nothing, as Delete does not. DocumentNotTrashed\nwhen no document is trashed under key.\n",
+      "file": "service/data/docstore/sql_trash.go",
       "layer": "service",
       "family": "data"
     },
@@ -55105,6 +55303,19 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*SQLStore[...]).Restore",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
+      "name": "Restore",
+      "recv": "SQLStore",
+      "spelled": "func(ctx context.Context, key string) error",
+      "canonical": "func(ctx context.Context, key string) error",
+      "doc": "Restore brings the document trashed under key back exactly as it was —\nthe same JSON, the same current version — files it again and calls\nOnWrite once its transaction commits. DocumentNotTrashed when no\ndocument is trashed under key, UniqueKeyTaken when another document took\none of its unique keys meanwhile, DocumentUndecodable when it no longer\ndecodes into the store's type; nothing changes on a refusal.\n",
+      "file": "service/data/docstore/sql_trash.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*SQLStore[...]).RewriteVersions",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
@@ -55114,6 +55325,32 @@
       "canonical": "func(ctx context.Context, key string, fn func(former []github.com/kitsunium/sdk/internal/core/data/docstore.VersionValue) ([]github.com/kitsunium/sdk/internal/core/data/docstore.VersionValue, error)) error",
       "doc": "RewriteVersions rewrites the former versions of the document stored under\nkey — every version but the current one, which is the document and which\nonly a write changes — in one transaction, a savepoint of the caller's when\nctx carries one, the document locked as a write locks it. fn receives copies\nof them, newest first, and returns those to keep, in the same order, under\nthe rules of [Store].RewriteVersions: VersionsRewriteRefused otherwise, and\nfn's own error returned as it is, nothing changed either way. It calls no\nhook: the document did not change.\n",
       "file": "service/data/docstore/sql_version.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*SQLStore[...]).Tombstones",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
+      "name": "Tombstones",
+      "recv": "SQLStore",
+      "spelled": "func(ctx context.Context) (tombstones []coredocstore.TombstoneValue, err error)",
+      "canonical": "func(ctx context.Context) (tombstones []github.com/kitsunium/sdk/internal/core/data/docstore.TombstoneValue, err error)",
+      "doc": "Tombstones returns every document in the trash, in key order: its key and\nthe instant it was trashed, read in one statement on the transaction ctx\ncarries. The statement scans the versions table, as List scans the\ndocuments'.\n",
+      "file": "service/data/docstore/sql_trash.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*SQLStore[...]).Trash",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
+      "name": "Trash",
+      "recv": "SQLStore",
+      "spelled": "func(ctx context.Context, key string) error",
+      "canonical": "func(ctx context.Context, key string) error",
+      "doc": "Trash moves the document stored under key to the trash, in one\ntransaction — a savepoint of the caller's when ctx carries one: its row\nand its index rows go, and a version row numbered 0 — no version's\nnumber — holds the document and the instant it was trashed beside its\nversions, which stay. It calls OnDelete once that transaction commits.\nDocumentNotFound when no document is stored under key, VersionsNotKept\nwhen the store keeps no versions: only a store that keeps versions has a\ntrash.\n",
+      "file": "service/data/docstore/sql_trash.go",
       "layer": "service",
       "family": "data"
     },
@@ -55164,7 +55401,7 @@
       "recv": "SQLStore",
       "spelled": "func(ctx context.Context, key string) (versions []coredocstore.VersionValue, err error)",
       "canonical": "func(ctx context.Context, key string) (versions []github.com/kitsunium/sdk/internal/core/data/docstore.VersionValue, err error)",
-      "doc": "Versions returns the versions the store keeps of the document stored under\nkey, newest first: the current one — the document as it is now — then the\nformer ones, read in one statement on the transaction ctx carries.\nDocumentNotFound when no document is stored under key, VersionsNotKept when\nthe store keeps no versions.\n",
+      "doc": "Versions returns the versions the store keeps of the document stored under\nkey, newest first: the current one — the document as it is now — then the\nformer ones, read in one statement on the transaction ctx carries; a\ndocument in the trash answers the versions it kept, the trashed document\nfirst, in a second one. DocumentNotFound when no document is stored or\ntrashed under key, VersionsNotKept when the store keeps no versions.\n",
       "file": "service/data/docstore/sql_version.go",
       "layer": "service",
       "family": "data"
@@ -55248,7 +55485,7 @@
       "recv": "Store",
       "spelled": "func(key string) error",
       "canonical": "func(key string) error",
-      "doc": "Delete removes the document stored under key, or returns DocumentNotFound.\nIts versions go with it.\n",
+      "doc": "Delete removes the document stored under key, or returns DocumentNotFound.\nIts versions go with it: a deletion never reaches the trash, which is\nTrash's.\n",
       "file": "service/data/docstore/write.go",
       "layer": "service",
       "family": "data"
@@ -55339,7 +55576,7 @@
       "recv": "Store",
       "spelled": "func(v T, stamp coredocstore.StampValue) error",
       "canonical": "func(v T, stamp github.com/kitsunium/sdk/internal/core/data/docstore.StampValue) error",
-      "doc": "InsertStamped is Insert, with what the write says about the version it\nmakes: version 1, whatever stamp.InPlace says.\n",
+      "doc": "InsertStamped is Insert, with what the write says about the version it\nmakes: version 1, whatever stamp.InPlace says — or, under the key of a\ndocument in the trash, a write over that document.\n",
       "file": "service/data/docstore/version.go",
       "layer": "service",
       "family": "data"
@@ -55378,7 +55615,7 @@
       "recv": "Store",
       "spelled": "func(fn func(key string)) (remove func())",
       "canonical": "func(fn func(key string)) (remove func())",
-      "doc": "OnDelete registers fn to be told the key of every document Delete removed,\non the same terms as OnWrite.\n",
+      "doc": "OnDelete registers fn to be told the key of every document Delete or Trash\nremoved, on the same terms as OnWrite.\n",
       "file": "service/data/docstore/hooks.go",
       "layer": "service",
       "family": "data"
@@ -55391,8 +55628,21 @@
       "recv": "Store",
       "spelled": "func(fn func(key string)) (remove func())",
       "canonical": "func(fn func(key string)) (remove func())",
-      "doc": "OnWrite registers fn to be told the key of every document Put, Insert,\nReplace or Update stored, once the write is durable, on the writer's\ngoroutine and outside every lock. It returns the function that removes the\nregistration. A panic in fn reaches the writer after its write stood.\n",
+      "doc": "OnWrite registers fn to be told the key of every document Put, Insert,\nReplace, Update or Restore stored, once the write is durable, on the\nwriter's goroutine and outside every lock. It returns the function that\nremoves the registration. A panic in fn reaches the writer after its write\nstood.\n",
       "file": "service/data/docstore/hooks.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*Store[...]).Purge",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
+      "name": "Purge",
+      "recv": "Store",
+      "spelled": "func(key string) error",
+      "canonical": "func(key string) error",
+      "doc": "Purge empties the trash of the document trashed under key: the trashed\ndocument and every version it kept go, in one durable write, and a\ndocument written later under the key starts again at version 1. It calls\nno hook and asks Held nothing, as Delete does not. DocumentNotTrashed\nwhen no document is trashed under key.\n",
+      "file": "service/data/docstore/trash.go",
       "layer": "service",
       "family": "data"
     },
@@ -55449,6 +55699,19 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*Store[...]).Restore",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
+      "name": "Restore",
+      "recv": "Store",
+      "spelled": "func(key string) error",
+      "canonical": "func(key string) error",
+      "doc": "Restore brings the document trashed under key back exactly as it was —\nthe same JSON, the same current version — files it again and calls\nOnWrite. DocumentNotTrashed when no document is trashed under key,\nUniqueKeyTaken when another document took one of its unique keys\nmeanwhile, DocumentUndecodable when it no longer decodes into the store's\ntype; nothing changes on a refusal.\n",
+      "file": "service/data/docstore/trash.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*Store[...]).RewriteVersions",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
@@ -55471,6 +55734,32 @@
       "canonical": "func() github.com/kitsunium/sdk/internal/service/data/docstore.StatsValue",
       "doc": "Stats reports what the store holds and where its overlay stands. It answers\nafter Close too, with the state the store closed in.\n",
       "file": "service/data/docstore/docstore.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*Store[...]).Tombstones",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
+      "name": "Tombstones",
+      "recv": "Store",
+      "spelled": "func() ([]coredocstore.TombstoneValue, error)",
+      "canonical": "func() ([]github.com/kitsunium/sdk/internal/core/data/docstore.TombstoneValue, error)",
+      "doc": "Tombstones returns every document in the trash, in key order: its key and\nthe instant it was trashed. It reads every document's versions, as List\nreads every document.\n",
+      "file": "service/data/docstore/trash.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*Store[...]).Trash",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
+      "name": "Trash",
+      "recv": "Store",
+      "spelled": "func(key string) error",
+      "canonical": "func(key string) error",
+      "doc": "Trash moves the document stored under key to the trash, in one durable\nwrite under the writers' lock: it leaves every read and its index keys\nare freed, while its versions are kept beside the trashed document and\nthe instant it was trashed. It calls OnDelete. DocumentNotFound when no\ndocument is stored under key, VersionsNotKept when the store keeps no\nversions: only a store that keeps versions has a trash.\n",
+      "file": "service/data/docstore/trash.go",
       "layer": "service",
       "family": "data"
     },
@@ -55521,7 +55810,7 @@
       "recv": "Store",
       "spelled": "func(key string) ([]coredocstore.VersionValue, error)",
       "canonical": "func(key string) ([]github.com/kitsunium/sdk/internal/core/data/docstore.VersionValue, error)",
-      "doc": "Versions returns the versions the store keeps of the document stored under\nkey, newest first: the current one — the document as it is now — then the\nformer ones. It returns DocumentNotFound when no document is stored under\nkey, and VersionsNotKept when the store keeps no versions.\n",
+      "doc": "Versions returns the versions the store keeps of the document stored under\nkey, newest first: the current one — the document as it is now — then the\nformer ones; a document in the trash answers the versions it kept, the\ntrashed document first. It returns DocumentNotFound when no document is\nstored or trashed under key, and VersionsNotKept when the store keeps no\nversions.\n",
       "file": "service/data/docstore/version.go",
       "layer": "service",
       "family": "data"

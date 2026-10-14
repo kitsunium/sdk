@@ -2,6 +2,7 @@ package docstore_test
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -185,6 +186,45 @@ var (
 // TestAStoreServesThroughItsPort holds the file engine as the port a double
 // stands in for, and finds through it the documents, the index, the refusal
 // and the hook the engine answers directly.
+func TestFacadeTrash(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	store, err := docstore.Open(
+		docstore.Config[member]{Key: func(m member) string { return m.ID }, Versions: 2, Clock: clock.NewManualClock(at)},
+		docstore.Unique("email", func(m member) string { return m.Email }),
+	)
+	if err != nil {
+		t.Fatalf("Open() = %v", err)
+	}
+	var trash docstore.Trashable = store
+	if err := store.Insert(member{ID: "m1", Email: "ada@example.com"}); err != nil {
+		t.Fatalf("Insert() = %v", err)
+	}
+	if err := trash.Trash("m1"); err != nil {
+		t.Fatalf("Trash() = %v", err)
+	}
+	if _, err := store.Lookup("email", "ada@example.com"); !errs.HasCode(err, docstore.CodeDocumentNotFound) {
+		t.Fatalf("Lookup of a trashed document = %v, want DocumentNotFound", err)
+	}
+	tombs, err := trash.Tombstones()
+	if err != nil || !slices.Equal(tombs, []docstore.Tombstone{{Key: "m1", At: at}}) {
+		t.Fatalf("Tombstones() = %+v, %v", tombs, err)
+	}
+	if versions, err := store.Versions("m1"); err != nil || len(versions) != 1 || versions[0].Number != 1 {
+		t.Fatalf("Versions of a trashed document = %+v, %v", versions, err)
+	}
+	if err := trash.Restore("m1"); err != nil {
+		t.Fatalf("Restore() = %v", err)
+	}
+	if err := trash.Purge("m1"); !errs.HasCode(err, docstore.CodeDocumentNotTrashed) || !errors.Is(err, docstore.DocumentNotTrashed) {
+		t.Fatalf("Purge of a restored document = %v, want DocumentNotTrashed", err)
+	}
+	if got, err := store.Lookup("email", "ada@example.com"); err != nil || got.ID != "m1" {
+		t.Fatalf("Lookup after Restore = %+v, %v", got, err)
+	}
+	var _ docstore.TrashableContext = (*docstore.SQLStore[member])(nil)
+}
+
 func TestAStoreServesThroughItsPort(t *testing.T) {
 	t.Parallel()
 	store := open(t, vfs.NewMem())

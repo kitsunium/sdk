@@ -32,8 +32,9 @@ type VersionValue struct {
 	// caller owns. The newest version's is the document itself.
 	JSON json.RawMessage
 	// Number counts a document's versions from 1. No number is given twice
-	// while the document exists, pruning included; a document deleted and
-	// written again is a new document, and starts again at 1.
+	// while the document exists or is in the trash, pruning included; a
+	// document deleted, or purged from the trash, and written again is a new
+	// document, and starts again at 1.
 	Number uint64
 }
 
@@ -51,4 +52,15 @@ type StampValue struct {
 	// which its journal already records. A creation is version 1 all the
 	// same.
 	InPlace bool
+}
+
+// TombstoneValue is a document in the trash, as [Trashable].Tombstones
+// lists it: its key and when it was trashed. The document and its versions
+// are read through [Versioned].Versions.
+type TombstoneValue struct {
+	// Key is the trashed document's key.
+	Key string
+	// At is when the document was trashed, in UTC, read from the store's
+	// clock and kept to the nanosecond, as a version's instant is.
+	At time.Time
 }

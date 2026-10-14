@@ -105,6 +105,25 @@ func (versionedContextDouble) RewriteVersions(context.Context, string, func([]co
 	return nil
 }
 
+// trashableDouble carries exactly the methods Trashable declares.
+type trashableDouble struct{}
+
+func (trashableDouble) Trash(string) error                                 { return nil }
+func (trashableDouble) Restore(string) error                               { return nil }
+func (trashableDouble) Purge(string) error                                 { return nil }
+func (trashableDouble) Tombstones() ([]coredocstore.TombstoneValue, error) { return nil, nil }
+
+// trashableContextDouble carries exactly the methods TrashableContext
+// declares.
+type trashableContextDouble struct{}
+
+func (trashableContextDouble) Trash(context.Context, string) error   { return nil }
+func (trashableContextDouble) Restore(context.Context, string) error { return nil }
+func (trashableContextDouble) Purge(context.Context, string) error   { return nil }
+func (trashableContextDouble) Tombstones(context.Context) ([]coredocstore.TombstoneValue, error) {
+	return nil, nil
+}
+
 // TestDoublesStillSatisfyThePorts is the ADR 0039 guard, executable rather
 // than documentary: each double above holds exactly its port's methods, so a
 // method added to a port fails this file's compilation before review.
@@ -114,6 +133,8 @@ func TestDoublesStillSatisfyThePorts(t *testing.T) {
 	var versioned coredocstore.Versioned[doc] = versionedDouble{}
 	var withContext coredocstore.CollectionContext[doc] = contextDouble{}
 	var versionedWithContext coredocstore.VersionedContext[doc] = versionedContextDouble{}
+	var trashable coredocstore.Trashable = trashableDouble{}
+	var trashableWithContext coredocstore.TrashableContext = trashableContextDouble{}
 	announcers := []coredocstore.Announcer{collection, withContext}
 	if _, err := collection.Get("k"); err != nil {
 		t.Fatalf("Collection.Get = %v, want nil", err)
@@ -126,6 +147,12 @@ func TestDoublesStillSatisfyThePorts(t *testing.T) {
 	}
 	if _, err := versionedWithContext.Versions(t.Context(), "k"); err != nil {
 		t.Fatalf("VersionedContext.Versions = %v, want nil", err)
+	}
+	if err := trashable.Trash("k"); err != nil {
+		t.Fatalf("Trashable.Trash = %v, want nil", err)
+	}
+	if err := trashableWithContext.Trash(t.Context(), "k"); err != nil {
+		t.Fatalf("TrashableContext.Trash = %v, want nil", err)
 	}
 	for _, announcer := range announcers {
 		announcer.OnWrite(func(string) {})()
@@ -165,6 +192,7 @@ func TestSentinelsCarryTheirDocumentedCodes(t *testing.T) {
 		{coredocstore.VersionsNotKept, "VERSIONS_NOT_KEPT", 0x00_03_50_12, 70, 400},
 		{coredocstore.VersionNotFound, "VERSION_NOT_FOUND", 0x00_03_50_13, 70, 404},
 		{coredocstore.VersionsRewriteRefused, "VERSIONS_REWRITE_REFUSED", 0x00_03_50_14, 70, 400},
+		{coredocstore.DocumentNotTrashed, "DOCUMENT_NOT_TRASHED", 0x00_03_50_15, 70, 404},
 	}
 	for _, tc := range cases {
 		t.Run(tc.reason, func(t *testing.T) {

@@ -138,11 +138,18 @@ packages:
             name: CodeVersionsRewriteRefused
             value: "0x00_03_50_14"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeDocumentNotTrashed identifies a restoration or a purge of a key the
+              store holds no trashed document under.
+            name: CodeDocumentNotTrashed
+            value: "0x00_03_50_15"
+        type: errs.Code
     doc: |-
       Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;
-      ADR 0139 added 16 and 17, ADR 0143 18 to 20). Both engines answer every one
-      of them alike, and the range keeps the LL = 3 its engine allocated it under
-      now that it is declared here (ADR 0160).
+      ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21). Both
+      engines answer every one of them alike, and the range keeps the LL = 3 its
+      engine allocated it under now that it is declared here (ADR 0160).
 
       Package docstore declares the document-store domain: typed, keyed JSON
       documents with unique and multi-valued secondary indexes, kept by two
@@ -156,12 +163,12 @@ packages:
         - the ports. [Collection] is a store whose calls take no context, which
           the file engine is; [CollectionContext] is the same calls, each taking
           a context first, which the SQL engine is. [Versioned] and
-          [VersionedContext] are their siblings for a document's versions, and
-          [Announcer] is the pair of hooks both engines answer exactly as they
-          are;
+          [VersionedContext] are their siblings for a document's versions,
+          [Trashable] and [TrashableContext] for its trash, and [Announcer] is
+          the pair of hooks both engines answer exactly as they are;
         - the values both engines read and return — [EntryValue], [VersionValue],
-          [StampValue] — and [IndexSpec], the declaration both take, with its two
-          constructors [Unique] and [Index];
+          [StampValue], [TombstoneValue] — and [IndexSpec], the declaration both
+          take, with its two constructors [Unique] and [Index];
         - the codes of the 0.3.80.* range and their sentinels: both engines answer
           the same refusals under the same codes (ADR 0160).
 
@@ -177,8 +184,8 @@ packages:
       statement live in internal/service/data/docstore.
 
       Package docstore — the siblings of Collection (ADR 0039): a document's
-      versions, and the same two ports with a context on every call, which the SQL
-      engine implements.
+      versions, its trash, and the same ports with a context on every call, which
+      the SQL engine implements.
 
       Package docstore — declares the sentinel *errs.Error outcomes both engines
       answer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
@@ -197,8 +204,8 @@ packages:
       take at construction and file by the same rule.
 
       Package docstore — the values both engines read and return: a stored
-      document as JSON, one version of a document, and what a write says about the
-      version it makes.
+      document as JSON, one version of a document, what a write says about the
+      version it makes, and a document in the trash.
     functions:
       - doc: |-
           Unique declares a unique index over the one key key returns: no two
@@ -245,8 +252,8 @@ packages:
         methods:
           - doc: |-
               OnWrite registers fn to be told the key of every document Put, Insert,
-              Replace or Update stored, and returns the function that removes the
-              registration. A nil fn registers nothing. A panic in fn reaches the
+              Replace, Update or Restore stored, and returns the function that removes
+              the registration. A nil fn registers nothing. A panic in fn reaches the
               writer after its write stood.
             in:
               - name: fn
@@ -256,8 +263,8 @@ packages:
               - name: remove
                 type: func()
           - doc: |-
-              OnDelete registers fn to be told the key of every document Delete
-              removed, on the same terms as OnWrite.
+              OnDelete registers fn to be told the key of every document Delete or
+              Trash removed, on the same terms as OnWrite.
             in:
               - name: fn
                 type: func(key string)
@@ -408,7 +415,8 @@ packages:
               - type: error
           - doc: |-
               InsertStamped is Insert, with what the write says about the version it
-              makes: version 1, whatever stamp.InPlace says.
+              makes: version 1, whatever stamp.InPlace says — or, under the key of a
+              document in the trash, a write over that document.
             in:
               - name: v
                 type: T
@@ -445,7 +453,9 @@ packages:
           - doc: |-
               Versions returns the versions kept of the document stored under key,
               newest first: the current one — the document as it is now — then the
-              former ones. DOCUMENT_NOT_FOUND when no document is stored under key.
+              former ones. A document in the trash answers the versions it kept, the
+              trashed document first. DOCUMENT_NOT_FOUND when no document is stored
+              or trashed under key.
             in:
               - name: key
                 type: string
@@ -703,6 +713,109 @@ packages:
         typeParams:
           - constraint: any
             name: T
+      - doc: |-
+          Trashable is a document's trash, on a store whose calls take no context:
+          the sibling of [Collection] and [Versioned] the file engine implements
+          beside them (ADR 0143, amended for ADR 0178). Only a store that keeps
+          versions has a trash; one that keeps none answers every call with
+          VERSIONS_NOT_KEPT.
+
+          A document in the trash is gone from every read — Get, List, Lookup,
+          Find — and its unique keys are free, as a former version's are; its
+          versions stay, readable through Versioned, and its number is kept: a
+          creation under its key is a write over the trashed document, which takes
+          it out of the trash and continues its versions. Delete never reaches the
+          trash, and a trashed document is not Delete's to find: Delete takes a
+          document and its versions at once, which is what an erasure needs. How
+          long a document stays in the trash is the caller's to decide, through
+          Tombstones and Purge.
+        methods:
+          - doc: |-
+              Trash moves the document stored under key to the trash: it is gone from
+              every read and its index keys are freed, while its versions are kept
+              and the trash records the instant. It calls OnDelete.
+              DOCUMENT_NOT_FOUND when no document is stored under key.
+            in:
+              - name: key
+                type: string
+            name: Trash
+            out:
+              - type: error
+          - doc: |-
+              Restore brings the document trashed under key back, exactly as it was
+              — the same JSON, the same current version — and files it again. It
+              calls OnWrite. DOCUMENT_NOT_TRASHED when no document is trashed under
+              key, UNIQUE_KEY_TAKEN when another document took one of its unique
+              keys meanwhile, which then stays in the trash.
+            in:
+              - name: key
+                type: string
+            name: Restore
+            out:
+              - type: error
+          - doc: |-
+              Purge empties the trash of the document trashed under key: the
+              trashed document and every version it kept go, and a document written
+              later under the key starts again at version 1. It calls no hook — the
+              document already left every read — and asks no hold, as Delete does
+              not. DOCUMENT_NOT_TRASHED when no document is trashed under key.
+            in:
+              - name: key
+                type: string
+            name: Purge
+            out:
+              - type: error
+          - doc: |-
+              Tombstones returns every document in the trash, in key order: its key
+              and when it was trashed, for a caller that empties the trash after a
+              while.
+            name: Tombstones
+            out:
+              - type: "[]TombstoneValue"
+              - type: error
+        name: Trashable
+      - doc: |-
+          TrashableContext is [Trashable] with a context on every call: the sibling
+          of [CollectionContext] and [VersionedContext] the SQL engine implements
+          beside them. Each call is one transaction, a savepoint of the caller's
+          when the context carries one.
+        methods:
+          - doc: Trash is Trashable.Trash under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Trash
+            out:
+              - type: error
+          - doc: Restore is Trashable.Restore under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Restore
+            out:
+              - type: error
+          - doc: Purge is Trashable.Purge under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Purge
+            out:
+              - type: error
+          - doc: Tombstones is Trashable.Tombstones under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Tombstones
+            out:
+              - type: "[]TombstoneValue"
+              - type: error
+        name: TrashableContext
     sentinels:
       - var:
           - code: CodeDocumentNotFound
@@ -926,6 +1039,16 @@ packages:
             private: "service/data/docstore: the rewrite function returned a version it was not given, out of order, with another instant, or that is not JSON; the fields name the store and the problem"
             public: A rewrite of versions may only drop or rewrite the versions it was given
             reason: VERSIONS_REWRITE_REFUSED
+          - code: CodeDocumentNotTrashed
+            doc: |-
+              DocumentNotTrashed is a miss on the trash: no document is trashed under
+              that key — it never was, it was restored, purged, or written again.
+            name: DocumentNotTrashed
+            options:
+              - errs.WithHTTPStatus(httpNotFound)
+            private: "service/data/docstore: Restore or Purge named a key the store holds no trashed document under; the fields name the store, never the key"
+            public: No document with this key is in the trash
+            reason: DOCUMENT_NOT_TRASHED
     types:
       - doc: |-
           IndexSpec declares one secondary index: a name to read it by, whether it is
@@ -991,8 +1114,9 @@ packages:
               type: json.RawMessage
             - doc: |-
                 Number counts a document's versions from 1. No number is given twice
-                while the document exists, pruning included; a document deleted and
-                written again is a new document, and starts again at 1.
+                while the document exists or is in the trash, pruning included; a
+                document deleted, or purged from the trash, and written again is a new
+                document, and starts again at 1.
               name: Number
               type: uint64
       - doc: |-
@@ -1016,6 +1140,21 @@ packages:
                 same.
               name: InPlace
               type: bool
+      - doc: |-
+          TombstoneValue is a document in the trash, as [Trashable].Tombstones
+          lists it: its key and when it was trashed. The document and its versions
+          are read through [Versioned].Versions.
+        name: TombstoneValue
+        struct:
+          fields:
+            - doc: Key is the trashed document's key.
+              name: Key
+              type: string
+            - doc: |-
+                At is when the document was trashed, in UTC, read from the store's
+                clock and kept to the nanosecond, as a version's instant is.
+              name: At
+              type: time.Time
   - constants:
       - doc: |-
           DefaultFoldAt is the least number of overlay entries that folds the overlay
@@ -1182,6 +1321,12 @@ packages:
       document itself, and the former ones kept beside it, recorded and pruned in
       the write that stores the document (ADR 0143).
 
+      Package docstore — a document's trash, on a store that keeps versions: a
+      trashed document leaves every read and keeps its versions and its number,
+      until Restore brings it back or Purge empties it (ADR 0143, amended for
+      ADR 0178). The file engine keeps it in the document's versions, the SQL
+      engine in a version row numbered 0.
+
       Package docstore — the writes: prepared outside every lock, checked and
       persisted under the writers' lock, applied under both.
     functions:
@@ -1343,7 +1488,8 @@ packages:
                 wrote before versions existed — and a negative value is refused. A
                 persistent store keeps them in the file Path + ".versions" once a fold
                 ran, and a store opened with zero over files that keep versions is
-                refused rather than left to drop or corrupt them (ADR 0143).
+                refused rather than left to drop or corrupt them (ADR 0143). A store
+                that keeps versions has a trash, Trash's; one that keeps none has none.
               name: Versions
               type: int
         typeParams:
@@ -1426,9 +1572,10 @@ packages:
             recv: pointer
           - doc: |-
               OnWrite registers fn to be told the key of every document Put, Insert,
-              Replace or Update stored, once the write is durable, on the writer's
-              goroutine and outside every lock. It returns the function that removes the
-              registration. A panic in fn reaches the writer after its write stood.
+              Replace, Update or Restore stored, once the write is durable, on the
+              writer's goroutine and outside every lock. It returns the function that
+              removes the registration. A panic in fn reaches the writer after its write
+              stood.
             in:
               - name: fn
                 type: func(key string)
@@ -1438,8 +1585,8 @@ packages:
                 type: func()
             recv: pointer
           - doc: |-
-              OnDelete registers fn to be told the key of every document Delete removed,
-              on the same terms as OnWrite.
+              OnDelete registers fn to be told the key of every document Delete or Trash
+              removed, on the same terms as OnWrite.
             in:
               - name: fn
                 type: func(key string)
@@ -1479,7 +1626,8 @@ packages:
             recv: pointer
           - doc: |-
               InsertStamped is Insert, with what the write says about the version it
-              makes: version 1, whatever stamp.InPlace says.
+              makes: version 1, whatever stamp.InPlace says — or, under the key of a
+              document in the trash, a write over that document.
             in:
               - name: v
                 type: T
@@ -1519,8 +1667,10 @@ packages:
           - doc: |-
               Versions returns the versions the store keeps of the document stored under
               key, newest first: the current one — the document as it is now — then the
-              former ones. It returns DocumentNotFound when no document is stored under
-              key, and VersionsNotKept when the store keeps no versions.
+              former ones; a document in the trash answers the versions it kept, the
+              trashed document first. It returns DocumentNotFound when no document is
+              stored or trashed under key, and VersionsNotKept when the store keeps no
+              versions.
             in:
               - name: key
                 type: string
@@ -1613,12 +1763,63 @@ packages:
             recv: pointer
           - doc: |-
               Delete removes the document stored under key, or returns DocumentNotFound.
-              Its versions go with it.
+              Its versions go with it: a deletion never reaches the trash, which is
+              Trash's.
             in:
               - name: key
                 type: string
             name: Delete
             out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Trash moves the document stored under key to the trash, in one durable
+              write under the writers' lock: it leaves every read and its index keys
+              are freed, while its versions are kept beside the trashed document and
+              the instant it was trashed. It calls OnDelete. DocumentNotFound when no
+              document is stored under key, VersionsNotKept when the store keeps no
+              versions: only a store that keeps versions has a trash.
+            in:
+              - name: key
+                type: string
+            name: Trash
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Restore brings the document trashed under key back exactly as it was —
+              the same JSON, the same current version — files it again and calls
+              OnWrite. DocumentNotTrashed when no document is trashed under key,
+              UniqueKeyTaken when another document took one of its unique keys
+              meanwhile, DocumentUndecodable when it no longer decodes into the store's
+              type; nothing changes on a refusal.
+            in:
+              - name: key
+                type: string
+            name: Restore
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Purge empties the trash of the document trashed under key: the trashed
+              document and every version it kept go, in one durable write, and a
+              document written later under the key starts again at version 1. It calls
+              no hook and asks Held nothing, as Delete does not. DocumentNotTrashed
+              when no document is trashed under key.
+            in:
+              - name: key
+                type: string
+            name: Purge
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Tombstones returns every document in the trash, in key order: its key and
+              the instant it was trashed. It reads every document's versions, as List
+              reads every document.
+            name: Tombstones
+            out:
+              - type: "[]coredocstore.TombstoneValue"
               - type: error
             recv: pointer
         name: Store
@@ -1715,6 +1916,8 @@ packages:
                 told nothing about: turned off, it leaves the table as it is, and a
                 document deleted and written again meanwhile would find the rows of the
                 one it replaced — so drop the table with the migration's Down (ADR 0143).
+                A store that keeps versions has a trash, Trash's, in the same table; one
+                that keeps none has none.
               name: Versions
               type: int
         typeParams:
@@ -1847,10 +2050,10 @@ packages:
             recv: pointer
           - doc: |-
               OnWrite registers fn to be told the key of every document Put, Insert,
-              Replace or Update stored, once the transaction that holds the write has
-              committed — never for a write that is rolled back — on the goroutine that
-              committed it, outside every lock. It returns the function that removes the
-              registration.
+              Replace, Update or Restore stored, once the transaction that holds the
+              write has committed — never for a write that is rolled back — on the
+              goroutine that committed it, outside every lock. It returns the function
+              that removes the registration.
             in:
               - name: fn
                 type: func(key string)
@@ -1860,8 +2063,8 @@ packages:
                 type: func()
             recv: pointer
           - doc: |-
-              OnDelete registers fn to be told the key of every document Delete removed,
-              on the same terms as OnWrite.
+              OnDelete registers fn to be told the key of every document Delete or Trash
+              removed, on the same terms as OnWrite.
             in:
               - name: fn
                 type: func(key string)
@@ -1884,7 +2087,8 @@ packages:
             recv: pointer
           - doc: |-
               InsertStamped is Insert, with what the write says about the version it
-              makes: version 1, whatever stamp.InPlace says.
+              makes: version 1, whatever stamp.InPlace says — or, under the key of a
+              document in the trash, a write over that document.
             in:
               - name: ctx
                 type: context.Context
@@ -1913,9 +2117,10 @@ packages:
           - doc: |-
               Versions returns the versions the store keeps of the document stored under
               key, newest first: the current one — the document as it is now — then the
-              former ones, read in one statement on the transaction ctx carries.
-              DocumentNotFound when no document is stored under key, VersionsNotKept when
-              the store keeps no versions.
+              former ones, read in one statement on the transaction ctx carries; a
+              document in the trash answers the versions it kept, the trashed document
+              first, in a second one. DocumentNotFound when no document is stored or
+              trashed under key, VersionsNotKept when the store keeps no versions.
             in:
               - name: ctx
                 type: context.Context
@@ -2041,7 +2246,8 @@ packages:
             recv: pointer
           - doc: |-
               Delete removes the document stored under key, or returns DocumentNotFound.
-              Its versions go with it, in the same transaction.
+              Its versions go with it, in the same transaction: a deletion never reaches
+              the trash, which is Trash's.
             in:
               - name: ctx
                 type: context.Context
@@ -2050,6 +2256,70 @@ packages:
             name: Delete
             out:
               - type: error
+            recv: pointer
+          - doc: |-
+              Trash moves the document stored under key to the trash, in one
+              transaction — a savepoint of the caller's when ctx carries one: its row
+              and its index rows go, and a version row numbered 0 — no version's
+              number — holds the document and the instant it was trashed beside its
+              versions, which stay. It calls OnDelete once that transaction commits.
+              DocumentNotFound when no document is stored under key, VersionsNotKept
+              when the store keeps no versions: only a store that keeps versions has a
+              trash.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Trash
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Restore brings the document trashed under key back exactly as it was —
+              the same JSON, the same current version — files it again and calls
+              OnWrite once its transaction commits. DocumentNotTrashed when no
+              document is trashed under key, UniqueKeyTaken when another document took
+              one of its unique keys meanwhile, DocumentUndecodable when it no longer
+              decodes into the store's type; nothing changes on a refusal.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Restore
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Purge empties the trash of the document trashed under key: the trashed
+              document and every version row of its key go, in one transaction, and a
+              document written later under the key starts again at version 1. It calls
+              no hook and asks Held nothing, as Delete does not. DocumentNotTrashed
+              when no document is trashed under key.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Purge
+            out:
+              - type: error
+            recv: pointer
+          - doc: |-
+              Tombstones returns every document in the trash, in key order: its key and
+              the instant it was trashed, read in one statement on the transaction ctx
+              carries. The statement scans the versions table, as List scans the
+              documents'.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Tombstones
+            out:
+              - name: tombstones
+                type: "[]coredocstore.TombstoneValue"
+              - name: err
+                type: error
             recv: pointer
         name: SQLStore
         struct:
@@ -2182,13 +2452,13 @@ packages:
       # The ports, for a double
 
       [Store] and [SQLStore] are engines. A caller that must stand a double in for
-      one depends instead on the port it implements: [Collection] and [Versioned]
-      for a [Store], whose calls take no context, [CollectionContext] and
-      [VersionedContext] for a [SQLStore], whose every call takes one, and
-      [Announcer] — OnWrite and OnDelete — for either. Each pair carries the same
-      methods, the same documents and the same refusals; there is no single port
-      over both, because the file engine waits on nothing a context could abandon
-      while the SQL engine waits on a database (ADR 0160).
+      one depends instead on the port it implements: [Collection], [Versioned] and
+      [Trashable] for a [Store], whose calls take no context, [CollectionContext],
+      [VersionedContext] and [TrashableContext] for a [SQLStore], whose every call
+      takes one, and [Announcer] — OnWrite and OnDelete — for either. Each pair
+      carries the same methods, the same documents and the same refusals; there is
+      no single port over both, because the file engine waits on nothing a context
+      could abandon while the SQL engine waits on a database (ADR 0160).
 
       # Versions
 
@@ -2223,6 +2493,26 @@ packages:
       store keeps them in a third table, which [SQLVersionsMigration] creates.
       [Version].JSON is compact JSON; a version predating a change of the type
       may no longer decode into it, which is why it is JSON and not a T.
+
+      # The trash
+
+      A store that keeps versions has a trash (ADR 0143, amended for ADR 0178):
+
+      	err = pages.Trash(page.ID)            // gone from Get, List, Lookup and Find; its versions stay
+      	trash, err := pages.Tombstones()      // every trashed key, with when it was trashed
+      	err = pages.Restore(page.ID)          // back as it was, filed again
+      	err = pages.Purge(page.ID)            // or gone for good, its versions with it
+
+      A trashed document leaves every read and frees its unique keys, as a
+      former version does; Versions still reads what it kept, the trashed document
+      first. Its number is kept: a creation under its key is a write over the
+      trashed document, which continues its versions. Restore brings it back
+      exactly as it was, or refuses with UniqueKeyTaken when another document
+      took one of its unique keys meanwhile. Purge removes it and its versions.
+      Delete never reaches the trash: it takes a document and its versions at
+      once, which is what an erasure needs, and finds no trashed document. How
+      long a document stays in the trash is the caller's to decide; the store
+      empties nothing by itself.
     facade:
       - const:
           - doc: |-
@@ -2382,6 +2672,12 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_50_14"
+          - doc: "CodeDocumentNotTrashed: no document is in the trash under the key."
+            name: CodeDocumentNotTrashed
+            reexport: coredocstore.CodeDocumentNotTrashed
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_15"
         doc: The codes of the store's refusals (0.3.80.*), for errs.HasCode.
       - doc: The store's sentinels, for errors.Is.
         var:
@@ -2469,14 +2765,18 @@ packages:
             name: VersionsRewriteRefused
             reexport: coredocstore.VersionsRewriteRefused
             type: "*errs.Error"
+          - doc: "DocumentNotTrashed is a miss on the trash: no document is trashed under the key."
+            name: DocumentNotTrashed
+            reexport: coredocstore.DocumentNotTrashed
+            type: "*errs.Error"
       - alias:
           - doc: |-
               Store is the public alias for the document store: Get, List, Filter,
               Entries, Lookup, Find and Stats read; Put, Insert, Replace, Update and
               Delete write, and their Stamped forms say what the version they make
               records; Versions and Version read a document's versions, RewriteVersions
-              rewrites its former ones; OnWrite and OnDelete announce; Fold and Close
-              bring it to rest.
+              rewrites its former ones; Trash, Restore, Purge and Tombstones keep its
+              trash; OnWrite and OnDelete announce; Fold and Close bring it to rest.
             name: Store
             target: svcdocstore.Store[T]
             typeParams:
@@ -2507,6 +2807,12 @@ packages:
             target: coredocstore.StampValue
       - alias:
           - doc: |-
+              Tombstone is the public alias for a document in the trash, as Tombstones
+              lists it: its Key, and the instant At it was trashed.
+            name: Tombstone
+            target: coredocstore.TombstoneValue
+      - alias:
+          - doc: |-
               IndexSpec is the public alias for one secondary index's declaration, built
               by [Unique] or [Index] and given to [Open].
             name: IndexSpec
@@ -2529,9 +2835,10 @@ packages:
               SQLStore is the public alias for the document store over SQL: Get, List,
               Filter, Entries, Count, Lookup and Find read; Put, Insert, Replace, Update
               and Delete write, and their Stamped forms say what the version they make
-              records; Versions, Version and RewriteVersions as for [Store]; OnWrite and
-              OnDelete announce once the write's transaction commits; Reindex files the
-              stored documents again. Every call takes a context.
+              records; Versions, Version and RewriteVersions, Trash, Restore, Purge and
+              Tombstones as for [Store]; OnWrite and OnDelete announce once the write's
+              transaction commits; Reindex files the stored documents again. Every call
+              takes a context.
             name: SQLStore
             target: svcdocstore.SQLStore[T]
             typeParams:
@@ -2588,6 +2895,19 @@ packages:
             typeParams:
               - constraint: any
                 name: T
+      - alias:
+          - doc: |-
+              Trashable is the public alias for the sibling of [Collection] that keeps a
+              document's trash without a context, which [Store] implements: Trash,
+              Restore, Purge and Tombstones.
+            name: Trashable
+            target: coredocstore.Trashable
+      - alias:
+          - doc: |-
+              TrashableContext is the public alias for [Trashable] with a context on
+              every call, which [SQLStore] implements.
+            name: TrashableContext
+            target: coredocstore.TrashableContext
       - alias:
           - doc: |-
               Announcer is the public alias for the pair of hooks both engines answer

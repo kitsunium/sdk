@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-28
 - **Deciders**: SDK maintainers
+- **Amended**: 2026-10-15 — the trash this record deferred, for [ADR 0178](0178-kits-effects-join-the-transaction-on-the-database-that-keeps-their-queue.md) C4 (see the dated section at the end)
 - **Closes**: [ADR 0139](0139-a-document-store-over-sql-joins-the-transaction-its-context-carries.md) §D10 and §Deferred, for versions (side values stay deferred)
 - **Related**: [ADR 0110](0110-a-document-store-writes-one-entry-and-rests-as-one-file.md) (the overlay entry a write publishes, the order-free replay), [ADR 0056](0056-sdk-vfs-domain.md) (the atomic publication), [ADR 0055](0055-sdk-sql-domain.md) (the transactions and savepoints), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (no port, so the values are the engines'), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (the refused settings), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the fields added to two published configurations), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port the versions are stamped with, public); kitsunium/platform ADR 0007 §3 and "Implementation, in order", step 3
 
@@ -71,7 +72,9 @@ versions, "a store with `Revisions(n)` holds up to n+1 times its documents".
   number. A deletion takes every version with it, and a document inserted
   later under the key is a new document, numbered from 1 — keeping a number
   across a deletion would need a tombstone in both engines, and a deleted
-  record's history is exactly what kit's ADR 0007 defers as a trash.
+  record's history is exactly what kit's ADR 0007 defers as a trash. (The
+  trash, and its tombstone, came on 2026-10-15: see the amendment at the end.
+  A deletion still takes every version.)
 - A document stored before its store kept versions is version 1 made at an
   unknown instant (`At` zero, no metadata), and its first write makes version 2.
 
@@ -421,6 +424,7 @@ configuration type of its own, or `pkg/v2`.
   when the Studio asks.
 - **A trash**: a deleted document's last version kept for some days. kit defers
   it too; it is the one thing that would need a number kept across a deletion.
+  Done on 2026-10-15, when ADR 0178 C4 asked for it: see the amendment below.
 - **Paged versions** for a held document whose history has grown: `Versions`
   reads them all.
 - **Undoing a write exactly on the file engine.** A framework that rolls a
@@ -505,3 +509,142 @@ configuration type of its own, or `pkg/v2`.
 - PostgreSQL `INSERT … ON CONFLICT … RETURNING`, `SELECT … FOR UPDATE`;
   MySQL 8.4 `INSERT … ON DUPLICATE KEY UPDATE` (affected rows), locking reads
   under REPEATABLE READ; SQLite UPSERT and `RETURNING` (3.35)
+
+## Amendment (2026-10-15): the trash, a tombstone in both engines
+
+**Why.** ADR 0178 C4 gives kit a trash: on a store with `Revisions(n)`, a
+deletion by the product keeps the record's last version and its versions for
+30 days, restorable, while a deletion kit makes for privacy — retention's
+`DeleteAfter`, an erasure, `Records.Delete` — bypasses it; and "a re-insert
+under a trashed key continues its numbering". This record deferred exactly
+that (D1, §Deferred): it needs a number kept across a deletion, so a tombstone
+in both engines. ADR 0178's order makes it an SDK pull request of its own
+(C7, item 9), before kit's (item 10).
+
+**Decision.** `core/data/docstore` gains a sibling port per family (ADR 0039),
+neither `Versioned` nor `Collection` widened, and the two engines implement
+them alike:
+
+```go
+type Trashable interface {
+	Trash(key string) error
+	Restore(key string) error
+	Purge(key string) error
+	Tombstones() ([]TombstoneValue, error)
+}
+// TrashableContext: the same four, each taking a context first.
+type TombstoneValue struct {
+	Key string
+	At  time.Time
+}
+```
+
+- **Only a store that keeps versions has a trash.** A store opened with
+  `Versions` zero answers the four calls `VERSIONS_NOT_KEPT`: kit keeps a
+  trash only for stores with `Revisions(n)`, and a trash of one version on a
+  store that keeps none would be a history it said it does not keep.
+- **`Trash`** removes the document from every read — `Get`, `List`,
+  `Filter`, `Entries`, `Lookup`, `Find` — and unfiles it, keeps its versions
+  as they are, and records the instant, from the store's clock. It calls
+  `OnDelete`: for a reader of the hooks the document is gone.
+  `DOCUMENT_NOT_FOUND` when nothing is stored under the key, a trashed
+  document included.
+- **`Versions` and `Version` read a trashed document** as they read a stored
+  one: the trashed document is the current version's, then the former ones.
+  That is what makes the trash readable: kit's Studio shows a trashed record's
+  revisions with the same call.
+- **`Restore`** brings the trashed document back exactly as it was — the same
+  JSON, the same current version, number, instant and metadata — and files it
+  again; it makes no version, because nothing about the document changed, and
+  kit's journal records the restoration. It calls `OnWrite`.
+  `DOCUMENT_NOT_TRASHED` (new, below) when no document is trashed under the
+  key.
+- **A trashed document holds none of its unique keys.** It is a former
+  version, which never does (D6): another document may take its e-mail while it
+  is in the trash, and `Restore` then refuses `UNIQUE_KEY_TAKEN` and leaves the
+  trash as it was. The other way — a trashed record reserving its keys for 30
+  days — would let a deleted account block the next sign-up under its address
+  for a month, through an index no read can show; and the SQL engine would need
+  its index rows kept for a document it no longer has.
+- **The number is kept.** A creation under a trashed key — `Insert`, or a
+  `Put` that creates — is a write over the trashed document: the trashed one
+  becomes the newest former version, the write makes the next number, the
+  trash lets the key go, and the usual rules hold (the same JSON or `InPlace`
+  makes no version, pruning and `Held` as for any write). `Replace`,
+  `Update`, `RewriteVersions` and `Delete` find no document under a trashed
+  key and answer `DOCUMENT_NOT_FOUND`.
+- **`Purge`** removes the trashed document and every version it kept: a
+  document written later under the key is a new one, numbered from 1, as after
+  `Delete`. It calls no hook — the document already left every read — and asks
+  `Held` nothing, as `Delete` does not: whether a hold forbids it is the
+  caller's question, kit's holds being kit's (D4).
+- **`Delete` never reaches the trash**, unchanged: it takes a document and its
+  versions in one write. The SDK does not know what a privacy deletion is; kit
+  routes one to `Delete` — or to `Purge` for a record already in the trash —
+  and the product's own deletions to `Trash`.
+- **The SDK empties nothing by itself.** `Tombstones` lists every trashed key
+  with the instant it was trashed, in key order, and the caller purges what is
+  older than its setting (kit's `<store>-trash`, 30 days). An age kept by the
+  SDK would be a sweep or an agenda per store, which ADR 0178 already declined
+  for versions.
+
+**File engine.** A trashed document's versions record gains `trashed:
+{at, doc}` — the trashed document, compact, and the instant — and the store
+holds no document under its key. `Trash` publishes ONE overlay entry, a
+deletion that keeps versions, holding that record; `Restore` one holding the
+document and the record without `trashed`; `Purge` a plain deletion. The fold
+writes the record into the versions file like any other, so a crash anywhere
+loads the same trash (`TestTheTrashIsDurable`). The loader refuses, as
+`LOAD_FAILED`, a deletion that keeps versions without a trashed document, an
+entry holding a document and a trashed one, a trashed record without a
+document, and a trashed document the snapshot also holds. A store opened with
+`Versions` zero over files that keep a trash is refused as before (D7). An SDK
+older than this amendment ignores `trashed`, finds versions of a document it
+does not hold, and refuses to open — a downgrade is refused, never silently
+lossy.
+
+**SQL engine.** No new table and no migration: a trashed document is a row of
+`<table>___vs` numbered 0 — a number no version is given (D1) — holding the
+document in `doc` and the instant it was trashed in `made_at` and `made_ns`,
+beside the version rows it kept, which are untouched. Its document's row and
+its index rows are deleted in the same transaction. A creation on a store that
+keeps versions now reads the key's lowest version row, locked
+(`SELECT num, doc … ORDER BY num LIMIT 1` + the dialect's `FOR UPDATE`)
+where it used to delete every row of the key: none is a new key, number 0 is
+the trash — emptied, and the write goes on as a write over that document —
+and any other row is a leftover of D7, deleted as before. The statement count
+of a creation is unchanged (`TestSQLVersionsRoundTrips`). `Restore` is that
+read, the document's insertion, its index rows and the trash row's deletion;
+`Purge` that read and the deletion of every row of the key; `Versions` of a
+trashed key a second statement after the first answered no row, a LEFT JOIN of
+the trash row and the version rows; `Tombstones` one statement over
+`num = 0`, which scans the table as `List` scans the documents'. Each call is
+one transaction, a savepoint of the caller's when its context carries one, and
+its hook runs after the commit. D7's gap stays the one gap: a store opened
+without versions that writes a trashed key leaves the trash row in place; and
+an SDK older than this amendment deletes the trash row with every other at its
+next creation under the key, starting it at 1.
+
+**Code.** `0.3.80.21` `DOCUMENT_NOT_TRASHED` (404): `Restore` or `Purge` of a
+key no document is trashed under — never trashed, restored, purged, or written
+again. No refusal names a key.
+
+**Verification.** `internal/service/data/docstore`:
+`trash_external_test.go` runs one contract on the memory store, the file
+store and the SQL store on each dialect: a trashed document gone from every
+read with its versions kept and listed with its instant, `OnDelete` told;
+`Restore` as it was, `OnWrite` told, then `DOCUMENT_NOT_TRASHED`; `Purge`
+taking the versions, no hook, a new document from 1; the unique key freed and
+`Restore` refused `UNIQUE_KEY_TAKEN`; a creation continuing the numbering;
+`Delete` never reaching the trash; a store without versions refusing all four;
+the key order. `trash_persist_external_test.go`: the trash through a crash
+and a fold, a purge through a crash, a refused publication changing nothing,
+three files no store wrote. `sql_trash_external_test.go`: the row numbered 0
+as it rests, every statement's failure and a caller's rollback undoing the
+call. `sql_statements_external_test.go`: the four statements per dialect;
+`sql_version_external_test.go`: the round trips. `internal/core/data/docstore`:
+the two doubles and the code. `pkg/v1/data/docstore`: `TestFacadeTrash`.
+
+**Breaking changes.** None in the API: two ports, eight methods, a value, a
+code and its sentinel, all new. In behaviour, a store's files or tables never
+held a trash before, so nothing stored changes meaning.

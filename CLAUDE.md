@@ -25,7 +25,7 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 | `codec` | data | 24 wire formats behind one `Marshal` / `Unmarshal` dispatch with per-format facades, strict JSON decoding, a type's wire shape and JSON patch | 0003, 0021, 0022, 0023, 0036, 0037, 0102, 0133, 0134, 0143, 0156 |
 | `transform` | data | Compression: stdlib gzip, raw DEFLATE and zlib; zstd and s2 opt-in under `third-party/`, with a ceiling that cannot be omitted | 0014, 0066 |
 | `sql` | data | Ports over `database/sql`, never an ORM or a driver: structural transaction ownership, savepoints, migrations under a lock that dies with its holder | 0055, 0139, 0140 |
-| `docstore` | data | Typed keyed JSON documents with indexes and versions — one overlay entry per write through `vfs`, or tables of the caller's database | 0110, 0139, 0143 |
+| `docstore` | data | Typed keyed JSON documents with indexes, versions and a trash — one overlay entry per write through `vfs`, or tables of the caller's database | 0110, 0139, 0143, 0178 |
 | `queue` | data | Durable at-least-once queue over a directory, a SQL table joined to the caller's transaction, or memory; retried and dead-lettered | 0054, 0104, 0151 |
 | `cache` | data | The kernel LRU+TTL primitive and the domain above it: tag invalidation, in-process stampede protection, L1/L2 chaining | 0025, 0049 |
 | `vfs` | data | `io/fs` reading unchanged and atomic publication, with how far "atomic" reaches stated | 0056 |
@@ -132,7 +132,8 @@ internal/
                              snapshot at rest; + the same store over SQL,
                              joined to the context's transaction — ADR 0139;
                              + a document's versions, in its own write —
-                             ADR 0143;
+                             ADR 0143; + its trash, a tombstone that keeps
+                             them — ADR 0143 amended for ADR 0178;
                            queue — file, SQL and memory brokers + Consume
                              loop waiting on the Waker sibling; the SQL
                              broker joins the context's transaction —
@@ -232,6 +233,7 @@ pkg/
     │                 docstore/ — typed JSON documents, indexes, one entry per write —
     │                   ADR 0110; the same store over SQL, OpenSQL — ADR 0139;
     │                   a document's versions, in its own write — ADR 0143;
+    │                   its trash, Trash/Restore/Purge — ADR 0143 amended (ADR 0178);
     │                 queue/ — durable at-least-once broker, no lock — ADR 0054;
     │                 cache/ — the ADR 0025 primitive AND the ADR 0049 domain,
     │                   side by side;
@@ -571,7 +573,7 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0140 — SQLite's migration lock is the database file's write lock — `docs/adr/0140-sqlites-migration-lock-is-the-database-files-write-lock.md`
 - ADR 0141 — a mail spool keeps an identifier its caller minted — `docs/adr/0141-a-mail-spool-keeps-an-identifier-its-caller-minted.md`
 - ADR 0142 — one key per subject, under a root that rotates, and an erasure is the key's destruction — `docs/adr/0142-one-key-per-subject-under-a-rotating-root-and-an-erasure-destroys-it.md`
-- ADR 0143 — a document keeps its versions in its own write — `docs/adr/0143-a-document-keeps-its-versions-in-its-own-write.md`
+- ADR 0143 — a document keeps its versions in its own write (amended 2026-10-15: the trash) — `docs/adr/0143-a-document-keeps-its-versions-in-its-own-write.md`
 - ADR 0144 — illumos and Solaris supervise, on the word of their own kernels — `docs/adr/0144-illumos-and-solaris-supervise-on-their-own-kernels-word.md`
 - ADR 0147 — the framework is a module of the SDK, above `pkg`, and a product imports nothing else — `docs/adr/0147-the-framework-is-a-module-of-the-sdk-above-pkg.md`
 - ADR 0148 — a private socket is gated by its directory, and the kernel names the peer where it can — `docs/adr/0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md`

@@ -403,7 +403,8 @@ func (c *fakeSQLConn) run(ctx context.Context, query string, args []driver.Value
 func writes(role string) bool {
 	switch role {
 	case "getDoc", "listDocs", "entries", "entriesLimit", "count", "exists", "lookup", "find",
-		"pageAfter", "uniqueTaken", "sharedKeys", "readVersions", "versionHead", "pruneCut", "lockFormers":
+		"pageAfter", "uniqueTaken", "sharedKeys", "readVersions", "versionHead", "pruneCut", "lockFormers",
+		"firstVersion", "readTrashed", "tombstones":
 		return false
 	default:
 		return true
@@ -530,6 +531,27 @@ func (e *sqlEngine) read(role, query string, args []driver.Value, work, latest *
 			return rowsOf([]string{"num"}, [][]driver.Value{{formers[offset]}}), true
 		}
 		return rowsOf([]string{"num"}, nil), true
+	// A document's lowest version row: the trash's, numbered 0, first.
+	case "firstVersion":
+		nums := work.versionsOf(str(0), false)
+		if len(nums) == 0 {
+			return rowsOf([]string{"num", "doc"}, nil), true
+		}
+		low := nums[len(nums)-1]
+		return rowsOf([]string{"num", "doc"}, [][]driver.Value{{low, nullable(work.vs[vsKey{doc: str(0), num: low}].doc)}}), true
+	// Every version a trashed document kept, the trashed document first.
+	case "readTrashed":
+		return e.readTrashed(work, str(0)), true
+	// Every trash row, in key order.
+	case "tombstones":
+		var rows [][]driver.Value
+		for k, row := range work.vs {
+			if k.num == 0 {
+				rows = append(rows, []driver.Value{[]byte(k.doc), row.at, row.ns})
+			}
+		}
+		slices.SortFunc(rows, func(a, b []driver.Value) int { return bytes.Compare(a[0].([]byte), b[0].([]byte)) })
+		return rowsOf([]string{"doc_key", "made_at", "made_ns"}, rows), true
 	// A document's former versions, newest first, for a rewrite.
 	case "lockFormers":
 		var rows [][]driver.Value
@@ -563,6 +585,34 @@ func (e *sqlEngine) readVersions(work *tables, key string) answer {
 			doc = current.doc
 		}
 		rows = append(rows, []driver.Value{num, row.at, row.ns, nullable(row.meta), bytes.Clone(doc)})
+	}
+	return rowsOf(cols, rows)
+}
+
+// readTrashed answers every version a trashed document kept, newest first,
+// with the trashed document as the current one's, as the LEFT JOIN of the
+// trash row and the version rows does: one row without a number for a
+// document no version row names, none for no trash row.
+func (e *sqlEngine) readTrashed(work *tables, key string) answer {
+	cols := []string{"num", "made_at", "made_ns", "meta", "doc"}
+	tomb, found := work.vs[vsKey{doc: key, num: 0}]
+	if !found {
+		return rowsOf(cols, nil)
+	}
+	var rows [][]driver.Value
+	for _, num := range work.versionsOf(key, false) {
+		if num == 0 {
+			continue
+		}
+		row := work.vs[vsKey{doc: key, num: num}]
+		doc := row.doc
+		if doc == nil {
+			doc = tomb.doc
+		}
+		rows = append(rows, []driver.Value{num, row.at, row.ns, nullable(row.meta), bytes.Clone(doc)})
+	}
+	if len(rows) == 0 {
+		rows = [][]driver.Value{{nil, nil, nil, nil, bytes.Clone(tomb.doc)}}
 	}
 	return rowsOf(cols, rows)
 }
@@ -635,6 +685,9 @@ func (e *sqlEngine) write(role, query string, args []driver.Value, work *tables)
 	// Every version of a document, as a deletion or a creation takes them.
 	case "dropVersions":
 		return affecting(dropVersions(work, str(0), func(int64, vsRow) bool { return true })), nil
+	// A trashed document's row, as a restoration or a creation empties it.
+	case "dropTombstone":
+		return affecting(dropVersions(work, str(0), func(num int64, _ vsRow) bool { return num == 0 })), nil
 	// Every former version, before a rewrite writes back those it keeps.
 	case "dropFormers":
 		return affecting(dropVersions(work, str(0), func(_ int64, row vsRow) bool { return row.doc != nil })), nil

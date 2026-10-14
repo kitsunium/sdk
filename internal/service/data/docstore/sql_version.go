@@ -57,7 +57,8 @@ func (s *SQLStore[T]) PutStamped(ctx context.Context, v T, stamp coredocstore.St
 }
 
 // InsertStamped is Insert, with what the write says about the version it
-// makes: version 1, whatever stamp.InPlace says.
+// makes: version 1, whatever stamp.InPlace says — or, under the key of a
+// document in the trash, a write over that document.
 func (s *SQLStore[T]) InsertStamped(ctx context.Context, v T, stamp coredocstore.StampValue) error {
 	//: nothing may be under the key.
 	return s.store(ctx, v, insertOnly, stamp)
@@ -72,17 +73,48 @@ func (s *SQLStore[T]) ReplaceStamped(ctx context.Context, v T, stamp coredocstor
 
 // Versions returns the versions the store keeps of the document stored under
 // key, newest first: the current one — the document as it is now — then the
-// former ones, read in one statement on the transaction ctx carries.
-// DocumentNotFound when no document is stored under key, VersionsNotKept when
-// the store keeps no versions.
+// former ones, read in one statement on the transaction ctx carries; a
+// document in the trash answers the versions it kept, the trashed document
+// first, in a second one. DocumentNotFound when no document is stored or
+// trashed under key, VersionsNotKept when the store keeps no versions.
 func (s *SQLStore[T]) Versions(ctx context.Context, key string) (versions []coredocstore.VersionValue, err error) {
 	//: a store that keeps none has none to read.
 	if s.keep == 0 {
 		//: VersionsNotKept, naming the store.
 		return nil, versionsNotKept(s.table)
 	}
+	versions, err = s.readVersionRows(ctx, s.stmts.readVersions, key)
+	//: a failure.
+	if err != nil {
+		//: StatementFailed or DocumentUndecodable.
+		return nil, err
+	}
+	//: a document stored under key.
+	if len(versions) > 0 {
+		//: its versions.
+		return versions, nil
+	}
+	versions, err = s.readVersionRows(ctx, s.stmts.readTrashed, key)
+	//: a failure.
+	if err != nil {
+		//: StatementFailed or DocumentUndecodable.
+		return nil, err
+	}
+	//: no row: no document, stored or trashed.
+	if len(versions) == 0 {
+		//: DocumentNotFound, naming no key.
+		return nil, kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
+	}
+	//: a trashed document's versions.
+	return versions, nil
+}
+
+// readVersionRows runs query — the versions of the document stored under
+// key, or of the one trashed under it — on the transaction ctx carries, and
+// returns the versions it answers, newest first; none when no document is.
+func (s *SQLStore[T]) readVersionRows(ctx context.Context, query, key string) (versions []coredocstore.VersionValue, err error) {
 	ex, _ := s.tx.join.Join(ctx)
-	rows, err := ex.QueryContext(ctx, s.stmts.readVersions, []byte(key))
+	rows, err := ex.QueryContext(ctx, query, []byte(key))
 	//: the read did not start.
 	if err != nil {
 		//: StatementFailed.
@@ -107,11 +139,6 @@ func (s *SQLStore[T]) Versions(ctx context.Context, key string) (versions []core
 			return nil, decodeErr
 		}
 		versions = append(versions, v)
-	}
-	//: no row: no document.
-	if len(versions) == 0 {
-		//: DocumentNotFound, naming no key.
-		return nil, kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
 	}
 	//: the finisher reports a failure that ended the rows early.
 	return versions, nil
@@ -236,7 +263,8 @@ func (s *SQLStore[T]) lockedFormers(ctx context.Context, ex coresql.Executor, ke
 
 // keepVersions records what a write leaves of its document's versions, in
 // the write's own transaction: a creation is version 1, over no row of an
-// earlier document of its key; a write that changes
+// earlier document of its key — unless its key is a trashed document's, which
+// it writes over, continuing its versions; a write that changes
 // the document makes the next version, the current one becoming the newest
 // former one with the document it held; a write stamped InPlace, or storing
 // the JSON already stored, makes none. Either way the former versions beyond
@@ -249,16 +277,15 @@ func (s *SQLStore[T]) keepVersions(ctx context.Context, ex coresql.Executor, w *
 		return nil
 	}
 	now := s.clock.Now().UTC()
-	//: a creation is version 1, whatever the stamp says.
+	//: a creation is version 1 — or, under a trashed key, a write over the
+	//: trashed document, which goes on below.
 	if !w.existed {
-		//: a document's versions begin with it: rows a document of the same
-		//: key left while the store kept no versions are not its history.
-		if _, execErr := ex.ExecContext(ctx, s.stmts.dropVersions, []byte(w.key)); execErr != nil {
-			//: StatementFailed; the write rolls back.
-			return s.failed("keep a version", execErr)
+		created, err := s.keepCreation(ctx, ex, w, now)
+		//: version 1 written, or a failure.
+		if created || err != nil {
+			//: nil, or StatementFailed: the write rolls back.
+			return err
 		}
-		//: its current version.
-		return s.insertVersionRows(ctx, ex, w.key, []versionRow{{at: &now, meta: w.meta, num: 1}})
 	}
 	//: the document keeps its current version: the caller said so, or the
 	//: write stores what is already stored.
@@ -295,6 +322,45 @@ func (s *SQLStore[T]) keepVersions(ctx context.Context, ex coresql.Executor, w *
 	}
 	//: pruned in this very transaction.
 	return s.prune(ctx, ex, w.key)
+}
+
+// keepCreation records the versions of a creation, as the first row its key
+// holds in the versions table says: none, and the creation is version 1; a
+// leftover of a document the store held while it kept no versions, which goes
+// before version 1 is written; or the trash row, number 0 — the key is a
+// trashed document's, which the creation writes over: the trash row goes, and
+// w becomes a write over the trashed document, for keepVersions to version.
+// It reports whether it wrote version 1.
+func (s *SQLStore[T]) keepCreation(ctx context.Context, ex coresql.Executor, w *storedWrite, now time.Time) (created bool, err error) {
+	num, doc, found, err := s.firstVersion(ctx, ex, w.key)
+	//: StatementFailed.
+	if err != nil {
+		//: the write rolls back.
+		return false, err
+	}
+	//: under the key of a document in the trash: a write over that document,
+	//: which continues its versions and leaves the trash.
+	if found && num == tombstoneNum {
+		//: StatementFailed; the write rolls back.
+		if _, execErr := ex.ExecContext(ctx, s.stmts.dropTombstone, []byte(w.key)); execErr != nil {
+			//: the write rolls back.
+			return false, s.failed("empty the trash", execErr)
+		}
+		w.old, w.existed = doc, true
+		//: versioned as a write over the trashed document.
+		return false, nil
+	}
+	//: a document's versions begin with it: rows a document of the same key
+	//: left while the store kept no versions are not its history.
+	if found {
+		//: StatementFailed; the write rolls back.
+		if _, execErr := ex.ExecContext(ctx, s.stmts.dropVersions, []byte(w.key)); execErr != nil {
+			//: the write rolls back.
+			return false, s.failed("keep a version", execErr)
+		}
+	}
+	//: its current version, version 1, whatever the stamp says.
+	return true, s.insertVersionRows(ctx, ex, w.key, []versionRow{{at: &now, meta: w.meta, num: 1}})
 }
 
 // readHead reads the number of the current version of the document stored

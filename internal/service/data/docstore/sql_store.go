@@ -278,17 +278,17 @@ func (s *SQLStore[T]) Find(ctx context.Context, index, key string) ([]T, error) 
 }
 
 // OnWrite registers fn to be told the key of every document Put, Insert,
-// Replace or Update stored, once the transaction that holds the write has
-// committed — never for a write that is rolled back — on the goroutine that
-// committed it, outside every lock. It returns the function that removes the
-// registration.
+// Replace, Update or Restore stored, once the transaction that holds the
+// write has committed — never for a write that is rolled back — on the
+// goroutine that committed it, outside every lock. It returns the function
+// that removes the registration.
 func (s *SQLStore[T]) OnWrite(fn func(key string)) (remove func()) {
 	//: the write hooks.
 	return s.onWrite.add(fn)
 }
 
-// OnDelete registers fn to be told the key of every document Delete removed,
-// on the same terms as OnWrite.
+// OnDelete registers fn to be told the key of every document Delete or Trash
+// removed, on the same terms as OnWrite.
 func (s *SQLStore[T]) OnDelete(fn func(key string)) (remove func()) {
 	//: the deletion hooks.
 	return s.onDelete.add(fn)

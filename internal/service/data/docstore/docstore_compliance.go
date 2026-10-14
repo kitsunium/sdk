@@ -13,8 +13,10 @@ import coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 var (
 	_ coredocstore.Collection[struct{}]        = (*Store[struct{}])(nil)
 	_ coredocstore.Versioned[struct{}]         = (*Store[struct{}])(nil)
+	_ coredocstore.Trashable                   = (*Store[struct{}])(nil)
 	_ coredocstore.Announcer                   = (*Store[struct{}])(nil)
 	_ coredocstore.CollectionContext[struct{}] = (*SQLStore[struct{}])(nil)
 	_ coredocstore.VersionedContext[struct{}]  = (*SQLStore[struct{}])(nil)
+	_ coredocstore.TrashableContext            = (*SQLStore[struct{}])(nil)
 	_ coredocstore.Announcer                   = (*SQLStore[struct{}])(nil)
 )

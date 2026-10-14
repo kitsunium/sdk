@@ -1,7 +1,7 @@
 // Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;
-// ADR 0139 added 16 and 17, ADR 0143 18 to 20). Both engines answer every one
-// of them alike, and the range keeps the LL = 3 its engine allocated it under
-// now that it is declared here (ADR 0160).
+// ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21). Both
+// engines answer every one of them alike, and the range keeps the LL = 3 its
+// engine allocated it under now that it is declared here (ADR 0160).
 //
 // Package docstore declares the document-store domain: typed, keyed JSON
 // documents with unique and multi-valued secondary indexes, kept by two
@@ -15,12 +15,12 @@
 //   - the ports. [Collection] is a store whose calls take no context, which
 //     the file engine is; [CollectionContext] is the same calls, each taking
 //     a context first, which the SQL engine is. [Versioned] and
-//     [VersionedContext] are their siblings for a document's versions, and
-//     [Announcer] is the pair of hooks both engines answer exactly as they
-//     are;
+//     [VersionedContext] are their siblings for a document's versions,
+//     [Trashable] and [TrashableContext] for its trash, and [Announcer] is
+//     the pair of hooks both engines answer exactly as they are;
 //   - the values both engines read and return — [EntryValue], [VersionValue],
-//     [StampValue] — and [IndexSpec], the declaration both take, with its two
-//     constructors [Unique] and [Index];
+//     [StampValue], [TombstoneValue] — and [IndexSpec], the declaration both
+//     take, with its two constructors [Unique] and [Index];
 //   - the codes of the 0.3.80.* range and their sentinels: both engines answer
 //     the same refusals under the same codes (ADR 0160).
 //
@@ -36,8 +36,8 @@
 // statement live in internal/service/data/docstore.
 //
 // Package docstore — the siblings of Collection (ADR 0039): a document's
-// versions, and the same two ports with a context on every call, which the SQL
-// engine implements.
+// versions, its trash, and the same ports with a context on every call, which
+// the SQL engine implements.
 //
 // Package docstore — declares the sentinel *errs.Error outcomes both engines
 // answer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
@@ -56,6 +56,6 @@
 // take at construction and file by the same rule.
 //
 // Package docstore — the values both engines read and return: a stored
-// document as JSON, one version of a document, and what a write says about the
-// version it makes.
+// document as JSON, one version of a document, what a write says about the
+// version it makes, and a document in the trash.
 package docstore

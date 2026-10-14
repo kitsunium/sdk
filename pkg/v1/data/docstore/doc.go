@@ -122,13 +122,13 @@
 // # The ports, for a double
 //
 // [Store] and [SQLStore] are engines. A caller that must stand a double in for
-// one depends instead on the port it implements: [Collection] and [Versioned]
-// for a [Store], whose calls take no context, [CollectionContext] and
-// [VersionedContext] for a [SQLStore], whose every call takes one, and
-// [Announcer] — OnWrite and OnDelete — for either. Each pair carries the same
-// methods, the same documents and the same refusals; there is no single port
-// over both, because the file engine waits on nothing a context could abandon
-// while the SQL engine waits on a database (ADR 0160).
+// one depends instead on the port it implements: [Collection], [Versioned] and
+// [Trashable] for a [Store], whose calls take no context, [CollectionContext],
+// [VersionedContext] and [TrashableContext] for a [SQLStore], whose every call
+// takes one, and [Announcer] — OnWrite and OnDelete — for either. Each pair
+// carries the same methods, the same documents and the same refusals; there is
+// no single port over both, because the file engine waits on nothing a context
+// could abandon while the SQL engine waits on a database (ADR 0160).
 //
 // # Versions
 //
@@ -163,4 +163,24 @@
 // store keeps them in a third table, which [SQLVersionsMigration] creates.
 // [Version].JSON is compact JSON; a version predating a change of the type
 // may no longer decode into it, which is why it is JSON and not a T.
+//
+// # The trash
+//
+// A store that keeps versions has a trash (ADR 0143, amended for ADR 0178):
+//
+//	err = pages.Trash(page.ID)            // gone from Get, List, Lookup and Find; its versions stay
+//	trash, err := pages.Tombstones()      // every trashed key, with when it was trashed
+//	err = pages.Restore(page.ID)          // back as it was, filed again
+//	err = pages.Purge(page.ID)            // or gone for good, its versions with it
+//
+// A trashed document leaves every read and frees its unique keys, as a
+// former version does; Versions still reads what it kept, the trashed document
+// first. Its number is kept: a creation under its key is a write over the
+// trashed document, which continues its versions. Restore brings it back
+// exactly as it was, or refuses with UniqueKeyTaken when another document
+// took one of its unique keys meanwhile. Purge removes it and its versions.
+// Delete never reaches the trash: it takes a document and its versions at
+// once, which is what an erasure needs, and finds no trashed document. How
+// long a document stays in the trash is the caller's to decide; the store
+// empties nothing by itself.
 package docstore

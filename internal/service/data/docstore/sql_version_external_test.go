@@ -410,7 +410,7 @@ func versionsRoundTripCases(fx *sqlFixture, dialect coresql.Dialect) []roundTrip
 	return []roundTripCase{
 		{
 			name: "Put of a new document", call: func(ctx context.Context) error { return store.Put(ctx, account{ID: "acc_1", Email: "a@x.dev"}) },
-			want: []string{begin, "claim", "uniqueTaken", "insertIndexRows", "dropVersions", "insertVersions", "COMMIT"},
+			want: []string{begin, "claim", "uniqueTaken", "insertIndexRows", "firstVersion", "insertVersions", "COMMIT"},
 		},
 		{
 			name: "Put over it", call: func(ctx context.Context) error { return store.Put(ctx, account{ID: "acc_1", Email: "b@x.dev"}) },
@@ -426,7 +426,7 @@ func versionsRoundTripCases(fx *sqlFixture, dialect coresql.Dialect) []roundTrip
 		},
 		{
 			name: "Insert", call: func(ctx context.Context) error { return store.Insert(ctx, account{ID: "acc_2"}) },
-			want: []string{begin, "insert", "dropVersions", "insertVersions", "COMMIT"},
+			want: []string{begin, "insert", "firstVersion", "insertVersions", "COMMIT"},
 		},
 		{
 			name: "Replace", call: func(ctx context.Context) error { return store.Replace(ctx, account{ID: "acc_2", Name: "b"}) },
@@ -461,6 +461,45 @@ func versionsRoundTripCases(fx *sqlFixture, dialect coresql.Dialect) []roundTrip
 				"versionHead", "retireHead", "insertVersions", "pruneCut", "pruneVersions",
 				"RELEASE SAVEPOINT ktn_sp_1", "COMMIT",
 			}),
+		},
+		{
+			name: "Trash", call: func(ctx context.Context) error { return store.Trash(ctx, "acc_1") },
+			want: []string{begin, "lockDoc", "deleteDoc", "deleteIndex", "insertVersions", "COMMIT"},
+		},
+		{
+			name: "Versions of a trashed document", call: func(ctx context.Context) error { _, err := store.Versions(ctx, "acc_1"); return err },
+			want: []string{"readVersions", "readTrashed"},
+		},
+		{
+			name: "Tombstones", call: func(ctx context.Context) error { _, err := store.Tombstones(ctx); return err },
+			want: []string{"tombstones"},
+		},
+		{
+			name: "Restore", call: func(ctx context.Context) error { return store.Restore(ctx, "acc_1") },
+			want: []string{begin, "firstVersion", "insert", "uniqueTaken", "insertIndexRows", "dropTombstone", "COMMIT"},
+		},
+		{
+			name: "Trash again", call: func(ctx context.Context) error { return store.Trash(ctx, "acc_1") },
+			want: []string{begin, "lockDoc", "deleteDoc", "deleteIndex", "insertVersions", "COMMIT"},
+		},
+		{
+			name: "Insert under the trashed key", call: func(ctx context.Context) error { return store.Insert(ctx, account{ID: "acc_1", Email: "e@x.dev"}) },
+			want: []string{
+				begin, "insert", "uniqueTaken", "insertIndexRows", "firstVersion", "dropTombstone",
+				"versionHead", "retireHead", "insertVersions", "pruneCut", "pruneVersions", "COMMIT",
+			},
+		},
+		{
+			name: "Trash, to purge", call: func(ctx context.Context) error { return store.Trash(ctx, "acc_1") },
+			want: []string{begin, "lockDoc", "deleteDoc", "deleteIndex", "insertVersions", "COMMIT"},
+		},
+		{
+			name: "Purge", call: func(ctx context.Context) error { return store.Purge(ctx, "acc_1") },
+			want: []string{begin, "firstVersion", "dropVersions", "COMMIT"},
+		},
+		{
+			name: "Put after the purge", call: func(ctx context.Context) error { return store.Put(ctx, account{ID: "acc_1", Email: "c@x.dev"}) },
+			want: []string{begin, "claim", "uniqueTaken", "insertIndexRows", "firstVersion", "insertVersions", "COMMIT"},
 		},
 	}
 }

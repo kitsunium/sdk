@@ -169,10 +169,11 @@ func (s *Store[T]) replay(name string) error {
 		return versionsErr
 	}
 	switch {
-	//: the key was deleted after the snapshot, its versions with it.
+	//: the key was deleted after the snapshot, its versions with it — or
+	//: trashed, its versions kept beside the trashed document.
 	case record.Deleted:
 		delete(s.docs, record.Key)
-		s.setVersions(record.Key, nil)
+		s.setVersions(record.Key, compacted(record.Versions))
 	//: an entry that neither holds a document nor records a deletion.
 	case len(record.Document) == 0:
 		//: LoadFailed, naming the file.
@@ -189,8 +190,8 @@ func (s *Store[T]) replay(name string) error {
 
 // checkEntryVersions refuses, as LoadFailed naming file, the versions an
 // overlay entry holds when they are wrong: versions in a store that keeps
-// none, versions beside a deletion, which takes them, or versions no store
-// wrote.
+// none, versions beside a deletion that is not a trashing — a deletion takes
+// them — a trashed document beside a document, or versions no store wrote.
 func (s *Store[T]) checkEntryVersions(file string, record entryRecord) error {
 	//: nothing recorded, which is always fine.
 	if record.Versions == nil {
@@ -202,10 +203,16 @@ func (s *Store[T]) checkEntryVersions(file string, record entryRecord) error {
 		//: the configuration, not the file, is what to change.
 		return loadFailed(file, "keeps versions, and the store keeps none: open it with Versions", nil)
 	}
-	//: a deletion takes a document's versions with it.
-	if record.Deleted {
+	//: a deletion takes a document's versions with it; a trashing keeps
+	//: them beside the trashed document, which it then holds.
+	if record.Deleted && record.Versions.Trashed == nil {
 		//: not an entry a store wrote.
 		return loadFailed(file, "records a deletion and keeps versions", nil)
+	}
+	//: a trashed document is not a document the store holds.
+	if !record.Deleted && record.Versions.Trashed != nil {
+		//: not an entry a store wrote.
+		return loadFailed(file, "holds a document and a trashed one", nil)
 	}
 	//: numbered from 1, newest first, each holding a document.
 	return checkRecord(file, record.Versions)
@@ -276,19 +283,22 @@ func (s *Store[T]) readVersions() error {
 }
 
 // versionsWithoutDocument refuses versions of a key the store holds no
-// document under. No write leaves any — a deletion takes them in its own
-// entry, and an entry keeping versions always holds a document — so they come
-// from an edited versions file.
+// document under, unless they hold its trashed document, and a trashed
+// document under a key the store holds one under. No write leaves either — a
+// deletion takes the versions in its own entry, a trashing removes the
+// document in its own, and any other entry keeping versions holds a document
+// — so they come from an edited versions file.
 func (s *Store[T]) versionsWithoutDocument() error {
 	//: every key that has versions.
-	for key := range s.versions {
-		//: its document.
-		if _, found := s.docs[key]; !found {
+	for key, record := range s.versions {
+		_, found := s.docs[key]
+		//: a document, or a trashed one, and never both.
+		if found == (record.Trashed != nil) {
 			//: LoadFailed, naming the file and never the key.
-			return loadFailed(s.versionsPath, "holds versions of a document the store does not hold", nil)
+			return loadFailed(s.versionsPath, "holds versions of a document the store does not hold, or trashed a document it holds", nil)
 		}
 	}
-	//: every version belongs to a document.
+	//: every version belongs to a document, stored or trashed.
 	return nil
 }
 
@@ -306,6 +316,11 @@ func checkRecord(file string, record *versionsRecord) error {
 	if newer == 0 {
 		//: not a number a store gives.
 		return loadFailed(file, "holds a version numbered 0", nil)
+	}
+	//: the trash holds a document.
+	if record.Trashed != nil && len(record.Trashed.Document) == 0 {
+		//: not a trashed document.
+		return loadFailed(file, "holds a trashed document without a document", nil)
 	}
 	//: newest first, each below the one before.
 	for _, former := range record.Former {
@@ -342,6 +357,10 @@ func compacted(record *versionsRecord) *versionsRecord {
 	//: a freshly decoded record is the loader's own to change.
 	for i := range record.Former {
 		record.Former[i].Document = compactJSON(record.Former[i].Document)
+	}
+	//: the trashed document too.
+	if record.Trashed != nil {
+		record.Trashed.Document = compactJSON(record.Trashed.Document)
 	}
 	//: as a write would have left it.
 	return record

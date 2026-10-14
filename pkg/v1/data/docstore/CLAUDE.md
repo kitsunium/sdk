@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T12:00:00Z -->
+<!-- updated: 2026-10-15T00:00:00Z -->
 # pkg/v1/data/docstore/
 
 ## Purpose
@@ -11,7 +11,9 @@ a write's cost independent of how many documents the store holds — and the sam
 contract over SQL, in two tables of a PostgreSQL, MySQL or SQLite database,
 every call on the transaction its context carries (ADR 0139). Either engine
 keeps, when `Versions` says so, the last versions of each document in the same
-durable write as the document (ADR 0143).
+durable write as the document (ADR 0143), and then has a trash: a trashed
+document leaves every read and keeps its versions and its number until it is
+restored or purged (ADR 0143, amended for ADR 0178 C4).
 
 ## Surface
 
@@ -19,25 +21,27 @@ durable write as the document (ADR 0143).
 |---|---|---|
 | `Open[T](cfg, indexes...)` | func | a `*Store[T]`, loaded from `cfg.FS` when set |
 | `Unique[T](name, key)` / `Index[T](name, keys)` | func | index declarations |
-| `Store[T]` | type alias | `Get`, `List`, `Filter`, `Entries`, `Lookup`, `Find`, `Stats`; `Put`, `Insert`, `Replace`, `Update`, `Delete`; `PutStamped`, `InsertStamped`, `ReplaceStamped`, `UpdateStamped`; `Versions`, `Version`, `RewriteVersions`; `OnWrite`, `OnDelete`; `Fold`, `Close` |
+| `Store[T]` | type alias | `Get`, `List`, `Filter`, `Entries`, `Lookup`, `Find`, `Stats`; `Put`, `Insert`, `Replace`, `Update`, `Delete`; `PutStamped`, `InsertStamped`, `ReplaceStamped`, `UpdateStamped`; `Versions`, `Version`, `RewriteVersions`; `Trash`, `Restore`, `Purge`, `Tombstones`; `OnWrite`, `OnDelete`; `Fold`, `Close` |
 | `Config[T]` | type alias | `Key` (required), `FS` + `Path` (both or neither), `FoldAt`, `Versions` + `Clock` + `Held` |
 | `Version` | type alias | `= coredocstore.VersionValue` — `Number` (from 1), `At`, `Meta`, `JSON` (compact, the caller's copy) |
 | `Stamp` | type alias | `= coredocstore.StampValue` — `Meta` (who, which command), `InPlace` (no version) |
+| `Tombstone` | type alias | `= coredocstore.TombstoneValue` — `Key`, `At` (when it was trashed) |
 | `IndexSpec[T]` | type alias | `= coredocstore.IndexSpec[T]` — `Keys`, `Name`, `Unique` |
 | `Entry` | type alias | `= coredocstore.EntryValue` — `Key`, `JSON` (the caller's copy) |
 | `Stats` | type alias | `= svcdocstore.StatsValue` — `Documents`, `Pending`, `Folds`, `FoldError` |
 | `DefaultFoldAt` | const | 1024 |
 | `OpenSQL[T](cfg, indexes...)` | func | a `*SQLStore[T]` over `cfg.Transactor`; sends no statement |
-| `SQLStore[T]` | type alias | `Get`, `List`, `Filter`, `Entries`, `Count`, `Lookup`, `Find`; `Put`, `Insert`, `Replace`, `Update`, `Delete` and their Stamped forms; `Versions`, `Version`, `RewriteVersions`; `OnWrite`, `OnDelete`; `Reindex` — every read and write takes a context (the two hook registrations do not) |
+| `SQLStore[T]` | type alias | `Get`, `List`, `Filter`, `Entries`, `Count`, `Lookup`, `Find`; `Put`, `Insert`, `Replace`, `Update`, `Delete` and their Stamped forms; `Versions`, `Version`, `RewriteVersions`; `Trash`, `Restore`, `Purge`, `Tombstones`; `OnWrite`, `OnDelete`; `Reindex` — every read and write takes a context (the two hook registrations do not) |
 | `SQLConfig[T]` | type alias | `Key`, `Transactor`, `Dialect`, `Table` (required), `IndexKey`, `Versions` + `Clock` + `Held` |
 | `SQLMigration(dialect, table, version)` | func | the two tables as one idempotent `sql.Migration` |
 | `SQLVersionsMigration(dialect, table, version)` | func | the versions table `<table>___vs`, which a store opened with `Versions` needs; its Down drops it |
 | `MaxSQLTableLen` / `MaxSQLKeyLen` / `MaxSQLIndexNameLen` | const | 58 / 1024 / 64 bytes |
 | `Collection[T]` / `Versioned[T]` | type alias | `= coredocstore.Collection[T]` / `Versioned[T]` — the ports `*Store[T]` implements, a call taking no context |
 | `CollectionContext[T]` / `VersionedContext[T]` | type alias | `= coredocstore.CollectionContext[T]` / `VersionedContext[T]` — the same calls each taking a context, which `*SQLStore[T]` implements |
+| `Trashable` / `TrashableContext` | type alias | `= coredocstore.Trashable` / `TrashableContext` — the trash's ports, `*Store[T]`'s and `*SQLStore[T]`'s |
 | `Announcer` | type alias | `= coredocstore.Announcer` — `OnWrite`, `OnDelete`, which both engines implement |
-| `Code*` | const | `0.3.80.1`–`0.3.80.20` |
-| `DocumentNotFound` … `WriteUnconfirmed`, `StatementFailed`, `KeyTooLong`, `VersionsNotKept`, `VersionNotFound`, `VersionsRewriteRefused` | var | the twenty sentinels |
+| `Code*` | const | `0.3.80.1`–`0.3.80.21` |
+| `DocumentNotFound` … `WriteUnconfirmed`, `StatementFailed`, `KeyTooLong`, `VersionsNotKept`, `VersionNotFound`, `VersionsRewriteRefused`, `DocumentNotTrashed` | var | the twenty-one sentinels |
 
 Every type is an alias. The engines, their configurations and `Stats` alias
 the service (ADR 0074); the values both engines share, the index declaration,
@@ -68,6 +72,11 @@ shows an internal package.
   rewrite in step (ADR 0143, kit's ADR 0007). The plain writes make versions
   stamped with nothing; the Stamped forms carry who and which command, or
   `InPlace` for a write that must not make one.
+- **The trash is four calls on the same stores, not a second store**, and only
+  on a store that keeps versions: a trashed document is its versions without a
+  current document, so it travels in the same write and the same files or
+  tables. The store empties nothing by itself — `Tombstones` says when each
+  document went, and the caller decides how long it stays (kit: 30 days).
 - **`Version.JSON` is JSON, not a `T`**: a version made before the type
   changed may no longer decode into it, and a diff reads JSON anyway.
 
