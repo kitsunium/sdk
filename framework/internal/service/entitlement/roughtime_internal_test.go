@@ -82,8 +82,8 @@ func Test_roughtimeExchange(t *testing.T) {
 			reason:  "a dial failure is not a decision about anything",
 		},
 		{
-			//: A real socket nobody is listening on: the datagram leaves and
-			//: no answer comes back, which is the ordinary filtered-port case.
+			//: A real socket that never answers: the datagram arrives and
+			//: nothing comes back, which is the ordinary filtered-port case.
 			name: "a port nothing answers on",
 			address: func(t *testing.T) string {
 				t.Helper()
@@ -91,12 +91,16 @@ func Test_roughtimeExchange(t *testing.T) {
 				if err != nil {
 					t.Fatalf("reserving a port: %v", err)
 				}
-				address := conn.LocalAddr().String()
-				//: Close it so the port is free and silent.
-				if closeErr := conn.Close(); closeErr != nil {
-					t.Fatalf("releasing the port: %v", closeErr)
-				}
-				return address
+				//: Held, never read, until the case ends. Released, the port
+				//: was free for the exchange's own socket to be given: then it
+				//: was connected to itself and read its own request back as
+				//: the answer — measured 1 in 16 000 (#304).
+				t.Cleanup(func() {
+					if closeErr := conn.Close(); closeErr != nil {
+						t.Errorf("releasing the port: %v", closeErr)
+					}
+				})
+				return conn.LocalAddr().String()
 			},
 			reason: "silence is what a filtered port and a dropped request look like alike",
 		},
@@ -109,11 +113,9 @@ func Test_roughtimeExchange(t *testing.T) {
 			address := tt.address(t)
 			response, err := roughtimeExchange(address, buildRoughtimeRequest(make([]byte, roughtimeNonceSize)))
 			if !errors.Is(err, coreent.ErrCIUnverifiable) {
-				//: The response is named because the one way this case
-				//: returns nil is a datagram from whoever bound the released
-				//: port since: seen once in CI and never reproduced, so the
-				//: next failure says who answered instead of only that
-				//: somebody did.
+				//: The response is named so a failure says who answered: the
+				//: one this case met was the request itself, read back by a
+				//: socket connected to itself (#304).
 				t.Errorf("roughtimeExchange(%s) error = %v, want coreent.ErrCIUnverifiable (%s); %d response bytes, head %q",
 					address, err, tt.reason, len(response), response[:min(len(response), 32)])
 			}
