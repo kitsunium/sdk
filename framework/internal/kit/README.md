@@ -4343,7 +4343,7 @@ Count returns how many entities the store holds.
 func (*StoreService) Delete(ctx context.Context, key string) error
 ```
 
-Delete removes the entity with the given key, or returns a [NotFound](#NotFound) error.
+Delete removes the entity with the given key, or returns a [NotFound](#NotFound) error. When the store seals at rest and the entity was its person's last record, their data key goes with it, as with an erasure — at the commit, in a [Transact](#Transact) —, once nothing kit keeps still needs it: a held record, or a former value or version sealed under it, keeps the key.
 
 <a name="StoreService.Diff"></a>
 ### func \(StoreService\) [Diff](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/revisions.go>)

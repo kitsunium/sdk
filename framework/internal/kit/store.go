@@ -224,6 +224,10 @@ func (s *StoreService[T]) Update(ctx context.Context, key string, fn func(*T) er
 }
 
 // Delete removes the entity with the given key, or returns a [NotFound] error.
+// When the store seals at rest and the entity was its person's last record,
+// their data key goes with it, as with an erasure — at the commit, in a
+// [Transact] —, once nothing kit keeps still needs it: a held record, or a
+// former value or version sealed under it, keeps the key.
 func (s *StoreService[T]) Delete(ctx context.Context, key string) error {
 	a := s.app()
 	if a == nil {

@@ -528,6 +528,102 @@ func TestErasingAPersonsLastRecordDestroysTheirKey(t *testing.T) {
 	}
 }
 
+// The product's own Delete of a person's last record destroys their data
+// key, as an erasure or a retention's deletion does — a copy of what it
+// sealed stops opening, the journal says so —, but never while anything kit
+// keeps still needs it: a record of theirs left, held or not, or a former
+// value a record whose subject changed since keeps sealed under it. In a
+// transaction the key goes at the commit: a deletion rolled back destroys
+// nothing (kitsunium/platform#35, kitsunium/sdk#274).
+func TestDeletingAPersonsLastRecordDestroysTheirKey(t *testing.T) {
+	needsFileStore(t)
+	app, cards := sealedCards(t, "deletedcards", t.TempDir())
+	ctx := t.Context()
+	// opens says whether a copy of a record, taken while it was there, still
+	// opens: whether its person's key is still kept.
+	opens := func(key string, copyOf []byte) bool {
+		t.Helper()
+		c, err := cards.sealing().openRecord(ctx, key, copyOf)
+		must(t, err)
+		return c.Note != ""
+	}
+	shreds := func() int {
+		t.Helper()
+		entries, err := app.journalEntries(ctx, 100)
+		must(t, err)
+		n := 0
+		for _, e := range entries {
+			if e.Op == model.JournalShred {
+				n++
+			}
+		}
+		return n
+	}
+
+	must(t, cards.Insert(ctx, card{ID: "c1", Owner: "ann", Note: "first"}))
+	must(t, cards.Insert(ctx, card{ID: "c2", Owner: "ann", Note: "second"}))
+	copyOfC1 := restingAt(t, cards, "c1")
+	must(t, cards.Delete(ctx, "c1"))
+	if !opens("c1", copyOfC1) {
+		t.Fatal("ann's key went with one of her two records")
+	}
+	copyOfC2 := restingAt(t, cards, "c2")
+	must(t, cards.Delete(ctx, "c2"))
+	if opens("c2", copyOfC2) {
+		t.Error("ann's key outlived her last record")
+	}
+	if n := shreds(); n != 1 {
+		t.Errorf("%d shred entries, want one: ann's last record", n)
+	}
+
+	// A record whose subject changed keeps its former values under its
+	// former person's key: bob's last record deleted, his key stays.
+	must(t, cards.Insert(ctx, card{ID: "c3", Owner: "bob", Note: "bob's words"}))
+	_, err := cards.Update(ctx, "c3", func(c *card) error { c.Owner, c.Note = "cid", "cid's words"; return nil })
+	must(t, err)
+	must(t, cards.Insert(ctx, card{ID: "c4", Owner: "bob", Note: "bob again"}))
+	copyOfC4 := restingAt(t, cards, "c4")
+	must(t, cards.Delete(ctx, "c4"))
+	if !opens("c4", copyOfC4) {
+		t.Error("bob's key went, though a former value is sealed under it")
+	}
+	if former, err := cards.Former(ctx, "c3", "/note"); err != nil || len(former) != 1 || string(former[0].Value) != `"bob's words"` {
+		t.Errorf("c3's former value, sealed under bob's key: %+v, %v", former, err)
+	}
+
+	// A held record of dan's keeps his key.
+	must(t, cards.Insert(ctx, card{ID: "c5", Owner: "dan", Note: "held"}))
+	must(t, cards.Hold(ctx, "c5", "a court's request"))
+	must(t, cards.Insert(ctx, card{ID: "c6", Owner: "dan", Note: "deleted"}))
+	copyOfC6 := restingAt(t, cards, "c6")
+	must(t, cards.Delete(ctx, "c6"))
+	if !opens("c6", copyOfC6) {
+		t.Error("dan's key went, though a record of his is held")
+	}
+
+	// In kit.Transact: a deletion rolled back destroys nothing, and one
+	// committed does, once its transaction ends.
+	must(t, cards.Insert(ctx, card{ID: "c7", Owner: "eve", Note: "eve's"}))
+	copyOfC7 := restingAt(t, cards, "c7")
+	rolled := errors.New("rolled back")
+	if err := Transact(ctx, func(ctx context.Context) error { return errors.Join(cards.Delete(ctx, "c7"), rolled) }); !errors.Is(err, rolled) {
+		t.Fatal(err)
+	}
+	if !opens("c7", copyOfC7) {
+		t.Error("a deletion rolled back destroyed eve's key")
+	}
+	if c, err := cards.Get(ctx, "c7"); err != nil || c.Note != "eve's" {
+		t.Errorf("eve's record after the rollback: %+v, %v", c, err)
+	}
+	must(t, Transact(ctx, func(ctx context.Context) error { return cards.Delete(ctx, "c7") }))
+	if opens("c7", copyOfC7) {
+		t.Error("eve's key outlived her last record's committed deletion")
+	}
+	if n := shreds(); n != 2 {
+		t.Errorf("%d shred entries, want two: ann's and eve's", n)
+	}
+}
+
 // relabeled is what the store of cards holds once its fields lose their
 // classes: the same JSON, no tag.
 type relabeled struct {

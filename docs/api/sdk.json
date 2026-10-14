@@ -7493,7 +7493,7 @@
       "recv": "StoreService",
       "spelled": "func(ctx context.Context, key string) error",
       "canonical": "func(ctx context.Context, key string) error",
-      "doc": "Delete removes the entity with the given key, or returns a [NotFound] error.\n",
+      "doc": "Delete removes the entity with the given key, or returns a [NotFound] error.\nWhen the store seals at rest and the entity was its person's last record,\ntheir data key goes with it, as with an erasure — at the commit, in a\n[Transact] —, once nothing kit keeps still needs it: a held record, or a\nformer value or version sealed under it, keeps the key.\n",
       "file": "framework/internal/kit/store.go",
       "layer": "framework"
     },

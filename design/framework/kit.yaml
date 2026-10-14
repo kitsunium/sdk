@@ -4413,7 +4413,12 @@ packages:
               - type: T
               - type: error
             recv: pointer
-          - doc: Delete removes the entity with the given key, or returns a [NotFound] error.
+          - doc: |-
+              Delete removes the entity with the given key, or returns a [NotFound] error.
+              When the store seals at rest and the entity was its person's last record,
+              their data key goes with it, as with an erasure — at the commit, in a
+              [Transact] —, once nothing kit keeps still needs it: a held record, or a
+              former value or version sealed under it, keeps the key.
             in:
               - name: ctx
                 type: context.Context
