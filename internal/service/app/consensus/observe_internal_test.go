@@ -61,8 +61,12 @@ func TestObservability(t *testing.T) {
 	lg := &fakeLogger{}
 	c := newClusterWith(t, &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{9, 9}, every: 0})
 	for _, tn := range c.nodes {
-		_ = tn.node.HardClose()
-		_ = c.net.Transport(tn.id).Close()
+		if err := tn.node.HardClose(); err != nil {
+			t.Fatalf("hard close %d: %v", tn.id, err)
+		}
+		if err := NewMemoryTransport(c.net, tn.id).Close(); err != nil {
+			t.Fatalf("close transport %d: %v", tn.id, err)
+		}
 	}
 	for i, tn := range c.nodes {
 		tn.sm = newKV()
@@ -70,7 +74,7 @@ func TestObservability(t *testing.T) {
 		if i == 0 {
 			cfg.Meter, cfg.Tracer, cfg.Logger = meter, tr, lg
 		}
-		n, err := NewRaft(cfg)
+		n, err := NewNode(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -84,7 +88,9 @@ func TestObservability(t *testing.T) {
 	if _, err := n0.Barrier(ctx); err != nil {
 		t.Fatal(err)
 	}
-	_ = n0.UpdateAddress(ctx, "op:test", c.nodes[1].id, "elsewhere")
+	if err := n0.UpdateAddress(ctx, "op:test", c.nodes[1].id, "elsewhere"); err != nil {
+		t.Fatalf("update address: %v", err)
+	}
 	time.Sleep(300 * time.Millisecond)
 	snap := meter.Collect()
 	for _, name := range []string{mRole, mTerm, mHasLeader, mApplyLagEntries, mClusterVersion} {
@@ -121,20 +127,21 @@ func TestObservability(t *testing.T) {
 // D13: certificate expiry over the TCP transport, log bytes, quota and free
 // space over the data directory.
 func TestResourceMetrics(t *testing.T) {
-	ca, cid, ns := newTCPCluster(t)
+	_, cid, ns := newTCPCluster(t)
 	tcpLeader(t, ns)
 	tn := ns[0]
-	_ = tn.node.HardClose()
+	if err := tn.node.HardClose(); err != nil {
+		t.Fatal(err)
+	}
 	meter := svcmetrics.NewMeter()
 	tn.sm = newKV()
 	cfg := tcpConfig(cid, tn)
 	cfg.Meter = meter
-	n, err := NewRaft(cfg)
+	n, err := NewNode(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tn.node = n
-	_ = ca
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		snap := meter.Collect()
@@ -152,19 +159,19 @@ func TestResourceMetrics(t *testing.T) {
 
 	c, nodes := threeOnDisk(t, 5)
 	dn := nodes[0]
-	dn.crash(c)
+	dn.crash(t, c)
 	dn.dd = openDir(t, dn.dir, 16<<10)
 	dn.sm = newKV()
 	dcfg := diskConfig(c, dn)
 	dm := svcmetrics.NewMeter()
 	dcfg.Meter = dm
-	if dn.node, err = NewRaft(dcfg); err != nil {
+	if dn.node, err = NewNode(dcfg); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		for _, x := range nodes {
 			if x.node != nil {
-				x.crash(c)
+				x.crash(t, c)
 			}
 		}
 	}()

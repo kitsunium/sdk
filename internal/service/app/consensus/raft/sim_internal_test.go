@@ -36,22 +36,23 @@ type event struct {
 	kind evKind
 	node core.NodeID
 	life int
-	msg  core.Message
-	meta core.SnapshotMeta
+	msg  core.MessageValue
+	meta core.SnapshotMetaValue
 	ok   bool
 }
 
 type eventQueue []*event
 
-func (q eventQueue) Len() int { return len(q) }
-func (q eventQueue) Less(i, j int) bool {
-	if !q[i].at.Equal(q[j].at) {
-		return q[i].at.Before(q[j].at)
+func (q *eventQueue) Len() int { return len(*q) }
+func (q *eventQueue) Less(i, j int) bool {
+	a, b := (*q)[i], (*q)[j]
+	if !a.at.Equal(b.at) {
+		return a.at.Before(b.at)
 	}
-	return q[i].ord < q[j].ord
+	return a.ord < b.ord
 }
-func (q eventQueue) Swap(i, j int) { q[i], q[j] = q[j], q[i] }
-func (q *eventQueue) Push(x any)   { *q = append(*q, x.(*event)) }
+func (q *eventQueue) Swap(i, j int) { (*q)[i], (*q)[j] = (*q)[j], (*q)[i] }
+func (q *eventQueue) Push(x any)    { *q = append(*q, x.(*event)) }
 func (q *eventQueue) Pop() any {
 	old := *q
 	x := old[len(old)-1]
@@ -60,7 +61,7 @@ func (q *eventQueue) Pop() any {
 }
 
 type simWrite struct {
-	rd     Ready
+	rd     ReadyValue
 	doneAt time.Time
 }
 
@@ -78,8 +79,8 @@ type simNode struct {
 	hs                core.HardState
 	// base is the durable snapshot the log continues; ents are the durable
 	// entries after it.
-	base core.SnapshotMeta
-	ents []core.Entry
+	base core.SnapshotMetaValue
+	ents []core.EntryValue
 	// noTable is set while the node lost its snapshot's body: it restarts
 	// with no table and asks for an install (R7-18).
 	noTable bool
@@ -87,7 +88,7 @@ type simNode struct {
 	appliedFrom uint64
 	writes      []simWrite
 	lastDone    time.Time
-	applied     []core.Entry
+	applied     []core.EntryValue
 	checked     uint64
 	maxTerm     uint64
 }
@@ -98,7 +99,7 @@ type entryKey struct {
 	sum  uint32
 }
 
-func keyOf(e *core.Entry) entryKey {
+func keyOf(e *core.EntryValue) entryKey {
 	return entryKey{term: e.Position.Term, kind: e.Kind, sum: crc32.ChecksumIEEE(e.Data)}
 }
 
@@ -136,9 +137,9 @@ type sim struct {
 	commits   map[uint64]entryKey
 	proposed  int
 	err       error
-	timing    core.TimingContract
+	timing    core.TimingContractSpec
 	nextCrash time.Time
-	forwarded map[[2]uint64]core.Message
+	forwarded map[[2]uint64]core.MessageValue
 	fetches   int
 	kv        *kvWorld
 }
@@ -175,24 +176,24 @@ func newSim(opt simOptions) *sim {
 		votes:     map[[2]uint64]core.NodeID{},
 		applied:   map[uint64]entryKey{},
 		commits:   map[uint64]entryKey{},
-		forwarded: map[[2]uint64]core.Message{},
-		timing: core.TimingContract{
+		forwarded: map[[2]uint64]core.MessageValue{},
+		timing: core.TimingContractSpec{
 			Generation: 1, HeartbeatInterval: 100 * time.Millisecond,
 			ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second, MaxClockDrift: 0.01,
 		},
 	}
-	var conf core.Membership
+	var conf core.MembershipValue
 	for i := 1; i <= opt.nodes; i++ {
 		id := core.NodeID(i)
 		s.ids = append(s.ids, id)
-		conf.Members = append(conf.Members, core.Member{ID: id, Voter: true, SPKI: [32]byte{byte(i)}})
+		conf.Members = append(conf.Members, core.MemberValue{ID: id, Voter: true, SPKI: [32]byte{byte(i)}})
 	}
 	// The founding configuration is entry 1 on every founder, committed.
-	data := wire.AppendAdmin(nil, &wire.Admin{Change: wire.ChangeFounding, Membership: conf})
-	found := core.Entry{Position: core.Position{Term: 1, Index: 1}, Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}
+	data := wire.AppendAdmin(nil, &wire.AdminValue{Change: wire.ChangeFounding, Membership: conf})
+	found := core.EntryValue{Position: core.PositionValue{Term: 1, Index: 1}, Kind: core.EntryMembership, BodySum: wire.BodySum(data), Data: data}
 	found.ChainSum = wire.ChainSum(0, &found)
 	for _, id := range s.ids {
-		n := &simNode{id: id, hs: core.HardState{Term: 1, Commit: 1}, ents: []core.Entry{found}}
+		n := &simNode{id: id, hs: core.HardState{Term: 1, Commit: 1}, ents: []core.EntryValue{found}}
 		s.nodes[id] = n
 		s.start(n)
 	}
@@ -220,7 +221,7 @@ func (s *sim) start(n *simNode) {
 	n.checked = 0
 	cfg := s.cfg(n.id)
 	cfg.NoTable = n.noTable
-	n.r = New(cfg, Start{HardState: n.hs, Snapshot: n.base, Entries: slices.Clone(n.ents), Applied: n.base.Position.Index, Now: s.clock(n)})
+	n.r = NewRaft(&cfg, &StartState{HardState: n.hs, Snapshot: n.base, Entries: slices.Clone(n.ents), Applied: n.base.Position.Index, Now: s.clock(n)})
 	s.push(&event{at: s.now.Add(time.Duration(s.rng.Int64N(int64(10 * time.Millisecond)))), kind: evTick, node: n.id, life: n.life})
 }
 
@@ -259,7 +260,7 @@ func (s *sim) fail(format string, args ...any) {
 	}
 }
 
-func (s *sim) deliver(m core.Message) {
+func (s *sim) deliver(m core.MessageValue) {
 	if s.cut[[2]core.NodeID{m.From, m.To}] || s.rng.Float64() < s.opt.drop {
 		return
 	}
@@ -291,7 +292,7 @@ func (s *sim) process(n *simNode) {
 		for _, f := range rd.Fetch {
 			// The store read, as the driver's reader goroutine does it: the
 			// durable entries, from the disk model.
-			var out []core.Entry
+			var out []core.EntryValue
 			compacted := f.Lo <= n.base.Position.Index
 			for i := f.Lo; !compacted && i < f.Hi && i <= n.last(); i++ {
 				e, _ := n.entry(i)
@@ -436,8 +437,8 @@ func (s *sim) leader() *simNode {
 }
 
 func (s *sim) propose(n *simNode, data []byte) bool {
-	e := core.Entry{Kind: core.EntryCommand, BodySum: wire.BodySum(data), Data: data}
-	_, code := n.r.Propose(s.clock(n), []core.Entry{e})
+	e := core.EntryValue{Kind: core.EntryCommand, BodySum: wire.BodySum(data), Data: data}
+	_, code := n.r.Propose(s.clock(n), []core.EntryValue{e})
 	s.process(n)
 	return code == 0
 }
@@ -553,10 +554,10 @@ func (s *sim) after(d time.Duration) time.Time { return s.now.Add(d) }
 func (n *simNode) last() uint64 { return n.base.Position.Index + uint64(len(n.ents)) }
 
 // entry returns the durable entry at i, if the disk holds it.
-func (n *simNode) entry(i uint64) (core.Entry, bool) {
+func (n *simNode) entry(i uint64) (core.EntryValue, bool) {
 	b := n.base.Position.Index
 	if i <= b || i > n.last() {
-		return core.Entry{}, false
+		return core.EntryValue{}, false
 	}
 	return n.ents[i-b-1], true
 }
@@ -577,7 +578,7 @@ func (s *sim) cutSnapshot(n *simNode, force bool) {
 	}
 	simTrace("t=%v n%d cut %d base=%d last=%d", s.now.Sub(time.Unix(1_700_000_000, 0)), n.id, c, n.base.Position.Index, n.last())
 	n.ents = slices.Clone(n.ents[c-n.base.Position.Index:])
-	n.base = core.SnapshotMeta{
+	n.base = core.SnapshotMetaValue{
 		ID: fmt.Sprintf("s-%d-%d", n.id, c), Position: e.Position, ChainTip: e.ChainSum,
 		Membership: n.r.ConfAt(c), Timing: s.timing,
 	}
@@ -594,9 +595,9 @@ func (s *sim) sendSnapshot(n *simNode, to core.NodeID) {
 		n.r.SnapshotDone(to, false)
 		return
 	}
-	m := core.Message{From: n.id, To: to, Term: n.r.Status().Term}
+	m := core.MessageValue{From: n.id, To: to, Term: n.r.Status().Term}
 	if s.cut[[2]core.NodeID{n.id, to}] || s.rng.Float64() < s.opt.drop {
-		s.push(&event{at: s.now.Add(rtt(n.id, to)), kind: evSnapDone, node: n.id, life: n.life, msg: core.Message{From: to}})
+		s.push(&event{at: s.now.Add(rtt(n.id, to)), kind: evSnapDone, node: n.id, life: n.life, msg: core.MessageValue{From: to}})
 		return
 	}
 	s.push(&event{at: s.now.Add(rtt(n.id, to)), kind: evInstall, node: to, msg: m, meta: n.base})
@@ -607,7 +608,7 @@ func (s *sim) sendSnapshot(n *simNode, to core.NodeID) {
 func (s *sim) install(n *simNode, e *event) {
 	ok := false
 	defer func() {
-		s.push(&event{at: s.now.Add(rtt(n.id, e.msg.From) / 2), kind: evSnapDone, node: e.msg.From, msg: core.Message{From: n.id}, ok: ok})
+		s.push(&event{at: s.now.Add(rtt(n.id, e.msg.From) / 2), kind: evSnapDone, node: e.msg.From, msg: core.MessageValue{From: n.id}, ok: ok})
 	}()
 	if !n.alive {
 		return
@@ -618,7 +619,7 @@ func (s *sim) install(n *simNode, e *event) {
 		s.storageDone(n)
 	}
 	meta := e.meta
-	code := n.r.CheckOffer(e.msg.From, core.InstallOffer{Term: e.msg.Term, SnapshotID: meta.ID, Meta: meta}, n.r.NoTable())
+	code := n.r.CheckOffer(e.msg.From, core.InstallOfferValue{Term: e.msg.Term, SnapshotID: meta.ID, Meta: meta}, n.r.NoTable())
 	simTrace("t=%v n%d offer %d from %d: %v", s.now.Sub(time.Unix(1_700_000_000, 0)), n.id, meta.Position.Index, e.msg.From, code)
 	if code == core.CodeAdminPreconditionFailed {
 		ok = true // held: the receiver already covers it

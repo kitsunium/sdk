@@ -18,10 +18,17 @@ import (
 // stream. A resumed transfer restarts on a chunk boundary.
 
 const (
-	chunkHeaderLen   = 12
+	// chunkHeaderLen is the three u32 fields that precede every chunk's
+	// bytes: encoded length, decoded length and CRC-32C.
+	chunkHeaderLen = 12
+	// defaultChunkSize is the decoded size of a chunk: large enough that the
+	// header and the codec's framing are noise, small enough that a resumed
+	// transfer loses at most 1 MiB.
 	defaultChunkSize = 1 << 20
 )
 
+// castagnoli is the CRC-32C table every checksum of the log, the stamp and
+// the snapshot stream is computed with: built once, read concurrently.
 var castagnoli = crc32.MakeTable(crc32.Castagnoli)
 
 // chunkWriter takes the decoded stream a state machine writes and emits
@@ -37,10 +44,16 @@ type chunkWriter struct {
 	decoded int64
 }
 
+// newChunkWriter returns a writer that encodes every chunk bytes of decoded
+// stream with codec and emits it to w; the last, partial chunk is emitted
+// by Close.
 func newChunkWriter(w io.Writer, codec coretransform.BoundedDecompressor, chunk int) *chunkWriter {
 	return &chunkWriter{w: w, codec: codec, size: chunk, sum: sha256.New(), buf: make([]byte, 0, chunk)}
 }
 
+// Write buffers p and emits each chunk as it fills. On a failed emit the
+// count is the bytes accepted so far, and the stream is unusable: a chunk
+// was half written.
 func (c *chunkWriter) Write(p []byte) (int, error) {
 	n := 0
 	for len(p) > 0 {
@@ -57,6 +70,9 @@ func (c *chunkWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+// flush encodes and emits the buffered chunk, header first, and folds its
+// decoded bytes into the SHA-256; an empty buffer emits nothing, so Close
+// after a full chunk adds no empty one.
 func (c *chunkWriter) flush() error {
 	if len(c.buf) == 0 {
 		return nil
@@ -101,14 +117,21 @@ type chunkReader struct {
 	encoded int64
 }
 
+// newChunkReader returns a reader decoding the chunk stream r, refusing a
+// chunk larger than chunk and a stream whose decoded total exceeds limit.
 func newChunkReader(r io.Reader, codec coretransform.BoundedDecompressor, chunk, limit int64) *chunkReader {
 	return &chunkReader{r: r, codec: codec, chunk: chunk, limit: limit, sum: sha256.New()}
 }
 
+// snapshotCorrupt is the SNAPSHOT_CORRUPT of a stream or a spool that
+// failed a check, the check named in its why field.
 func snapshotCorrupt(why string) error {
 	return origin(coreconsensus.SnapshotCorrupt, errs.String("why", why))
 }
 
+// Read returns decoded bytes, decoding the next chunk when the current one
+// is spent; io.EOF arrives only on a chunk boundary, a stream cut anywhere
+// else is SNAPSHOT_CORRUPT.
 func (c *chunkReader) Read(p []byte) (int, error) {
 	for c.pos == len(c.dec) {
 		if err := c.next(); err != nil {
@@ -120,6 +143,9 @@ func (c *chunkReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+// next reads, checks and decodes one chunk. The announced lengths are
+// bounded BEFORE anything is allocated for them (R2-11), and a chunk whose
+// checksum or decoded length disagrees with its header is refused.
 func (c *chunkReader) next() error {
 	var h [chunkHeaderLen]byte
 	if _, err := io.ReadFull(c.r, h[:]); err != nil {
@@ -134,7 +160,7 @@ func (c *chunkReader) next() error {
 		return origin(coreconsensus.SnapshotTooLarge, errs.Int64("chunk", decLen))
 	}
 	if int64(cap(c.enc)) < encLen {
-		c.enc = make([]byte, encLen)
+		c.enc = make([]byte, 0, encLen)
 	}
 	c.enc = c.enc[:encLen]
 	if _, err := io.ReadFull(c.r, c.enc); err != nil {
@@ -155,7 +181,7 @@ func (c *chunkReader) next() error {
 }
 
 // verifySnapshot decodes a whole snapshot and checks its sizes and digest.
-func verifySnapshot(r io.Reader, meta coreconsensus.SnapshotMeta, codec coretransform.BoundedDecompressor, limit int64) error {
+func verifySnapshot(r io.Reader, meta coreconsensus.SnapshotMetaValue, codec coretransform.BoundedDecompressor, limit int64) error {
 	cr := newChunkReader(r, codec, max(meta.ChunkSize, 1), limit)
 	if _, err := io.Copy(io.Discard, cr); err != nil {
 		return err

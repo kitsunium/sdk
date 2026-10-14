@@ -5,21 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
-	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
-
-// snapState tracks the cuts: at most one in flight, coalesced (D7).
-type snapState struct {
-	mu       sync.Mutex
-	last     uint64
-	inFlight bool
-	spools   map[string]coreconsensus.SnapshotSink
-}
 
 // Latest opens the newest complete snapshot of a store (R7-07).
 func Latest(s coreconsensus.SnapshotStore) (coreconsensus.SnapshotHandle, error) {
@@ -35,12 +24,18 @@ func Latest(s coreconsensus.SnapshotStore) (coreconsensus.SnapshotHandle, error)
 
 // restoreFrom verifies a snapshot's digest, then restores the state machine
 // from it, serialised with Apply.
-func (n *Node) restoreFrom(m coreconsensus.SnapshotMeta, durIdx uint64) error {
+func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (err error) {
 	h, err := n.cfg.Snapshots.Open(m.ID)
 	if err != nil {
 		return err
 	}
-	defer h.Close()
+	defer func() {
+		// The handle is only read; its Close matters to the node only when
+		// it is the one failure there was.
+		if cerr := h.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	if err := verifySnapshot(io.NewSectionReader(h, 0, m.EncodedSize), m, n.cfg.SnapshotCodec, n.cfg.MaxSnapshotBytes); err != nil {
 		return err
 	}
@@ -79,18 +74,37 @@ func (n *Node) maybeSnapshot() {
 		ss.mu.Lock()
 		ss.inFlight = false
 		ss.mu.Unlock()
+		n.cutFailed(err)
 	}
 }
 
-func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMeta, bool) {
-	var meta coreconsensus.SnapshotMeta
+// cutFailed is what a snapshot cut that published nothing does to the node.
+// A STORAGE_FAILED stops it: a failed write or sync of a snapshot is a
+// failed write or sync of this node's disk, and D4 never retries one, for
+// the page cache may now lie about the log on the same disk as well. Any
+// other failure — the machine's Snapshot, its encoding — is logged, and the
+// next cut tries again.
+func (n *Node) cutFailed(err error) {
+	if errs.HasCode(err, coreconsensus.CodeStorageFailed) {
+		n.stop(err, true)
+		return
+	}
+	n.obs.warn("consensus: snapshot cut failed", lstr("error", err.Error()))
+}
+
+// metaAt builds, on the event loop, the metadata of a snapshot at idx: the
+// configuration and chain tip in force there, and the timing, versions and
+// no-space alarm as they stand now. It reports false when the node stopped
+// before the loop could answer.
+func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMetaValue, bool) {
+	var meta coreconsensus.SnapshotMetaValue
 	ok := n.exec(func() {
 		st := n.r.Status()
 		conf := n.r.ConfAt(idx)
 		conf.Index = idx
-		meta = coreconsensus.SnapshotMeta{
+		meta = coreconsensus.SnapshotMetaValue{
 			ID: fmt.Sprintf("%020d-%020d", idx, term), Version: 1,
-			Position: coreconsensus.Position{Term: term, Index: idx}, Log: n.ident, Membership: conf,
+			Position: coreconsensus.PositionValue{Term: term, Index: idx}, Log: n.ident, Membership: conf,
 			ChainTip: n.r.ChainAt(idx), Codec: string(n.cfg.SnapshotCodec.Algorithm()), ChunkSize: defaultChunkSize,
 			Timing: st.Timing, ClusterVersion: st.Cluster, ClusterGeneration: st.ClusterG, NoSpace: st.NoSpace,
 		}
@@ -99,7 +113,10 @@ func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMeta, bool) {
 }
 
 // cut captures the state machine at the applied index and writes it. When w
-// is not nil, the encoded stream is copied to it too (SaveSnapshot).
+// is not nil, the encoded stream is copied to it too (SaveSnapshot). Unless
+// the machine pauses apply to cut, or w is set, the write runs on a
+// background goroutine counted in n.wg, which ends when the write does, so
+// Close waits for it; its failure reaches cutFailed instead of the caller.
 func (n *Node) cut(idx, term uint64, w io.Writer) error {
 	meta, ok := n.metaAt(idx, term)
 	if !ok {
@@ -115,18 +132,24 @@ func (n *Node) cut(idx, term uint64, w io.Writer) error {
 	n.wg.Add(1)
 	go func() {
 		defer n.wg.Done()
-		_ = n.writeSnapshot(snap, meta, nil)
+		if err := n.writeSnapshot(snap, meta, nil); err != nil {
+			n.cutFailed(err)
+		}
 	}()
 	return nil
 }
 
-func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMeta, extra io.Writer) error {
+// writeSnapshot encodes a captured snapshot into a fresh sink, discarding a
+// stale spool of the same id first, and commits it; on any failure the sink
+// is aborted and nothing is published. It always releases the capture and
+// clears the in-flight flag, so the next cut can run.
+func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMetaValue, extra io.Writer) error {
 	defer snap.Release()
-	ss := &n.snapState
+	state := &n.snapState
 	done := func() {
-		ss.mu.Lock()
-		ss.inFlight = false
-		ss.mu.Unlock()
+		state.mu.Lock()
+		state.inFlight = false
+		state.mu.Unlock()
 	}
 	defer done()
 	sink, spooled, err := n.cfg.Snapshots.Create(meta.ID, meta)
@@ -134,7 +157,11 @@ func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.Sna
 		return err
 	}
 	if spooled > 0 {
-		_ = sink.Abort()
+		// A stale spool of that id: discarded, or the fresh cut would
+		// resume from it.
+		if err := sink.Abort(); err != nil {
+			return err
+		}
 		if sink, _, err = n.cfg.Snapshots.Create(meta.ID, meta); err != nil {
 			return err
 		}
@@ -146,12 +173,10 @@ func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.Sna
 	}
 	cw := newChunkWriter(out, n.cfg.SnapshotCodec, defaultChunkSize)
 	if _, err := snap.WriteTo(cw); err != nil {
-		_ = sink.Abort()
-		return err
+		return alsoFailed(err, "abort", sink.Abort())
 	}
 	if err := cw.Close(); err != nil {
-		_ = sink.Abort()
-		return err
+		return alsoFailed(err, "abort", sink.Abort())
 	}
 	meta.EncodedSize, meta.DecodedSize = cw.encoded, cw.decoded
 	copy(meta.SHA256[:], cw.sum.Sum(nil))
@@ -161,9 +186,9 @@ func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.Sna
 	n.obs.record(mSnapshotDuration, n.clk.Since(cutStart).Seconds())
 	n.obs.record(mSnapshotBytes, float64(meta.EncodedSize))
 	n.obs.info("consensus: snapshot cut", lattr("index", meta.Position.Index), lattr("bytes", uint64(meta.EncodedSize)))
-	ss.mu.Lock()
-	ss.last = max(ss.last, meta.Position.Index)
-	ss.mu.Unlock()
+	state.mu.Lock()
+	state.last = max(state.last, meta.Position.Index)
+	state.mu.Unlock()
 	n.afterCut()
 	return nil
 }
@@ -176,7 +201,11 @@ func (n *Node) afterCut() {
 		return
 	}
 	for _, m := range metas[min(2, len(metas)):] {
-		_ = n.cfg.Snapshots.Remove(m.ID) // refused while a transfer reads it
+		// Refused while a transfer reads it: kept until the next cut, which
+		// tries again. Worth a line, never a stop.
+		if err := n.cfg.Snapshots.Remove(m.ID); err != nil {
+			n.obs.info("consensus: an old snapshot is kept for now", lstr("id", m.ID), lstr("error", err.Error()))
+		}
 	}
 	older := metas[min(1, len(metas)-1)].Position.Index
 	n.am.Lock()
@@ -204,42 +233,32 @@ func (n *Node) requestCut() {
 }
 
 // SaveSnapshot cuts a snapshot now and copies its encoded stream to w.
-func (n *Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io.Writer) (coreconsensus.SnapshotMeta, error) {
+func (n *Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io.Writer) (coreconsensus.SnapshotMetaValue, error) {
 	if !op.Valid() {
-		return coreconsensus.SnapshotMeta{}, origin(coreconsensus.MembershipInvalid, errs.String("why", "operator"))
+		return coreconsensus.SnapshotMetaValue{}, origin(coreconsensus.MembershipInvalid, errs.String("why", "operator"))
 	}
 	if _, err := n.Barrier(ctx); err != nil {
-		return coreconsensus.SnapshotMeta{}, err
+		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	ss := &n.snapState
 	ss.mu.Lock()
 	if ss.inFlight {
 		ss.mu.Unlock()
-		return coreconsensus.SnapshotMeta{}, origin(coreconsensus.Overloaded, errs.String("why", "a cut is in flight"))
+		return coreconsensus.SnapshotMetaValue{}, origin(coreconsensus.Overloaded, errs.String("why", "a cut is in flight"))
 	}
 	ss.inFlight = true
 	ss.mu.Unlock()
 	// The cut runs on the apply goroutine, serialised with Apply.
-	req := &saveReq{w: w, done: make(chan saveRes, 1)}
+	req := newSaveReq(w, op)
 	n.aq.push(applyItem{save: req})
 	select {
 	case r := <-req.done:
 		return r.meta, r.err
 	case <-ctx.Done():
-		return coreconsensus.SnapshotMeta{}, ctx.Err()
+		return coreconsensus.SnapshotMetaValue{}, ctx.Err()
 	case <-n.loopDone:
-		return coreconsensus.SnapshotMeta{}, n.stoppedErr()
+		return coreconsensus.SnapshotMetaValue{}, n.stoppedErr()
 	}
-}
-
-type saveReq struct {
-	w    io.Writer
-	done chan saveRes
-}
-
-type saveRes struct {
-	meta coreconsensus.SnapshotMeta
-	err  error
 }
 
 // save runs a SaveSnapshot on the apply goroutine.
@@ -248,24 +267,42 @@ func (n *Node) save(req *saveReq) {
 	idx, term := n.applied, n.appliedTerm
 	n.am.Unlock()
 	err := n.cut(idx, term, req.w)
-	var m coreconsensus.SnapshotMeta
+	var m coreconsensus.SnapshotMetaValue
 	if err == nil {
-		metas, _ := n.cfg.Snapshots.List()
-		for _, x := range metas {
-			if x.Position.Index == idx {
-				m = x
+		// The caller keeps this metadata to restore from later: a list that
+		// could not be read fails the save rather than answer a zero one.
+		var metas []coreconsensus.SnapshotMetaValue
+		if metas, err = n.cfg.Snapshots.List(); err == nil {
+			for _, x := range metas {
+				if x.Position.Index == idx {
+					m = x
+				}
 			}
 		}
 	} else {
 		n.snapState.mu.Lock()
 		n.snapState.inFlight = false
 		n.snapState.mu.Unlock()
+		// The operator who asked reads the error too, but a storage failure
+		// is the node's before it is the caller's.
+		n.cutFailed(err)
+	}
+	if err == nil {
+		// An administrative operation is recorded under its operator, as
+		// the offline ones are in the audit file (D17).
+		n.obs.info("consensus: snapshot saved", lstr("operator", string(req.op)), lattr("index", idx))
 	}
 	req.done <- saveRes{m, err}
 }
 
 // ---- sending ----
 
+// sendSnapshot streams the newest snapshot to a peer that needs one, at
+// most one transfer per peer, and asks for a cut when there is none to
+// send. It runs on the loop and launches the transfer on a background
+// goroutine counted in n.wg, which ends when Stream returns, and a watcher
+// goroutine that cancels the stream when the node stops and ends with it;
+// the outcome goes back to raft on the loop.
 func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 	if n.sending[to] {
 		return
@@ -285,7 +322,7 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 		return
 	}
 	n.sending[to] = true
-	offer := coreconsensus.InstallOffer{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}
+	offer := coreconsensus.InstallOfferValue{Term: n.r.Status().Term, SnapshotID: meta.ID, Meta: meta}
 	n.wg.Add(1)
 	go func() {
 		defer n.wg.Done()
@@ -306,7 +343,11 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 			return io.NopCloser(io.NewSectionReader(h, off, meta.EncodedSize-off)), nil
 		})
 		cancel()
-		_ = h.Close()
+		if cerr := h.Close(); cerr != nil {
+			// The transfer is over whatever the read handle says; the pin
+			// it held is released either way.
+			n.obs.warn("consensus: snapshot handle close failed", lstr("id", meta.ID), lstr("error", cerr.Error()))
+		}
 		if errors.Is(err, coreconsensus.Compacted) {
 			// The peer's log starts past this snapshot: cut a newer one,
 			// which the next probe sends.
@@ -322,61 +363,88 @@ func (n *Node) sendSnapshot(to coreconsensus.NodeID) {
 
 // ---- receiving ----
 
-func (n *Node) offer(from coreconsensus.AuthenticatedPeer, o coreconsensus.InstallOffer) coreconsensus.InstallAccept {
-	acc := coreconsensus.InstallAccept{SnapshotID: o.SnapshotID}
-	ok := n.exec(func() {
-		code := n.r.CheckOffer(from.ID, o, n.r.NoTable())
-		if code == coreconsensus.CodeAdminPreconditionFailed {
-			// The receiver already covers the offered index — it holds that
-			// snapshot, or committed past it: an idempotent success, and the
-			// leader moves the peer back to probe (D7, R3-16).
-			acc.Held = true
-			return
-		}
-		if code != 0 {
-			acc.Refused = code
-			return
-		}
-		if o.SnapshotID != o.Meta.ID || o.Meta.Version != 1 {
-			acc.Refused = coreconsensus.CodeVersionUnsupported
-			return
-		}
-		if o.Meta.DecodedSize > n.cfg.MaxSnapshotBytes || o.Meta.EncodedSize > n.cfg.MaxSnapshotBytes {
-			acc.Refused = coreconsensus.CodeSnapshotTooLarge
-			return
-		}
-		metas, err := n.cfg.Snapshots.List()
-		if err != nil {
-			acc.Refused = coreconsensus.CodeStorageFailed
-			return
-		}
-		for _, m := range metas {
-			if m.ID != o.SnapshotID {
-				continue
-			}
-			if !n.r.NoTable() {
-				acc.Held = true
-				return
-			}
-			// A node with no table holds that id only as a copy that failed
-			// its checksums: it is replaced, never answered as held.
-			if err := n.cfg.Snapshots.Remove(m.ID); err != nil {
-				acc.Refused = coreconsensus.CodeStorageFailed
-				return
-			}
-		}
-		sink, off, err := n.cfg.Snapshots.Create(o.SnapshotID, o.Meta)
-		if err != nil {
-			acc.Refused = coreconsensus.CodeStorageFailed
-			return
-		}
-		n.keepSpool(o.SnapshotID, sink)
-		acc.Offset = off
-	})
+// offer answers a peer's snapshot offer: held when this node already covers
+// it, refused with the code a leader can act on, or accepted at the offset
+// a resumed spool already holds. It is judged on the event loop, and a node
+// that stopped before the loop answered refuses with NODE_STOPPED.
+func (n *Node) offer(from coreconsensus.AuthenticatedPeerValue, o coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue {
+	acc := coreconsensus.InstallAcceptValue{SnapshotID: o.SnapshotID}
+	ok := n.exec(func() { n.judgeOffer(from.ID, &o, &acc) })
 	if !ok {
 		acc.Refused = coreconsensus.CodeNodeStopped
 	}
 	return acc
+}
+
+// judgeOffer is offer's verdict, on the loop: screened first, then answered
+// from a copy already held, else a sink is opened and kept for install.
+func (n *Node) judgeOffer(from coreconsensus.NodeID, o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue) {
+	if n.screenOffer(from, o, acc) || n.answerFromHeld(o, acc) {
+		return
+	}
+	sink, off, err := n.cfg.Snapshots.Create(o.SnapshotID, o.Meta)
+	if err != nil {
+		acc.Refused = coreconsensus.CodeStorageFailed
+		return
+	}
+	n.keepSpool(o.SnapshotID, sink)
+	acc.Offset = off
+}
+
+// screenOffer settles an offer raft or the bounds decide on their own, and
+// reports whether it did: one this node already covers is held, and one
+// from a stale term, of another version or over MaxSnapshotBytes is refused
+// before any byte is spooled.
+func (n *Node) screenOffer(from coreconsensus.NodeID, o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue) bool {
+	code := n.r.CheckOffer(from, *o, n.r.NoTable())
+	if code == coreconsensus.CodeAdminPreconditionFailed {
+		// The receiver already covers the offered index — it holds that
+		// snapshot, or committed past it: an idempotent success, and the
+		// leader moves the peer back to probe (D7, R3-16).
+		acc.Held = true
+		return true
+	}
+	if code != 0 {
+		acc.Refused = code
+		return true
+	}
+	if o.SnapshotID != o.Meta.ID || o.Meta.Version != 1 {
+		acc.Refused = coreconsensus.CodeVersionUnsupported
+		return true
+	}
+	if o.Meta.DecodedSize > n.cfg.MaxSnapshotBytes || o.Meta.EncodedSize > n.cfg.MaxSnapshotBytes {
+		acc.Refused = coreconsensus.CodeSnapshotTooLarge
+		return true
+	}
+	return false
+}
+
+// answerFromHeld answers an offer for a snapshot id this node already
+// stores, and reports whether it did: held, unless the node has no table,
+// in which case its copy failed its checksums and is removed so the offer
+// proceeds and replaces it.
+func (n *Node) answerFromHeld(o *coreconsensus.InstallOfferValue, acc *coreconsensus.InstallAcceptValue) bool {
+	metas, err := n.cfg.Snapshots.List()
+	if err != nil {
+		acc.Refused = coreconsensus.CodeStorageFailed
+		return true
+	}
+	for _, m := range metas {
+		if m.ID != o.SnapshotID {
+			continue
+		}
+		if !n.r.NoTable() {
+			acc.Held = true
+			return true
+		}
+		// A node with no table holds that id only as a copy that failed
+		// its checksums: it is replaced, never answered as held.
+		if err := n.cfg.Snapshots.Remove(m.ID); err != nil {
+			acc.Refused = coreconsensus.CodeStorageFailed
+			return true
+		}
+	}
+	return false
 }
 
 // keepSpool holds the sink an accepted offer opened until its body
@@ -397,11 +465,17 @@ func (n *Node) keepSpool(id string, sink coreconsensus.SnapshotSink) {
 	n.snapState.spools[id] = sink
 }
 
-func (n *Node) install(req coreconsensus.InstallRequest) error {
-	id := req.Offer.SnapshotID
+// install receives the stream of an accepted offer into its spool, commits
+// it, and has the apply goroutine restore from it before raft adopts it. A
+// short stream keeps the spool for the next offer to resume; a snapshot
+// that does not restore is removed, so a restart does not load it. The
+// test-only crash hook launches HardClose on its own goroutine, which ends
+// when HardClose returns, because install itself runs under the transport.
+func (n *Node) install(req coreconsensus.InstallParams) error {
+	snapID := req.Offer.SnapshotID
 	n.snapState.mu.Lock()
-	sink := n.snapState.spools[id]
-	delete(n.snapState.spools, id)
+	sink := n.snapState.spools[snapID]
+	delete(n.snapState.spools, snapID)
 	n.snapState.mu.Unlock()
 	if sink == nil {
 		return origin(coreconsensus.SnapshotCorrupt, errs.String("why", "no accepted offer"))
@@ -421,7 +495,9 @@ func (n *Node) install(req coreconsensus.InstallRequest) error {
 		return n.stoppedErr()
 	}
 	if code != 0 {
-		_ = sink.Abort()
+		// The spool is discarded either way: the refusal is the answer the
+		// leader acts on, and nothing here could act on a failed Abort.
+		abandon(sink.Abort())
 		return origin(coreconsensus.AdminPreconditionFailed, errs.String("why", "the offer is no longer fresh"))
 	}
 	if err := sink.Commit(meta); err != nil {
@@ -440,8 +516,9 @@ func (n *Node) install(req coreconsensus.InstallRequest) error {
 		return n.stoppedErr()
 	}
 	if err != nil {
-		_ = n.cfg.Snapshots.Remove(id)
-		return err
+		// The installed copy did not restore: unpublished, so a restart
+		// does not load it again, or the failure to do so travels with it.
+		return alsoFailed(err, "remove", n.cfg.Snapshots.Remove(snapID))
 	}
 	n.exec(func() {
 		n.r.InstallSnapshot(meta)
@@ -450,75 +527,4 @@ func (n *Node) install(req coreconsensus.InstallRequest) error {
 	n.obs.inc(mSnapshotInstalls)
 	n.obs.info("consensus: snapshot installed", lattr("index", meta.Position.Index), lattr("from", uint64(req.From.ID)))
 	return nil
-}
-
-// ---- pre-admission JOIN (D4, R8-09) ----
-
-func (n *Node) join(ctx context.Context, from coreconsensus.AuthenticatedPeer, r coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code) {
-	pos, code, _ := n.joinReason(ctx, from, r)
-	return pos, code
-}
-
-// joinReason answers a JOIN and, when it refuses, says why: the
-// authorizer's own words, sanitized and bounded, or the engine's rule. An
-// authorizer that says nothing leaves the reason empty.
-func (n *Node) joinReason(ctx context.Context, from coreconsensus.AuthenticatedPeer, r coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string) {
-	refuse := func(why string) (coreconsensus.Position, errs.Code, string) {
-		return coreconsensus.Position{}, coreconsensus.CodeJoinRefused, why
-	}
-	switch {
-	case n.cfg.JoinAuthorizer == nil:
-		return refuse("this cluster admits no JOIN")
-	case r.Cluster != n.ident.Cluster:
-		return refuse("another cluster")
-	case r.Slot != from.Slot:
-		return refuse("the slot differs from the certificate's")
-	case from.SPKI == ([32]byte{}):
-		return refuse("no key")
-	}
-	r.SPKI = from.SPKI
-	// One JOIN per slot per election timeout (R7-42).
-	n.joinMu.Lock()
-	if n.lastJoin == nil {
-		n.lastJoin = map[string]time.Time{}
-	}
-	now := n.clk.Now()
-	if last, ok := n.lastJoin[r.Slot]; ok && now.Sub(last) < n.Status().Timing.ElectionTimeoutMin {
-		n.joinMu.Unlock()
-		n.joinRefused.Add(1)
-		n.obs.inc(mJoinsRateLimited)
-		return refuse("one JOIN per slot per election timeout")
-	}
-	n.lastJoin[r.Slot] = now
-	n.joinMu.Unlock()
-	for _, m := range n.Membership().Members {
-		if m.Slot == r.Slot {
-			// A slot that still has a live member is refused (R8-11).
-			return refuse("the slot still has a member")
-		}
-	}
-	op, err := n.cfg.JoinAuthorizer.Authorize(ctx, r)
-	if err != nil {
-		n.obs.warn("consensus: JOIN refused by the authorizer", lstr("slot", r.Slot), lstr("error", err.Error()))
-		return refuse(joinReasonOf(err))
-	}
-	if !op.Valid() {
-		return refuse("the authorizer returned an invalid operator")
-	}
-	m := coreconsensus.Member{ID: r.ID, Incarnation: r.Incarnation, Slot: r.Slot, SPKI: r.SPKI, Address: r.Address, Joining: true}
-	a := wire.Admin{
-		Operator: string(op), Change: wire.ChangeAddLearner, Target: m.ID,
-		Membership: coreconsensus.Membership{Members: []coreconsensus.Member{m}},
-	}
-	data := wire.AppendAdmin(nil, &a)
-	tok, _, err := n.submit(ctx, coreconsensus.Entry{Kind: coreconsensus.EntryMembership, BodySum: wire.BodySum(data), Data: data}, true)
-	if err != nil {
-		c, ok := errs.CodeOf(err)
-		if !ok {
-			c = coreconsensus.CodeJoinRefused
-		}
-		reason, _ := errs.ReasonOf(err)
-		return coreconsensus.Position{}, c, reason
-	}
-	return tok.Position(), 0, ""
 }

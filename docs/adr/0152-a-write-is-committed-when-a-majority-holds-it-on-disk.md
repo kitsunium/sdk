@@ -3613,6 +3613,37 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
   extents and a measurement shows `fdatasync` after it publishes no
   metadata.
 
+## Amendment — the published names follow the SDK's roles (2026-10-13, v0 breaking changes)
+
+The domain shipped in `pkg/v1/app` v0.1.1 without the gate of the SDK's
+linter, and its first run reported names and signatures every other domain
+already follows. They are changed here, while the module is v0, under
+[ADR 0040](0040-changing-a-published-shape-while-v0.md)'s licence, said out
+loud as it requires: **every rename below breaks a caller**, and the release
+that carries them is a minor one. No behaviour, wire byte or on-disk byte
+changes with them.
+
+| Before | After | Why |
+|---|---|---|
+| `Entry`, `Position`, `Token`, `LogIdentity`, `Member`, `Membership`, `Stamp`, `Status`, `Versions`, `StopReason`, `SnapshotMeta`, `InstallOffer`, `InstallAccept`, `AuthenticatedPeer`, `FencedAttestation`, `JoinRequest`, `Message`, `Health`, `PeerHealth`, `Report` | the same name + `Value` | a plain value says so, as in every other domain (KTN-STRUCT-ROLE); `Message` and `JoinRequest` are binary-coded by `wire`, never by reflection, and their old suffixes declared a JSON DTO they are not |
+| `TimingContract`, `Precondition` | `TimingContractSpec`, `PreconditionSpec` | what every member must agree on, what an operation expects |
+| `InstallRequest` | `InstallParams` | the arguments the transport hands the engine |
+| raft `Start`, `Ready`, `Status`, `PeerStat`, `FetchRequest`, `UnsupportedEntry`; wire `Admin` | `StartState`, `ReadyValue`, `StatusValue`, `PeerStatValue`, `FetchSpec`, `UnsupportedEntryValue`; `AdminValue` | same rule, internal packages |
+| `NewRaft`, `OpenDataDir`, `OpenDataDirWith`, raft `New` | `NewNode`, `NewDataDir`, `NewDataDirWith`, raft `NewRaft` | a behaviour-bearing type is built by `New<Type>` in its own file (KTN-STRUCT-CTOR) |
+| `MemoryNetwork.Transport(id)` | `NewMemoryTransport(net, id)` | same rule; it still returns the one end of that id |
+| `LoadPEMIdentity(…) (*PEMIdentity, *x509.CertPool, error)` | `NewPEMIdentity(…) (*PEMIdentity, error)` + `(*PEMIdentity).Roots()` | same rule |
+| `FileLog`, `FileSnapshots` | unexported | reachable only through `DataDir.Log()` / `Snapshots()`, as the ports |
+| `Bootstrap(ctx, Config, …)`, `Recover(…, RecoverOptions)`, `RestoreSnapshot(…, RestoreOptions)`, `NewTCPTransport(TransportConfig)`, `NewTCPTransportFromPEM(…, TransportConfig)`, raft `New(Config, Start)`, `(Status).Precondition`, `(Config).MemoryBudget` | pointer parameters and receivers | 120–416-byte structs were copied at every call (KTN-VAR-BIGSTRUCT); the callee reads them, and the transport constructors apply their defaults to a copy |
+| `Health.Ready`, `HasLeader`, `QuorumReachable`, `Stopped`; `PeerHealth.Voter`, `Unreachable`, `Snapshot`; raft `PeerStat.Voter`, `Heard`, `Probing`, `Snapshot` | `Flags` with `HealthReady`… / `PeerVoter`… / `StatVoter`…, read with `Has` | three or more booleans are one bit-set (KTN-STRUCT-FLAGS) |
+| `DefaultSegmentBytes`, `MaxJoinReasonBytes` | typed `int64`, `int` | KTN-CONST-TYPED |
+| tlsid `PeerIdentity`, `Files` | `PeerIdentityValue`, `FilesConfig` | KTN-STRUCT-ROLE |
+| raft `(*Raft).Applied` | removed | it did nothing and nothing called it |
+
+Added beside them: `ReadyValue.ChainRefusedBy`, which feeds
+`consensus_chain_refusals_total` — the counter D13 names and the engine never
+emitted. `Bootstrap` honours its context: a caller that gave up before the
+first durable write gets its cancellation back and nothing is written.
+
 ## Revision history
 
 | Version | Round | What changed |

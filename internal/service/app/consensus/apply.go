@@ -2,31 +2,52 @@ package consensus
 
 import (
 	"fmt"
+	"io"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 type applyItem struct {
-	entries []coreconsensus.Entry
+	entries []coreconsensus.EntryValue
 	restore *restoreReq
 	save    *saveReq
 	cut     bool
 }
 
 type restoreReq struct {
-	meta coreconsensus.SnapshotMeta
+	meta coreconsensus.SnapshotMetaValue
 	done chan error
+}
+
+// newSaveReq is a SaveSnapshot request for the apply goroutine: the extra
+// writer, the operator it is recorded under, and the one-slot channel its
+// answer comes back on, so the apply goroutine never blocks on a caller
+// that left.
+func newSaveReq(w io.Writer, op coreconsensus.Operator) *saveReq {
+	return &saveReq{w: w, op: op, done: make(chan saveRes, 1)}
+}
+
+type saveReq struct {
+	w io.Writer
+	// op is the operator the save is recorded under.
+	op   coreconsensus.Operator
+	done chan saveRes
+}
+
+type saveRes struct {
+	meta coreconsensus.SnapshotMetaValue
+	err  error
 }
 
 // token builds an entry's lineage-scoped command identity: an entry kept by
 // Recover keeps its PREDECESSOR identity (D10, R7-09).
-func (n *Node) token(p coreconsensus.Position) coreconsensus.Token {
+func (n *Node) token(p coreconsensus.PositionValue) coreconsensus.TokenValue {
 	l := n.ident
 	if l.Predecessor != (coreconsensus.ClusterID{}) && p.Index <= l.KeptIndex {
-		return coreconsensus.Token{Cluster: l.Predecessor, Epoch: l.PredecessorEpoch, Term: p.Term, Index: p.Index}
+		return coreconsensus.TokenValue{Cluster: l.Predecessor, Epoch: l.PredecessorEpoch, Term: p.Term, Index: p.Index}
 	}
-	return coreconsensus.Token{Cluster: l.Cluster, Epoch: l.Epoch, Term: p.Term, Index: p.Index}
+	return coreconsensus.TokenValue{Cluster: l.Cluster, Epoch: l.Epoch, Term: p.Term, Index: p.Index}
 }
 
 // applyLoop is the apply goroutine: every committed command in log order,
@@ -36,42 +57,62 @@ func (n *Node) applyLoop() {
 	var items []applyItem
 	for {
 		select {
-		case <-n.aq.signal:
+		case _, ok := <-n.aq.signal:
+			// The fifo never closes its signal channel; were it closed, the
+			// queue would have no producer left, and the goroutine ends as
+			// it does on stop rather than spinning on the closed channel.
+			if !ok {
+				return
+			}
 		case <-n.stopc:
 			return
 		}
 		items = n.aq.take(items)
-		for _, it := range items {
-			if n.stopped.Load() {
-				return
-			}
-			if it.restore != nil {
-				// A machine already past the snapshot is never rolled back:
-				// the entries it applied after the snapshot are committed
-				// and would not be applied again (review H3).
-				n.am.Lock()
-				applied := n.applied
-				n.am.Unlock()
-				it.restore.done <- n.restoreFrom(it.restore.meta, applied)
-				continue
-			}
-			if it.save != nil {
-				n.save(it.save)
-				continue
-			}
-			if it.cut {
-				n.forceCut()
-				continue
-			}
-			if !n.applyEntries(it.entries) {
-				return
-			}
-			n.maybeSnapshot()
+		if !n.applyItems(items) {
+			return
 		}
 	}
 }
 
-func (n *Node) applyEntries(es []coreconsensus.Entry) bool {
+// applyItems runs one batch taken from the apply queue in order. It returns
+// false when the apply goroutine must end: the node stopped, or applying an
+// entry stopped it.
+func (n *Node) applyItems(items []applyItem) bool {
+	for _, it := range items {
+		if n.stopped.Load() {
+			return false
+		}
+		if it.restore != nil {
+			// A machine already past the snapshot is never rolled back:
+			// the entries it applied after the snapshot are committed
+			// and would not be applied again (review H3).
+			n.am.Lock()
+			applied := n.applied
+			n.am.Unlock()
+			it.restore.done <- n.restoreFrom(it.restore.meta, applied)
+			continue
+		}
+		if it.save != nil {
+			n.save(it.save)
+			continue
+		}
+		if it.cut {
+			n.forceCut()
+			continue
+		}
+		if !n.applyEntries(it.entries) {
+			return false
+		}
+		n.maybeSnapshot()
+	}
+	return true
+}
+
+// applyEntries applies committed entries in log order, skipping those a
+// restored snapshot already covers and handing a run of commands to a
+// BatchingStateMachine in one call. It returns false once the state machine
+// failed and the node is stopping: nothing after that entry is applied.
+func (n *Node) applyEntries(es []coreconsensus.EntryValue) bool {
 	batcher, batching := n.cfg.Machine.(coreconsensus.BatchingStateMachine)
 	for i := 0; i < len(es); {
 		e := &es[i]
@@ -93,29 +134,41 @@ func (n *Node) applyEntries(es []coreconsensus.Entry) bool {
 			i++
 			continue
 		}
-		j := i + 1
-		if batching {
-			for j < len(es) && es[j].Kind == coreconsensus.EntryCommand {
-				j++
-			}
-		}
-		results := make([]any, j-i)
-		for k := i; k < j; k++ {
-			es[k].Token = n.token(es[k].Position)
-		}
-		applyStart := n.clk.Now()
-		err := n.safeApply(batcher, batching, es[i:j], results)
-		n.obs.record(mApplyLatency, n.clk.Since(applyStart).Seconds())
-		if err != nil {
-			n.stop(err, false)
+		j, ok := n.applyCommands(batcher, batching, es, i)
+		if !ok {
 			return false
-		}
-		for k := i; k < j; k++ {
-			n.applied1(&es[k], results[k-i])
 		}
 		i = j
 	}
 	return true
+}
+
+// applyCommands applies the command at es[i], and with a batching machine
+// every command that directly follows it, then answers their proposals. It
+// returns the index of the first entry it did not apply, and false when the
+// state machine failed and the node was stopped.
+func (n *Node) applyCommands(batcher coreconsensus.BatchingStateMachine, batching bool, es []coreconsensus.EntryValue, i int) (int, bool) {
+	j := i + 1
+	if batching {
+		for j < len(es) && es[j].Kind == coreconsensus.EntryCommand {
+			j++
+		}
+	}
+	results := make([]any, j-i)
+	for k := i; k < j; k++ {
+		es[k].Token = n.token(es[k].Position)
+	}
+	applyStart := n.clk.Now()
+	err := n.safeApply(batcher, batching, es[i:j], results)
+	n.obs.record(mApplyLatency, n.clk.Since(applyStart).Seconds())
+	if err != nil {
+		n.stop(err, false)
+		return j, false
+	}
+	for k := i; k < j; k++ {
+		n.applied1(&es[k], results[k-i])
+	}
+	return j, true
 }
 
 // forceCut cuts a snapshot at the applied index whatever SnapshotEvery says.
@@ -140,7 +193,7 @@ func (n *Node) forceCut() {
 
 // safeApply calls the state machine; a panic stops the node with
 // STATE_MACHINE_FAILED, and the entry IS committed (D3).
-func (n *Node) safeApply(b coreconsensus.BatchingStateMachine, batching bool, es []coreconsensus.Entry, results []any) (err error) {
+func (n *Node) safeApply(b coreconsensus.BatchingStateMachine, batching bool, es []coreconsensus.EntryValue, results []any) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = origin(coreconsensus.StateMachineFailed,
@@ -159,7 +212,7 @@ func (n *Node) safeApply(b coreconsensus.BatchingStateMachine, batching bool, es
 
 // applied1 records one applied entry and answers the Propose that created
 // it on this node.
-func (n *Node) applied1(e *coreconsensus.Entry, val any) {
+func (n *Node) applied1(e *coreconsensus.EntryValue, val any) {
 	n.am.Lock()
 	n.applied = e.Position.Index
 	n.appliedTerm = e.Position.Term
@@ -192,6 +245,10 @@ func (n *Node) applied1(e *coreconsensus.Entry, val any) {
 }
 
 // waitApplied blocks until index is applied, the node stops, or done closes.
+// It launches one goroutine that turns done or the loop's end into a
+// broadcast on the apply condition, since a sync.Cond cannot select; that
+// goroutine ends after that one broadcast or, through stopWake, as soon as
+// waitApplied returns, so none accumulates across calls.
 func (n *Node) waitApplied(done <-chan struct{}, index uint64) bool {
 	stopWake := make(chan struct{})
 	defer close(stopWake)

@@ -14,5 +14,5 @@
 // Durability is an input, never an assumption (D5b): a write the step
 // function asks for is counted only once the driver reports it with
 // [Raft.StorageDone], and the replies that depend on it leave in
-// [Ready.AfterSync], which the driver sends only once that write is durable.
+// [ReadyValue.AfterSync], which the driver sends only once that write is durable.
 package raft

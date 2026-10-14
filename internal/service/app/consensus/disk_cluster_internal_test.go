@@ -21,7 +21,7 @@ type diskNode struct {
 func diskConfig(c *cluster, dn *diskNode) Config {
 	return Config{
 		Cluster: c.cid, Machine: dn.sm, Durability: DurabilityVolatile, Log: dn.dd.Log(), Snapshots: dn.dd.Snapshots(),
-		Transport: c.net.Transport(dn.id), InitialTiming: testTimingDisk(), MaxSnapshotBytes: 1 << 30,
+		Transport: NewMemoryTransport(c.net, dn.id), InitialTiming: testTimingDisk(), MaxSnapshotBytes: 1 << 30,
 		SnapshotEveryBytes: 1 << 20, MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 3,
 		SnapshotEvery: 50, SnapshotTrailing: 10,
 	}
@@ -31,17 +31,28 @@ func (dn *diskNode) open(t *testing.T, c *cluster) {
 	t.Helper()
 	dn.dd = openDir(t, dn.dir, 16<<10)
 	dn.sm = newKV()
-	n, err := NewRaft(diskConfig(c, dn))
+	n, err := NewNode(diskConfig(c, dn))
 	if err != nil {
-		t.Fatalf("NewRaft: %v", err)
+		t.Fatalf("NewNode: %v", err)
 	}
 	dn.node = n
 }
 
-func (dn *diskNode) crash(c *cluster) {
-	_ = dn.node.HardClose()
-	_ = c.net.Transport(dn.id).Close()
-	_ = dn.dd.Close()
+// crash cuts the node the way a power loss would, then releases what it
+// held. Each step is reported rather than ignored: a directory still in use
+// after HardClose is exactly the leak R7-11 bounds, and the restart that
+// follows would then test the wrong thing.
+func (dn *diskNode) crash(t *testing.T, c *cluster) {
+	t.Helper()
+	if err := dn.node.HardClose(); err != nil {
+		t.Errorf("hard close %d: %v", dn.id, err)
+	}
+	if err := NewMemoryTransport(c.net, dn.id).Close(); err != nil {
+		t.Errorf("close transport %d: %v", dn.id, err)
+	}
+	if err := dn.dd.Close(); err != nil {
+		t.Errorf("close data directory %d: %v", dn.id, err)
+	}
 	dn.node = nil
 }
 
@@ -51,8 +62,8 @@ func (dn *diskNode) crash(c *cluster) {
 func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{7}}
 	var nodes []*diskNode
-	var members []coreconsensus.Member
-	for i := 0; i < 3; i++ {
+	var members []coreconsensus.MemberValue
+	for i := range 3 {
 		dn := &diskNode{dir: t.TempDir()}
 		dn.dd = openDir(t, dn.dir, 16<<10)
 		slot := fmt.Sprintf("d%d", i)
@@ -62,20 +73,22 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 		}
 		dn.id = id
 		nodes = append(nodes, dn)
-		members = append(members, coreconsensus.Member{ID: id, Incarnation: inc, Slot: slot, SPKI: MemorySPKI(id), Voter: true})
+		members = append(members, coreconsensus.MemberValue{ID: id, Incarnation: inc, Slot: slot, SPKI: MemorySPKI(id), Voter: true})
 	}
 	for _, dn := range nodes {
 		dn.sm = newKV()
-		if err := Bootstrap(context.Background(), diskConfig(c, dn), members); err != nil {
+		if err := Bootstrap(context.Background(), new(diskConfig(c, dn)), members); err != nil {
 			t.Fatal(err)
 		}
-		_ = dn.dd.Close()
+		if err := dn.dd.Close(); err != nil {
+			t.Fatal(err)
+		}
 		dn.open(t, c)
 	}
 	t.Cleanup(func() {
 		for _, dn := range nodes {
 			if dn.node != nil {
-				dn.crash(c)
+				dn.crash(t, c)
 			}
 		}
 	})
@@ -92,8 +105,8 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 		t.Fatal("no leader")
 		return nil
 	}
-	var tok coreconsensus.Token
-	for i := 0; i < 300; i++ {
+	var tok coreconsensus.TokenValue
+	for i := range 300 {
 		tok = propose(t, leader().node, fmt.Sprintf("k%d=v%d", i, i))
 	}
 	// A data directory a live node holds refuses offline work.
@@ -101,7 +114,7 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 		t.Fatal("Inspect on a live directory")
 	}
 	for _, dn := range nodes {
-		dn.crash(c)
+		dn.crash(t, c)
 	}
 	for _, dn := range nodes {
 		dn.open(t, c)
@@ -123,7 +136,7 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 		t.Fatalf("index went back: %d then %d", tok.Index, tok2.Index)
 	}
 	for _, dn := range nodes {
-		if metas, _ := dn.dd.Snapshots().List(); len(metas) == 0 || len(metas) > 2 {
+		if metas := must(dn.dd.Snapshots().List())(t); len(metas) == 0 || len(metas) > 2 {
 			t.Fatalf("node %d keeps %d snapshots", dn.id, len(metas))
 		}
 		if f, _ := dn.dd.Log().Bounds(); f < 100 {
@@ -135,8 +148,8 @@ func TestDiskClusterSurvivesFullRestart(t *testing.T) {
 // testTimingDisk is slower than the memory clusters' timing: a real fsync,
 // FlushFileBuffers on Windows above all, can take longer than a 10 ms
 // heartbeat, and elections would churn under it.
-func testTimingDisk() coreconsensus.TimingContract {
-	return coreconsensus.TimingContract{
+func testTimingDisk() coreconsensus.TimingContractSpec {
+	return coreconsensus.TimingContractSpec{
 		Generation: 1, HeartbeatInterval: 50 * time.Millisecond,
 		ElectionTimeoutMin: 500 * time.Millisecond, ElectionTimeoutMax: time.Second, MaxClockDrift: 0.05,
 	}

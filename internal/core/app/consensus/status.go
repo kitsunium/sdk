@@ -8,15 +8,30 @@ type Role uint8
 // The roles.
 const (
 	// RoleFollower follows a leader, or waits for one.
-	RoleFollower Role = 1
+	RoleFollower Role = iota + 1
 	// RolePreCandidate asks whether it COULD win, without raising its term.
-	RolePreCandidate Role = 2
+	RolePreCandidate
 	// RoleCandidate campaigns at a raised term.
-	RoleCandidate Role = 3
+	RoleCandidate
 	// RoleLeader leads its term.
-	RoleLeader Role = 4
+	RoleLeader
 	// RoleLearner receives the log and votes when asked, but never campaigns.
-	RoleLearner Role = 5
+	RoleLearner
+)
+
+// FrameLane is the connection a frame belongs on: control, data or snapshot.
+// It is carried in the two high bits of the frame's type byte, so a transport
+// routes a frame of a type it does not parse.
+type FrameLane uint8
+
+// The lanes.
+const (
+	// LaneControl carries votes, heartbeats, their replies and TimeoutNow.
+	LaneControl FrameLane = iota
+	// LaneData carries entries, their acknowledgements and forwarded proposals.
+	LaneData
+	// LaneSnapshot carries snapshot streams.
+	LaneSnapshot
 )
 
 // String names the role.
@@ -36,8 +51,10 @@ func (r Role) String() string {
 	return "unknown"
 }
 
-// Status is a node's view of its group after one turn of its event loop.
-type Status struct {
+// StatusValue is a node's view of its group after one turn of its event loop. It is a
+// copy taken on the loop, never a live view, so every field in it describes the
+// same instant.
+type StatusValue struct {
 	// ID is this node.
 	ID NodeID
 	// Role is its role.
@@ -51,24 +68,40 @@ type Status struct {
 	// Applied is the highest index its state machine applied.
 	Applied uint64
 	// Log is the identity of its log.
-	Log LogIdentity
+	Log LogIdentityValue
 	// Versions are its capabilities and the committed cluster version.
-	Versions Versions
+	Versions VersionsValue
 	// Timing is the committed timing contract.
-	Timing TimingContract
+	Timing TimingContractSpec
 	// NoSpace is the raised no-space alarm, 0 when none.
 	NoSpace AlarmID
 }
 
-// Precondition returns the precondition an operation clearing the current
-// alarm, or replacing the current contract, would carry.
-func (s Status) Precondition() Precondition {
-	return Precondition{Log: s.Log, Alarm: s.NoSpace, Generation: s.Timing.Generation}
+// VersionsValue are a node's capabilities: the protocol range it speaks, the
+// payload versions its state machine supports, and the committed cluster
+// version.
+type VersionsValue struct {
+	// ProtocolMin is the lowest protocol version it speaks.
+	ProtocolMin uint32
+	// ProtocolMax is the highest.
+	ProtocolMax uint32
+	// PayloadMax is the highest payload version it applies.
+	PayloadMax uint32
+	// Cluster is the committed cluster version.
+	Cluster uint32
+	// ClusterGeneration counts cluster-version raises.
+	ClusterGeneration uint64
 }
 
-// StopReason says why a node stopped itself. Err carries the sentinel of the
+// Precondition returns the precondition an operation clearing the current
+// alarm, or replacing the current contract, would carry.
+func (s *StatusValue) Precondition() PreconditionSpec {
+	return PreconditionSpec{Log: s.Log, Alarm: s.NoSpace, Generation: s.Timing.Generation}
+}
+
+// StopReasonValue says why a node stopped itself. Err carries the sentinel of the
 // stop; ExitCode is the process exit status the product should use.
-type StopReason struct {
+type StopReasonValue struct {
 	// Err is the stop's error, built on its sentinel.
 	Err error
 	// Unmarked is set when a STORAGE_FAILED stop could write its marker
@@ -78,7 +111,7 @@ type StopReason struct {
 
 // ExitCode returns errs.ExitCodeOf of the stop's error, or 73 for a storage
 // failure whose marker could not be written (ADR 0152 D4).
-func (s StopReason) ExitCode() int {
+func (s StopReasonValue) ExitCode() int {
 	if s.Unmarked {
 		return exitCantCreate
 	}
@@ -87,18 +120,3 @@ func (s StopReason) ExitCode() int {
 	}
 	return errs.ExitCodeOf(s.Err)
 }
-
-// FrameLane is the connection a frame belongs on: control, data or snapshot.
-// It is carried in the two high bits of the frame's type byte, so a transport
-// routes a frame of a type it does not parse.
-type FrameLane uint8
-
-// The lanes.
-const (
-	// LaneControl carries votes, heartbeats, their replies and TimeoutNow.
-	LaneControl FrameLane = 0
-	// LaneData carries entries, their acknowledgements and forwarded proposals.
-	LaneData FrameLane = 1
-	// LaneSnapshot carries snapshot streams.
-	LaneSnapshot FrameLane = 2
-)

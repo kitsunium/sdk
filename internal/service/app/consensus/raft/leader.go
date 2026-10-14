@@ -9,17 +9,34 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
+// The refusals the step function returns, short names for the domain's codes:
+// it answers with a code rather than an error, so a refusal costs no
+// allocation on the event loop.
 const (
-	codeNotLeader         = core.CodeNotLeader
-	codeChangePending     = core.CodeMembershipChangePending
-	codeMembershipInvalid = core.CodeMembershipInvalid
-	codeRetired           = core.CodeNodeIDRetired
-	codePrecondition      = core.CodeAdminPreconditionFailed
-	codeTransferFailed    = core.CodeTransferFailed
-	codeVersion           = core.CodeVersionUnsupported
-	codeMisconfigured     = core.CodeConsensusMisconfigured
+	// codeNotLeader refuses what only the leader of this term may do.
+	codeNotLeader errs.Code = core.CodeNotLeader
+	// codeChangePending refuses a membership change while another is not
+	// yet committed, or before the term's no-op is.
+	codeChangePending errs.Code = core.CodeMembershipChangePending
+	// codeMembershipInvalid refuses a change, a transfer or a target the
+	// current configuration does not allow.
+	codeMembershipInvalid errs.Code = core.CodeMembershipInvalid
+	// codeRetired refuses a node id a Remove retired for good.
+	codeRetired errs.Code = core.CodeNodeIDRetired
+	// codePrecondition refuses an admin operation whose expected state is
+	// not the current one.
+	codePrecondition errs.Code = core.CodeAdminPreconditionFailed
+	// codeTransferFailed ends a transfer that did not complete in time.
+	codeTransferFailed errs.Code = core.CodeTransferFailed
+	// codeVersion refuses an entry kind or a payload this node cannot read.
+	codeVersion errs.Code = core.CodeVersionUnsupported
+	// codeMisconfigured refuses a timing contract that cannot hold.
+	codeMisconfigured errs.Code = core.CodeConsensusMisconfigured
 )
 
+// becomeLeader takes leadership of the current term: a fresh progress per
+// member, no lease and no read until the term's no-op, which it appends and
+// broadcasts at once.
 func (r *Raft) becomeLeader() {
 	r.role = core.RoleLeader
 	r.lead = r.id
@@ -30,15 +47,16 @@ func (r *Raft) becomeLeader() {
 	}
 	if pr := r.prs[r.id]; pr != nil {
 		pr.match = r.log.stable
-		pr.heard = true
+		pr.facts |= peerHeard
 	}
-	r.leaseDropped, r.leaseStart = false, time.Time{}
+	r.facts &^= raftLeaseDropped
+	r.leaseStart = time.Time{}
 	r.rounds, r.pendingReads, r.waitingReads = nil, nil, nil
 	r.transferTo = 0
 	// A new leader commits a no-op of its term before it serves a read or
 	// accepts a membership change (D6).
-	noop := core.Entry{Kind: core.EntryNoOp, BodySum: wire.BodySum(nil)}
-	r.appendAsLeader([]core.Entry{noop})
+	noop := core.EntryValue{Kind: core.EntryNoOp, BodySum: wire.BodySum(nil)}
+	r.appendAsLeader([]core.EntryValue{noop})
 	r.termStart = r.log.lastIndex()
 	r.heartbeatDue = r.now
 	r.broadcastAppend(false)
@@ -46,13 +64,13 @@ func (r *Raft) becomeLeader() {
 
 // appendAsLeader assigns positions and chain values at the leader's
 // serialized append point (D4) and appends.
-func (r *Raft) appendAsLeader(es []core.Entry) []core.Position {
-	pos := make([]core.Position, len(es))
+func (r *Raft) appendAsLeader(es []core.EntryValue) []core.PositionValue {
+	pos := make([]core.PositionValue, len(es))
 	chain := r.log.chain(r.log.lastIndex())
 	idx := r.log.lastIndex()
 	for i := range es {
 		idx++
-		es[i].Position = core.Position{Term: r.term, Index: idx}
+		es[i].Position = core.PositionValue{Term: r.term, Index: idx}
 		es[i].ChainSum = wire.ChainSum(chain, &es[i])
 		chain = es[i].ChainSum
 		pos[i] = es[i].Position
@@ -61,6 +79,8 @@ func (r *Raft) appendAsLeader(es []core.Entry) []core.Position {
 	return pos
 }
 
+// tickLeader runs the leader's timers: CheckQuorum, the transfer deadline,
+// then the heartbeat, in that order, so a deposed leader sends nothing.
 func (r *Raft) tickLeader(now time.Time) {
 	// CheckQuorum (D5): a leader that has not heard from a majority within
 	// the minimum election timeout steps down.
@@ -78,6 +98,8 @@ func (r *Raft) tickLeader(now time.Time) {
 	}
 }
 
+// quorumActive reports whether a majority of the voters, this node counted,
+// was heard within window before now.
 func (r *Raft) quorumActive(now time.Time, window time.Duration) bool {
 	n := 0
 	for _, id := range r.voters() {
@@ -92,6 +114,9 @@ func (r *Raft) quorumActive(now time.Time, window time.Duration) bool {
 	return n >= r.quorum()
 }
 
+// broadcastHeartbeat opens a confirmation round, keeping the last 64, and
+// sends it to every peer with a commit clamped to the peer's match, so a
+// heartbeat never commits an entry the peer may not hold.
 func (r *Raft) broadcastHeartbeat(now time.Time) {
 	r.nextRound++
 	rd := &round{id: r.nextRound, sentAt: now, acks: map[core.NodeID]uint64{r.id: r.timing.Generation + 1}, conf: r.conf().Index}
@@ -105,12 +130,12 @@ func (r *Raft) broadcastHeartbeat(now time.Time) {
 		if r.mutated(mutHeartbeatUnclamped) {
 			commit = r.log.committed
 		}
-		r.send(core.Message{Kind: core.MsgHeartbeat, To: id, Commit: commit, Context: rd.id})
+		r.send(core.MessageValue{Kind: core.MsgHeartbeat, To: id, Commit: commit, Context: rd.id})
 		if pr.state == stateReplicate && pr.paused(r.cfg.MaxInflight, r.cfg.MaxInflightBytes) {
 			// A full window must not stall forever on a lost
 			// acknowledgement: an empty append at next (R2-07).
 			if t, ok := r.log.term(pr.next - 1); ok {
-				r.send(core.Message{Kind: core.MsgApp, To: id, Index: pr.next - 1, LogTerm: t, Commit: min(pr.match, r.log.committed)})
+				r.send(core.MessageValue{Kind: core.MsgApp, To: id, Index: pr.next - 1, LogTerm: t, Commit: min(pr.match, r.log.committed)})
 			}
 		}
 	}
@@ -130,12 +155,16 @@ func (r *Raft) peers() []core.NodeID {
 	return out
 }
 
+// broadcastAppend feeds every peer, in configuration order.
 func (r *Raft) broadcastAppend(sendIfEmpty bool) {
 	for _, id := range r.peers() {
 		r.sendAppend(id, sendIfEmpty)
 	}
 }
 
+// sendAppend feeds one peer what it lacks: entries when the log holds them,
+// a fetch when their payloads were evicted, a snapshot when the log no
+// longer reaches back to the peer. A paused peer gets nothing.
 func (r *Raft) sendAppend(to core.NodeID, sendIfEmpty bool) {
 	pr := r.prs[to]
 	if pr == nil || pr.paused(r.cfg.MaxInflight, r.cfg.MaxInflightBytes) {
@@ -153,8 +182,8 @@ func (r *Raft) sendAppend(to core.NodeID, sendIfEmpty bool) {
 	}
 	if pr.next <= r.log.evicted && pr.next <= r.log.lastIndex() {
 		// The payloads were evicted: the driver reads them off the loop.
-		pr.fetching = true
-		r.rd.Fetch = append(r.rd.Fetch, FetchRequest{To: to, Lo: pr.next, Hi: min(r.log.evicted, r.log.lastIndex()) + 1})
+		pr.facts |= peerFetching
+		r.rd.Fetch = append(r.rd.Fetch, FetchSpec{To: to, Lo: pr.next, Hi: min(r.log.evicted, r.log.lastIndex()) + 1})
 		return
 	}
 	ents := r.log.slice(pr.next, r.log.lastIndex()+1, r.cfg.MaxBatchBytes)
@@ -167,12 +196,12 @@ func (r *Raft) sendAppend(to core.NodeID, sendIfEmpty bool) {
 // Fetched hands back entries read for a peer. Anything stale — another
 // role, another next, a term the log no longer has at that index — is
 // dropped, and a compacted read moves the peer to the snapshot path.
-func (r *Raft) Fetched(to core.NodeID, lo uint64, ents []core.Entry, compacted bool) {
+func (r *Raft) Fetched(to core.NodeID, lo uint64, ents []core.EntryValue, compacted bool) {
 	pr := r.prs[to]
-	if pr == nil || !pr.fetching {
+	if pr == nil || pr.facts&peerFetching == 0 {
 		return
 	}
-	pr.fetching = false
+	pr.facts &^= peerFetching
 	if r.role != core.RoleLeader || pr.next != lo || pr.state == stateSnapshot {
 		r.sendAppend(to, false)
 		return
@@ -182,11 +211,9 @@ func (r *Raft) Fetched(to core.NodeID, lo uint64, ents []core.Entry, compacted b
 		r.rd.SendSnapshot = append(r.rd.SendSnapshot, to)
 		return
 	}
-	for i := range ents {
-		if t, ok := r.log.term(ents[i].Position.Index); !ok || t != ents[i].Position.Term || ents[i].Position.Index != lo+uint64(i) {
-			r.sendAppend(to, false)
-			return
-		}
+	if !r.fetchedMatch(lo, ents) {
+		r.sendAppend(to, false)
+		return
 	}
 	prevTerm, ok := r.log.term(lo - 1)
 	if !ok || len(ents) == 0 {
@@ -196,8 +223,22 @@ func (r *Raft) Fetched(to core.NodeID, lo uint64, ents []core.Entry, compacted b
 	r.sendEntries(pr, to, lo-1, prevTerm, ents)
 }
 
-func (r *Raft) sendEntries(pr *progress, to core.NodeID, prev, prevTerm uint64, ents []core.Entry) {
-	m := core.Message{Kind: core.MsgApp, To: to, Index: prev, LogTerm: prevTerm, Entries: ents, Commit: r.log.committed}
+// fetchedMatch reports whether ents are the entries from lo on, one per
+// index, at the terms the log still holds: a read that raced a truncation
+// is not sent.
+func (r *Raft) fetchedMatch(lo uint64, ents []core.EntryValue) bool {
+	for i := range ents {
+		if t, ok := r.log.term(ents[i].Position.Index); !ok || t != ents[i].Position.Term || ents[i].Position.Index != lo+uint64(i) {
+			return false
+		}
+	}
+	return true
+}
+
+// sendEntries sends one append after prev and accounts for it: a replicating
+// peer's window grows by it, a probing peer pauses until it answers.
+func (r *Raft) sendEntries(pr *progress, to core.NodeID, prev, prevTerm uint64, ents []core.EntryValue) {
+	m := core.MessageValue{Kind: core.MsgApp, To: to, Index: prev, LogTerm: prevTerm, Entries: ents, Commit: r.log.committed}
 	r.send(m)
 	switch pr.state {
 	case stateReplicate:
@@ -211,10 +252,16 @@ func (r *Raft) sendEntries(pr *progress, to core.NodeID, prev, prevTerm uint64, 
 			pr.add(last, size)
 		}
 	case stateProbe:
-		pr.probeSent = true
+		pr.facts |= peerProbeSent
+	default:
+		// stateSnapshot: a peer in a transfer is paused, so no append
+		// reaches it and there is no window to account.
 	}
 }
 
+// maybeCommit advances the commit to the highest index a quorum of voters
+// matches, if that entry is of the leader's own term; it reports whether the
+// commit moved.
 func (r *Raft) maybeCommit() bool {
 	vs := r.voters()
 	if len(vs) == 0 {
@@ -243,7 +290,9 @@ func (r *Raft) maybeCommit() bool {
 	return true
 }
 
-func (r *Raft) stepLeader(now time.Time, m core.Message) {
+// stepLeader handles a message of the leader's term. Any answer from a
+// member counts as contact for CheckQuorum, the lease and promotion.
+func (r *Raft) stepLeader(now time.Time, m core.MessageValue) {
 	pr := r.prs[m.From]
 	switch m.Kind {
 	case core.MsgReadIndex:
@@ -252,77 +301,61 @@ func (r *Raft) stepLeader(now time.Time, m core.Message) {
 		return
 	case core.MsgVoteResp, core.MsgPreVoteResp:
 		return
+	default:
+		// Every other kind is from a member: its progress is read below.
 	}
 	if pr == nil {
 		return
 	}
 	pr.lastHeard = now
-	pr.heard = true
+	pr.facts |= peerHeard
 	switch m.Kind {
 	case core.MsgAppResp:
 		r.handleAppResp(pr, m)
 	case core.MsgHeartbeatResp:
-		for _, rd := range r.rounds {
-			if rd.id <= m.Context {
-				rd.acks[m.From] = m.Contract + 1
-			}
-		}
-		r.confirmRounds()
-		if pr.state == stateProbe {
-			pr.probeSent = false
-		}
-		if pr.state == stateReplicate && len(pr.inflight) > 0 && pr.match == pr.hbMatch {
-			// An append in the window was lost: the transport may drop,
-			// and a window that never refills must not stall (R1-11).
-			pr.becomeProbe()
-		}
-		pr.hbMatch = pr.match
-		if pr.match < r.log.lastIndex() {
-			r.sendAppend(m.From, false)
+		r.handleHeartbeatResp(pr, m)
+	default:
+		// Nothing else carries news for a leader of this term: the
+		// contact above is all it records.
+	}
+}
+
+// handleHeartbeatResp acknowledges every round up to the one answered,
+// recording the contract generation the peer applied, and refills a window
+// that a lost append left stalled.
+func (r *Raft) handleHeartbeatResp(pr *progress, m core.MessageValue) {
+	r.ackRounds(m.From, m.Context, m.Contract)
+	r.confirmRounds()
+	if pr.state == stateProbe {
+		pr.facts &^= peerProbeSent
+	}
+	if pr.state == stateReplicate && len(pr.inflight) > 0 && pr.match == pr.hbMatch {
+		// An append in the window was lost: the transport may drop,
+		// and a window that never refills must not stall (R1-11).
+		pr.becomeProbe()
+	}
+	pr.hbMatch = pr.match
+	if pr.match < r.log.lastIndex() {
+		r.sendAppend(m.From, false)
+	}
+}
+
+// ackRounds records from's answer to every round up to round, with the
+// contract generation it applied, stored plus one so that 0 stays "no
+// answer".
+func (r *Raft) ackRounds(from core.NodeID, round, contract uint64) {
+	for _, rd := range r.rounds {
+		if rd.id <= round {
+			rd.acks[from] = contract + 1
 		}
 	}
 }
 
-func (r *Raft) handleAppResp(pr *progress, m core.Message) {
+// handleAppResp moves a peer's progress on an append's answer, commits what
+// a quorum now holds, and feeds the peer what it still lacks.
+func (r *Raft) handleAppResp(pr *progress, m core.MessageValue) {
 	if m.Reject {
-		if m.Flags&core.FlagNeedSnapshot != 0 && pr.state != stateSnapshot {
-			pr.becomeSnapshot(r.log.snapIndex)
-			r.rd.SendSnapshot = append(r.rd.SendSnapshot, m.From)
-			return
-		}
-		if m.Flags&core.FlagTruncated != 0 && m.RejectHint < pr.match {
-			// The peer lost acknowledged entries to a truncation it reports;
-			// its log is the truth now.
-			pr.match = m.RejectHint
-			pr.becomeProbe()
-			pr.next = m.RejectHint + 1
-			r.sendAppend(m.From, true)
-			return
-		}
-		// Rejections are handled per state (R2-07): only one answering the
-		// outstanding probe, or an append still in the window, counts.
-		switch pr.state {
-		case stateProbe:
-			if m.Index != pr.next-1 {
-				return
-			}
-		case stateReplicate:
-			if m.Index <= pr.match || m.Index >= pr.next {
-				return
-			}
-		default:
-			return
-		}
-		pr.next = max(min(m.Index, m.RejectHint+1), pr.match+1)
-		if pr.state == stateReplicate {
-			pr.state = stateProbe
-			pr.freeAll()
-		}
-		pr.probeSent = false
-		r.sendAppend(m.From, false)
-		if !pr.probeSent {
-			r.sendAppend(m.From, true)
-		}
+		r.handleAppReject(pr, m)
 		return
 	}
 	if pr.maybeUpdate(m.Index) {
@@ -346,31 +379,60 @@ func (r *Raft) handleAppResp(pr *progress, m core.Message) {
 	}
 }
 
+// handleAppReject backs a peer off after a refused append: to a snapshot it
+// asked for, to the truncation it reports, or to the hint of a rejection
+// that still answers an outstanding append; any other rejection is stale and
+// ignored.
+func (r *Raft) handleAppReject(pr *progress, m core.MessageValue) {
+	if m.Flags&core.FlagNeedSnapshot != 0 && pr.state != stateSnapshot {
+		pr.becomeSnapshot(r.log.snapIndex)
+		r.rd.SendSnapshot = append(r.rd.SendSnapshot, m.From)
+		return
+	}
+	if m.Flags&core.FlagTruncated != 0 && m.RejectHint < pr.match {
+		// The peer lost acknowledged entries to a truncation it reports;
+		// its log is the truth now.
+		pr.match = m.RejectHint
+		pr.becomeProbe()
+		pr.next = m.RejectHint + 1
+		r.sendAppend(m.From, true)
+		return
+	}
+	// Rejections are handled per state (R2-07): only one answering the
+	// outstanding probe, or an append still in the window, counts.
+	if !pr.rejectCounts(m.Index) {
+		return
+	}
+	pr.next = max(min(m.Index, m.RejectHint+1), pr.match+1)
+	if pr.state == stateReplicate {
+		pr.state = stateProbe
+		pr.freeAll()
+	}
+	pr.facts &^= peerProbeSent
+	r.sendAppend(m.From, false)
+	if pr.facts&peerProbeSent == 0 {
+		r.sendAppend(m.From, true)
+	}
+}
+
 // ---- proposals ----
 
 // Propose appends entries at the leader. Kind, Version, BodySum and Data are
 // the proposer's; positions and chain values are assigned here. A refusal
 // appends nothing.
-func (r *Raft) Propose(now time.Time, es []core.Entry) ([]core.Position, errs.Code) {
+func (r *Raft) Propose(now time.Time, es []core.EntryValue) ([]core.PositionValue, errs.Code) {
 	r.now = now
 	if r.role != core.RoleLeader || r.transferTo != 0 {
 		return nil, codeNotLeader
 	}
 	var transfer core.NodeID
 	for i := range es {
-		e := &es[i]
-		switch {
-		case e.Kind == core.EntryCommand:
-		case e.Kind == core.EntryNoOp || !e.Kind.Known():
-			return nil, codeVersion
-		default:
-			to, code := r.validateAdmin(e, r.log.lastIndex()+uint64(i)+1)
-			if code != 0 {
-				return nil, code
-			}
-			if to != 0 {
-				transfer = to
-			}
+		to, code := r.checkProposed(&es[i], r.log.lastIndex()+uint64(i)+1)
+		if code != 0 {
+			return nil, code
+		}
+		if to != 0 {
+			transfer = to
 		}
 	}
 	pos := r.appendAsLeader(es)
@@ -381,150 +443,246 @@ func (r *Raft) Propose(now time.Time, es []core.Entry) ([]core.Position, errs.Co
 	return pos, 0
 }
 
+// checkProposed admits one proposed entry that would land at index: a
+// command as it is, a no-op or an unknown kind never, an engine entry once
+// validateAdmin accepts and rewrites it. It returns the target of a
+// transfer the entry asks for.
+func (r *Raft) checkProposed(e *core.EntryValue, index uint64) (core.NodeID, errs.Code) {
+	switch {
+	case e.Kind == core.EntryCommand:
+		return 0, 0
+	case e.Kind == core.EntryNoOp || !e.Kind.Known():
+		return 0, codeVersion
+	default:
+		return r.validateAdmin(e, index)
+	}
+}
+
 // validateAdmin re-validates an engine entry against the leader's own state
 // and rewrites a membership change into the whole configuration (D8).
-func (r *Raft) validateAdmin(e *core.Entry, index uint64) (core.NodeID, errs.Code) {
-	a, err := wire.ParseAdmin(e.Data)
+func (r *Raft) validateAdmin(e *core.EntryValue, index uint64) (core.NodeID, errs.Code) {
+	admin, err := wire.ParseAdmin(e.Data)
 	if err != nil {
 		return 0, codeVersion
 	}
-	var transfer core.NodeID
-	switch e.Kind {
-	case core.EntryMembership:
-		if !r.mutated(mutMembershipBeforeNoOp) && r.log.committed < r.termStart {
-			return 0, codeChangePending
-		}
-		if r.conf().Index > r.log.committed {
-			return 0, codeChangePending
-		}
-		next, code := r.nextConf(a)
-		if code != 0 {
-			return 0, code
-		}
-		next.Index = index
-		a.Membership = next
-	case core.EntryTimingContract:
-		if !a.Pre.Log.Same(r.cfg.Log) || a.Pre.Generation != r.timing.Generation {
-			return 0, codePrecondition
-		}
-		c := a.Contract
-		if c.HeartbeatInterval <= 0 || c.ElectionTimeoutMin <= 0 || c.HeartbeatInterval*5 > c.ElectionTimeoutMin ||
-			c.ElectionTimeoutMax <= c.ElectionTimeoutMin || c.MaxClockDrift < 0 || c.MaxClockDrift >= 1 {
-			return 0, codeMisconfigured
-		}
-		// From the moment a new contract is proposed, the lease is dropped
-		// (D9 d).
-		r.leaseDropped = true
-	case core.EntryClusterVersion:
-		if a.ClusterVersion > ProtocolMax {
-			// No member of this version announces more (D18, review M3).
-			return 0, codeVersion
-		}
-		if !a.Pre.Log.Same(r.cfg.Log) || a.Pre.Generation != r.clusterGen || a.ClusterVersion <= r.clusterVer {
-			return 0, codePrecondition
-		}
-	case core.EntryNoSpaceClear:
-		if !a.Pre.Log.Same(r.cfg.Log) || r.noSpace == 0 || a.Pre.Alarm != r.noSpace {
-			return 0, codePrecondition
-		}
-	case core.EntryNoSpaceRaise:
-	case core.EntryTransfer:
-		if a.Target == r.id || !r.isVoter(a.Target) {
-			return 0, codeMembershipInvalid
-		}
-		transfer = a.Target
+	transfer, code := r.checkAdmin(e.Kind, &admin, index)
+	if code != 0 {
+		return 0, code
 	}
-	e.Data = wire.AppendAdmin(nil, &a)
+	e.Data = wire.AppendAdmin(nil, &admin)
 	e.BodySum = wire.BodySum(e.Data)
 	return transfer, 0
 }
 
-// nextConf computes the configuration a single-server change produces, and
-// refuses it on its merits (D8).
-func (r *Raft) nextConf(a wire.Admin) (core.Membership, errs.Code) {
-	cur := r.conf().Clone()
-	idx := slices.IndexFunc(cur.Members, func(m core.Member) bool { return m.ID == a.Target })
-	switch a.Change {
-	case wire.ChangeAddLearner:
-		if len(a.Membership.Members) != 1 {
-			return cur, codeMembershipInvalid
-		}
-		nm := a.Membership.Members[0]
-		if cur.IsRetired(nm.ID) {
-			return cur, codeRetired
-		}
-		if nm.ID == 0 || nm.SPKI == ([32]byte{}) {
-			return cur, codeMembershipInvalid
-		}
-		if _, ok := cur.Member(nm.ID); ok {
-			return cur, codeMembershipInvalid
-		}
-		if slices.ContainsFunc(cur.Members, func(m core.Member) bool { return m.SPKI == nm.SPKI }) {
-			// One key, one member: the transport admits by key (review M5).
-			return cur, codeMembershipInvalid
-		}
-		if !r.quorumActive(r.now, r.voteWindow) {
-			return cur, codeMembershipInvalid
-		}
-		nm.Voter = false
-		cur.Members = append(cur.Members, nm)
-	case wire.ChangePromote:
-		if cur.IsRetired(a.Target) {
-			return cur, codeRetired
-		}
-		if idx < 0 || cur.Members[idx].Voter {
-			return cur, codeMembershipInvalid
-		}
-		pr := r.prs[a.Target]
-		// Recent DURABLE progress within PromoteLag of the commit, heard
-		// within the last election timeout (D8).
-		if pr == nil || !pr.heard || pr.match+r.cfg.PromoteLag < r.log.committed ||
-			r.now.Sub(pr.lastHeard) >= r.timing.ElectionTimeoutMax {
-			return cur, codeMembershipInvalid
-		}
-		cur.Members[idx].Voter = true
-		cur.Members[idx].Joining = false
-		if !r.activeMajority(cur) {
-			return cur, codeMembershipInvalid
-		}
-	case wire.ChangeRemove:
-		if idx < 0 || a.Target == r.id {
-			return cur, codeMembershipInvalid
-		}
-		wasVoter := cur.Members[idx].Voter
-		cur.Members = slices.Delete(cur.Members, idx, idx+1)
-		cur.Retired = append(cur.Retired, a.Target)
-		if wasVoter {
-			n := len(cur.Voters())
-			if n == 0 || n < r.cfg.MinVoters {
-				return cur, codeMembershipInvalid
-			}
-		}
-		if !r.activeMajority(cur) {
-			return cur, codeMembershipInvalid
-		}
-	case wire.ChangeUpdateAddress:
-		if idx < 0 || len(a.Membership.Members) != 1 {
-			return cur, codeMembershipInvalid
-		}
-		if !r.activeMajority(cur) {
-			return cur, codeMembershipInvalid
-		}
-		cur.Members[idx].Address = a.Membership.Members[0].Address
-	case wire.ChangeDenyPin:
-		if idx < 0 {
-			return cur, codeMembershipInvalid
-		}
-		cur.Members[idx].SPKI = [32]byte{}
+// checkAdmin holds an engine entry of kind to the leader's state, rewriting
+// admin in place where the entry it replicates differs from the one
+// proposed. It returns the transfer target of an EntryTransfer.
+func (r *Raft) checkAdmin(kind core.EntryKind, admin *wire.AdminValue, index uint64) (core.NodeID, errs.Code) {
+	switch kind {
+	case core.EntryMembership:
+		return 0, r.checkMembership(admin, index)
+	case core.EntryTimingContract:
+		return 0, r.checkTimingContract(admin)
+	case core.EntryClusterVersion:
+		return 0, r.checkClusterVersion(admin)
+	case core.EntryNoSpaceClear:
+		return 0, r.checkNoSpaceClear(admin)
+	case core.EntryTransfer:
+		return r.checkTransfer(admin)
 	default:
-		return cur, codeMembershipInvalid
+		// EntryNoSpaceRaise has no precondition: any member may raise the
+		// alarm. Propose never hands a command, a no-op or an unknown kind
+		// here.
+		return 0, 0
 	}
-	return cur, 0
+}
+
+// checkMembership admits one membership change at a time, only once the
+// term's no-op committed, and rewrites it into the whole configuration that
+// takes effect at index.
+func (r *Raft) checkMembership(admin *wire.AdminValue, index uint64) errs.Code {
+	if (!r.mutated(mutMembershipBeforeNoOp) && r.log.committed < r.termStart) || r.conf().Index > r.log.committed {
+		return codeChangePending
+	}
+	next, code := r.nextConf(*admin)
+	if code != 0 {
+		return code
+	}
+	next.Index = index
+	admin.Membership = next
+	return 0
+}
+
+// checkTimingContract admits a contract proposed against the current
+// generation that can hold: a heartbeat at most a fifth of the minimum
+// election timeout, a non-empty randomization range and a drift in [0, 1).
+// Admitting it drops the lease at once (D9 d).
+func (r *Raft) checkTimingContract(admin *wire.AdminValue) errs.Code {
+	if !admin.Pre.Log.Same(r.cfg.Log) || admin.Pre.Generation != r.timing.Generation {
+		return codePrecondition
+	}
+	c := admin.Contract
+	if c.HeartbeatInterval <= 0 || c.ElectionTimeoutMin <= 0 || c.HeartbeatInterval*5 > c.ElectionTimeoutMin ||
+		c.ElectionTimeoutMax <= c.ElectionTimeoutMin || c.MaxClockDrift < 0 || c.MaxClockDrift >= 1 {
+		return codeMisconfigured
+	}
+	// From the moment a new contract is proposed, the lease is dropped
+	// (D9 d).
+	r.facts |= raftLeaseDropped
+	return 0
+}
+
+// checkClusterVersion admits only a raise, proposed against the current
+// cluster generation of this log.
+func (r *Raft) checkClusterVersion(admin *wire.AdminValue) errs.Code {
+	if admin.ClusterVersion > ProtocolMax {
+		// No member of this version announces more (D18, review M3).
+		return codeVersion
+	}
+	if !admin.Pre.Log.Same(r.cfg.Log) || admin.Pre.Generation != r.clusterGen || admin.ClusterVersion <= r.clusterVer {
+		return codePrecondition
+	}
+	return 0
+}
+
+// checkNoSpaceClear admits clearing only the alarm that is raised now, so a
+// late clear cannot end a newer alarm.
+func (r *Raft) checkNoSpaceClear(admin *wire.AdminValue) errs.Code {
+	if !admin.Pre.Log.Same(r.cfg.Log) || r.noSpace == 0 || admin.Pre.Alarm != r.noSpace {
+		return codePrecondition
+	}
+	return 0
+}
+
+// checkTransfer admits a transfer to another voter and returns it.
+func (r *Raft) checkTransfer(admin *wire.AdminValue) (core.NodeID, errs.Code) {
+	if admin.Target == r.id || !r.isVoter(admin.Target) {
+		return 0, codeMembershipInvalid
+	}
+	return admin.Target, 0
+}
+
+// nextConf computes the configuration a single-server change produces, and
+// refuses it on its merits (D8). On a refusal the configuration returned is
+// not to be used.
+func (r *Raft) nextConf(admin wire.AdminValue) (core.MembershipValue, errs.Code) {
+	cur := r.conf().Clone()
+	idx := slices.IndexFunc(cur.Members, func(m core.MemberValue) bool { return m.ID == admin.Target })
+	var code errs.Code
+	switch admin.Change {
+	case wire.ChangeAddLearner:
+		code = r.addLearner(&cur, &admin)
+	case wire.ChangePromote:
+		code = r.promote(&cur, admin.Target, idx)
+	case wire.ChangeRemove:
+		code = r.removeMember(&cur, admin.Target, idx)
+	case wire.ChangeUpdateAddress:
+		code = r.updateAddress(&cur, &admin, idx)
+	case wire.ChangeDenyPin:
+		code = denyPin(&cur, idx)
+	default:
+		code = codeMembershipInvalid
+	}
+	return cur, code
+}
+
+// addLearner adds the one member admin carries as a learner: a new id with
+// a key no member holds, never retired, with a pin, and only while a quorum
+// answers so the change can commit.
+func (r *Raft) addLearner(cur *core.MembershipValue, admin *wire.AdminValue) errs.Code {
+	if len(admin.Membership.Members) != 1 {
+		return codeMembershipInvalid
+	}
+	nm := admin.Membership.Members[0]
+	if cur.IsRetired(nm.ID) {
+		return codeRetired
+	}
+	var unpinned [32]byte
+	if nm.ID == 0 || nm.SPKI == unpinned {
+		return codeMembershipInvalid
+	}
+	// One id, one member; and one key, one member, since the transport
+	// admits by key (review M5).
+	if _, ok := cur.Member(nm.ID); ok || slices.ContainsFunc(cur.Members, func(m core.MemberValue) bool { return m.SPKI == nm.SPKI }) {
+		return codeMembershipInvalid
+	}
+	if !r.quorumActive(r.now, r.voteWindow) {
+		return codeMembershipInvalid
+	}
+	nm.Voter = false
+	cur.Members = append(cur.Members, nm)
+	return 0
+}
+
+// promote makes the learner at idx a voter, only once it caught up and was
+// heard recently, and only if the new voter set still answers by a majority.
+func (r *Raft) promote(cur *core.MembershipValue, target core.NodeID, idx int) errs.Code {
+	if cur.IsRetired(target) {
+		return codeRetired
+	}
+	if idx < 0 || cur.Members[idx].Voter {
+		return codeMembershipInvalid
+	}
+	pr := r.prs[target]
+	// Recent DURABLE progress within PromoteLag of the commit, heard
+	// within the last election timeout (D8).
+	if pr == nil || pr.facts&peerHeard == 0 || pr.match+r.cfg.PromoteLag < r.log.committed ||
+		r.now.Sub(pr.lastHeard) >= r.timing.ElectionTimeoutMax {
+		return codeMembershipInvalid
+	}
+	cur.Members[idx].Voter = true
+	cur.Members[idx].Joining = false
+	if !r.activeMajority(*cur) {
+		return codeMembershipInvalid
+	}
+	return 0
+}
+
+// removeMember removes the member at idx, never this leader, and retires
+// its id; a voter's removal may not cross MinVoters nor leave a voter set
+// without an answering majority.
+func (r *Raft) removeMember(cur *core.MembershipValue, target core.NodeID, idx int) errs.Code {
+	if idx < 0 || target == r.id {
+		return codeMembershipInvalid
+	}
+	wasVoter := cur.Members[idx].Voter
+	cur.Members = slices.Delete(cur.Members, idx, idx+1)
+	cur.Retired = append(cur.Retired, target)
+	if wasVoter {
+		n := len(cur.Voters())
+		if n == 0 || n < r.cfg.MinVoters {
+			return codeMembershipInvalid
+		}
+	}
+	if !r.activeMajority(*cur) {
+		return codeMembershipInvalid
+	}
+	return 0
+}
+
+// updateAddress changes the address of the member at idx to the one admin
+// carries, while a majority answers.
+func (r *Raft) updateAddress(cur *core.MembershipValue, admin *wire.AdminValue, idx int) errs.Code {
+	if idx < 0 || len(admin.Membership.Members) != 1 || !r.activeMajority(*cur) {
+		return codeMembershipInvalid
+	}
+	cur.Members[idx].Address = admin.Membership.Members[0].Address
+	return 0
+}
+
+// denyPin withdraws the pin of the member at idx: its connections are
+// refused from then on, while it stays a member.
+func denyPin(cur *core.MembershipValue, idx int) errs.Code {
+	if idx < 0 {
+		return codeMembershipInvalid
+	}
+	clear(cur.Members[idx].SPKI[:])
+	return 0
 }
 
 // activeMajority is etcd's strict reconfiguration check: the voters of m
 // that answer the leader NOW form a majority of m (R2-27).
-func (r *Raft) activeMajority(m core.Membership) bool {
+func (r *Raft) activeMajority(m core.MembershipValue) bool {
 	vs := m.Voters()
 	n := 0
 	for _, id := range vs {
@@ -532,48 +690,51 @@ func (r *Raft) activeMajority(m core.Membership) bool {
 			n++
 			continue
 		}
-		if pr := r.prs[id]; pr != nil && pr.heard && r.now.Sub(pr.lastHeard) < r.voteWindow {
+		if pr := r.prs[id]; pr != nil && pr.facts&peerHeard != 0 && r.now.Sub(pr.lastHeard) < r.voteWindow {
 			n++
 		}
 	}
 	return len(vs) > 0 && n >= len(vs)/2+1
 }
 
-func (r *Raft) handleForward(m core.Message) {
+// handleForward proposes the one entry a follower forwarded and answers
+// with its position or a refusal. The entry is copied out of the frame
+// first, and a body that does not match its checksum is never proposed.
+func (r *Raft) handleForward(m core.MessageValue) {
 	resp := core.MsgForwardResp
 	if m.Kind == core.MsgForwardAdmin {
 		resp = core.MsgForwardAdminResp
 	}
 	if r.role != core.RoleLeader || len(m.Entries) != 1 {
-		r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: codeNotLeader, RejectHint: uint64(r.lead)})
+		r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: codeNotLeader, RejectHint: uint64(r.lead)})
 		return
 	}
 	e := m.Entries[0]
-	e.Data = append([]byte(nil), e.Data...)
+	e.Data = ownCopy(e.Data)
 	if wire.BodySum(e.Data) != e.BodySum {
-		r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: core.CodeFrameInvalid})
+		r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: core.CodeFrameInvalid})
 		return
 	}
 	if (m.Kind == core.MsgForward) != (e.Kind == core.EntryCommand) {
-		r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: codeVersion})
+		r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: codeVersion})
 		return
 	}
 	if e.Kind == core.EntryCommand {
 		if code := r.admitForward(len(e.Data)); code != 0 {
-			r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: code})
+			r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: code})
 			return
 		}
 	}
-	pos, code := r.Propose(r.now, []core.Entry{e})
+	pos, code := r.Propose(r.now, []core.EntryValue{e})
 	if code != 0 {
-		r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: code, RejectHint: uint64(r.lead)})
+		r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: code, RejectHint: uint64(r.lead)})
 		return
 	}
 	if e.Kind == core.EntryCommand {
 		r.fwd = append(r.fwd, fwdEntry{index: pos[0].Index, size: int64(len(e.Data))})
 		r.fwdBytes += int64(len(e.Data))
 	}
-	r.send(core.Message{Kind: resp, To: m.From, Context: m.Context, Index: pos[0].Index, LogTerm: pos[0].Term})
+	r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Index: pos[0].Index, LogTerm: pos[0].Term})
 }
 
 // admitForward applies to a forwarded command the bounds the driver applies
@@ -592,7 +753,7 @@ func (r *Raft) admitForward(size int) errs.Code {
 	switch {
 	case r.cfg.MaxEntryBytes > 0 && size > r.cfg.MaxEntryBytes:
 		return core.CodeEntryTooLarge
-	case r.overloaded, r.cfg.MaxForwardBytes > 0 && r.fwdBytes+int64(size) > r.cfg.MaxForwardBytes:
+	case r.facts&raftOverloaded != 0, r.cfg.MaxForwardBytes > 0 && r.fwdBytes+int64(size) > r.cfg.MaxForwardBytes:
 		return core.CodeOverloaded
 	}
 	return 0
@@ -609,7 +770,7 @@ func (r *Raft) ReadIndex(now time.Time, ctx uint64, noLease bool) {
 		r.pendingReads = append(r.pendingReads, readReq{ctx: ctx})
 		r.serveLeaseRead(!noLease)
 	case r.lead != 0:
-		m := core.Message{Kind: core.MsgReadIndex, To: r.lead, Context: ctx}
+		m := core.MessageValue{Kind: core.MsgReadIndex, To: r.lead, Context: ctx}
 		if noLease {
 			m.Flags |= core.FlagNoLease
 		}
@@ -619,6 +780,9 @@ func (r *Raft) ReadIndex(now time.Time, ctx uint64, noLease bool) {
 	}
 }
 
+// serveLeaseRead answers every pending read at the commit index at once,
+// with no round, while the lease holds and the caller allows it; otherwise
+// the reads wait for flushReads.
 func (r *Raft) serveLeaseRead(allowLease bool) {
 	if !allowLease || !r.LeaseValid(r.now) {
 		return
@@ -665,7 +829,25 @@ func (r *Raft) contractWindow(gen uint64) time.Duration {
 	return w
 }
 
+// confirmRounds settles the latest round a quorum of the current
+// configuration acknowledged: it extends the lease from that round's send
+// instant, answers every read waiting on it or an earlier one, and forgets
+// those rounds.
 func (r *Raft) confirmRounds() {
+	confirmed, sentAt, leaseLen := r.lastConfirmedRound()
+	if confirmed == 0 {
+		return
+	}
+	r.extendLease(sentAt, leaseLen)
+	r.answerConfirmed(confirmed)
+	r.dropRoundsThrough(confirmed)
+}
+
+// lastConfirmedRound returns the latest round of the current configuration
+// a quorum acknowledged, its send instant and the lease it grants; a zero
+// id when there is none. A round of an older configuration never counts
+// (R2-15).
+func (r *Raft) lastConfirmedRound() (uint64, time.Time, time.Duration) {
 	confIdx := r.conf().Index
 	confirmed := uint64(0)
 	var sentAt time.Time
@@ -674,30 +856,48 @@ func (r *Raft) confirmRounds() {
 		if rd.conf != confIdx {
 			continue
 		}
-		n := 0
-		minWindow := time.Duration(0)
-		for _, id := range r.voters() {
-			if g := rd.acks[id]; g != 0 {
-				n++
-				if w := r.contractWindow(g - 1); minWindow == 0 || w < minWindow {
-					minWindow = w
-				}
-			}
-		}
+		n, minWindow := r.roundAcks(rd)
 		if n >= r.quorum() {
 			confirmed, sentAt, leaseLen = rd.id, rd.sentAt, minWindow
 		}
 	}
-	if confirmed == 0 {
+	return confirmed, sentAt, leaseLen
+}
+
+// roundAcks counts the voters that acknowledged rd and returns the shortest
+// election window among the contracts they applied: the lease a round may
+// grant is the one every acknowledging voter honours (D9 d).
+func (r *Raft) roundAcks(rd *round) (int, time.Duration) {
+	n := 0
+	minWindow := time.Duration(0)
+	for _, id := range r.voters() {
+		if g := rd.acks[id]; g != 0 {
+			n++
+			if w := r.contractWindow(g - 1); minWindow == 0 || w < minWindow {
+				minWindow = w
+			}
+		}
+	}
+	return n, minWindow
+}
+
+// extendLease moves the lease start to a confirmed round sent later than
+// the current one, shortened by the drift budget; a dropped lease stays
+// dropped for the term.
+func (r *Raft) extendLease(sentAt time.Time, leaseLen time.Duration) {
+	if r.facts&raftLeaseDropped != 0 || !sentAt.After(r.leaseStart) {
 		return
 	}
-	if !r.leaseDropped && sentAt.After(r.leaseStart) {
-		r.leaseStart = sentAt
-		if r.mutated(mutLeaseLeaderView) {
-			leaseLen = r.timing.ElectionTimeoutMin
-		}
-		r.leaseLen = time.Duration(float64(leaseLen) * (1 - r.timing.MaxClockDrift))
+	r.leaseStart = sentAt
+	if r.mutated(mutLeaseLeaderView) {
+		leaseLen = r.timing.ElectionTimeoutMin
 	}
+	r.leaseLen = time.Duration(float64(leaseLen) * (1 - r.timing.MaxClockDrift))
+}
+
+// answerConfirmed answers, in arrival order, every read waiting on a round
+// through confirmed, and keeps the others waiting.
+func (r *Raft) answerConfirmed(confirmed uint64) {
 	k := 0
 	for _, q := range r.waitingReads {
 		if q.round <= confirmed {
@@ -708,6 +908,11 @@ func (r *Raft) confirmRounds() {
 		k++
 	}
 	r.waitingReads = r.waitingReads[:k]
+}
+
+// dropRoundsThrough forgets every round through confirmed, keeping the
+// slice's storage.
+func (r *Raft) dropRoundsThrough(confirmed uint64) {
 	n := 0
 	for n < len(r.rounds) && r.rounds[n].id <= confirmed {
 		n++
@@ -715,12 +920,14 @@ func (r *Raft) confirmRounds() {
 	r.rounds = append(r.rounds[:0], r.rounds[n:]...)
 }
 
+// answerRead answers a read at index, or refuses it with code: locally in
+// Ready.ReadStates, or with a message to the follower that forwarded it.
 func (r *Raft) answerRead(q readReq, index uint64, code errs.Code) {
 	if q.from == 0 || q.from == r.id {
 		r.rd.ReadStates = append(r.rd.ReadStates, ReadState{Context: q.ctx, Index: index, Code: code})
 		return
 	}
-	r.send(core.Message{Kind: core.MsgReadIndexResp, To: q.from, Context: q.ctx, Index: index, Code: code})
+	r.send(core.MessageValue{Kind: core.MsgReadIndexResp, To: q.from, Context: q.ctx, Index: index, Code: code})
 }
 
 // ---- leadership transfer ----
@@ -739,15 +946,18 @@ func (r *Raft) TransferLeadership(now time.Time, to core.NodeID) errs.Code {
 	return 0
 }
 
+// startTransfer starts a transfer to to unless one runs: from now on the
+// leader proposes nothing and holds no lease, catches the target up, and
+// sends TimeoutNow once it holds the whole log.
 func (r *Raft) startTransfer(to core.NodeID) {
 	if r.transferTo != 0 {
 		return
 	}
 	r.transferTo = to
-	r.transferSent = false
+	r.facts &^= raftTransferSent
 	r.transferDeadline = r.now.Add(r.timing.ElectionTimeoutMax)
 	if !r.mutated(mutLeaseAfterTransfer) {
-		r.leaseDropped = true
+		r.facts |= raftLeaseDropped
 	}
 	if pr := r.prs[to]; pr != nil && pr.match < r.log.lastIndex() {
 		r.sendAppend(to, false)
@@ -758,7 +968,7 @@ func (r *Raft) startTransfer(to core.NodeID) {
 // maybeSendTimeoutNow sends TimeoutNow only once every proposed entry is
 // committed and the target holds them all (D8, from raft-sql-poc).
 func (r *Raft) maybeSendTimeoutNow() {
-	if r.transferTo == 0 || r.transferSent || r.role != core.RoleLeader {
+	if r.transferTo == 0 || r.facts&raftTransferSent != 0 || r.role != core.RoleLeader {
 		return
 	}
 	pr := r.prs[r.transferTo]
@@ -766,8 +976,8 @@ func (r *Raft) maybeSendTimeoutNow() {
 	if pr == nil || r.log.committed != last || pr.match != last {
 		return
 	}
-	r.transferSent = true
-	r.send(core.Message{Kind: core.MsgTimeoutNow, To: r.transferTo})
+	r.facts |= raftTransferSent
+	r.send(core.MessageValue{Kind: core.MsgTimeoutNow, To: r.transferTo})
 }
 
 // ---- snapshots ----
@@ -775,7 +985,7 @@ func (r *Raft) maybeSendTimeoutNow() {
 // CheckOffer answers an install offer on the event loop, which alone knows
 // the term, the leader and the commit index (R8-21). needTable exempts a
 // node that holds no usable snapshot from the freshness rule (R7-18).
-func (r *Raft) CheckOffer(from core.NodeID, o core.InstallOffer, needTable bool) errs.Code {
+func (r *Raft) CheckOffer(from core.NodeID, o core.InstallOfferValue, needTable bool) errs.Code {
 	if o.Term != r.term || from != r.lead || r.role == core.RoleLeader {
 		return codeNotLeader
 	}
@@ -794,29 +1004,17 @@ func (r *Raft) CheckOffer(from core.NodeID, o core.InstallOffer, needTable bool)
 // InstallSnapshot moves the log onto a snapshot the driver has published and
 // restored. The suffix after it is kept only when the boundary entry matches
 // (D7).
-func (r *Raft) InstallSnapshot(meta core.SnapshotMeta) {
+func (r *Raft) InstallSnapshot(meta core.SnapshotMetaValue) {
 	idx, t := meta.Position.Index, meta.Position.Term
 	if idx < r.log.snapIndex && !r.mutated(mutInstallBelowBase) {
 		return // CheckOffer refuses it: never move the base back
 	}
 	if r.log.matchTerm(idx, t) && idx <= r.log.lastIndex() {
 		r.log.compactTo(idx, t, meta.ChainTip)
-		n := 0
-		for n < len(r.confs) && r.confs[n].index <= idx {
-			n++
-		}
-		r.confs = append(r.confs[:0], r.confs[n:]...)
+		r.dropConfsThrough(idx)
 		r.rd.Compact = max(r.rd.Compact, idx)
 	} else {
-		if r.log.lastIndex() > r.log.snapIndex {
-			r.truncateFrom(r.log.snapIndex + 1)
-		}
-		r.log.ents = nil
-		r.log.window, r.log.evicted = 0, idx
-		r.log.snapIndex, r.log.snapTerm, r.log.snapChain = idx, t, meta.ChainTip
-		r.log.stable = max(r.log.stable, idx)
-		r.confs = nil
-		r.rd.Compact = max(r.rd.Compact, idx)
+		r.restartLogAt(idx, t, meta.ChainTip)
 	}
 	r.log.committed = max(r.log.committed, idx)
 	r.log.applied = max(r.log.applied, idx)
@@ -839,6 +1037,41 @@ func (r *Raft) InstallSnapshot(meta core.SnapshotMeta) {
 		ack = r.log.lastIndex()
 	}
 	if r.lead != 0 {
-		r.send(core.Message{Kind: core.MsgAppResp, To: r.lead, Index: ack})
+		r.send(core.MessageValue{Kind: core.MsgAppResp, To: r.lead, Index: ack})
 	}
+}
+
+// restartLogAt discards the whole log, whose boundary entry does not match
+// the snapshot at (idx, t), and restarts it empty on that snapshot: the
+// entries dropped are truncated in the Ready and the store compacted to idx.
+func (r *Raft) restartLogAt(idx, t uint64, chainTip uint32) {
+	if r.log.lastIndex() > r.log.snapIndex {
+		r.truncateFrom(r.log.snapIndex + 1)
+	}
+	r.log.ents = nil
+	r.log.window, r.log.evicted = 0, idx
+	r.log.snapIndex, r.log.snapTerm, r.log.snapChain = idx, t, chainTip
+	r.log.stable = max(r.log.stable, idx)
+	r.confs = nil
+	r.rd.Compact = max(r.rd.Compact, idx)
+}
+
+// dropConfsThrough forgets every configuration appended at or before index,
+// which the snapshot base now carries, keeping the slice's storage.
+func (r *Raft) dropConfsThrough(index uint64) {
+	n := 0
+	for n < len(r.confs) && r.confs[n].index <= index {
+		n++
+	}
+	r.confs = append(r.confs[:0], r.confs[n:]...)
+}
+
+// ownCopy returns a copy of b the step function owns, out of a frame the
+// transport reuses. An empty b yields nil, exactly as the append([]byte(nil),
+// b...) it replaces did, so a copied entry compares equal to its original.
+func ownCopy(b []byte) []byte {
+	if len(b) == 0 {
+		return nil
+	}
+	return slices.Clone(b)
 }

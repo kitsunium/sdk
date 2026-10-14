@@ -9,24 +9,24 @@ import (
 // The membership changes an EntryMembership records.
 const (
 	// ChangeFounding is the founding configuration Bootstrap writes.
-	ChangeFounding uint8 = 1
+	ChangeFounding uint8 = iota + 1
 	// ChangeAddLearner adds a learner.
-	ChangeAddLearner uint8 = 2
+	ChangeAddLearner
 	// ChangePromote makes a learner a voter.
-	ChangePromote uint8 = 3
+	ChangePromote
 	// ChangeRemove removes a member and retires its id.
-	ChangeRemove uint8 = 4
+	ChangeRemove
 	// ChangeUpdateAddress changes a member's address.
-	ChangeUpdateAddress uint8 = 5
+	ChangeUpdateAddress
 	// ChangeDenyPin withdraws a member's SPKI pin.
-	ChangeDenyPin uint8 = 6
+	ChangeDenyPin
 	// ChangeForced is the configuration Recover or RestoreSnapshot forces.
-	ChangeForced uint8 = 7
+	ChangeForced
 )
 
-// Admin is the payload of every engine entry kind: who asked, what it expects
+// AdminValue is the payload of every engine entry kind: who asked, what it expects
 // to act on, and what it changes. Each kind reads the fields it needs.
-type Admin struct {
+type AdminValue struct {
 	// Operator is the identity the caller vouched for.
 	Operator string
 	// Change is the membership change of an EntryMembership.
@@ -34,17 +34,17 @@ type Admin struct {
 	// Target is the node a change or a transfer names.
 	Target coreconsensus.NodeID
 	// Pre is the precondition of a clearing or raising operation.
-	Pre coreconsensus.Precondition
+	Pre coreconsensus.PreconditionSpec
 	// Membership is the whole configuration after a membership change.
-	Membership coreconsensus.Membership
+	Membership coreconsensus.MembershipValue
 	// Contract is the timing contract of an EntryTimingContract.
-	Contract coreconsensus.TimingContract
+	Contract coreconsensus.TimingContractSpec
 	// ClusterVersion is the version an EntryClusterVersion raises to.
 	ClusterVersion uint32
 }
 
 // AppendAdmin appends the encoding of an engine entry's payload.
-func AppendAdmin(dst []byte, a *Admin) []byte {
+func AppendAdmin(dst []byte, a *AdminValue) []byte {
 	dst = appendString(dst, a.Operator)
 	dst = append(dst, a.Change)
 	dst = binary.LittleEndian.AppendUint64(dst, uint64(a.Target))
@@ -57,9 +57,9 @@ func AppendAdmin(dst []byte, a *Admin) []byte {
 }
 
 // ParseAdmin decodes an engine entry's payload.
-func ParseAdmin(b []byte) (Admin, error) {
+func ParseAdmin(b []byte) (AdminValue, error) {
 	r := reader{b: b}
-	var a Admin
+	var a AdminValue
 	a.Operator = r.str()
 	a.Change = r.u8()
 	a.Target = coreconsensus.NodeID(r.u64())

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -18,6 +19,21 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
+// must curries a fallible test step: must(step())(t) yields the step's value,
+// or stops the test when the step failed. Every value it guards is one the
+// test goes on to rely on, so continuing would assert on garbage. The curried
+// shape exists because Go spreads a multi-value call only when it is the sole
+// argument.
+func must[T any](v T, err error) func(testing.TB) T {
+	return func(t testing.TB) T {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+}
+
 // kv is a key-value state machine held in memory: Apply sets "k=v" and
 // returns the previous value.
 type kv struct {
@@ -28,12 +44,13 @@ type kv struct {
 
 func newKV() *kv { return &kv{m: map[string]string{}} }
 
-func (s *kv) Apply(e coreconsensus.Entry) any {
+func (s *kv) Apply(e coreconsensus.EntryValue) any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	k, v, _ := bytes.Cut(e.Data, []byte("="))
-	prev := s.m[string(k)]
-	s.m[string(k)] = string(v)
+	key := string(k)
+	prev := s.m[key]
+	s.m[key] = string(v)
 	s.last = e.Position.Index
 	return prev
 }
@@ -57,11 +74,7 @@ func (s *kv) Snapshot() (coreconsensus.Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var b []byte
-	keys := make([]string, 0, len(s.m))
-	for k := range s.m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
+	keys := slices.Sorted(maps.Keys(s.m))
 	for _, k := range keys {
 		b = binary.AppendUvarint(b, uint64(len(k)))
 		b = append(b, k...)
@@ -71,7 +84,7 @@ func (s *kv) Snapshot() (coreconsensus.Snapshot, error) {
 	return kvSnap{data: b}, nil
 }
 
-func (s *kv) Restore(r io.Reader, _ coreconsensus.SnapshotMeta) error {
+func (s *kv) Restore(r io.Reader, _ coreconsensus.SnapshotMetaValue) error {
 	b, err := io.ReadAll(r)
 	if err != nil {
 		return err
@@ -106,14 +119,14 @@ type cluster struct {
 	net     *MemoryNetwork
 	cid     coreconsensus.ClusterID
 	nodes   []*testNode
-	members []coreconsensus.Member
+	members []coreconsensus.MemberValue
 	every   uint64
 	recent  int64
 	size    int
 }
 
-func testTimingFast() coreconsensus.TimingContract {
-	return coreconsensus.TimingContract{
+func testTimingFast() coreconsensus.TimingContractSpec {
+	return coreconsensus.TimingContractSpec{
 		Generation: 1, HeartbeatInterval: 10 * time.Millisecond,
 		ElectionTimeoutMin: 100 * time.Millisecond, ElectionTimeoutMax: 200 * time.Millisecond, MaxClockDrift: 0.05,
 	}
@@ -122,7 +135,7 @@ func testTimingFast() coreconsensus.TimingContract {
 func (c *cluster) config(tn *testNode) Config {
 	return Config{
 		Cluster: c.cid, Machine: tn.sm, Durability: DurabilityVolatile, Log: tn.log, Snapshots: tn.snaps,
-		Transport: c.net.Transport(tn.id), InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30,
+		Transport: NewMemoryTransport(c.net, tn.id), InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30,
 		SnapshotEveryBytes: 1 << 20, MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 1,
 		SnapshotEvery: c.every, SnapshotTrailing: 4, JoinAuthorizer: allowJoin{}, RecentEntriesBytes: c.recent,
 	}
@@ -130,7 +143,7 @@ func (c *cluster) config(tn *testNode) Config {
 
 type allowJoin struct{}
 
-func (allowJoin) Authorize(_ context.Context, r coreconsensus.JoinRequest) (coreconsensus.Operator, error) {
+func (allowJoin) Authorize(_ context.Context, r coreconsensus.JoinRequestValue) (coreconsensus.Operator, error) {
 	return coreconsensus.Operator("automation:" + r.Slot), nil
 }
 
@@ -143,7 +156,7 @@ func newClusterWith(t *testing.T, c *cluster) *cluster {
 	if size == 0 {
 		size = 3
 	}
-	for i := 0; i < size; i++ {
+	for i := range size {
 		tn := &testNode{log: NewMemoryLog(), snaps: NewMemorySnapshots(), sm: newKV()}
 		id, inc, err := InitLog(tn.log, c.cid, fmt.Sprintf("slot-%d", i))
 		if err != nil {
@@ -151,17 +164,17 @@ func newClusterWith(t *testing.T, c *cluster) *cluster {
 		}
 		tn.id = id
 		c.nodes = append(c.nodes, tn)
-		c.members = append(c.members, coreconsensus.Member{
+		c.members = append(c.members, coreconsensus.MemberValue{
 			ID: id, Incarnation: inc, Slot: fmt.Sprintf("slot-%d", i),
 			SPKI: MemorySPKI(id), Voter: true,
 		})
 	}
 	for _, tn := range c.nodes {
-		if err := Bootstrap(context.Background(), c.config(tn), c.members); err != nil {
+		if err := Bootstrap(context.Background(), new(c.config(tn)), c.members); err != nil {
 			t.Fatal(err)
 		}
 		// Rerunning with the identical list is an idempotent success.
-		if err := Bootstrap(context.Background(), c.config(tn), c.members); err != nil {
+		if err := Bootstrap(context.Background(), new(c.config(tn)), c.members); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -171,7 +184,9 @@ func newClusterWith(t *testing.T, c *cluster) *cluster {
 	t.Cleanup(func() {
 		for _, tn := range c.nodes {
 			if tn.node != nil {
-				_ = tn.node.HardClose()
+				if err := tn.node.HardClose(); err != nil {
+					t.Errorf("hard close %d: %v", tn.id, err)
+				}
 			}
 		}
 	})
@@ -180,16 +195,21 @@ func newClusterWith(t *testing.T, c *cluster) *cluster {
 
 func (c *cluster) start(tn *testNode) {
 	tn.sm = newKV()
-	n, err := NewRaft(c.config(tn))
+	n, err := NewNode(c.config(tn))
 	if err != nil {
-		c.t.Fatalf("NewRaft %d: %v", tn.id, err)
+		c.t.Fatalf("NewNode %d: %v", tn.id, err)
 	}
 	tn.node = n
 }
 
 func (c *cluster) kill(tn *testNode) {
-	_ = tn.node.HardClose()
-	_ = c.net.Transport(tn.id).Close()
+	c.t.Helper()
+	if err := tn.node.HardClose(); err != nil {
+		c.t.Fatalf("hard close %d: %v", tn.id, err)
+	}
+	if err := NewMemoryTransport(c.net, tn.id).Close(); err != nil {
+		c.t.Fatalf("close transport %d: %v", tn.id, err)
+	}
 	tn.node = nil
 }
 
@@ -239,7 +259,7 @@ func (c *cluster) waitApplied(index uint64, timeout time.Duration) {
 	}
 }
 
-func propose(t *testing.T, n *Node, kv string) coreconsensus.Token {
+func propose(t *testing.T, n *Node, kv string) coreconsensus.TokenValue {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -335,8 +355,8 @@ func TestClusterSnapshotInstallsOnALaggingNode(t *testing.T) {
 		}
 	}
 	c.kill(lag)
-	var tok coreconsensus.Token
-	for i := 0; i < 200; i++ {
+	var tok coreconsensus.TokenValue
+	for i := range 200 {
 		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
 	}
 	// Wait for compaction past what the lagging node holds.
@@ -356,7 +376,7 @@ func TestClusterSnapshotInstallsOnALaggingNode(t *testing.T) {
 	if v, _ := lag.sm.get("k199"); v != "199" {
 		t.Fatalf("lagging node: k199=%q", v)
 	}
-	if metas, _ := lag.snaps.List(); len(metas) == 0 {
+	if metas := must(lag.snaps.List())(t); len(metas) == 0 {
 		t.Fatal("the lagging node caught up without a snapshot")
 	}
 }
@@ -377,8 +397,8 @@ func TestClusterMembershipThroughLearners(t *testing.T) {
 	tn.id = id
 	c.nodes = append(c.nodes, tn)
 	c.start(tn)
-	st, _ := tn.log.Stamp()
-	if _, err := c.net.Transport(id).Join(ctx, coreconsensus.JoinConfig{Stamp: st, Address: "mem"}); err != nil {
+	st := must(tn.log.Stamp())(t)
+	if _, err := NewMemoryTransport(c.net, id).Join(ctx, coreconsensus.JoinConfig{Stamp: st, Address: "mem"}); err != nil {
 		t.Fatalf("join: %v", err)
 	}
 	tok := propose(t, l.node, "y=2")
@@ -407,7 +427,7 @@ func TestClusterMembershipThroughLearners(t *testing.T) {
 	if _, ok := m.Member(victim); ok || !m.IsRetired(victim) {
 		t.Fatalf("victim still a member: %+v", m)
 	}
-	vm := coreconsensus.Member{ID: victim, SPKI: [32]byte{1}}
+	vm := coreconsensus.MemberValue{ID: victim, SPKI: [32]byte{1}}
 	if err := l.node.AddLearner(ctx, "op:test", vm); !errors.Is(err, coreconsensus.NodeIDRetired) {
 		t.Fatalf("retired id re-added: %v", err)
 	}
@@ -448,7 +468,12 @@ func TestStorageFailureStopsTheNode(t *testing.T) {
 	l.log.FailSync(errors.New("injected fdatasync failure"))
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_, _, _ = l.node.Propose(ctx, []byte("a=1"))
+	// This proposal only provokes the sync; whether it is refused or
+	// acknowledged by the followers' majority is not what the test pins —
+	// the stop below is — so its outcome is recorded rather than asserted.
+	if _, _, err := l.node.Propose(ctx, []byte("a=1")); err != nil {
+		t.Logf("proposal under a failing sync: %v", err)
+	}
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if r, ok := l.node.StopReason(); ok {
@@ -483,15 +508,15 @@ func TestEngineDropsAFrameWhoseFromIsNotThePeer(t *testing.T) {
 		}
 	}
 	before := f.node.Health().DroppedFrames
-	m := coreconsensus.Message{Version: 1, Group: 1, Kind: coreconsensus.MsgTimeoutNow, From: l.id, To: f.id, Term: l.node.Status().Term}
-	frame := appendFrame(&m)
+	m := &coreconsensus.MessageValue{Version: 1, Group: 1, Kind: coreconsensus.MsgTimeoutNow, From: l.id, To: f.id, Term: l.node.Status().Term}
+	frame := appendFrame(m)
 	var liar coreconsensus.NodeID
 	for _, tn := range c.nodes {
 		if tn != l && tn != f {
 			liar = tn.id
 		}
 	}
-	f.node.deliver(coreconsensus.AuthenticatedPeer{ID: liar}, frame)
+	f.node.deliver(coreconsensus.AuthenticatedPeerValue{ID: liar}, frame)
 	if got := f.node.Health().DroppedFrames; got != before+1 {
 		t.Fatalf("dropped %d, want %d", got, before+1)
 	}
@@ -501,7 +526,7 @@ func TestEngineDropsAFrameWhoseFromIsNotThePeer(t *testing.T) {
 	}
 }
 
-func appendFrame(m *coreconsensus.Message) []byte { return wire.AppendMessage(nil, m) }
+func appendFrame(m *coreconsensus.MessageValue) []byte { return wire.AppendMessage(nil, m) }
 
 // A transfer submitted on a follower succeeds, or fails with TRANSFER_FAILED
 // and the old leader resumes; never OUTCOME_UNKNOWN (D8). NOT_LEADER is the
@@ -511,7 +536,7 @@ func appendFrame(m *coreconsensus.Message) []byte { return wire.AppendMessage(ni
 // leadership on its target, within a bounded time.
 func TestClusterTransferSubmittedOnAFollower(t *testing.T) {
 	c := newCluster(t, 3, 0)
-	for round := 0; round < 10; round++ {
+	for round := range 10 {
 		// A follower that has not yet heard from a just-elected leader
 		// answers NOT_LEADER at once, so the bound is a deadline with a
 		// pause between attempts, not a count.
@@ -590,8 +615,8 @@ func TestHealthReportsFailureToleranceAndPeers(t *testing.T) {
 	}
 	waitFor("tolerance 1 with three voters", func() bool {
 		h := l.node.Health()
-		return h.FailureTolerance == 1 && h.QuorumReachable && len(h.Peers) == 2 &&
-			!h.Peers[0].Unreachable && !h.Peers[1].Unreachable && h.Peers[0].Lag == 0
+		return h.FailureTolerance == 1 && h.Flags.Has(HealthQuorumReachable) && len(h.Peers) == 2 &&
+			!h.Peers[0].Flags.Has(PeerUnreachable) && !h.Peers[1].Flags.Has(PeerUnreachable) && h.Peers[0].Lag == 0
 	})
 	var f *testNode
 	for _, tn := range c.nodes {
@@ -600,7 +625,7 @@ func TestHealthReportsFailureToleranceAndPeers(t *testing.T) {
 			break
 		}
 	}
-	if h := f.node.Health(); h.FailureTolerance != -1 || h.Peers != nil || !h.HasLeader || !h.Ready {
+	if h := f.node.Health(); h.FailureTolerance != -1 || h.Peers != nil || !h.Flags.Has(HealthHasLeader) || !h.Flags.Has(HealthReady) {
 		t.Fatalf("follower health %+v", h)
 	}
 	c.net.Isolate(f.id, true)
@@ -609,7 +634,7 @@ func TestHealthReportsFailureToleranceAndPeers(t *testing.T) {
 		h := l.node.Health()
 		for _, p := range h.Peers {
 			if p.ID == f.id {
-				return h.FailureTolerance == 0 && p.Unreachable && p.Lag > 0
+				return h.FailureTolerance == 0 && p.Flags.Has(PeerUnreachable) && p.Lag > 0
 			}
 		}
 		return false
@@ -622,8 +647,8 @@ func TestHealthReportsFailureToleranceAndPeers(t *testing.T) {
 func TestClusterNodeWithoutAValidSnapshotAsksForAnInstall(t *testing.T) {
 	c := newCluster(t, 3, 20)
 	l := c.leader(5 * time.Second)
-	var tok coreconsensus.Token
-	for i := 0; i < 120; i++ {
+	var tok coreconsensus.TokenValue
+	for i := range 120 {
 		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
 	}
 	c.waitApplied(tok.Index, 5*time.Second)
@@ -637,7 +662,7 @@ func TestClusterNodeWithoutAValidSnapshotAsksForAnInstall(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		first, _ := f.log.Bounds()
-		metas, _ := f.snaps.List()
+		metas := must(f.snaps.List())(t)
 		if first > 1 && len(metas) > 0 {
 			break
 		}
@@ -681,8 +706,8 @@ func TestClusterLaggingFollowerFedFromTheStore(t *testing.T) {
 		}
 	}
 	c.kill(f)
-	var tok coreconsensus.Token
-	for i := 0; i < 300; i++ {
+	var tok coreconsensus.TokenValue
+	for i := range 300 {
 		tok = propose(t, l.node, fmt.Sprintf("key-%d=%0100d", i, i))
 	}
 	c.start(f)
@@ -696,20 +721,24 @@ func TestClusterLaggingFollowerFedFromTheStore(t *testing.T) {
 func TestLongLoopTurnDropsTheLease(t *testing.T) {
 	c := newCluster(t, 3, 0)
 	for _, tn := range c.nodes {
-		_ = tn.node.HardClose()
+		if err := tn.node.HardClose(); err != nil {
+			t.Fatalf("hard close %d: %v", tn.id, err)
+		}
 	}
 	for _, tn := range c.nodes {
-		_ = c.net.Transport(tn.id).Close()
+		if err := NewMemoryTransport(c.net, tn.id).Close(); err != nil {
+			t.Fatalf("close transport %d: %v", tn.id, err)
+		}
 		tn.sm = newKV()
 		cfg := c.config(tn)
 		cfg.Reads = ReadLease
 		// A 50 ms budget (1 s × 0.05): ordinary turns under -race stay
 		// below it, the 200 ms pause below does not.
-		cfg.InitialTiming = coreconsensus.TimingContract{
+		cfg.InitialTiming = coreconsensus.TimingContractSpec{
 			Generation: 1, HeartbeatInterval: 50 * time.Millisecond,
 			ElectionTimeoutMin: time.Second, ElectionTimeoutMax: 2 * time.Second, MaxClockDrift: 0.05,
 		}
-		n, err := NewRaft(cfg)
+		n, err := NewNode(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -744,8 +773,8 @@ func TestJoinIsRateLimitedPerSlot(t *testing.T) {
 	l := c.leader(5 * time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	peer := coreconsensus.AuthenticatedPeer{Slot: "burst", SPKI: [32]byte{7}}
-	req := coreconsensus.JoinRequest{Cluster: c.cid, ID: 991, Slot: "burst"}
+	peer := coreconsensus.AuthenticatedPeerValue{Slot: "burst", SPKI: [32]byte{7}}
+	req := coreconsensus.JoinRequestValue{Cluster: c.cid, ID: 991, Slot: "burst"}
 	if _, code := l.node.join(ctx, peer, req); code != 0 {
 		t.Fatalf("first join: %v", code)
 	}
@@ -764,7 +793,7 @@ type gatedKV struct {
 	gate chan struct{}
 }
 
-func (g gatedKV) Apply(e coreconsensus.Entry) any {
+func (g gatedKV) Apply(e coreconsensus.EntryValue) any {
 	<-g.gate
 	return g.kv.Apply(e)
 }
@@ -776,15 +805,19 @@ func TestApplyLagBackpressure(t *testing.T) {
 	c := newCluster(t, 3, 0)
 	gate := make(chan struct{})
 	for _, tn := range c.nodes {
-		_ = tn.node.HardClose()
-		_ = c.net.Transport(tn.id).Close()
+		if err := tn.node.HardClose(); err != nil {
+			t.Fatalf("hard close %d: %v", tn.id, err)
+		}
+		if err := NewMemoryTransport(c.net, tn.id).Close(); err != nil {
+			t.Fatalf("close transport %d: %v", tn.id, err)
+		}
 	}
 	for _, tn := range c.nodes {
 		tn.sm = newKV()
 		cfg := c.config(tn)
 		cfg.Machine = gatedKV{kv: tn.sm, gate: gate}
 		cfg.MaxApplyLagBytes = 2048
-		n, err := NewRaft(cfg)
+		n, err := NewNode(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -845,8 +878,8 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 		}
 	}
 	c.kill(lag)
-	var tok coreconsensus.Token
-	for i := 0; i < 200; i++ {
+	var tok coreconsensus.TokenValue
+	for i := range 200 {
 		tok = propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -865,7 +898,7 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if metas, _ := lag.snaps.List(); len(metas) == 0 {
+	if metas := must(lag.snaps.List())(t); len(metas) == 0 {
 		t.Fatal("nothing was published before the crash")
 	}
 	c.kill(lag)
@@ -878,7 +911,7 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 
 // staleSnapshot runs a cluster until a follower applied past the leader's
 // newest snapshot, and returns that snapshot's meta and encoded body.
-func staleSnapshot(t *testing.T) (c *cluster, l, f *testNode, meta coreconsensus.SnapshotMeta, body []byte, tok coreconsensus.Token) {
+func staleSnapshot(t *testing.T) (c *cluster, l, f *testNode, meta coreconsensus.SnapshotMetaValue, body []byte, tok coreconsensus.TokenValue) {
 	c = newCluster(t, 3, 20)
 	l = c.leader(5 * time.Second)
 	for _, tn := range c.nodes {
@@ -947,10 +980,10 @@ func TestInstallAfterTheReceiverMovedPastTheSnapshot(t *testing.T) {
 	}
 	f.node.snapState.spools[meta.ID] = sink
 	f.node.snapState.mu.Unlock()
-	err = f.node.install(coreconsensus.InstallRequest{
+	err = f.node.install(coreconsensus.InstallParams{
 		Ctx:   context.Background(),
-		From:  coreconsensus.AuthenticatedPeer{ID: l.id},
-		Offer: coreconsensus.InstallOffer{Term: l.node.Status().Term, SnapshotID: meta.ID, Meta: meta},
+		From:  coreconsensus.AuthenticatedPeerValue{ID: l.id},
+		Offer: coreconsensus.InstallOfferValue{Term: l.node.Status().Term, SnapshotID: meta.ID, Meta: meta},
 		Body:  bytes.NewReader(body),
 	})
 	if !errors.Is(err, coreconsensus.AdminPreconditionFailed) {
@@ -1000,7 +1033,7 @@ func TestBatchLargerThanAFrameIsRefused(t *testing.T) {
 	c.kill(tn)
 	cfg := c.config(tn)
 	cfg.Transport = smallFrames{cfg.Transport}
-	if _, err := NewRaft(cfg); !errors.Is(err, coreconsensus.ConsensusMisconfigured) {
+	if _, err := NewNode(cfg); !errors.Is(err, coreconsensus.ConsensusMisconfigured) {
 		t.Fatalf("a batch above the frame limit: %v", err)
 	}
 }
@@ -1023,14 +1056,14 @@ func TestUnknownEntryKindInAnAppendStopsTheNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := coreconsensus.Entry{Position: coreconsensus.Position{Term: tok.Term, Index: tok.Index + 1}, Kind: 0x80, Data: []byte("x")}
+	e := coreconsensus.EntryValue{Position: coreconsensus.PositionValue{Term: tok.Term, Index: tok.Index + 1}, Kind: 0x80, Data: []byte("x")}
 	e.BodySum = wire.BodySum(e.Data)
 	e.ChainSum = wire.ChainSum(prev[0].ChainSum, &e)
-	m := coreconsensus.Message{
+	m := &coreconsensus.MessageValue{
 		Version: 1, Group: 1, Kind: coreconsensus.MsgApp, From: l.id, To: f.id, Term: l.node.Status().Term,
-		Index: tok.Index, LogTerm: tok.Term, Entries: []coreconsensus.Entry{e},
+		Index: tok.Index, LogTerm: tok.Term, Entries: []coreconsensus.EntryValue{e},
 	}
-	f.node.deliver(coreconsensus.AuthenticatedPeer{ID: l.id}, appendFrame(&m))
+	f.node.deliver(coreconsensus.AuthenticatedPeerValue{ID: l.id}, appendFrame(m))
 	deadline := time.Now().Add(5 * time.Second)
 	for !f.node.stopped.Load() {
 		if time.Now().After(deadline) {
@@ -1056,12 +1089,15 @@ func TestUnknownEntryKindInTheLogStopsTheNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := coreconsensus.Entry{Position: coreconsensus.Position{Term: tok.Term, Index: tok.Index + 1}, Kind: 0x80, Data: []byte("x")}
+	e := coreconsensus.EntryValue{Position: coreconsensus.PositionValue{Term: tok.Term, Index: tok.Index + 1}, Kind: 0x80, Data: []byte("x")}
 	e.BodySum = wire.BodySum(e.Data)
 	e.ChainSum = wire.ChainSum(prev[0].ChainSum, &e)
-	hs, _ := tn.log.HardState()
+	hs, err := tn.log.HardState()
+	if err != nil {
+		t.Fatal(err)
+	}
 	hs.Commit = e.Position.Index
-	if err := tn.log.Append([]coreconsensus.Entry{e}, &hs); err != nil {
+	if err := tn.log.Append([]coreconsensus.EntryValue{e}, &hs); err != nil {
 		t.Fatal(err)
 	}
 	if err := tn.log.Sync(); err != nil {
@@ -1092,7 +1128,7 @@ func TestTickFollowsTheCommittedContract(t *testing.T) {
 	next.HeartbeatInterval = 5 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	pre := coreconsensus.Precondition{Log: l.node.ident, Generation: st.Timing.Generation}
+	pre := coreconsensus.PreconditionSpec{Log: l.node.ident, Generation: st.Timing.Generation}
 	if err := l.node.ProposeTimingContract(ctx, "op:test", pre, next); err != nil {
 		t.Fatal(err)
 	}

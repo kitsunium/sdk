@@ -14,17 +14,22 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
-// FileSnapshots is the shipped SnapshotStore: ADR 0056's publication rules
+// fileSnapshots is the shipped SnapshotStore: ADR 0056's publication rules
 // applied to a stream (D4). A snapshot is spooled to <id>.spool, synced,
 // renamed to <id>.snap, and published by its <id>.meta, written atomically
 // last; a .snap without its .meta is not a snapshot.
-type FileSnapshots struct {
+type fileSnapshots struct {
 	dir  string
 	mu   sync.Mutex
 	pins map[string]int
 }
 
-func newFileSnapshots(dir string) (*FileSnapshots, error) {
+// newFileSnapshots opens the snapshot directory dir, creating it private
+// to the owner, and removes every .snap that has no .meta: a crash between
+// a snapshot's rename and its .meta leaves one, and it is neither a snapshot
+// nor resumable. A directory that cannot be created, listed or cleaned is a
+// STORAGE_FAILED, so a store never opens over a state it could not read.
+func newFileSnapshots(dir string) (*fileSnapshots, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, storageFailed("mkdir", err)
 	}
@@ -45,60 +50,71 @@ func newFileSnapshots(dir string) (*FileSnapshots, error) {
 			}
 		}
 	}
-	return &FileSnapshots{dir: dir, pins: map[string]int{}}, nil
+	return &fileSnapshots{dir: dir, pins: map[string]int{}}, nil
 }
 
+// validID reports whether id may name a snapshot's files: non-empty,
+// bounded, and with no separator or dot, so an id a peer sent can never
+// reach outside the directory or collide with another file's suffix.
 func validID(id string) bool {
 	return id != "" && len(id) <= 128 && !strings.ContainsAny(id, "/\\.") && filepath.Base(id) == id
 }
 
 type fileSink struct {
-	s    *FileSnapshots
+	s    *fileSnapshots
 	id   string
 	f    *os.File
-	meta coreconsensus.SnapshotMeta
+	meta coreconsensus.SnapshotMetaValue
 }
 
 // Create implements SnapshotStore: an existing spool of that id resumes from
 // its last whole, checksummed chunk (R8-21).
-func (s *FileSnapshots) Create(id string, meta coreconsensus.SnapshotMeta) (coreconsensus.SnapshotSink, int64, error) {
+func (s *fileSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error) {
 	if !validID(id) {
 		return nil, 0, origin(coreconsensus.FrameInvalid, errs.String("snapshot_id", id))
 	}
 	path := filepath.Join(s.dir, id+".spool")
+	sink := &fileSink{s: s, id: id, meta: meta}
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, 0, storageFailed("spool", err)
 	}
+	sink.f = f
 	prefix, err := io.ReadAll(f)
 	if err != nil {
-		f.Close()
-		return nil, 0, storageFailed("spool", err)
+		return nil, 0, alsoFailed(storageFailed("spool", err), "close", f.Close())
 	}
 	off := alignedOffset(prefix)
 	if err := f.Truncate(off); err != nil {
-		f.Close()
-		return nil, 0, storageFailed("spool", err)
+		return nil, 0, alsoFailed(storageFailed("spool", err), "close", f.Close())
 	}
 	if _, err := f.Seek(off, io.SeekStart); err != nil {
-		f.Close()
-		return nil, 0, storageFailed("spool", err)
+		return nil, 0, alsoFailed(storageFailed("spool", err), "close", f.Close())
 	}
-	return &fileSink{s: s, id: id, f: f, meta: meta}, off, nil
+	return sink, off, nil
 }
 
+// Write appends p to the spool file; nothing is durable until Commit syncs
+// it.
 func (k *fileSink) Write(p []byte) (int, error) { return k.f.Write(p) }
 
-func (k *fileSink) Commit(final coreconsensus.SnapshotMeta) error {
+// Commit publishes the spool in ADR 0056's order: the encoded size is
+// checked, the spool synced and closed, renamed to <id>.snap, and the
+// <id>.meta written atomically LAST, so a crash at any step leaves no
+// published snapshot without its bytes.
+func (k *fileSink) Commit(final coreconsensus.SnapshotMetaValue) error {
 	final.ID = k.id
 	size, err := k.f.Seek(0, io.SeekCurrent)
-	if err != nil || size != final.EncodedSize {
-		k.f.Close()
-		return snapshotCorrupt("encoded size")
+	if err != nil {
+		// The size could not be read: the disk failed, the spool did not
+		// lie about its length.
+		return alsoFailed(storageFailed("snapshot size", err), "close", k.f.Close())
+	}
+	if size != final.EncodedSize {
+		return alsoFailed(snapshotCorrupt("encoded size"), "close", k.f.Close())
 	}
 	if err := k.f.Sync(); err != nil {
-		k.f.Close()
-		return storageFailed("sync snapshot", err)
+		return alsoFailed(storageFailed("sync snapshot", err), "close", k.f.Close())
 	}
 	if err := k.f.Close(); err != nil {
 		return storageFailed("close snapshot", err)
@@ -113,11 +129,50 @@ func (k *fileSink) Commit(final coreconsensus.SnapshotMeta) error {
 	return nil
 }
 
-// release closes the spool's handle and keeps the spool for a resume.
-func (k *fileSink) release() { k.f.Close() }
+// published reads the snapshot a directory entry named name publishes. ok
+// is false for anything that is not a complete snapshot: another file, a
+// .meta that does not parse or names another id, or one whose .snap is
+// missing. Such an entry is skipped: it is a publication a crash
+// interrupted, not a snapshot that failed. A .meta or a .snap that is there
+// but cannot be read is neither: it is an I/O failure, and it is reported,
+// so that a listing never reads a failing disk as "no snapshot".
+func (s *fileSnapshots) published(name string) (coreconsensus.SnapshotMetaValue, bool, error) {
+	var m coreconsensus.SnapshotMetaValue
+	if !strings.HasSuffix(name, ".meta") {
+		return m, false, nil
+	}
+	id := strings.TrimSuffix(name, ".meta")
+	b, err := os.ReadFile(filepath.Join(s.dir, name))
+	if errors.Is(err, os.ErrNotExist) {
+		return m, false, nil
+	}
+	if err != nil {
+		return m, false, storageFailed("read snapshot meta", err)
+	}
+	if wire.ParseSnapshotMeta(b, &m) != nil || m.ID != id {
+		return m, false, nil
+	}
+	if _, err := os.Stat(filepath.Join(s.dir, id+".snap")); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return m, false, nil
+		}
+		return m, false, storageFailed("stat snapshot", err)
+	}
+	return m, true, nil
+}
 
+// release closes the spool's handle and keeps the spool for a resume. A
+// failed Close is abandoned: the resume reads back only the chunks whose
+// checksums hold, so nothing it could say changes what is kept.
+func (k *fileSink) release() { abandon(k.f.Close()) }
+
+// Abort closes and deletes the spool; a spool already gone is not a
+// failure, any other removal failure is a STORAGE_FAILED.
 func (k *fileSink) Abort() error {
-	k.f.Close()
+	// The spool is being discarded: what its descriptor's Close could say
+	// about bytes no one will read changes nothing. The removal is what
+	// Abort promises, and its failure is reported.
+	abandon(k.f.Close())
 	if err := os.Remove(filepath.Join(k.s.dir, k.id+".spool")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return storageFailed("abort spool", err)
 	}
@@ -125,32 +180,22 @@ func (k *fileSink) Abort() error {
 }
 
 // List implements SnapshotStore: complete snapshots, newest first.
-func (s *FileSnapshots) List() ([]coreconsensus.SnapshotMeta, error) {
+func (s *fileSnapshots) List() ([]coreconsensus.SnapshotMetaValue, error) {
 	ents, err := os.ReadDir(s.dir)
 	if err != nil {
 		return nil, storageFailed("list snapshots", err)
 	}
-	var out []coreconsensus.SnapshotMeta
+	var out []coreconsensus.SnapshotMetaValue
 	for _, e := range ents {
-		name := e.Name()
-		if !strings.HasSuffix(name, ".meta") {
-			continue
-		}
-		id := strings.TrimSuffix(name, ".meta")
-		b, err := os.ReadFile(filepath.Join(s.dir, name))
+		m, ok, err := s.published(e.Name())
 		if err != nil {
-			continue
+			return nil, err
 		}
-		var m coreconsensus.SnapshotMeta
-		if wire.ParseSnapshotMeta(b, &m) != nil || m.ID != id {
-			continue
+		if ok {
+			out = append(out, m)
 		}
-		if _, err := os.Stat(filepath.Join(s.dir, id+".snap")); err != nil {
-			continue
-		}
-		out = append(out, m)
 	}
-	slices.SortFunc(out, func(a, b coreconsensus.SnapshotMeta) int {
+	slices.SortFunc(out, func(a, b coreconsensus.SnapshotMetaValue) int {
 		switch {
 		case a.Position.Index > b.Position.Index:
 			return -1
@@ -164,25 +209,31 @@ func (s *FileSnapshots) List() ([]coreconsensus.SnapshotMeta, error) {
 
 type fileHandle struct {
 	*os.File
-	s    *FileSnapshots
-	meta coreconsensus.SnapshotMeta
+	s    *fileSnapshots
+	meta coreconsensus.SnapshotMetaValue
 	once sync.Once
 }
 
-func (h *fileHandle) Meta() coreconsensus.SnapshotMeta { return h.meta }
+// Meta returns the metadata read from the snapshot's .meta at Open.
+func (h *fileHandle) Meta() coreconsensus.SnapshotMetaValue { return h.meta }
 
+// Close unpins the snapshot and closes its file exactly once; a second
+// Close returns nil and releases nothing.
 func (h *fileHandle) Close() error {
+	var err error
 	h.once.Do(func() {
 		h.s.mu.Lock()
 		h.s.pins[h.meta.ID]--
 		h.s.mu.Unlock()
-		_ = h.File.Close()
+		if cerr := h.File.Close(); cerr != nil {
+			err = storageFailed("close snapshot", cerr)
+		}
 	})
-	return nil
+	return err
 }
 
 // Open implements SnapshotStore: pinned until Close.
-func (s *FileSnapshots) Open(id string) (coreconsensus.SnapshotHandle, error) {
+func (s *fileSnapshots) Open(id string) (coreconsensus.SnapshotHandle, error) {
 	if !validID(id) {
 		return nil, origin(coreconsensus.FrameInvalid, errs.String("snapshot_id", id))
 	}
@@ -190,23 +241,25 @@ func (s *FileSnapshots) Open(id string) (coreconsensus.SnapshotHandle, error) {
 	if err != nil {
 		return nil, origin(coreconsensus.SnapshotCorrupt, errs.String("id", id), errs.String("why", "no meta"))
 	}
-	var m coreconsensus.SnapshotMeta
+	var m coreconsensus.SnapshotMetaValue
 	if err := wire.ParseSnapshotMeta(b, &m); err != nil {
 		return nil, err
 	}
+	h := &fileHandle{s: s, meta: m}
 	f, err := os.Open(filepath.Join(s.dir, id+".snap"))
 	if err != nil {
 		return nil, storageFailed("open snapshot", err)
 	}
+	h.File = f
 	s.mu.Lock()
 	s.pins[id]++
 	s.mu.Unlock()
-	return &fileHandle{File: f, s: s, meta: m}, nil
+	return h, nil
 }
 
 // Remove implements SnapshotStore: refused while a handle is open. The meta
 // goes first, so a crash leaves no published snapshot without its bytes.
-func (s *FileSnapshots) Remove(id string) error {
+func (s *fileSnapshots) Remove(id string) error {
 	if !validID(id) {
 		return origin(coreconsensus.FrameInvalid, errs.String("snapshot_id", id))
 	}

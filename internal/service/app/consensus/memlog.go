@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"slices"
 	"sync"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -14,9 +15,9 @@ type MemoryLog struct {
 	mu        sync.RWMutex
 	first     uint64
 	prevTerm  uint64
-	ents      []coreconsensus.Entry
+	ents      []coreconsensus.EntryValue
 	hs        coreconsensus.HardState
-	stamp     coreconsensus.Stamp
+	stamp     coreconsensus.StampValue
 	stamped   bool
 	failSync  error
 	closed    bool
@@ -26,13 +27,16 @@ type MemoryLog struct {
 // NewMemoryLog returns an empty in-memory log.
 func NewMemoryLog() *MemoryLog { return &MemoryLog{first: 1} }
 
+// compacted is the COMPACTED a reader gets for an index below the log's
+// first: the entry is in a snapshot now, and both bounds travel as fields
+// so the caller knows where the log resumes.
 func compacted(index, first uint64) error {
 	return errs.Wrap(coreconsensus.Compacted, errs.WrapParams{},
 		errs.String("index", u64s(index)), errs.String("first", u64s(first)))
 }
 
 // Entries implements LogReader.
-func (l *MemoryLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.Entry) ([]coreconsensus.Entry, error) {
+func (l *MemoryLog) Entries(lo, hi uint64, maxBytes int, dst []coreconsensus.EntryValue) ([]coreconsensus.EntryValue, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	if lo < l.first {
@@ -77,7 +81,7 @@ func (l *MemoryLog) Bounds() (first, last uint64) {
 }
 
 // Append implements LogStore.
-func (l *MemoryLog) Append(entries []coreconsensus.Entry, hs *coreconsensus.HardState) error {
+func (l *MemoryLog) Append(entries []coreconsensus.EntryValue, hs *coreconsensus.HardState) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, e := range entries {
@@ -140,7 +144,7 @@ func (l *MemoryLog) CompactPrefix(through uint64) error {
 		return nil
 	}
 	l.prevTerm = l.ents[through-l.first].Position.Term
-	l.ents = append([]coreconsensus.Entry(nil), l.ents[through-l.first+1:]...)
+	l.ents = slices.Clone(l.ents[through-l.first+1:])
 	l.first = through + 1
 	return nil
 }
@@ -153,14 +157,14 @@ func (l *MemoryLog) HardState() (coreconsensus.HardState, error) {
 }
 
 // Stamp implements LogStore.
-func (l *MemoryLog) Stamp() (coreconsensus.Stamp, error) {
+func (l *MemoryLog) Stamp() (coreconsensus.StampValue, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.stamp, nil
 }
 
 // WriteStamp implements LogStore.
-func (l *MemoryLog) WriteStamp(s coreconsensus.Stamp) error {
+func (l *MemoryLog) WriteStamp(s coreconsensus.StampValue) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.stamp, l.stamped = s, true

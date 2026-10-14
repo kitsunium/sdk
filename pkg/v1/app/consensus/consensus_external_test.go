@@ -17,7 +17,7 @@ type counter struct {
 	sum int
 }
 
-func (c *counter) Apply(e consensus.Entry) any {
+func (c *counter) Apply(e consensus.EntryValue) any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sum += len(e.Data)
@@ -38,11 +38,29 @@ func (c *counter) Snapshot() (consensus.Snapshot, error) {
 	return counterSnap{c.sum}, nil
 }
 
-func (c *counter) Restore(r io.Reader, _ consensus.SnapshotMeta) error {
+func (c *counter) Restore(r io.Reader, _ consensus.SnapshotMetaValue) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	_, err := fmt.Fscan(r, &c.sum)
 	return err
+}
+
+// closer is the one capability teardown needs from a node: a graceful
+// Close bounded by its context.
+type closer interface {
+	Close(ctx context.Context) error
+}
+
+// closeAtCleanup stops n when the test ends and reports a Close that failed:
+// a node that cannot shut down cleanly is a defect the test should surface,
+// not one its teardown should hide.
+func closeAtCleanup(t *testing.T, n closer) {
+	t.Helper()
+	t.Cleanup(func() {
+		if err := n.Close(context.Background()); err != nil {
+			t.Errorf("close node: %v", err)
+		}
+	})
 }
 
 // TestFacadeThreeNodesInMemory runs three nodes through the facade alone.
@@ -55,8 +73,8 @@ func TestFacadeThreeNodesInMemory(t *testing.T) {
 		id    consensus.NodeID
 	}
 	var parts []nodeParts
-	var members []consensus.Member
-	for i := 0; i < 3; i++ {
+	var members []consensus.MemberValue
+	for i := range 3 {
 		p := nodeParts{log: consensus.NewMemoryLog(), snaps: consensus.NewMemorySnapshots()}
 		slot := fmt.Sprintf("s%d", i)
 		id, inc, err := consensus.InitLog(p.log, cluster, slot)
@@ -65,9 +83,9 @@ func TestFacadeThreeNodesInMemory(t *testing.T) {
 		}
 		p.id = id
 		parts = append(parts, p)
-		members = append(members, consensus.Member{ID: id, Incarnation: inc, Slot: slot, SPKI: consensus.MemorySPKI(id), Voter: true})
+		members = append(members, consensus.MemberValue{ID: id, Incarnation: inc, Slot: slot, SPKI: consensus.MemorySPKI(id), Voter: true})
 	}
-	timing := consensus.TimingContract{
+	timing := consensus.TimingContractSpec{
 		HeartbeatInterval:  10 * time.Millisecond,
 		ElectionTimeoutMin: 100 * time.Millisecond, ElectionTimeoutMax: 200 * time.Millisecond,
 	}
@@ -75,17 +93,17 @@ func TestFacadeThreeNodesInMemory(t *testing.T) {
 	for _, p := range parts {
 		cfg := consensus.Config{
 			Cluster: cluster, Machine: &counter{}, Durability: consensus.DurabilityVolatile,
-			Log: p.log, Snapshots: p.snaps, Transport: net.Transport(p.id), InitialTiming: timing,
+			Log: p.log, Snapshots: p.snaps, Transport: consensus.NewMemoryTransport(net, p.id), InitialTiming: timing,
 			MaxSnapshotBytes: 1 << 30, MaxLogBytes: 1 << 30, MinVoters: 3,
 		}
-		if err := consensus.Bootstrap(context.Background(), cfg, members); err != nil {
+		if err := consensus.Bootstrap(context.Background(), &cfg, members); err != nil {
 			t.Fatal(err)
 		}
-		n, err := consensus.NewRaft(cfg)
+		n, err := consensus.NewNode(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = n.Close(context.Background()) })
+		closeAtCleanup(t, n)
 		nodes = append(nodes, n)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

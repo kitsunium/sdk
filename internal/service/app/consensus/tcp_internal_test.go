@@ -30,7 +30,7 @@ type testCA struct {
 
 func newTestCA(t *testing.T) *testCA {
 	t.Helper()
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key := must(ecdsa.GenerateKey(elliptic.P256(), rand.Reader))(t)
 	tpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "consensus test CA"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true,
@@ -40,7 +40,7 @@ func newTestCA(t *testing.T) *testCA {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, _ := x509.ParseCertificate(der)
+	c := must(x509.ParseCertificate(der))(t)
 	pool := x509.NewCertPool()
 	pool.AddCert(c)
 	return &testCA{cert: c, key: key, pool: pool}
@@ -49,9 +49,9 @@ func newTestCA(t *testing.T) *testCA {
 func (ca *testCA) issue(t *testing.T, san *url.URL, key *ecdsa.PrivateKey) (*tls.Certificate, [32]byte) {
 	t.Helper()
 	if key == nil {
-		key, _ = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		key = must(ecdsa.GenerateKey(elliptic.P256(), rand.Reader))(t)
 	}
-	serial, _ := rand.Int(rand.Reader, big.NewInt(1<<62))
+	serial := must(rand.Int(rand.Reader, big.NewInt(1<<62)))(t)
 	tpl := &x509.Certificate{
 		SerialNumber: serial, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		URIs: []*url.URL{san}, KeyUsage: x509.KeyUsageDigitalSignature,
@@ -61,7 +61,7 @@ func (ca *testCA) issue(t *testing.T, san *url.URL, key *ecdsa.PrivateKey) (*tls
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaf, _ := x509.ParseCertificate(der)
+	leaf := must(x509.ParseCertificate(der))(t)
 	return &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, SPKIOf(leaf)
 }
 
@@ -94,7 +94,7 @@ func (tn *tcpNode) listen(t *testing.T, ca *testCA) {
 	if addr == "" {
 		addr = "127.0.0.1:0"
 	}
-	tr, err := NewTCPTransport(TransportConfig{Certificate: tn.cert, Roots: ca.pool, ListenAddress: addr})
+	tr, err := NewTCPTransport(&TransportConfig{Certificate: tn.cert, Roots: ca.pool, ListenAddress: addr})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,20 +104,28 @@ func (tn *tcpNode) listen(t *testing.T, ca *testCA) {
 func (tn *tcpNode) start(t *testing.T, cid coreconsensus.ClusterID) {
 	t.Helper()
 	tn.sm = newKV()
-	n, err := NewRaft(tcpConfig(cid, tn))
+	n, err := NewNode(tcpConfig(cid, tn))
 	if err != nil {
 		t.Fatal(err)
 	}
 	tn.node = n
 }
 
-func (tn *tcpNode) stop() {
+// stop cuts the node and its transport, reporting either step that failed:
+// a transport that cannot close leaves its listener bound and a later restart
+// on the same address would test the wrong thing.
+func (tn *tcpNode) stop(t *testing.T) {
+	t.Helper()
 	if tn.node != nil {
-		_ = tn.node.HardClose()
+		if err := tn.node.HardClose(); err != nil {
+			t.Errorf("hard close %d: %v", tn.id, err)
+		}
 		tn.node = nil
 	}
 	if tn.tr != nil {
-		_ = tn.tr.Close()
+		if err := tn.tr.Close(); err != nil {
+			t.Errorf("close transport %d: %v", tn.id, err)
+		}
 	}
 }
 
@@ -140,8 +148,8 @@ func newTCPCluster(t *testing.T) (*testCA, coreconsensus.ClusterID, []*tcpNode) 
 	ca := newTestCA(t)
 	cid := coreconsensus.ClusterID{0xc0, 0xff, 0xee}
 	var ns []*tcpNode
-	var members []coreconsensus.Member
-	for i := 0; i < 3; i++ {
+	var members []coreconsensus.MemberValue
+	for i := range 3 {
 		tn := &tcpNode{slot: fmt.Sprintf("site-%d", i), log: NewMemoryLog(), snaps: NewMemorySnapshots()}
 		tn.cert, tn.spki = ca.issue(t, SAN(cid, tn.slot), nil)
 		tn.listen(t, ca)
@@ -151,18 +159,18 @@ func newTCPCluster(t *testing.T) (*testCA, coreconsensus.ClusterID, []*tcpNode) 
 		}
 		tn.id, tn.inc = id, inc
 		ns = append(ns, tn)
-		members = append(members, coreconsensus.Member{ID: id, Incarnation: inc, Slot: tn.slot, SPKI: tn.spki, Address: tn.addr, Voter: true})
+		members = append(members, coreconsensus.MemberValue{ID: id, Incarnation: inc, Slot: tn.slot, SPKI: tn.spki, Address: tn.addr, Voter: true})
 	}
 	for _, tn := range ns {
 		tn.sm = newKV()
-		if err := Bootstrap(context.Background(), tcpConfig(cid, tn), members); err != nil {
+		if err := Bootstrap(context.Background(), new(tcpConfig(cid, tn)), members); err != nil {
 			t.Fatal(err)
 		}
 		tn.start(t, cid)
 	}
 	t.Cleanup(func() {
 		for _, tn := range ns {
-			tn.stop()
+			tn.stop(t)
 		}
 	})
 	return ca, cid, ns
@@ -182,7 +190,7 @@ func TestTCPClusterOverMutualTLS(t *testing.T) {
 
 	// Kill the leader; the other two elect and commit; the old one comes
 	// back on the same address and catches up.
-	l.stop()
+	l.stop(t)
 	l2 := tcpLeader(t, ns)
 	tok2 := propose(t, l2.node, "c=3")
 	if tok2.Index <= tok.Index {
@@ -216,15 +224,15 @@ func TestTCPRefusesAnUnpinnedKeyAndAnotherCluster(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	// Dialing a member under the wrong pin is refused by the dialer.
-	wrong := [32]byte{1}
-	if _, err := impostor.tr.dial(ctx, target.addr, laneControl, &wrong); err == nil {
+	wrong := &[32]byte{1}
+	if _, err := impostor.tr.dial(ctx, target.addr, laneControl, wrong); err == nil {
 		t.Fatal("dial accepted a listener whose key is not the pinned one")
 	}
 	// Frames from the impostor's key are never delivered.
 	before := target.node.Status().Term
-	impostor.tr.SetMembership(1, []coreconsensus.Member{{ID: target.id, SPKI: target.spki, Address: target.addr}})
-	m := coreconsensus.Message{Version: 1, Group: 1, Kind: coreconsensus.MsgVote, From: ns[1].id, To: target.id, Term: before + 10, LogTerm: 99, Index: 99}
-	for i := 0; i < 5; i++ {
+	impostor.tr.SetMembership(1, []coreconsensus.MemberValue{{ID: target.id, SPKI: target.spki, Address: target.addr}})
+	m := coreconsensus.MessageValue{Version: 1, Group: 1, Kind: coreconsensus.MsgVote, From: ns[1].id, To: target.id, Term: before + 10, LogTerm: 99, Index: 99}
+	for range 5 {
 		impostor.tr.Send(target.id, appendFrame(&m))
 	}
 	time.Sleep(300 * time.Millisecond)
@@ -244,14 +252,14 @@ func TestTCPRefusesAnUnpinnedKeyAndAnotherCluster(t *testing.T) {
 	// A non-canonical SAN is refused at construction.
 	bad := &url.URL{Scheme: "kitsunium-consensus", Host: cid.String(), Path: "/slot/x/"}
 	c, _ := ca.issue(t, bad, nil)
-	if _, err := NewTCPTransport(TransportConfig{Certificate: c, Roots: ca.pool, ListenAddress: "127.0.0.1:0"}); !errors.Is(err, coreconsensus.TransportMisconfigured) {
+	if _, err := NewTCPTransport(&TransportConfig{Certificate: c, Roots: ca.pool, ListenAddress: "127.0.0.1:0"}); !errors.Is(err, coreconsensus.TransportMisconfigured) {
 		t.Fatalf("non-canonical SAN: %v", err)
 	}
 	// Session tickets stay off (R7-26).
 	if !target.tr.id.ServerConfig(nil).SessionTicketsDisabled || !target.tr.id.ClientConfig(nil).SessionTicketsDisabled {
 		t.Fatal("session tickets enabled")
 	}
-	if _, err := NewTCPTransport(TransportConfig{Certificate: c, Roots: ca.pool, ListenAddress: "127.0.0.1:0", HandshakeTimeout: 2 * time.Second}); !errors.Is(err, coreconsensus.TransportMisconfigured) {
+	if _, err := NewTCPTransport(&TransportConfig{Certificate: c, Roots: ca.pool, ListenAddress: "127.0.0.1:0", HandshakeTimeout: 2 * time.Second}); !errors.Is(err, coreconsensus.TransportMisconfigured) {
 		t.Fatalf("handshake timeout above 1 s: %v", err)
 	}
 }
@@ -269,8 +277,8 @@ func TestTCPJoinAddsALearner(t *testing.T) {
 	}
 	j.id = id
 	j.start(t, cid)
-	defer j.stop()
-	st, _ := j.log.Stamp()
+	defer j.stop(t)
+	st := must(j.log.Stamp())(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// An answer from a peer the joiner does not pin counts for nothing,
@@ -320,7 +328,7 @@ func TestTCPCapsUnauthenticatedConnectionsPerAddress(t *testing.T) {
 	ca := newTestCA(t)
 	cid := coreconsensus.ClusterID{0xab}
 	cert, _ := ca.issue(t, SAN(cid, "a"), nil)
-	tr, err := NewTCPTransport(TransportConfig{
+	tr, err := NewTCPTransport(&TransportConfig{
 		Certificate: cert, Roots: ca.pool, ListenAddress: "127.0.0.1:0",
 		MaxUnauthenticatedPerIP: 2, ReservedMemberSlots: 5,
 	})
@@ -330,7 +338,7 @@ func TestTCPCapsUnauthenticatedConnectionsPerAddress(t *testing.T) {
 	defer tr.Close()
 	open := func(n int) []net.Conn {
 		var cs []net.Conn
-		for i := 0; i < n; i++ {
+		for range n {
 			c, err := net.Dial("tcp", tr.Addr())
 			if err != nil {
 				t.Fatal(err)
@@ -351,7 +359,7 @@ func TestTCPCapsUnauthenticatedConnectionsPerAddress(t *testing.T) {
 	}
 	closeAll(cs)
 	time.Sleep(1200 * time.Millisecond) // the handshake timeout frees the slots
-	tr.SetMembership(1, []coreconsensus.Member{{ID: 1, SPKI: [32]byte{1}, Address: tr.Addr()}})
+	tr.SetMembership(1, []coreconsensus.MemberValue{{ID: 1, SPKI: [32]byte{1}, Address: tr.Addr()}})
 	before := tr.RefusedBeforeHandshake()
 	cs = open(4)
 	defer closeAll(cs)
@@ -367,10 +375,18 @@ func (tn *tcpNode) authorizer() coreconsensus.JoinAuthorizer {
 	return allowJoin{}
 }
 
+// authorizerReason is an error written the way a foreign authorizer writes
+// one — a sentence about its own world, proper nouns capitalised — rather
+// than in Go's error style: the test pins that such a reason reaches the
+// joiner byte for byte, so the casing is part of the data under test.
+type authorizerReason string
+
+func (r authorizerReason) Error() string { return string(r) }
+
 // denyJoin refuses every JOIN with its error.
 type denyJoin struct{ err error }
 
-func (d denyJoin) Authorize(context.Context, coreconsensus.JoinRequest) (coreconsensus.Operator, error) {
+func (d denyJoin) Authorize(context.Context, coreconsensus.JoinRequestValue) (coreconsensus.Operator, error) {
 	return "", d.err
 }
 
@@ -380,7 +396,9 @@ func joinWith(t *testing.T, auth coreconsensus.JoinAuthorizer) error {
 	t.Helper()
 	ca, cid, ns := newTCPCluster(t)
 	for _, tn := range ns {
-		_ = tn.node.HardClose()
+		if err := tn.node.HardClose(); err != nil {
+			t.Fatal(err)
+		}
 		tn.auth = auth
 		tn.start(t, cid)
 	}
@@ -392,7 +410,7 @@ func joinWith(t *testing.T, auth coreconsensus.JoinAuthorizer) error {
 	if _, _, err := InitLog(j.log, cid, j.slot); err != nil {
 		t.Fatal(err)
 	}
-	st, _ := j.log.Stamp()
+	st := must(j.log.Stamp())(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_, err := j.tr.Join(ctx, coreconsensus.JoinConfig{Addresses: []string{ns[0].addr}, Stamp: st, Address: j.addr, Pins: pinsOf(ns)})
@@ -402,7 +420,7 @@ func joinWith(t *testing.T, auth coreconsensus.JoinAuthorizer) error {
 // The authorizer's reason reaches the joiner over the wire, sanitized and
 // bounded; an authorizer that says nothing leaves no reason.
 func TestJoinRefusalCarriesTheAuthorizersReason(t *testing.T) {
-	err := joinWith(t, denyJoin{errors.New("Nomad node wkld-3 is draining")})
+	err := joinWith(t, denyJoin{authorizerReason("Nomad node wkld-3 is draining")})
 	if !errors.Is(err, coreconsensus.JoinRefused) {
 		t.Fatalf("refusal: %v", err)
 	}
@@ -449,7 +467,7 @@ func TestTCPAdmitsNoKeyTwoMembersShare(t *testing.T) {
 	tn.listen(t, ca)
 	defer tn.tr.Close()
 	shared := [32]byte{7}
-	tn.tr.SetMembership(1, []coreconsensus.Member{{ID: 1, SPKI: shared}, {ID: 2, SPKI: shared}, {ID: 3, SPKI: [32]byte{3}}})
+	tn.tr.SetMembership(1, []coreconsensus.MemberValue{{ID: 1, SPKI: shared}, {ID: 2, SPKI: shared}, {ID: 3, SPKI: [32]byte{3}}})
 	tn.tr.mu.Lock()
 	_, admitted := tn.tr.bySPKI[shared]
 	_, other := tn.tr.bySPKI[[32]byte{3}]
@@ -471,10 +489,10 @@ func pinsOf(ns []*tcpNode) [][32]byte {
 // An answer whose membership does not list the responder under its key is
 // a forged one: the joiner does not install it (review M4).
 func TestJoinAnswerMustListTheResponder(t *testing.T) {
-	if joinAnswerListsPeer(coreconsensus.Membership{Members: []coreconsensus.Member{{ID: 1, SPKI: [32]byte{1}}}}, [32]byte{2}) {
+	if joinAnswerListsPeer(coreconsensus.MembershipValue{Members: []coreconsensus.MemberValue{{ID: 1, SPKI: [32]byte{1}}}}, [32]byte{2}) {
 		t.Fatal("a membership without the responder's key was accepted")
 	}
-	if !joinAnswerListsPeer(coreconsensus.Membership{Members: []coreconsensus.Member{{ID: 1, SPKI: [32]byte{1}}}}, [32]byte{1}) {
+	if !joinAnswerListsPeer(coreconsensus.MembershipValue{Members: []coreconsensus.MemberValue{{ID: 1, SPKI: [32]byte{1}}}}, [32]byte{1}) {
 		t.Fatal("a membership listing the responder was refused")
 	}
 }

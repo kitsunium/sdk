@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"hash/crc32"
 	"math"
+	"slices"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
@@ -15,13 +16,22 @@ import (
 // counts the bytes AFTER the length field. The two high bits of type are the
 // lane.
 const (
-	frameHeaderLen  = 14
-	frameVersion1   = 1
-	tokenVersion1   = 1
-	tokenLen        = 41
-	metaVersion1    = 1
-	entryFixedLen   = 8 + 8 + 1 + 4 + 4 + 4 + 4
-	messageFixedLen = 1 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 8 + 8 + 8 + 8 + 8 + 4 + 4
+	// frameHeaderLen is the frozen header: length, version, type, group.
+	frameHeaderLen int = 14
+	// frameVersion1 is the only frame version this node writes and parses.
+	frameVersion1 byte = 1
+	// tokenVersion1 is the leading byte of every token this node mints.
+	tokenVersion1 byte = 1
+	// tokenLen is a token's whole length: version, ClusterID, three uint64.
+	tokenLen int = 41
+	// metaVersion1 is the leading byte of an encoded SnapshotMeta.
+	metaVersion1 byte = 1
+	// entryFixedLen is an entry's header before its data: term, index,
+	// kind, version, body sum, chain sum and data length.
+	entryFixedLen = 8 + 8 + 1 + 4 + 4 + 4 + 4
+	// messageFixedLen is a message body's fixed part after the frame
+	// header, up to and including its entry count.
+	messageFixedLen int = 1 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 8 + 8 + 8 + 8 + 8 + 4 + 4
 )
 
 // castagnoli is the CRC-32C table every checksum of the domain uses.
@@ -34,7 +44,7 @@ func BodySum(data []byte) uint32 { return crc32.Checksum(data, castagnoli) }
 // ChainSum returns the chain value of an entry: the CRC-32C of the previous
 // entry's chain value and of this entry's header fields. The LEADER computes
 // it at its serialized append point; followers verify it.
-func ChainSum(prev uint32, e *coreconsensus.Entry) uint32 {
+func ChainSum(prev uint32, e *coreconsensus.EntryValue) uint32 {
 	var b [4 + 8 + 8 + 1 + 4 + 4]byte
 	binary.LittleEndian.PutUint32(b[0:], prev)
 	binary.LittleEndian.PutUint64(b[4:], e.Position.Term)
@@ -55,7 +65,7 @@ func Lane(frame []byte) (coreconsensus.FrameLane, error) {
 }
 
 // AppendMessage appends m's encoding, frame header included, to dst.
-func AppendMessage(dst []byte, m *coreconsensus.Message) []byte {
+func AppendMessage(dst []byte, m *coreconsensus.MessageValue) []byte {
 	start := len(dst)
 	dst = binary.LittleEndian.AppendUint32(dst, 0)
 	dst = append(dst, frameVersion1, byte(m.Kind))
@@ -83,7 +93,7 @@ func AppendMessage(dst []byte, m *coreconsensus.Message) []byte {
 }
 
 // appendEntry appends one entry's wire form.
-func appendEntry(dst []byte, e *coreconsensus.Entry) []byte {
+func appendEntry(dst []byte, e *coreconsensus.EntryValue) []byte {
 	dst = binary.LittleEndian.AppendUint64(dst, e.Position.Term)
 	dst = binary.LittleEndian.AppendUint64(dst, e.Position.Index)
 	dst = append(dst, byte(e.Kind))
@@ -98,7 +108,7 @@ func appendEntry(dst []byte, e *coreconsensus.Entry) []byte {
 // data aliases frame: it is valid while frame is. A frame that does not parse
 // is FRAME_INVALID; a frame version this node does not know is
 // VERSION_UNSUPPORTED.
-func ParseMessage(frame []byte, m *coreconsensus.Message) error {
+func ParseMessage(frame []byte, m *coreconsensus.MessageValue) error {
 	if len(frame) < frameHeaderLen {
 		return frameInvalid("short header", len(frame))
 	}
@@ -114,49 +124,49 @@ func ParseMessage(frame []byte, m *coreconsensus.Message) error {
 		return errs.Wrap(coreconsensus.VersionUnsupported, errs.WrapParams{},
 			errs.Int("message_kind", int(kind)))
 	}
-	b := frame[frameHeaderLen:]
-	if len(b) < messageFixedLen {
+	body := frame[frameHeaderLen:]
+	if len(body) < messageFixedLen {
 		return frameInvalid("short body", len(frame))
 	}
-	if b[49] > 1 {
+	if body[49] > 1 {
 		// One encoding per value: a non-canonical bool is refused, so an
 		// accepted frame always encodes back to its own bytes.
 		return frameInvalid("reject flag", len(frame))
 	}
 	entries := m.Entries[:0]
-	*m = coreconsensus.Message{
+	*m = coreconsensus.MessageValue{
 		Version:        frame[4],
 		Kind:           kind,
 		Group:          coreconsensus.GroupID(binary.LittleEndian.Uint64(frame[6:])),
-		Flags:          coreconsensus.MessageFlags(b[0]),
-		From:           coreconsensus.NodeID(binary.LittleEndian.Uint64(b[1:])),
-		To:             coreconsensus.NodeID(binary.LittleEndian.Uint64(b[9:])),
-		Term:           binary.LittleEndian.Uint64(b[17:]),
-		LogTerm:        binary.LittleEndian.Uint64(b[25:]),
-		Index:          binary.LittleEndian.Uint64(b[33:]),
-		Commit:         binary.LittleEndian.Uint64(b[41:]),
-		Reject:         b[49] != 0,
-		RejectHint:     binary.LittleEndian.Uint64(b[50:]),
-		Context:        binary.LittleEndian.Uint64(b[58:]),
-		TransferIssuer: coreconsensus.NodeID(binary.LittleEndian.Uint64(b[66:])),
-		TransferTerm:   binary.LittleEndian.Uint64(b[74:]),
-		Contract:       binary.LittleEndian.Uint64(b[82:]),
-		Code:           errs.Code(binary.LittleEndian.Uint32(b[90:])),
+		Flags:          coreconsensus.MessageFlags(body[0]),
+		From:           coreconsensus.NodeID(binary.LittleEndian.Uint64(body[1:])),
+		To:             coreconsensus.NodeID(binary.LittleEndian.Uint64(body[9:])),
+		Term:           binary.LittleEndian.Uint64(body[17:]),
+		LogTerm:        binary.LittleEndian.Uint64(body[25:]),
+		Index:          binary.LittleEndian.Uint64(body[33:]),
+		Commit:         binary.LittleEndian.Uint64(body[41:]),
+		Reject:         body[49] != 0,
+		RejectHint:     binary.LittleEndian.Uint64(body[50:]),
+		Context:        binary.LittleEndian.Uint64(body[58:]),
+		TransferIssuer: coreconsensus.NodeID(binary.LittleEndian.Uint64(body[66:])),
+		TransferTerm:   binary.LittleEndian.Uint64(body[74:]),
+		Contract:       binary.LittleEndian.Uint64(body[82:]),
+		Code:           errs.Code(binary.LittleEndian.Uint32(body[90:])),
 	}
-	n := binary.LittleEndian.Uint32(b[94:])
-	b = b[messageFixedLen:]
-	if uint64(n)*entryFixedLen > uint64(len(b)) {
+	n := binary.LittleEndian.Uint32(body[94:])
+	body = body[messageFixedLen:]
+	if uint64(n)*entryFixedLen > uint64(len(body)) {
 		return frameInvalid("entry count", len(frame))
 	}
-	for i := uint32(0); i < n; i++ {
-		var e coreconsensus.Entry
+	for range n {
+		var e coreconsensus.EntryValue
 		var err error
-		if b, err = parseEntry(b, &e); err != nil {
+		if body, err = parseEntry(body, &e); err != nil {
 			return err
 		}
 		entries = append(entries, e)
 	}
-	if len(b) != 0 {
+	if len(body) != 0 {
 		return frameInvalid("trailing bytes", len(frame))
 	}
 	m.Entries = entries
@@ -164,7 +174,7 @@ func ParseMessage(frame []byte, m *coreconsensus.Message) error {
 }
 
 // parseEntry decodes one entry from the head of b and returns the rest.
-func parseEntry(b []byte, e *coreconsensus.Entry) ([]byte, error) {
+func parseEntry(b []byte, e *coreconsensus.EntryValue) ([]byte, error) {
 	if len(b) < entryFixedLen {
 		return nil, frameInvalid("short entry", len(b))
 	}
@@ -185,7 +195,7 @@ func parseEntry(b []byte, e *coreconsensus.Entry) ([]byte, error) {
 
 // AppendToken appends the 41-byte encoding of t: a version byte, the
 // ClusterID, then epoch, term and index as big-endian uint64.
-func AppendToken(dst []byte, t coreconsensus.Token) []byte {
+func AppendToken(dst []byte, t coreconsensus.TokenValue) []byte {
 	dst = append(dst, tokenVersion1)
 	dst = append(dst, t.Cluster[:]...)
 	dst = binary.BigEndian.AppendUint64(dst, t.Epoch)
@@ -194,11 +204,11 @@ func AppendToken(dst []byte, t coreconsensus.Token) []byte {
 }
 
 // ParseToken decodes a token; another length or version is FRAME_INVALID.
-func ParseToken(b []byte) (coreconsensus.Token, error) {
+func ParseToken(b []byte) (coreconsensus.TokenValue, error) {
 	if len(b) != tokenLen || b[0] != tokenVersion1 {
-		return coreconsensus.Token{}, frameInvalid("token", len(b))
+		return coreconsensus.TokenValue{}, frameInvalid("token", len(b))
 	}
-	var t coreconsensus.Token
+	var t coreconsensus.TokenValue
 	copy(t.Cluster[:], b[1:17])
 	t.Epoch = binary.BigEndian.Uint64(b[17:])
 	t.Term = binary.BigEndian.Uint64(b[25:])
@@ -207,7 +217,7 @@ func ParseToken(b []byte) (coreconsensus.Token, error) {
 }
 
 // AppendSnapshotMeta appends the versioned encoding of m.
-func AppendSnapshotMeta(dst []byte, m *coreconsensus.SnapshotMeta) []byte {
+func AppendSnapshotMeta(dst []byte, m *coreconsensus.SnapshotMetaValue) []byte {
 	dst = append(dst, metaVersion1)
 	dst = appendString(dst, m.ID)
 	dst = append(dst, m.Version)
@@ -229,7 +239,7 @@ func AppendSnapshotMeta(dst []byte, m *coreconsensus.SnapshotMeta) []byte {
 }
 
 // ParseSnapshotMeta decodes a SnapshotMeta, copying every byte it keeps.
-func ParseSnapshotMeta(b []byte, m *coreconsensus.SnapshotMeta) error {
+func ParseSnapshotMeta(b []byte, m *coreconsensus.SnapshotMetaValue) error {
 	r := reader{b: b}
 	if v := r.u8(); v != metaVersion1 {
 		if r.err != nil {
@@ -238,7 +248,7 @@ func ParseSnapshotMeta(b []byte, m *coreconsensus.SnapshotMeta) error {
 		return errs.Wrap(coreconsensus.VersionUnsupported, errs.WrapParams{},
 			errs.Int("snapshot_meta_version", int(v)))
 	}
-	var out coreconsensus.SnapshotMeta
+	var out coreconsensus.SnapshotMetaValue
 	out.ID = r.str()
 	out.Version = r.u8()
 	out.Position.Term = r.u64()
@@ -255,7 +265,11 @@ func ParseSnapshotMeta(b []byte, m *coreconsensus.SnapshotMeta) error {
 	out.ClusterVersion = r.u32()
 	out.ClusterGeneration = r.u64()
 	out.NoSpace = coreconsensus.AlarmID(r.u64())
-	out.Reserved = append([]byte(nil), r.bytes()...)
+	// An empty field stays nil, as the decoder always produced it, so a
+	// decoded meta compares equal to the one that was encoded.
+	if reserved := r.bytes(); len(reserved) != 0 {
+		out.Reserved = slices.Clone(reserved)
+	}
 	if r.err == nil && len(r.b) != 0 {
 		r.err = frameInvalid("snapshot meta trailing bytes", len(b))
 	}
@@ -268,7 +282,7 @@ func ParseSnapshotMeta(b []byte, m *coreconsensus.SnapshotMeta) error {
 
 // AppendMembership appends the encoding of a membership, the payload of an
 // EntryMembership and a part of SnapshotMeta.
-func AppendMembership(dst []byte, m *coreconsensus.Membership) []byte {
+func AppendMembership(dst []byte, m *coreconsensus.MembershipValue) []byte {
 	dst = binary.LittleEndian.AppendUint64(dst, m.Index)
 	dst = binary.LittleEndian.AppendUint32(dst, uint32(len(m.Members)))
 	for i := range m.Members {
@@ -290,7 +304,7 @@ func AppendMembership(dst []byte, m *coreconsensus.Membership) []byte {
 }
 
 // ParseMembership decodes a membership encoded by AppendMembership.
-func ParseMembership(b []byte) (coreconsensus.Membership, error) {
+func ParseMembership(b []byte) (coreconsensus.MembershipValue, error) {
 	r := reader{b: b}
 	m := r.membership()
 	if r.err == nil && len(r.b) != 0 {
@@ -300,7 +314,7 @@ func ParseMembership(b []byte) (coreconsensus.Membership, error) {
 }
 
 // AppendTimingContract appends the encoding of a timing contract.
-func AppendTimingContract(dst []byte, c coreconsensus.TimingContract) []byte {
+func AppendTimingContract(dst []byte, c coreconsensus.TimingContractSpec) []byte {
 	dst = binary.LittleEndian.AppendUint64(dst, c.Generation)
 	dst = binary.LittleEndian.AppendUint64(dst, uint64(c.HeartbeatInterval))
 	dst = binary.LittleEndian.AppendUint64(dst, uint64(c.ElectionTimeoutMin))
@@ -309,7 +323,7 @@ func AppendTimingContract(dst []byte, c coreconsensus.TimingContract) []byte {
 }
 
 // ParseTimingContract decodes a timing contract.
-func ParseTimingContract(b []byte) (coreconsensus.TimingContract, error) {
+func ParseTimingContract(b []byte) (coreconsensus.TimingContractSpec, error) {
 	r := reader{b: b}
 	c := r.timing()
 	if r.err == nil && len(r.b) != 0 {
@@ -319,7 +333,7 @@ func ParseTimingContract(b []byte) (coreconsensus.TimingContract, error) {
 }
 
 // appendLogIdentity appends the encoding of a log identity.
-func appendLogIdentity(dst []byte, l coreconsensus.LogIdentity) []byte {
+func appendLogIdentity(dst []byte, l coreconsensus.LogIdentityValue) []byte {
 	dst = append(dst, l.Cluster[:]...)
 	dst = binary.LittleEndian.AppendUint64(dst, l.Epoch)
 	dst = append(dst, l.Predecessor[:]...)
@@ -374,6 +388,7 @@ func (r *reader) n(k int) []byte {
 	return out
 }
 
+// u8 reads one byte, 0 once a read failed.
 func (r *reader) u8() uint8 {
 	if b := r.n(1); b != nil {
 		return b[0]
@@ -390,6 +405,7 @@ func (r *reader) flag() bool {
 	return v == 1
 }
 
+// u32 reads a little-endian uint32, 0 once a read failed.
 func (r *reader) u32() uint32 {
 	if b := r.n(4); b != nil {
 		return binary.LittleEndian.Uint32(b)
@@ -397,6 +413,7 @@ func (r *reader) u32() uint32 {
 	return 0
 }
 
+// u64 reads a little-endian uint64, 0 once a read failed.
 func (r *reader) u64() uint64 {
 	if b := r.n(8); b != nil {
 		return binary.LittleEndian.Uint64(b)
@@ -404,6 +421,8 @@ func (r *reader) u64() uint64 {
 	return 0
 }
 
+// bytes reads a u32-length-prefixed field; the result aliases the input,
+// and a length past the end fails the reader rather than allocating.
 func (r *reader) bytes() []byte {
 	n := r.u32()
 	if uint64(n) > uint64(len(r.b)) {
@@ -413,10 +432,12 @@ func (r *reader) bytes() []byte {
 	return r.n(int(n))
 }
 
+// str reads a u32-length-prefixed string, copying it out of the input.
 func (r *reader) str() string { return string(r.bytes()) }
 
-func (r *reader) logIdentity() coreconsensus.LogIdentity {
-	var l coreconsensus.LogIdentity
+// logIdentity reads the layout appendLogIdentity writes.
+func (r *reader) logIdentity() coreconsensus.LogIdentityValue {
+	var l coreconsensus.LogIdentityValue
 	copy(l.Cluster[:], r.n(16))
 	l.Epoch = r.u64()
 	copy(l.Predecessor[:], r.n(16))
@@ -425,8 +446,9 @@ func (r *reader) logIdentity() coreconsensus.LogIdentity {
 	return l
 }
 
-func (r *reader) timing() coreconsensus.TimingContract {
-	var c coreconsensus.TimingContract
+// timing reads the layout AppendTimingContract writes.
+func (r *reader) timing() coreconsensus.TimingContractSpec {
+	var c coreconsensus.TimingContractSpec
 	c.Generation = r.u64()
 	c.HeartbeatInterval = time.Duration(r.u64())
 	c.ElectionTimeoutMin = time.Duration(r.u64())
@@ -435,8 +457,11 @@ func (r *reader) timing() coreconsensus.TimingContract {
 	return c
 }
 
-func (r *reader) membership() coreconsensus.Membership {
-	var m coreconsensus.Membership
+// membership reads the layout AppendMembership writes. Both counts are
+// bounded by the bytes left before anything is allocated, so a forged count
+// fails the frame instead of reserving memory for it.
+func (r *reader) membership() coreconsensus.MembershipValue {
+	var m coreconsensus.MembershipValue
 	m.Index = r.u64()
 	n := r.u32()
 	if uint64(n) > uint64(len(r.b)) {
@@ -444,7 +469,7 @@ func (r *reader) membership() coreconsensus.Membership {
 		return m
 	}
 	for i := uint32(0); i < n && r.err == nil; i++ {
-		var x coreconsensus.Member
+		var x coreconsensus.MemberValue
 		x.ID = coreconsensus.NodeID(r.u64())
 		copy(x.Incarnation[:], r.n(16))
 		x.Slot = r.str()
@@ -461,7 +486,7 @@ func (r *reader) membership() coreconsensus.Membership {
 		r.err = frameInvalid("retired count", len(r.b))
 		return m
 	}
-	for i := uint32(0); i < k; i++ {
+	for range k {
 		m.Retired = append(m.Retired, coreconsensus.NodeID(r.u64()))
 	}
 	return m

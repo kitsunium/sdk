@@ -502,6 +502,28 @@ rules:
       # file alone, the bench's two signatures, nothing else of the package.
       - "**/internal/kernel/collections/heap/heap_bench_test.go"
       - "internal/kernel/collections/heap/heap_bench_test.go"
+    # Function-level, never a file: the consensus StateMachine port fixes
+    # Apply's result to `any` (the value the caller's machine computed, handed
+    # back to the proposer unchanged), and Replicated fixes Propose's — both
+    # frozen ports (ADR 0039), with ProposeAs[T] as the typed sibling. Each
+    # entry below implements one of those signatures or carries that value
+    # unchanged to the waiter (submit, applied1); no narrower type exists.
+    # False positive reported as kodflow/ktn-linter#726: the rule exempts
+    # implementations of stdlib interfaces only. RETIRE these entries when it
+    # ships, and re-run the linter on the consensus tree.
+    exclude_functions:
+      - "**/internal/service/app/consensus/ops.go:Node.Propose"
+      - "internal/service/app/consensus/ops.go:Node.Propose"
+      - "**/internal/service/app/consensus/ops.go:Node.submit"
+      - "internal/service/app/consensus/ops.go:Node.submit"
+      - "**/internal/service/app/consensus/apply.go:Node.applied1"
+      - "internal/service/app/consensus/apply.go:Node.applied1"
+      - "**/internal/service/app/consensus/cluster_internal_test.go:kv.Apply"
+      - "internal/service/app/consensus/cluster_internal_test.go:kv.Apply"
+      - "**/internal/service/app/consensus/cluster_internal_test.go:gatedKV.Apply"
+      - "internal/service/app/consensus/cluster_internal_test.go:gatedKV.Apply"
+      - "**/pkg/v1/app/consensus/consensus_external_test.go:counter.Apply"
+      - "pkg/v1/app/consensus/consensus_external_test.go:counter.Apply"
 
   # KTN-API-MINIF (info) — "prefer the narrowest interface for this parameter".
   #

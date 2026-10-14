@@ -10,9 +10,29 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
+// The facts a Raft holds, one bit each in raftFacts: set with |=, cleared
+// with &^= and read with &, plain operators that keep the step function's
+// small methods within the inliner's budget.
+const (
+	// raftSelfVoteDurable is set once the write that carries this
+	// candidate's own vote is durable: its vote counts from then on (D5b).
+	raftSelfVoteDurable raftFacts = 1 << iota
+	// raftTransferSent is set once TimeoutNow left for the transfer target.
+	raftTransferSent
+	// raftLeaseDropped is set when the lease must not be served until a new
+	// round confirms leadership (D9).
+	raftLeaseDropped
+	// raftOverloaded is the driver's apply backpressure, set each turn: a
+	// forwarded command is refused while it holds, as a local one is.
+	raftOverloaded
+)
+
 // ProtocolMax is the highest protocol version this engine speaks: a cluster
 // version above it is refused, and stops a node that finds it committed.
 const ProtocolMax uint32 = 1
+
+// raftFacts are the step function's own yes/no state, one bit each.
+type raftFacts uint8
 
 // Config is what the step function needs from its driver. Every bound is
 // already clamped and validated by the engine.
@@ -22,11 +42,11 @@ type Config struct {
 	// Group is the consensus group.
 	Group core.GroupID
 	// Log is the identity of the log, checked against an admin precondition.
-	Log core.LogIdentity
+	Log core.LogIdentityValue
 	// Seed draws the randomized election timeouts.
 	Seed uint64
 	// Timing is the committed timing contract at start.
-	Timing core.TimingContract
+	Timing core.TimingContractSpec
 	// MaxInflight bounds the appends in flight per peer.
 	MaxInflight int
 	// MaxInflightBytes bounds their bytes.
@@ -74,16 +94,24 @@ type fwdEntry struct {
 
 // SetOverloaded tells the state machine whether the driver refuses new
 // commands for apply backpressure (D6): forwarded ones are refused too.
-func (r *Raft) SetOverloaded(on bool) { r.overloaded = on }
+func (r *Raft) SetOverloaded(on bool) {
+	if on {
+		r.facts |= raftOverloaded
+		return
+	}
+	r.facts &^= raftOverloaded
+}
 
-// Start is the durable state the driver loaded.
-type Start struct {
+// StartState is the durable state the driver loaded from its store at
+// boot. NewRaft rebuilds the step function from it alone, so a restart
+// depends on nothing held in memory.
+type StartState struct {
 	// HardState is the last hard state on disk.
 	HardState core.HardState
 	// Snapshot is the base the log continues, zero for none.
-	Snapshot core.SnapshotMeta
+	Snapshot core.SnapshotMetaValue
 	// Entries are the durable entries after the snapshot.
-	Entries []core.Entry
+	Entries []core.EntryValue
 	// Applied is where the state machine resumes, at least the snapshot.
 	Applied uint64
 	// Now is the start instant: the restart vote-refusal window opens here.
@@ -98,14 +126,18 @@ type ReadState struct {
 	Code    errs.Code
 }
 
-// TransferResult ends a leadership transfer this node started.
+// TransferResult ends a leadership transfer this node started. A zero Code
+// means TimeoutNow was sent to To; TRANSFER_FAILED means it was not, before
+// the deadline or before leadership was lost.
 type TransferResult struct {
 	To   core.NodeID
 	Code errs.Code
 }
 
-// Ready is what the driver must do after a turn.
-type Ready struct {
+// ReadyValue is what the driver must do after a turn: write, then send.
+// Nothing in AfterSync leaves before the write numbered Seq is durable
+// (D5b).
+type ReadyValue struct {
 	// Seq names the write when there is one; completions carry it.
 	Seq uint64
 	// HardState is set when the term or the vote changed: it is durable
@@ -116,19 +148,19 @@ type Ready struct {
 	// TruncateFrom removes every entry from that index on, before Entries.
 	TruncateFrom uint64
 	// Entries are appended after the truncation.
-	Entries []core.Entry
+	Entries []core.EntryValue
 	// Messages leave at once.
-	Messages []core.Message
+	Messages []core.MessageValue
 	// AfterSync leave once this write is durable.
-	AfterSync []core.Message
+	AfterSync []core.MessageValue
 	// Apply are committed, locally durable entries, in order.
-	Apply []core.Entry
+	Apply []core.EntryValue
 	// SendSnapshot names the peers that need a snapshot.
 	SendSnapshot []core.NodeID
 	// ReadStates answer reads.
 	ReadStates []ReadState
 	// Forwarded are answers to this node's forwarded proposals.
-	Forwarded []core.Message
+	Forwarded []core.MessageValue
 	// Transfers end transfers.
 	Transfers []TransferResult
 	// Compact drops the log's prefix through that index, which a durable
@@ -139,35 +171,41 @@ type Ready struct {
 	SilenceEnded bool
 	// Fetch asks the driver to read entries the step function no longer
 	// holds, off the event loop, and hand them back with Fetched.
-	Fetch []FetchRequest
+	Fetch []FetchSpec
 	// Membership is set when the admitted set changed.
-	Membership []core.Member
+	Membership []core.MemberValue
 	// Unsupported names an entry whose kind this version does not know:
 	// the driver stops the node with VERSION_UNSUPPORTED.
-	Unsupported UnsupportedEntry
+	Unsupported UnsupportedEntryValue
+	// ChainRefusedBy names, once per refusal, the leader whose append this
+	// follower refused for a broken chain, for D13's
+	// consensus_chain_refusals_total.
+	ChainRefusedBy []core.NodeID
 }
 
-// UnsupportedEntry is an entry a leader sent that this version cannot
+// UnsupportedEntryValue is an entry a leader sent that this version cannot
 // apply; Index is 0 when there is none.
-type UnsupportedEntry struct {
+type UnsupportedEntryValue struct {
 	Index uint64
 	Kind  core.EntryKind
 }
 
-// FetchRequest asks for the entries [Lo, Hi) of the store for a peer.
-type FetchRequest struct {
+// FetchSpec asks for the entries [Lo, Hi) of the store for a peer, whose
+// payloads the step function evicted. The driver reads them off the event
+// loop and hands them back with Fetched.
+type FetchSpec struct {
 	To     core.NodeID
 	Lo, Hi uint64
 }
 
 // NeedsWrite reports whether the Ready asks the storage actor for anything.
-func (rd *Ready) NeedsWrite() bool {
+func (rd *ReadyValue) NeedsWrite() bool {
 	return rd.HardState != nil || rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.AfterSync) != 0 || rd.Commit != 0
 }
 
 type confAt struct {
 	index uint64
-	m     core.Membership
+	m     core.MembershipValue
 }
 
 type readReq struct {
@@ -191,9 +229,10 @@ type Raft struct {
 	rng *rand.Rand
 	mut mutation
 
-	// overloaded is the driver's apply backpressure, set each turn: a
-	// forwarded command is refused while it holds, as a local one is.
-	overloaded bool
+	// facts are the step function's yes/no state (raftFacts): the vote
+	// counted once durable, the transfer sent, the lease dropped, and the
+	// driver's apply backpressure.
+	facts raftFacts
 	// fwd lists the forwarded commands appended in fwdTerm and not yet
 	// known committed, with fwdBytes their payload total.
 	fwd      []fwdEntry
@@ -208,7 +247,7 @@ type Raft struct {
 
 	log memLog
 
-	base  core.Membership
+	base  core.MembershipValue
 	confs []confAt
 
 	prs   map[core.NodeID]*progress
@@ -221,22 +260,19 @@ type Raft struct {
 
 	// selfVoteSeq is the write that carries this candidate's own vote; its
 	// vote counts once that write is durable (D5b).
-	selfVoteSeq     uint64
-	selfVoteDurable bool
+	selfVoteSeq uint64
 
 	// termStart is the index of this leader's no-op.
 	termStart uint64
 
 	transferTo       core.NodeID
-	transferSent     bool
 	transferDeadline time.Time
-	leaseDropped     bool
 	leaseStart       time.Time
 	// leaseLen is the lease the last confirmed round grants: computed
 	// from the minimum timing contract over the acknowledging majority,
 	// never from the leader's newer view (D9 d).
 	leaseLen  time.Duration
-	contracts map[uint64]core.TimingContract
+	contracts map[uint64]core.TimingContractSpec
 	// campaignTransfer is the flag the current campaign carries.
 	campaignIssuer core.NodeID
 	campaignTerm   uint64
@@ -246,7 +282,7 @@ type Raft struct {
 	pendingReads []readReq
 	waitingReads []readReq
 
-	timing      core.TimingContract
+	timing      core.TimingContractSpec
 	voteWindow  time.Duration
 	clusterVer  uint32
 	clusterGen  uint64
@@ -257,14 +293,14 @@ type Raft struct {
 	refusals    int
 
 	seq uint64
-	rd  Ready
+	rd  ReadyValue
 	hs  core.HardState
 }
 
-// New builds the step function over the loaded state.
-func New(cfg Config, st Start) *Raft {
-	r := &Raft{
-		cfg:    cfg,
+// NewRaft builds the step function over the loaded state.
+func NewRaft(cfg *Config, st *StartState) *Raft {
+	node := &Raft{
+		cfg:    *cfg,
 		mut:    cfg.mut,
 		rng:    rand.New(rand.NewPCG(cfg.Seed, uint64(cfg.ID))),
 		id:     cfg.ID,
@@ -276,42 +312,42 @@ func New(cfg Config, st Start) *Raft {
 		now:    st.Now,
 	}
 	sm := st.Snapshot
-	r.log = memLog{snapIndex: sm.Position.Index, snapTerm: sm.Position.Term, snapChain: sm.ChainTip}
-	r.base = sm.Membership.Clone()
-	r.base.Index = sm.Position.Index
-	if sm.Timing.Generation > r.timing.Generation {
-		r.timing = sm.Timing
+	node.log = memLog{snapIndex: sm.Position.Index, snapTerm: sm.Position.Term, snapChain: sm.ChainTip}
+	node.base = sm.Membership.Clone()
+	node.base.Index = sm.Position.Index
+	if sm.Timing.Generation > node.timing.Generation {
+		node.timing = sm.Timing
 	}
-	r.clusterVer, r.clusterGen, r.noSpace = sm.ClusterVersion, sm.ClusterGeneration, sm.NoSpace
-	r.voteWindow = r.timing.ElectionTimeoutMin
-	r.contracts = map[uint64]core.TimingContract{r.timing.Generation: r.timing}
+	node.clusterVer, node.clusterGen, node.noSpace = sm.ClusterVersion, sm.ClusterGeneration, sm.NoSpace
+	node.voteWindow = node.timing.ElectionTimeoutMin
+	node.contracts = map[uint64]core.TimingContractSpec{node.timing.Generation: node.timing}
 	for _, e := range st.Entries {
-		if e.Position.Index <= r.log.snapIndex {
+		if e.Position.Index <= node.log.snapIndex {
 			continue
 		}
-		r.log.ents = append(r.log.ents, e)
-		r.log.window += int64(len(e.Data))
-		r.noteAppended(&e)
+		node.log.ents = append(node.log.ents, e)
+		node.log.window += int64(len(e.Data))
+		node.noteAppended(&e)
 	}
-	r.log.stable = r.log.lastIndex()
-	r.log.committed = min(max(st.HardState.Commit, r.log.snapIndex), r.log.lastIndex())
-	r.log.applied = max(st.Applied, r.log.snapIndex)
-	r.log.applied = min(r.log.applied, r.log.committed)
-	r.applyCommitEffects(r.log.snapIndex+1, r.log.committed)
-	r.hs = core.HardState{Term: r.term, Vote: r.vote, Commit: r.log.committed}
-	r.role = core.RoleFollower
-	if !r.isVoter(r.id) {
-		r.role = core.RoleLearner
+	node.log.stable = node.log.lastIndex()
+	node.log.committed = min(max(st.HardState.Commit, node.log.snapIndex), node.log.lastIndex())
+	node.log.applied = max(st.Applied, node.log.snapIndex)
+	node.log.applied = min(node.log.applied, node.log.committed)
+	node.applyCommitEffects(node.log.snapIndex+1, node.log.committed)
+	node.hs = core.HardState{Term: node.term, Vote: node.vote, Commit: node.log.committed}
+	node.role = core.RoleFollower
+	if !node.isVoter(node.id) {
+		node.role = core.RoleLearner
 	}
 	// A node that starts behaves as if it had just heard from a leader: it
 	// refuses votes for one window (D5, from raft-sql-poc).
-	r.lastLeaderContact = st.Now
-	if r.mutated(mutNoRestartRefusal) {
-		r.lastLeaderContact = time.Time{}
+	node.lastLeaderContact = st.Now
+	if node.mutated(mutNoRestartRefusal) {
+		node.lastLeaderContact = time.Time{}
 	}
-	r.resetElection(st.Now)
-	r.rd.Membership = r.admitted()
-	return r
+	node.resetElection(st.Now)
+	node.rd.Membership = node.admitted()
+	return node
 }
 
 // ---- inputs ----
@@ -333,18 +369,10 @@ func (r *Raft) Tick(now time.Time) {
 
 // StorageDone reports that the write seq is durable through (index, term).
 func (r *Raft) StorageDone(seq, index, term uint64) {
-	if r.selfVoteSeq != 0 && seq >= r.selfVoteSeq {
-		r.selfVoteSeq = 0
-		if r.role == core.RoleCandidate {
-			r.selfVoteDurable = true
-			r.votes[r.id] = true
-			r.tallyVotes()
-		}
-	}
-	if index == 0 || index <= r.log.stable {
-		return
-	}
-	if !r.mutated(mutStaleCompletion) && !r.log.matchTerm(index, term) {
+	r.noteSelfVote(seq)
+	// A completion that moves nothing, or that a truncation superseded,
+	// counts for nothing.
+	if index == 0 || index <= r.log.stable || (!r.mutated(mutStaleCompletion) && !r.log.matchTerm(index, term)) {
 		return
 	}
 	r.log.stable = min(index, r.log.lastIndex())
@@ -358,9 +386,18 @@ func (r *Raft) StorageDone(seq, index, term uint64) {
 	}
 }
 
-// Applied reports how far the state machine applied.
-func (r *Raft) Applied(index uint64) {
-	_ = index // the driver keeps applied; the step function hands out through log.applied
+// noteSelfVote counts this candidate's own vote once the write seq that
+// carries it is durable (D5b), and tallies the campaign then.
+func (r *Raft) noteSelfVote(seq uint64) {
+	if r.selfVoteSeq == 0 || seq < r.selfVoteSeq {
+		return
+	}
+	r.selfVoteSeq = 0
+	if r.role == core.RoleCandidate {
+		r.facts |= raftSelfVoteDurable
+		r.votes[r.id] = true
+		r.tallyVotes()
+	}
 }
 
 // ReportUnreachable moves a peer the transport could not reach to probe.
@@ -380,7 +417,7 @@ func (r *Raft) SnapshotDone(to core.NodeID, ok bool) {
 		pr.pendingSnapshot = 0
 	}
 	pr.becomeProbe()
-	pr.probeSent = true
+	pr.facts |= peerProbeSent
 }
 
 // Compact forgets the entries through index, which a durable snapshot
@@ -414,15 +451,15 @@ func (r *Raft) SetCanVote(v bool) { r.cfg.CanVote = v }
 func (r *Raft) SnapshotIndex() uint64 { return r.log.snapIndex }
 
 // Entry returns the entry at i, if the step function holds it.
-func (r *Raft) Entry(i uint64) (core.Entry, bool) {
+func (r *Raft) Entry(i uint64) (core.EntryValue, bool) {
 	if i <= r.log.snapIndex || i > r.log.lastIndex() || i <= r.log.evicted {
-		return core.Entry{}, false
+		return core.EntryValue{}, false
 	}
 	return *r.log.at(i), true
 }
 
 // ConfAt returns the membership valid at index i.
-func (r *Raft) ConfAt(i uint64) core.Membership { return r.confAt(i).Clone() }
+func (r *Raft) ConfAt(i uint64) core.MembershipValue { return r.confAt(i).Clone() }
 
 // ChainAt returns the chain value at i.
 func (r *Raft) ChainAt(i uint64) uint32 { return r.log.chain(i) }
@@ -432,26 +469,27 @@ func (r *Raft) TermAt(i uint64) (uint64, bool) { return r.log.term(i) }
 
 // ---- status ----
 
-// Status is the step function's part of a node's status.
-type Status struct {
+// StatusValue is the step function's part of a node's status. It is a copy:
+// its memberships are cloned, so the caller may keep it.
+type StatusValue struct {
 	Role      core.Role
 	Term      uint64
 	Lead      core.NodeID
 	Commit    uint64
 	Last      uint64
 	Stable    uint64
-	Timing    core.TimingContract
+	Timing    core.TimingContractSpec
 	Cluster   uint32
 	ClusterG  uint64
 	NoSpace   core.AlarmID
-	Conf      core.Membership
-	Committed core.Membership
+	Conf      core.MembershipValue
+	Committed core.MembershipValue
 	Transfer  core.NodeID
 }
 
 // Status returns the step function's view.
-func (r *Raft) Status() Status {
-	return Status{
+func (r *Raft) Status() StatusValue {
+	return StatusValue{
 		Role: r.role, Term: r.term, Lead: r.lead, Commit: r.log.committed,
 		Last: r.log.lastIndex(), Stable: r.log.stable, Timing: r.timing,
 		Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace,
@@ -471,10 +509,7 @@ func (r *Raft) Progress(id core.NodeID) (match uint64, lastHeard time.Time, ok b
 
 // LeaseValid reports whether the leader's lease holds at now (D9).
 func (r *Raft) LeaseValid(now time.Time) bool {
-	if !r.cfg.Lease || r.role != core.RoleLeader || r.leaseDropped || r.leaseStart.IsZero() {
-		return false
-	}
-	if r.log.committed < r.termStart {
+	if !r.cfg.Lease || r.role != core.RoleLeader || r.facts&raftLeaseDropped != 0 || r.leaseStart.IsZero() || r.log.committed < r.termStart {
 		return false
 	}
 	return now.Sub(r.leaseStart) < r.leaseLen
@@ -482,33 +517,43 @@ func (r *Raft) LeaseValid(now time.Time) bool {
 
 // DropLease drops the lease for the rest of the term: a loop turn longer than
 // the drift budget (D9).
-func (r *Raft) DropLease() { r.leaseDropped = true }
+func (r *Raft) DropLease() { r.facts |= raftLeaseDropped }
 
 // HasReady reports whether a turn left work for the driver.
 func (r *Raft) HasReady() bool {
 	r.flushReads()
 	rd := &r.rd
-	if r.term != r.hs.Term || r.vote != r.hs.Vote || r.log.committed != r.hs.Commit {
+	// A hard state to write, or committed entries to apply, are work even
+	// with nothing queued (a node with no table applies nothing, D7).
+	if r.term != r.hs.Term || r.vote != r.hs.Vote || r.log.committed != r.hs.Commit ||
+		(r.log.applied < min(r.log.committed, r.log.stable) && !r.cfg.NoTable) {
 		return true
 	}
-	if r.log.applied < min(r.log.committed, r.log.stable) && !r.cfg.NoTable {
-		return true
-	}
-	return rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.Messages) != 0 || len(rd.AfterSync) != 0 ||
-		len(rd.SendSnapshot) != 0 || len(rd.ReadStates) != 0 || len(rd.Forwarded) != 0 ||
+	return rd.hasLogWork() || rd.hasNotices()
+}
+
+// hasLogWork reports whether the Ready queues a log change or a message.
+func (rd *ReadyValue) hasLogWork() bool {
+	return rd.TruncateFrom != 0 || rd.Compact != 0 || len(rd.Entries) != 0 || len(rd.Messages) != 0 || len(rd.AfterSync) != 0
+}
+
+// hasNotices reports whether the Ready queues anything else for the
+// driver: snapshots to send, answers, a membership, fetches, the end of the
+// silence, an entry this version cannot apply.
+func (rd *ReadyValue) hasNotices() bool {
+	return len(rd.SendSnapshot) != 0 || len(rd.ReadStates) != 0 || len(rd.Forwarded) != 0 ||
 		len(rd.Transfers) != 0 || rd.Membership != nil || len(rd.Fetch) != 0 || rd.SilenceEnded ||
 		rd.Unsupported.Index != 0
 }
 
 // Ready returns the work of the turns since the last call and resets it.
-func (r *Raft) Ready() Ready {
+func (r *Raft) Ready() ReadyValue {
 	r.flushReads()
 	rd := r.rd
-	r.rd = Ready{}
+	r.rd = ReadyValue{}
 	hsChanged := r.term != r.hs.Term || r.vote != r.hs.Vote
 	if hsChanged {
-		hs := core.HardState{Term: r.term, Vote: r.vote, Commit: r.log.committed}
-		rd.HardState = &hs
+		rd.HardState = new(core.HardState{Term: r.term, Vote: r.vote, Commit: r.log.committed})
 		// A request at a new term, or a reply that a new vote decided,
 		// waits for the term and the vote to be durable (D5b).
 		rd.AfterSync = append(rd.AfterSync, rd.Messages...)
@@ -524,26 +569,38 @@ func (r *Raft) Ready() Ready {
 		r.log.applied = hi
 	}
 	r.log.evict(r.cfg.RecentEntriesBytes, min(r.log.applied, r.log.stable))
-	if rd.NeedsWrite() {
-		r.seq++
-		rd.Seq = r.seq
-		if hsChanged && r.role == core.RoleCandidate && !r.selfVoteDurable {
-			r.selfVoteSeq = rd.Seq
-		}
-	}
+	r.numberWrite(&rd, hsChanged)
 	return rd
+}
+
+// numberWrite gives a Ready that asks the storage actor for anything the
+// next write sequence number, and remembers it as the write carrying a
+// candidate's own vote when this one persists that vote (D5b).
+func (r *Raft) numberWrite(rd *ReadyValue, hsChanged bool) {
+	if !rd.NeedsWrite() {
+		return
+	}
+	r.seq++
+	rd.Seq = r.seq
+	if hsChanged && r.role == core.RoleCandidate && r.facts&raftSelfVoteDurable == 0 {
+		r.selfVoteSeq = rd.Seq
+	}
 }
 
 // ---- helpers ----
 
-func (r *Raft) conf() *core.Membership {
+// conf is the latest appended configuration, which governs this node from
+// the moment it is appended (D8).
+func (r *Raft) conf() *core.MembershipValue {
 	if n := len(r.confs); n > 0 {
 		return &r.confs[n-1].m
 	}
 	return &r.base
 }
 
-func (r *Raft) confAt(i uint64) *core.Membership {
+// confAt is the configuration in force at index i: the latest appended at
+// or before it, else the snapshot base's.
+func (r *Raft) confAt(i uint64) *core.MembershipValue {
 	for k := len(r.confs) - 1; k >= 0; k-- {
 		if r.confs[k].index <= i {
 			return &r.confs[k].m
@@ -552,13 +609,16 @@ func (r *Raft) confAt(i uint64) *core.Membership {
 	return &r.base
 }
 
+// isVoter reports whether id votes in the current configuration.
 func (r *Raft) isVoter(id core.NodeID) bool {
 	m, ok := r.conf().Member(id)
 	return ok && m.Voter
 }
 
+// voters lists the current configuration's voters, in its order.
 func (r *Raft) voters() []core.NodeID { return r.conf().Voters() }
 
+// quorum is the size of a majority of the current voters.
 func (r *Raft) quorum() int { return len(r.voters())/2 + 1 }
 
 // promotable reports whether this node may campaign: a voter of the current
@@ -568,6 +628,8 @@ func (r *Raft) promotable() bool {
 	return ok && m.Voter && !m.Joining && r.cfg.CanVote && !r.cfg.NoTable
 }
 
+// randomTimeout draws an election timeout in [min, max) from the seeded
+// generator, one draw per call, so a run replays from its seed (D15).
 func (r *Raft) randomTimeout() time.Duration {
 	lo, hi := r.timing.ElectionTimeoutMin, r.timing.ElectionTimeoutMax
 	if hi <= lo {
@@ -576,21 +638,25 @@ func (r *Raft) randomTimeout() time.Duration {
 	return lo + time.Duration(r.rng.Int64N(int64(hi-lo)))
 }
 
+// resetElection arms the election timer at a fresh random timeout from now.
 func (r *Raft) resetElection(now time.Time) { r.electionDeadline = now.Add(r.randomTimeout()) }
 
 // admitted is the transport's admission set: the union of the latest
 // appended configuration and the latest committed one (D4).
-func (r *Raft) admitted() []core.Member {
+func (r *Raft) admitted() []core.MemberValue {
 	out := slices.Clone(r.conf().Members)
 	for _, m := range r.confAt(r.log.committed).Members {
-		if !slices.ContainsFunc(out, func(x core.Member) bool { return x.ID == m.ID }) {
+		if !slices.ContainsFunc(out, func(x core.MemberValue) bool { return x.ID == m.ID }) {
 			out = append(out, m)
 		}
 	}
 	return out
 }
 
-func (r *Raft) send(m core.Message) {
+// send stamps m with this node's identity and term and queues it. An
+// acknowledgement or a vote waits in AfterSync for the write it vouches for
+// (D5b), and a silent node sends no positive acknowledgement at all.
+func (r *Raft) send(m core.MessageValue) {
 	m.Version = 1
 	m.Group = r.cfg.Group
 	m.From = r.id
@@ -603,17 +669,24 @@ func (r *Raft) send(m core.Message) {
 		}
 		m.Flags |= core.FlagTruncated
 	}
-	if (m.Kind == core.MsgAppResp || m.Kind == core.MsgVoteResp) && !r.mutated(mutAckBeforeSync) {
+	if r.waitsForSync(m.Kind) {
 		r.rd.AfterSync = append(r.rd.AfterSync, m)
 		return
 	}
 	r.rd.Messages = append(r.rd.Messages, m)
 }
 
+// waitsForSync reports whether a message of kind vouches for durable state,
+// an append's acknowledgement or a granted vote, and so leaves only after
+// the write (D5b).
+func (r *Raft) waitsForSync(kind core.MessageKind) bool {
+	return (kind == core.MsgAppResp || kind == core.MsgVoteResp) && !r.mutated(mutAckBeforeSync)
+}
+
 // noteAppended records what an appended entry changes at append time: a
 // membership takes effect when appended (D8), and every contract present
 // widens the vote-refusal window (R3-07).
-func (r *Raft) noteAppended(e *core.Entry) {
+func (r *Raft) noteAppended(e *core.EntryValue) {
 	switch e.Kind {
 	case core.EntryMembership:
 		a, err := wire.ParseAdmin(e.Data)
@@ -633,35 +706,48 @@ func (r *Raft) noteAppended(e *core.Entry) {
 				r.voteWindow = c.ElectionTimeoutMin
 			}
 		}
+	default:
+		// Every other kind acts at commit, if at all: applyCommitEffects.
 	}
 }
 
+// confChanged follows a change of the latest configuration: the admission
+// set is republished, a leader tracks exactly the new members, and a
+// follower or learner takes the role the new configuration gives it.
 func (r *Raft) confChanged() {
 	r.rd.Membership = r.admitted()
-	if r.role == core.RoleLeader {
-		conf := r.conf()
-		for _, m := range conf.Members {
-			if r.prs[m.ID] == nil {
-				pr := &progress{next: r.log.lastIndex() + 1}
-				pr.lastHeard = r.now
-				r.prs[m.ID] = pr
-			}
-		}
-		for id := range r.prs {
-			if _, ok := conf.Member(id); !ok {
-				delete(r.prs, id)
-			}
-		}
-		// A configuration change restarts every read round (R2-15).
-		for _, rd := range r.rounds {
-			rd.conf = 0
-		}
-	} else if r.role == core.RoleLearner || r.role == core.RoleFollower {
+	switch r.role {
+	case core.RoleLeader:
+		r.trackMembers()
+	case core.RoleLearner, core.RoleFollower:
 		if r.isVoter(r.id) {
 			r.role = core.RoleFollower
 		} else {
 			r.role = core.RoleLearner
 		}
+	default:
+		// A candidate keeps its role: its campaign ends by itself, and it
+		// takes its role from the configuration when it does.
+	}
+}
+
+// trackMembers gives every new member a progress, drops the progress of
+// every removed one, and restarts every read round (R2-15).
+func (r *Raft) trackMembers() {
+	conf := r.conf()
+	for _, m := range conf.Members {
+		if r.prs[m.ID] == nil {
+			r.prs[m.ID] = &progress{next: r.log.lastIndex() + 1, lastHeard: r.now}
+		}
+	}
+	for id := range r.prs {
+		if _, ok := conf.Member(id); !ok {
+			delete(r.prs, id)
+		}
+	}
+	// A configuration change restarts every read round (R2-15).
+	for _, rd := range r.rounds {
+		rd.conf = 0
 	}
 }
 
@@ -687,7 +773,9 @@ func (r *Raft) truncateFrom(i uint64) {
 	}
 }
 
-func (r *Raft) appendEntries(es []core.Entry) {
+// appendEntries appends es to the log and to the Ready's write, noting what
+// each changes at append time.
+func (r *Raft) appendEntries(es []core.EntryValue) {
 	for i := range es {
 		r.log.ents = append(r.log.ents, es[i])
 		r.log.window += int64(len(es[i].Data))
@@ -697,51 +785,101 @@ func (r *Raft) appendEntries(es []core.Entry) {
 }
 
 // applyCommitEffects applies the engine's own replicated state of the
-// entries newly committed in [lo, hi].
+// entries newly committed in [lo, hi]. It stops at the first entry this
+// version cannot apply, leaving the ones after it untouched.
 func (r *Raft) applyCommitEffects(lo, hi uint64) {
 	for i := max(lo, r.log.snapIndex+1); i <= hi && i <= r.log.lastIndex(); i++ {
-		e := r.log.at(i)
-		switch e.Kind {
-		case core.EntryTimingContract, core.EntryClusterVersion, core.EntryNoSpaceRaise, core.EntryNoSpaceClear:
-		default:
-			continue
-		}
-		a, err := wire.ParseAdmin(e.Data)
-		if err != nil {
-			continue
-		}
-		switch e.Kind {
-		case core.EntryTimingContract:
-			if a.Pre.Generation == r.timing.Generation {
-				c := a.Contract
-				c.Generation = r.timing.Generation + 1
-				r.timing = c
-				r.contracts[c.Generation] = c
-				if c.ElectionTimeoutMin > r.voteWindow {
-					r.voteWindow = c.ElectionTimeoutMin
-				}
-			}
-		case core.EntryClusterVersion:
-			if a.ClusterVersion > ProtocolMax {
-				// Unknown means stop (D18, review M3).
-				r.rd.Unsupported = UnsupportedEntry{Index: i, Kind: e.Kind}
-				return
-			}
-			if a.Pre.Generation == r.clusterGen && a.ClusterVersion > r.clusterVer {
-				r.clusterVer, r.clusterGen = a.ClusterVersion, r.clusterGen+1
-			}
-		case core.EntryNoSpaceRaise:
-			if r.noSpace == 0 {
-				r.noSpace = core.AlarmID(i)
-			}
-		case core.EntryNoSpaceClear:
-			if a.Pre.Alarm == r.noSpace {
-				r.noSpace = 0
-			}
+		if r.applyCommitEffect(i, r.log.at(i)) {
+			return
 		}
 	}
 }
 
+// applyCommitEffect applies the committed entry e at index i to the
+// engine's own replicated state. An engine entry whose payload does not
+// parse changes nothing, whatever its kind. It reports whether the walk
+// must stop because the entry is one this version cannot apply.
+func (r *Raft) applyCommitEffect(i uint64, e *core.EntryValue) bool {
+	if !actsAtCommit(e.Kind) {
+		return false
+	}
+	admin, err := wire.ParseAdmin(e.Data)
+	if err != nil {
+		return false
+	}
+	return r.applyAdmin(i, e.Kind, &admin)
+}
+
+// actsAtCommit reports whether an entry of kind changes the engine's own
+// replicated state when it commits.
+func actsAtCommit(kind core.EntryKind) bool {
+	switch kind {
+	case core.EntryTimingContract, core.EntryClusterVersion, core.EntryNoSpaceRaise, core.EntryNoSpaceClear:
+		return true
+	default:
+		// Commands, no-ops, memberships and transfers carry no state of
+		// the engine's own at commit.
+		return false
+	}
+}
+
+// applyAdmin applies the committed engine entry at index i, of kind, whose
+// payload is admin, and reports whether it is one this version cannot
+// apply, which stops the walk over the committed entries.
+func (r *Raft) applyAdmin(i uint64, kind core.EntryKind, admin *wire.AdminValue) bool {
+	switch kind {
+	case core.EntryTimingContract:
+		r.commitTimingContract(admin)
+	case core.EntryClusterVersion:
+		return r.commitClusterVersion(i, admin)
+	case core.EntryNoSpaceRaise:
+		if r.noSpace == 0 {
+			r.noSpace = core.AlarmID(i)
+		}
+	case core.EntryNoSpaceClear:
+		if admin.Pre.Alarm == r.noSpace {
+			r.noSpace = 0
+		}
+	default:
+		// actsAtCommit admits no other kind.
+	}
+	return false
+}
+
+// commitTimingContract makes a committed contract the current one when it
+// was proposed against the current generation, and widens the vote-refusal
+// window to it.
+func (r *Raft) commitTimingContract(admin *wire.AdminValue) {
+	if admin.Pre.Generation != r.timing.Generation {
+		return
+	}
+	c := admin.Contract
+	c.Generation = r.timing.Generation + 1
+	r.timing = c
+	r.contracts[c.Generation] = c
+	if c.ElectionTimeoutMin > r.voteWindow {
+		r.voteWindow = c.ElectionTimeoutMin
+	}
+}
+
+// commitClusterVersion raises the cluster version a committed entry at
+// index i proposed against the current generation, never lowering it. A
+// version above ProtocolMax is not applied: it is named in the Ready for the
+// driver to stop the node, and true stops the walk there.
+func (r *Raft) commitClusterVersion(i uint64, admin *wire.AdminValue) bool {
+	if admin.ClusterVersion > ProtocolMax {
+		// Unknown means stop (D18, review M3).
+		r.rd.Unsupported = UnsupportedEntryValue{Index: i, Kind: core.EntryClusterVersion}
+		return true
+	}
+	if admin.Pre.Generation == r.clusterGen && admin.ClusterVersion > r.clusterVer {
+		r.clusterVer, r.clusterGen = admin.ClusterVersion, r.clusterGen+1
+	}
+	return false
+}
+
+// commitTo advances the commit to i, never back, applying the engine's own
+// effects of the entries it covers and republishing the admission set.
 func (r *Raft) commitTo(i uint64) {
 	if i > r.log.committed {
 		old := r.log.committed
@@ -751,31 +889,19 @@ func (r *Raft) commitTo(i uint64) {
 	}
 }
 
-// PeerStat is the leader's view of one peer, for Health (D13).
-type PeerStat struct {
-	ID        core.NodeID
-	Voter     bool
-	Match     uint64
-	Next      uint64
-	Inflight  int
-	LastHeard time.Time
-	Heard     bool
-	Probing   bool
-	Snapshot  bool
-}
-
 // PeerStats returns the leader's view of every peer, in configuration
 // order; nil off the leader.
-func (r *Raft) PeerStats() []PeerStat {
+func (r *Raft) PeerStats() []PeerStatValue {
 	if r.role != core.RoleLeader {
 		return nil
 	}
-	var out []PeerStat
+	var out []PeerStatValue
 	for _, id := range r.peers() {
 		pr := r.prs[id]
-		out = append(out, PeerStat{
-			ID: id, Voter: r.isVoter(id), Match: pr.match, Next: pr.next, Inflight: len(pr.inflight),
-			LastHeard: pr.lastHeard, Heard: pr.heard, Probing: pr.state == stateProbe, Snapshot: pr.state == stateSnapshot,
+		out = append(out, PeerStatValue{
+			ID: id, Match: pr.match, Next: pr.next, Inflight: len(pr.inflight), LastHeard: pr.lastHeard,
+			Flags: statFlag(StatVoter, r.isVoter(id)) | statFlag(StatHeard, pr.facts&peerHeard != 0) |
+				statFlag(StatProbing, pr.state == stateProbe) | statFlag(StatSnapshot, pr.state == stateSnapshot),
 		})
 	}
 	return out
@@ -794,7 +920,7 @@ func (r *Raft) FailureTolerance(now time.Time) int {
 			n++
 			continue
 		}
-		if pr := r.prs[id]; pr != nil && pr.heard && now.Sub(pr.lastHeard) < r.timing.ElectionTimeoutMin {
+		if pr := r.prs[id]; pr != nil && pr.facts&peerHeard != 0 && now.Sub(pr.lastHeard) < r.timing.ElectionTimeoutMin {
 			n++
 		}
 	}

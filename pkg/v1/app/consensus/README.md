@@ -10,8 +10,8 @@ Package consensus is the public facade of the SDK's consensus domain (ADR 0152):
 
 ```
 id, inc, _ := consensus.Init(dir, cluster, "fra")      // offline, every founder
-_ = consensus.Bootstrap(ctx, cfg, members)              // offline, identical list
-node, _ := consensus.NewRaft(cfg)                       // never bootstraps
+_ = consensus.Bootstrap(ctx, &cfg, members)             // offline, identical list
+node, _ := consensus.NewNode(cfg)                       // never bootstraps
 tok, result, err := node.Propose(ctx, command)
 ```
 
@@ -31,50 +31,51 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
-- [func AppendMessage\(dst \[\]byte, m \*Message\) \[\]byte](<#AppendMessage>)
-- [func AppendSnapshotMeta\(dst \[\]byte, m \*SnapshotMeta\) \[\]byte](<#AppendSnapshotMeta>)
-- [func AppendToken\(dst \[\]byte, t Token\) \[\]byte](<#AppendToken>)
-- [func Bootstrap\(ctx context.Context, cfg Config, members \[\]Member\) error](<#Bootstrap>)
+- [func AppendMessage\(dst \[\]byte, m \*MessageValue\) \[\]byte](<#AppendMessage>)
+- [func AppendSnapshotMeta\(dst \[\]byte, m \*SnapshotMetaValue\) \[\]byte](<#AppendSnapshotMeta>)
+- [func AppendToken\(dst \[\]byte, t TokenValue\) \[\]byte](<#AppendToken>)
+- [func Bootstrap\(ctx context.Context, cfg \*Config, members \[\]MemberValue\) error](<#Bootstrap>)
 - [func ClearQuarantine\(d DataDir, exit QuarantineExit, op Operator\) error](<#ClearQuarantine>)
 - [func Init\(d DataDir, cluster ClusterID, slot string\) \(NodeID, Incarnation, error\)](<#Init>)
 - [func InitLog\(log LogStore, cluster ClusterID, slot string\) \(NodeID, Incarnation, error\)](<#InitLog>)
-- [func Inspect\(d DataDir\) \(Report, error\)](<#Inspect>)
+- [func Inspect\(d DataDir\) \(ReportValue, error\)](<#Inspect>)
 - [func JoinRefusalReason\(err error\) \(string, bool\)](<#JoinRefusalReason>)
 - [func Lane\(frame \[\]byte\) \(FrameLane, error\)](<#Lane>)
 - [func Latest\(s SnapshotStore\) \(SnapshotHandle, error\)](<#Latest>)
 - [func LeaderHint\(err error\) \(NodeID, bool\)](<#LeaderHint>)
-- [func LoadPEMIdentity\(certFile string, keyFile string, caFile string\) \(\*PEMIdentity, \*x509.CertPool, error\)](<#LoadPEMIdentity>)
 - [func MemorySPKI\(id NodeID\) \[32\]byte](<#MemorySPKI>)
+- [func NewDataDir\(dir string\) \(DataDir, error\)](<#NewDataDir>)
+- [func NewDataDirWith\(dir string, opts DataDirOptions\) \(DataDir, error\)](<#NewDataDirWith>)
 - [func NewMemoryLog\(\) \*MemoryLog](<#NewMemoryLog>)
 - [func NewMemoryNetwork\(\) \*MemoryNetwork](<#NewMemoryNetwork>)
 - [func NewMemorySnapshots\(\) \*MemorySnapshots](<#NewMemorySnapshots>)
-- [func NewRaft\(cfg Config\) \(\*Node, error\)](<#NewRaft>)
-- [func NewTCPTransport\(cfg TransportConfig\) \(\*TCPTransport, error\)](<#NewTCPTransport>)
-- [func NewTCPTransportFromPEM\(certFile string, keyFile string, caFile string, cfg TransportConfig\) \(\*TCPTransport, error\)](<#NewTCPTransportFromPEM>)
-- [func OpenDataDir\(dir string\) \(DataDir, error\)](<#OpenDataDir>)
-- [func OpenDataDirWith\(dir string, opts DataDirOptions\) \(DataDir, error\)](<#OpenDataDirWith>)
-- [func ParseMessage\(frame \[\]byte, m \*Message\) error](<#ParseMessage>)
-- [func ParseSnapshotMeta\(b \[\]byte, m \*SnapshotMeta\) error](<#ParseSnapshotMeta>)
-- [func ParseToken\(b \[\]byte\) \(Token, error\)](<#ParseToken>)
-- [func ProposeAs\[R any\]\(ctx context.Context, r Replicated, data \[\]byte\) \(Token, R, error\)](<#ProposeAs>)
+- [func NewMemoryTransport\(n \*MemoryNetwork, id NodeID\) \*MemoryTransport](<#NewMemoryTransport>)
+- [func NewNode\(cfg Config\) \(\*Node, error\)](<#NewNode>)
+- [func NewPEMIdentity\(certFile string, keyFile string, caFile string\) \(\*PEMIdentity, error\)](<#NewPEMIdentity>)
+- [func NewTCPTransport\(cfg \*TransportConfig\) \(\*TCPTransport, error\)](<#NewTCPTransport>)
+- [func NewTCPTransportFromPEM\(certFile string, keyFile string, caFile string, cfg \*TransportConfig\) \(\*TCPTransport, error\)](<#NewTCPTransportFromPEM>)
+- [func ParseMessage\(frame \[\]byte, m \*MessageValue\) error](<#ParseMessage>)
+- [func ParseSnapshotMeta\(b \[\]byte, m \*SnapshotMetaValue\) error](<#ParseSnapshotMeta>)
+- [func ParseToken\(b \[\]byte\) \(TokenValue, error\)](<#ParseToken>)
+- [func ProposeAs\[R any\]\(ctx context.Context, r Replicated, data \[\]byte\) \(TokenValue, R, error\)](<#ProposeAs>)
 - [func ReceiptMessage\(old ClusterID, next ClusterID, voter NodeID\) \[\]byte](<#ReceiptMessage>)
-- [func Recover\(d DataDir, newCluster ClusterID, members \[\]Member, opt RecoverOptions\) error](<#Recover>)
+- [func Recover\(d DataDir, newCluster ClusterID, members \[\]MemberValue, opt \*RecoverOptions\) error](<#Recover>)
 - [func Redraw\(d DataDir\) \(NodeID, error\)](<#Redraw>)
 - [func RedrawLog\(log LogStore\) \(NodeID, error\)](<#RedrawLog>)
-- [func RestoreSnapshot\(d DataDir, r io.Reader, newCluster ClusterID, members \[\]Member, opt RestoreOptions\) \(SnapshotMeta, error\)](<#RestoreSnapshot>)
+- [func RestoreSnapshot\(d DataDir, r io.Reader, newCluster ClusterID, members \[\]MemberValue, opt \*RestoreOptions\) \(SnapshotMetaValue, error\)](<#RestoreSnapshot>)
 - [func SAN\(cluster ClusterID, slot string\) \*url.URL](<#SAN>)
 - [func SPKIOf\(c \*x509.Certificate\) \[32\]byte](<#SPKIOf>)
-- [func TimingDefaults\(\) TimingContract](<#TimingDefaults>)
-- [func TokenOf\(err error\) \(Token, bool\)](<#TokenOf>)
+- [func TimingDefaults\(\) TimingContractSpec](<#TimingDefaults>)
+- [func TokenOf\(err error\) \(TokenValue, bool\)](<#TokenOf>)
 - [type AlarmID](<#AlarmID>)
-- [type AuthenticatedPeer](<#AuthenticatedPeer>)
+- [type AuthenticatedPeerValue](<#AuthenticatedPeerValue>)
 - [type BatchingStateMachine](<#BatchingStateMachine>)
-  - [func \(BatchingStateMachine\) ApplyBatch\(es \[\]Entry, results \[\]any\)](<#BatchingStateMachine.ApplyBatch>)
+  - [func \(BatchingStateMachine\) ApplyBatch\(es \[\]EntryValue, results \[\]any\)](<#BatchingStateMachine.ApplyBatch>)
 - [type ClusterID](<#ClusterID>)
   - [func \(ClusterID\) IsZero\(\) bool](<#ClusterID.IsZero>)
   - [func \(ClusterID\) String\(\) string](<#ClusterID.String>)
 - [type Config](<#Config>)
-  - [func \(Config\) MemoryBudget\(peers int\) int64](<#Config.MemoryBudget>)
+  - [func \(\*Config\) MemoryBudget\(peers int\) int64](<#Config.MemoryBudget>)
 - [type DataDir](<#DataDir>)
   - [func \(DataDir\) Close\(\) error](<#DataDir.Close>)
   - [func \(DataDir\) Dir\(\) string](<#DataDir.Dir>)
@@ -83,107 +84,106 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type DataDirOptions](<#DataDirOptions>)
 - [type Durability](<#Durability>)
 - [type DurableStateMachine](<#DurableStateMachine>)
-  - [func \(DurableStateMachine\) AppliedPosition\(\) \(LogIdentity, Position, error\)](<#DurableStateMachine.AppliedPosition>)
-- [type Entry](<#Entry>)
+  - [func \(DurableStateMachine\) AppliedPosition\(\) \(LogIdentityValue, PositionValue, error\)](<#DurableStateMachine.AppliedPosition>)
 - [type EntryKind](<#EntryKind>)
   - [func \(EntryKind\) Known\(\) bool](<#EntryKind.Known>)
-- [type FencedAttestation](<#FencedAttestation>)
+- [type EntryValue](<#EntryValue>)
+- [type FencedAttestationValue](<#FencedAttestationValue>)
 - [type FrameLane](<#FrameLane>)
 - [type GroupID](<#GroupID>)
 - [type HardState](<#HardState>)
-- [type Health](<#Health>)
+- [type HealthValue](<#HealthValue>)
 - [type Incarnation](<#Incarnation>)
   - [func \(Incarnation\) IsZero\(\) bool](<#Incarnation.IsZero>)
   - [func \(Incarnation\) String\(\) string](<#Incarnation.String>)
-- [type InstallAccept](<#InstallAccept>)
-- [type InstallOffer](<#InstallOffer>)
-- [type InstallRequest](<#InstallRequest>)
+- [type InstallAcceptValue](<#InstallAcceptValue>)
+- [type InstallOfferValue](<#InstallOfferValue>)
+- [type InstallParams](<#InstallParams>)
 - [type JoinAuthorizer](<#JoinAuthorizer>)
-  - [func \(JoinAuthorizer\) Authorize\(ctx context.Context, r JoinRequest\) \(Operator, error\)](<#JoinAuthorizer.Authorize>)
+  - [func \(JoinAuthorizer\) Authorize\(ctx context.Context, r JoinRequestValue\) \(Operator, error\)](<#JoinAuthorizer.Authorize>)
 - [type JoinConfig](<#JoinConfig>)
 - [type JoinReasonBinder](<#JoinReasonBinder>)
-  - [func \(JoinReasonBinder\) BindJoinReason\(group GroupID, join func\(ctx context.Context, from AuthenticatedPeer, r JoinRequest\) \(Position, errs.Code, string\)\)](<#JoinReasonBinder.BindJoinReason>)
-- [type JoinRequest](<#JoinRequest>)
+  - [func \(JoinReasonBinder\) BindJoinReason\(group GroupID, join func\(ctx context.Context, from AuthenticatedPeerValue, r JoinRequestValue\) \(PositionValue, errs.Code, string\)\)](<#JoinReasonBinder.BindJoinReason>)
+- [type JoinRequestValue](<#JoinRequestValue>)
 - [type Joiner](<#Joiner>)
-  - [func \(Joiner\) Join\(ctx context.Context, cfg JoinConfig\) \(Position, error\)](<#Joiner.Join>)
+  - [func \(Joiner\) Join\(ctx context.Context, cfg JoinConfig\) \(PositionValue, error\)](<#Joiner.Join>)
 - [type LeadershipWatcher](<#LeadershipWatcher>)
-  - [func \(LeadershipWatcher\) Watch\(ctx context.Context\) \<-chan Status](<#LeadershipWatcher.Watch>)
-- [type LogIdentity](<#LogIdentity>)
-  - [func \(LogIdentity\) Same\(o LogIdentity\) bool](<#LogIdentity.Same>)
+  - [func \(LeadershipWatcher\) Watch\(ctx context.Context\) \<-chan StatusValue](<#LeadershipWatcher.Watch>)
+- [type LogIdentityValue](<#LogIdentityValue>)
+  - [func \(LogIdentityValue\) Same\(o LogIdentityValue\) bool](<#LogIdentityValue.Same>)
 - [type LogReader](<#LogReader>)
   - [func \(LogReader\) Bounds\(\) \(first uint64, last uint64\)](<#LogReader.Bounds>)
-  - [func \(LogReader\) Entries\(lo uint64, hi uint64, maxBytes int, dst \[\]Entry\) \(\[\]Entry, error\)](<#LogReader.Entries>)
+  - [func \(LogReader\) Entries\(lo uint64, hi uint64, maxBytes int, dst \[\]EntryValue\) \(\[\]EntryValue, error\)](<#LogReader.Entries>)
   - [func \(LogReader\) Term\(index uint64\) \(uint64, error\)](<#LogReader.Term>)
 - [type LogStore](<#LogStore>)
-  - [func \(LogStore\) Append\(entries \[\]Entry, hs \*HardState\) error](<#LogStore.Append>)
+  - [func \(LogStore\) Append\(entries \[\]EntryValue, hs \*HardState\) error](<#LogStore.Append>)
   - [func \(LogStore\) Close\(\) error](<#LogStore.Close>)
   - [func \(LogStore\) CompactPrefix\(through uint64\) error](<#LogStore.CompactPrefix>)
   - [func \(LogStore\) HardState\(\) \(HardState, error\)](<#LogStore.HardState>)
-  - [func \(LogStore\) Stamp\(\) \(Stamp, error\)](<#LogStore.Stamp>)
+  - [func \(LogStore\) Stamp\(\) \(StampValue, error\)](<#LogStore.Stamp>)
   - [func \(LogStore\) Sync\(\) error](<#LogStore.Sync>)
   - [func \(LogStore\) TruncateSuffix\(from uint64\) error](<#LogStore.TruncateSuffix>)
-  - [func \(LogStore\) WriteStamp\(Stamp\) error](<#LogStore.WriteStamp>)
-- [type Member](<#Member>)
-- [type Membership](<#Membership>)
-  - [func \(Membership\) Clone\(\) Membership](<#Membership.Clone>)
-  - [func \(Membership\) IsRetired\(id NodeID\) bool](<#Membership.IsRetired>)
-  - [func \(Membership\) Member\(id NodeID\) \(Member, bool\)](<#Membership.Member>)
-  - [func \(Membership\) Voters\(\) \[\]NodeID](<#Membership.Voters>)
+  - [func \(LogStore\) WriteStamp\(StampValue\) error](<#LogStore.WriteStamp>)
+- [type MemberValue](<#MemberValue>)
+- [type MembershipValue](<#MembershipValue>)
+  - [func \(MembershipValue\) Clone\(\) MembershipValue](<#MembershipValue.Clone>)
+  - [func \(MembershipValue\) IsRetired\(id NodeID\) bool](<#MembershipValue.IsRetired>)
+  - [func \(MembershipValue\) Member\(id NodeID\) \(MemberValue, bool\)](<#MembershipValue.Member>)
+  - [func \(MembershipValue\) Voters\(\) \[\]NodeID](<#MembershipValue.Voters>)
 - [type MemoryLog](<#MemoryLog>)
-  - [func \(\*MemoryLog\) Append\(entries \[\]coreconsensus.Entry, hs \*coreconsensus.HardState\) error](<#MemoryLog.Append>)
+  - [func \(\*MemoryLog\) Append\(entries \[\]coreconsensus.EntryValue, hs \*coreconsensus.HardState\) error](<#MemoryLog.Append>)
   - [func \(\*MemoryLog\) Bounds\(\) \(first uint64, last uint64\)](<#MemoryLog.Bounds>)
   - [func \(\*MemoryLog\) Close\(\) error](<#MemoryLog.Close>)
   - [func \(\*MemoryLog\) CompactPrefix\(through uint64\) error](<#MemoryLog.CompactPrefix>)
-  - [func \(\*MemoryLog\) Entries\(lo uint64, hi uint64, maxBytes int, dst \[\]coreconsensus.Entry\) \(\[\]coreconsensus.Entry, error\)](<#MemoryLog.Entries>)
+  - [func \(\*MemoryLog\) Entries\(lo uint64, hi uint64, maxBytes int, dst \[\]coreconsensus.EntryValue\) \(\[\]coreconsensus.EntryValue, error\)](<#MemoryLog.Entries>)
   - [func \(\*MemoryLog\) FailSync\(err error\)](<#MemoryLog.FailSync>)
   - [func \(\*MemoryLog\) HardState\(\) \(coreconsensus.HardState, error\)](<#MemoryLog.HardState>)
-  - [func \(\*MemoryLog\) Stamp\(\) \(coreconsensus.Stamp, error\)](<#MemoryLog.Stamp>)
+  - [func \(\*MemoryLog\) Stamp\(\) \(coreconsensus.StampValue, error\)](<#MemoryLog.Stamp>)
   - [func \(\*MemoryLog\) Sync\(\) error](<#MemoryLog.Sync>)
   - [func \(\*MemoryLog\) Term\(index uint64\) \(uint64, error\)](<#MemoryLog.Term>)
   - [func \(\*MemoryLog\) TruncateSuffix\(from uint64\) error](<#MemoryLog.TruncateSuffix>)
-  - [func \(\*MemoryLog\) WriteStamp\(s coreconsensus.Stamp\) error](<#MemoryLog.WriteStamp>)
+  - [func \(\*MemoryLog\) WriteStamp\(s coreconsensus.StampValue\) error](<#MemoryLog.WriteStamp>)
 - [type MemoryNetwork](<#MemoryNetwork>)
   - [func \(\*MemoryNetwork\) Cut\(a coreconsensus.NodeID, b coreconsensus.NodeID, cut bool\)](<#MemoryNetwork.Cut>)
   - [func \(\*MemoryNetwork\) Isolate\(id coreconsensus.NodeID, cut bool\)](<#MemoryNetwork.Isolate>)
-  - [func \(\*MemoryNetwork\) Transport\(id coreconsensus.NodeID\) \*MemoryTransport](<#MemoryNetwork.Transport>)
 - [type MemorySnapshots](<#MemorySnapshots>)
-  - [func \(\*MemorySnapshots\) Create\(id string, meta coreconsensus.SnapshotMeta\) \(coreconsensus.SnapshotSink, int64, error\)](<#MemorySnapshots.Create>)
-  - [func \(\*MemorySnapshots\) List\(\) \(\[\]coreconsensus.SnapshotMeta, error\)](<#MemorySnapshots.List>)
+  - [func \(\*MemorySnapshots\) Create\(id string, meta coreconsensus.SnapshotMetaValue\) \(coreconsensus.SnapshotSink, int64, error\)](<#MemorySnapshots.Create>)
+  - [func \(\*MemorySnapshots\) List\(\) \(\[\]coreconsensus.SnapshotMetaValue, error\)](<#MemorySnapshots.List>)
   - [func \(\*MemorySnapshots\) Open\(id string\) \(coreconsensus.SnapshotHandle, error\)](<#MemorySnapshots.Open>)
   - [func \(\*MemorySnapshots\) Remove\(id string\) error](<#MemorySnapshots.Remove>)
 - [type MemoryTransport](<#MemoryTransport>)
-  - [func \(\*MemoryTransport\) Bind\(group coreconsensus.GroupID, deliver func\(coreconsensus.AuthenticatedPeer, \[\]byte\), offer func\(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer\) coreconsensus.InstallAccept, install func\(coreconsensus.InstallRequest\) error, join func\(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest\) \(coreconsensus.Position, errs.Code\)\) error](<#MemoryTransport.Bind>)
-  - [func \(\*MemoryTransport\) BindJoinReason\(\_ coreconsensus.GroupID, join func\(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest\) \(coreconsensus.Position, errs.Code, string\)\)](<#MemoryTransport.BindJoinReason>)
+  - [func \(\*MemoryTransport\) Bind\(group coreconsensus.GroupID, deliver func\(coreconsensus.AuthenticatedPeerValue, \[\]byte\), offer func\(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue\) coreconsensus.InstallAcceptValue, install func\(coreconsensus.InstallParams\) error, join func\(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue\) \(coreconsensus.PositionValue, errs.Code\)\) error](<#MemoryTransport.Bind>)
+  - [func \(\*MemoryTransport\) BindJoinReason\(\_ coreconsensus.GroupID, join func\(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue\) \(coreconsensus.PositionValue, errs.Code, string\)\)](<#MemoryTransport.BindJoinReason>)
   - [func \(\*MemoryTransport\) Close\(\) error](<#MemoryTransport.Close>)
-  - [func \(\*MemoryTransport\) Join\(ctx context.Context, cfg coreconsensus.JoinConfig\) \(coreconsensus.Position, error\)](<#MemoryTransport.Join>)
+  - [func \(\*MemoryTransport\) Join\(ctx context.Context, cfg coreconsensus.JoinConfig\) \(coreconsensus.PositionValue, error\)](<#MemoryTransport.Join>)
   - [func \(\*MemoryTransport\) Send\(to coreconsensus.NodeID, frame \[\]byte\)](<#MemoryTransport.Send>)
-  - [func \(\*MemoryTransport\) SetMembership\(\_ coreconsensus.GroupID, admitted \[\]coreconsensus.Member\)](<#MemoryTransport.SetMembership>)
-  - [func \(\*MemoryTransport\) Stream\(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOffer, open func\(int64\) \(io.ReadCloser, error\)\) error](<#MemoryTransport.Stream>)
-- [type Message](<#Message>)
+  - [func \(\*MemoryTransport\) SetMembership\(\_ coreconsensus.GroupID, admitted \[\]coreconsensus.MemberValue\)](<#MemoryTransport.SetMembership>)
+  - [func \(\*MemoryTransport\) Stream\(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func\(int64\) \(io.ReadCloser, error\)\) error](<#MemoryTransport.Stream>)
 - [type MessageKind](<#MessageKind>)
   - [func \(MessageKind\) Known\(\) bool](<#MessageKind.Known>)
   - [func \(MessageKind\) Lane\(\) FrameLane](<#MessageKind.Lane>)
+- [type MessageValue](<#MessageValue>)
 - [type Node](<#Node>)
-  - [func \(\*Node\) AddLearner\(ctx context.Context, op coreconsensus.Operator, m coreconsensus.Member\) error](<#Node.AddLearner>)
-  - [func \(\*Node\) Barrier\(ctx context.Context\) \(coreconsensus.Token, error\)](<#Node.Barrier>)
-  - [func \(\*Node\) ClearNoSpace\(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.Precondition\) error](<#Node.ClearNoSpace>)
+  - [func \(\*Node\) AddLearner\(ctx context.Context, op coreconsensus.Operator, m coreconsensus.MemberValue\) error](<#Node.AddLearner>)
+  - [func \(\*Node\) Barrier\(ctx context.Context\) \(coreconsensus.TokenValue, error\)](<#Node.Barrier>)
+  - [func \(\*Node\) ClearNoSpace\(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec\) error](<#Node.ClearNoSpace>)
   - [func \(\*Node\) Close\(ctx context.Context\) error](<#Node.Close>)
   - [func \(\*Node\) DenyPin\(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID\) error](<#Node.DenyPin>)
   - [func \(\*Node\) HardClose\(\) error](<#Node.HardClose>)
-  - [func \(\*Node\) Health\(\) Health](<#Node.Health>)
-  - [func \(\*Node\) Membership\(\) coreconsensus.Membership](<#Node.Membership>)
+  - [func \(\*Node\) Health\(\) HealthValue](<#Node.Health>)
+  - [func \(\*Node\) Membership\(\) coreconsensus.MembershipValue](<#Node.Membership>)
   - [func \(\*Node\) Promote\(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID\) error](<#Node.Promote>)
-  - [func \(\*Node\) Propose\(ctx context.Context, data \[\]byte\) \(coreconsensus.Token, any, error\)](<#Node.Propose>)
-  - [func \(\*Node\) ProposeTimingContract\(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.Precondition, c coreconsensus.TimingContract\) error](<#Node.ProposeTimingContract>)
-  - [func \(\*Node\) RaiseClusterVersion\(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.Precondition, v uint32\) error](<#Node.RaiseClusterVersion>)
+  - [func \(\*Node\) Propose\(ctx context.Context, data \[\]byte\) \(coreconsensus.TokenValue, any, error\)](<#Node.Propose>)
+  - [func \(\*Node\) ProposeTimingContract\(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec, c coreconsensus.TimingContractSpec\) error](<#Node.ProposeTimingContract>)
+  - [func \(\*Node\) RaiseClusterVersion\(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec, v uint32\) error](<#Node.RaiseClusterVersion>)
   - [func \(\*Node\) Remove\(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID\) error](<#Node.Remove>)
-  - [func \(\*Node\) SaveSnapshot\(ctx context.Context, op coreconsensus.Operator, w io.Writer\) \(coreconsensus.SnapshotMeta, error\)](<#Node.SaveSnapshot>)
-  - [func \(\*Node\) Status\(\) coreconsensus.Status](<#Node.Status>)
-  - [func \(\*Node\) StopReason\(\) \(coreconsensus.StopReason, bool\)](<#Node.StopReason>)
+  - [func \(\*Node\) SaveSnapshot\(ctx context.Context, op coreconsensus.Operator, w io.Writer\) \(coreconsensus.SnapshotMetaValue, error\)](<#Node.SaveSnapshot>)
+  - [func \(\*Node\) Status\(\) coreconsensus.StatusValue](<#Node.Status>)
+  - [func \(\*Node\) StopReason\(\) \(coreconsensus.StopReasonValue, bool\)](<#Node.StopReason>)
   - [func \(\*Node\) TransferLeadership\(ctx context.Context, op coreconsensus.Operator, to coreconsensus.NodeID\) error](<#Node.TransferLeadership>)
   - [func \(\*Node\) UpdateAddress\(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID, addr string\) error](<#Node.UpdateAddress>)
-  - [func \(\*Node\) WaitApplied\(ctx context.Context, t coreconsensus.Token\) error](<#Node.WaitApplied>)
-  - [func \(\*Node\) Watch\(ctx context.Context\) \<-chan coreconsensus.Status](<#Node.Watch>)
+  - [func \(\*Node\) WaitApplied\(ctx context.Context, t coreconsensus.TokenValue\) error](<#Node.WaitApplied>)
+  - [func \(\*Node\) Watch\(ctx context.Context\) \<-chan coreconsensus.StatusValue](<#Node.Watch>)
 - [type NodeID](<#NodeID>)
   - [func \(NodeID\) String\(\) string](<#NodeID.String>)
 - [type Operator](<#Operator>)
@@ -191,18 +191,19 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type PEMIdentity](<#PEMIdentity>)
   - [func \(\*PEMIdentity\) GetCertificate\(\) \(\*tls.Certificate, error\)](<#PEMIdentity.GetCertificate>)
   - [func \(\*PEMIdentity\) ReloadFailures\(\) int](<#PEMIdentity.ReloadFailures>)
-- [type PeerHealth](<#PeerHealth>)
-- [type Position](<#Position>)
-- [type Precondition](<#Precondition>)
+  - [func \(\*PEMIdentity\) Roots\(\) \*x509.CertPool](<#PEMIdentity.Roots>)
+- [type PeerHealthValue](<#PeerHealthValue>)
+- [type PositionValue](<#PositionValue>)
+- [type PreconditionSpec](<#PreconditionSpec>)
 - [type QuarantineExit](<#QuarantineExit>)
 - [type ReadMode](<#ReadMode>)
 - [type RecoverOptions](<#RecoverOptions>)
 - [type Replicated](<#Replicated>)
-  - [func \(Replicated\) Barrier\(ctx context.Context\) \(Token, error\)](<#Replicated.Barrier>)
-  - [func \(Replicated\) Propose\(ctx context.Context, data \[\]byte\) \(Token, any, error\)](<#Replicated.Propose>)
-  - [func \(Replicated\) Status\(\) Status](<#Replicated.Status>)
-  - [func \(Replicated\) WaitApplied\(ctx context.Context, t Token\) error](<#Replicated.WaitApplied>)
-- [type Report](<#Report>)
+  - [func \(Replicated\) Barrier\(ctx context.Context\) \(TokenValue, error\)](<#Replicated.Barrier>)
+  - [func \(Replicated\) Propose\(ctx context.Context, data \[\]byte\) \(TokenValue, any, error\)](<#Replicated.Propose>)
+  - [func \(Replicated\) Status\(\) StatusValue](<#Replicated.Status>)
+  - [func \(Replicated\) WaitApplied\(ctx context.Context, t TokenValue\) error](<#Replicated.WaitApplied>)
+- [type ReportValue](<#ReportValue>)
 - [type RestoreOptions](<#RestoreOptions>)
 - [type Role](<#Role>)
   - [func \(Role\) String\(\) string](<#Role.String>)
@@ -211,54 +212,54 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(Snapshot\) WriteTo\(w io.Writer\) \(int64, error\)](<#Snapshot.WriteTo>)
 - [type SnapshotHandle](<#SnapshotHandle>)
   - [func \(SnapshotHandle\) Close\(\) error](<#SnapshotHandle.Close>)
-  - [func \(SnapshotHandle\) Meta\(\) SnapshotMeta](<#SnapshotHandle.Meta>)
-- [type SnapshotMeta](<#SnapshotMeta>)
+  - [func \(SnapshotHandle\) Meta\(\) SnapshotMetaValue](<#SnapshotHandle.Meta>)
+- [type SnapshotMetaValue](<#SnapshotMetaValue>)
 - [type SnapshotSink](<#SnapshotSink>)
   - [func \(SnapshotSink\) Abort\(\) error](<#SnapshotSink.Abort>)
-  - [func \(SnapshotSink\) Commit\(final SnapshotMeta\) error](<#SnapshotSink.Commit>)
+  - [func \(SnapshotSink\) Commit\(final SnapshotMetaValue\) error](<#SnapshotSink.Commit>)
 - [type SnapshotStore](<#SnapshotStore>)
-  - [func \(SnapshotStore\) Create\(id string, meta SnapshotMeta\) \(sink SnapshotSink, spooled int64, err error\)](<#SnapshotStore.Create>)
-  - [func \(SnapshotStore\) List\(\) \(\[\]SnapshotMeta, error\)](<#SnapshotStore.List>)
+  - [func \(SnapshotStore\) Create\(id string, meta SnapshotMetaValue\) \(sink SnapshotSink, spooled int64, err error\)](<#SnapshotStore.Create>)
+  - [func \(SnapshotStore\) List\(\) \(\[\]SnapshotMetaValue, error\)](<#SnapshotStore.List>)
   - [func \(SnapshotStore\) Open\(id string\) \(SnapshotHandle, error\)](<#SnapshotStore.Open>)
   - [func \(SnapshotStore\) Remove\(id string\) error](<#SnapshotStore.Remove>)
-- [type Stamp](<#Stamp>)
 - [type StampState](<#StampState>)
+- [type StampValue](<#StampValue>)
 - [type StateMachine](<#StateMachine>)
-  - [func \(StateMachine\) Apply\(e Entry\) any](<#StateMachine.Apply>)
-  - [func \(StateMachine\) Restore\(r io.Reader, meta SnapshotMeta\) error](<#StateMachine.Restore>)
+  - [func \(StateMachine\) Apply\(e EntryValue\) any](<#StateMachine.Apply>)
+  - [func \(StateMachine\) Restore\(r io.Reader, meta SnapshotMetaValue\) error](<#StateMachine.Restore>)
   - [func \(StateMachine\) Snapshot\(\) \(Snapshot, error\)](<#StateMachine.Snapshot>)
-- [type Status](<#Status>)
-  - [func \(Status\) Precondition\(\) Precondition](<#Status.Precondition>)
-- [type StopReason](<#StopReason>)
-  - [func \(StopReason\) ExitCode\(\) int](<#StopReason.ExitCode>)
+- [type StatusValue](<#StatusValue>)
+  - [func \(\*StatusValue\) Precondition\(\) PreconditionSpec](<#StatusValue.Precondition>)
+- [type StopReasonValue](<#StopReasonValue>)
+  - [func \(StopReasonValue\) ExitCode\(\) int](<#StopReasonValue.ExitCode>)
 - [type TCPTransport](<#TCPTransport>)
   - [func \(\*TCPTransport\) Addr\(\) string](<#TCPTransport.Addr>)
-  - [func \(\*TCPTransport\) Bind\(\_ coreconsensus.GroupID, deliver func\(coreconsensus.AuthenticatedPeer, \[\]byte\), offer func\(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer\) coreconsensus.InstallAccept, install func\(coreconsensus.InstallRequest\) error, join func\(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest\) \(coreconsensus.Position, errs.Code\)\) error](<#TCPTransport.Bind>)
-  - [func \(\*TCPTransport\) BindJoinReason\(\_ coreconsensus.GroupID, join func\(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest\) \(coreconsensus.Position, errs.Code, string\)\)](<#TCPTransport.BindJoinReason>)
+  - [func \(\*TCPTransport\) Bind\(\_ coreconsensus.GroupID, deliver func\(coreconsensus.AuthenticatedPeerValue, \[\]byte\), offer func\(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue\) coreconsensus.InstallAcceptValue, install func\(coreconsensus.InstallParams\) error, join func\(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue\) \(coreconsensus.PositionValue, errs.Code\)\) error](<#TCPTransport.Bind>)
+  - [func \(\*TCPTransport\) BindJoinReason\(\_ coreconsensus.GroupID, join func\(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue\) \(coreconsensus.PositionValue, errs.Code, string\)\)](<#TCPTransport.BindJoinReason>)
   - [func \(\*TCPTransport\) CertExpiry\(\) time.Time](<#TCPTransport.CertExpiry>)
   - [func \(\*TCPTransport\) Close\(\) error](<#TCPTransport.Close>)
   - [func \(\*TCPTransport\) Cluster\(\) coreconsensus.ClusterID](<#TCPTransport.Cluster>)
-  - [func \(\*TCPTransport\) Join\(ctx context.Context, cfg coreconsensus.JoinConfig\) \(coreconsensus.Position, error\)](<#TCPTransport.Join>)
+  - [func \(\*TCPTransport\) Join\(ctx context.Context, cfg coreconsensus.JoinConfig\) \(coreconsensus.PositionValue, error\)](<#TCPTransport.Join>)
   - [func \(\*TCPTransport\) PeerCertExpiry\(\) map\[coreconsensus.NodeID\]time.Time](<#TCPTransport.PeerCertExpiry>)
   - [func \(\*TCPTransport\) RefusedBeforeHandshake\(\) int64](<#TCPTransport.RefusedBeforeHandshake>)
   - [func \(\*TCPTransport\) ReloadFailures\(\) int](<#TCPTransport.ReloadFailures>)
   - [func \(\*TCPTransport\) Send\(to coreconsensus.NodeID, frame \[\]byte\)](<#TCPTransport.Send>)
-  - [func \(\*TCPTransport\) SetMembership\(group coreconsensus.GroupID, admitted \[\]coreconsensus.Member\)](<#TCPTransport.SetMembership>)
+  - [func \(\*TCPTransport\) SetMembership\(group coreconsensus.GroupID, admitted \[\]coreconsensus.MemberValue\)](<#TCPTransport.SetMembership>)
   - [func \(\*TCPTransport\) Slot\(\) string](<#TCPTransport.Slot>)
-  - [func \(\*TCPTransport\) Stream\(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOffer, open func\(int64\) \(io.ReadCloser, error\)\) error](<#TCPTransport.Stream>)
+  - [func \(\*TCPTransport\) Stream\(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func\(int64\) \(io.ReadCloser, error\)\) error](<#TCPTransport.Stream>)
   - [func \(\*TCPTransport\) Unreachable\(f func\(coreconsensus.NodeID\)\)](<#TCPTransport.Unreachable>)
-- [type TimingContract](<#TimingContract>)
-- [type Token](<#Token>)
-  - [func \(Token\) Position\(\) Position](<#Token.Position>)
+- [type TimingContractSpec](<#TimingContractSpec>)
+- [type TokenValue](<#TokenValue>)
+  - [func \(TokenValue\) Position\(\) PositionValue](<#TokenValue.Position>)
 - [type Transport](<#Transport>)
-  - [func \(Transport\) Bind\(group GroupID, deliver func\(from AuthenticatedPeer, frame \[\]byte\), offer func\(from AuthenticatedPeer, o InstallOffer\) InstallAccept, install func\(InstallRequest\) error, join func\(ctx context.Context, from AuthenticatedPeer, r JoinRequest\) \(Position, errs.Code\)\) error](<#Transport.Bind>)
+  - [func \(Transport\) Bind\(group GroupID, deliver func\(from AuthenticatedPeerValue, frame \[\]byte\), offer func\(from AuthenticatedPeerValue, o InstallOfferValue\) InstallAcceptValue, install func\(InstallParams\) error, join func\(ctx context.Context, from AuthenticatedPeerValue, r JoinRequestValue\) \(PositionValue, errs.Code\)\) error](<#Transport.Bind>)
   - [func \(Transport\) Send\(to NodeID, frame \[\]byte\)](<#Transport.Send>)
-  - [func \(Transport\) SetMembership\(group GroupID, admitted \[\]Member\)](<#Transport.SetMembership>)
-  - [func \(Transport\) Stream\(ctx context.Context, to NodeID, offer InstallOffer, open func\(offset int64\) \(io.ReadCloser, error\)\) error](<#Transport.Stream>)
+  - [func \(Transport\) SetMembership\(group GroupID, admitted \[\]MemberValue\)](<#Transport.SetMembership>)
+  - [func \(Transport\) Stream\(ctx context.Context, to NodeID, offer InstallOfferValue, open func\(offset int64\) \(io.ReadCloser, error\)\) error](<#Transport.Stream>)
 - [type TransportConfig](<#TransportConfig>)
 - [type UnreachableReporter](<#UnreachableReporter>)
   - [func \(UnreachableReporter\) Unreachable\(func\(NodeID\)\)](<#UnreachableReporter.Unreachable>)
-- [type Versions](<#Versions>)
+- [type VersionsValue](<#VersionsValue>)
 
 ## Constants
 
@@ -354,7 +355,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.LaneSnaps
 
 <a name="MaxJoinReasonBytes"></a>
 ```go
-const MaxJoinReasonBytes = 256
+const MaxJoinReasonBytes int = 256
 ```
 
 MaxJoinReasonBytes bounds the reason a JOIN refusal carries.
@@ -1028,7 +1029,7 @@ Code `0.2.57.15` · reason `VERSION_UNSUPPORTED` · public "A version this node 
 ## func [AppendMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func AppendMessage(dst []byte, m *Message) []byte
+func AppendMessage(dst []byte, m *MessageValue) []byte
 ```
 
 AppendMessage appends m's frame to dst.
@@ -1037,7 +1038,7 @@ AppendMessage appends m's frame to dst.
 ## func [AppendSnapshotMeta](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func AppendSnapshotMeta(dst []byte, m *SnapshotMeta) []byte
+func AppendSnapshotMeta(dst []byte, m *SnapshotMetaValue) []byte
 ```
 
 AppendSnapshotMeta appends the encoding of m.
@@ -1046,7 +1047,7 @@ AppendSnapshotMeta appends the encoding of m.
 ## func [AppendToken](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func AppendToken(dst []byte, t Token) []byte
+func AppendToken(dst []byte, t TokenValue) []byte
 ```
 
 AppendToken appends the 41-byte encoding of t.
@@ -1055,7 +1056,7 @@ AppendToken appends the 41-byte encoding of t.
 ## func [Bootstrap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func Bootstrap(ctx context.Context, cfg Config, members []Member) error
+func Bootstrap(ctx context.Context, cfg *Config, members []MemberValue) error
 ```
 
 Bootstrap founds a cluster on one founding node, with the IDENTICAL member list on every founder. Idempotent and resumable.
@@ -1091,7 +1092,7 @@ InitLog prepares a joining log on any LogStore: a random NodeID and a joining st
 ## func [Inspect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func Inspect(d DataDir) (Report, error)
+func Inspect(d DataDir) (ReportValue, error)
 ```
 
 Inspect reads a stopped node's directory without changing it.
@@ -1132,15 +1133,6 @@ func LeaderHint(err error) (NodeID, bool)
 
 LeaderHint reads the known leader from a NOT\_LEADER (R7-10).
 
-<a name="LoadPEMIdentity"></a>
-## func [LoadPEMIdentity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
-
-```go
-func LoadPEMIdentity(certFile string, keyFile string, caFile string) (*PEMIdentity, *x509.CertPool, error)
-```
-
-LoadPEMIdentity reads a node identity and the CA pool from PEM files.
-
 <a name="MemorySPKI"></a>
 ## func [MemorySPKI](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
@@ -1149,6 +1141,24 @@ func MemorySPKI(id NodeID) [32]byte
 ```
 
 MemorySPKI is the key the memory transport authenticates a node with.
+
+<a name="NewDataDir"></a>
+## func [NewDataDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+```go
+func NewDataDir(dir string) (DataDir, error)
+```
+
+NewDataDir takes the directory lock first, then recovers the log.
+
+<a name="NewDataDirWith"></a>
+## func [NewDataDirWith](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+```go
+func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error)
+```
+
+NewDataDirWith is OpenDataDir with options.
 
 <a name="NewMemoryLog"></a>
 ## func [NewMemoryLog](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
@@ -1177,20 +1187,38 @@ func NewMemorySnapshots() *MemorySnapshots
 
 NewMemorySnapshots returns the in-memory SnapshotStore double.
 
-<a name="NewRaft"></a>
-## func [NewRaft](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="NewMemoryTransport"></a>
+## func [NewMemoryTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func NewRaft(cfg Config) (*Node, error)
+func NewMemoryTransport(n *MemoryNetwork, id NodeID) *MemoryTransport
 ```
 
-NewRaft opens a node over what Init and Bootstrap prepared. It never bootstraps.
+NewMemoryTransport returns the end of the network n that node id sends and receives through, the same one on every call for that id.
+
+<a name="NewNode"></a>
+## func [NewNode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+```go
+func NewNode(cfg Config) (*Node, error)
+```
+
+NewNode opens a node over what Init and Bootstrap prepared. It never bootstraps.
+
+<a name="NewPEMIdentity"></a>
+## func [NewPEMIdentity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+```go
+func NewPEMIdentity(certFile string, keyFile string, caFile string) (*PEMIdentity, error)
+```
+
+NewPEMIdentity reads a node identity from PEM files; its Roots method is the CA pool to pass as TransportConfig.Roots.
 
 <a name="NewTCPTransport"></a>
 ## func [NewTCPTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func NewTCPTransport(cfg TransportConfig) (*TCPTransport, error)
+func NewTCPTransport(cfg *TransportConfig) (*TCPTransport, error)
 ```
 
 NewTCPTransport builds the shipped mTLS transport; it is also a Joiner.
@@ -1199,34 +1227,16 @@ NewTCPTransport builds the shipped mTLS transport; it is also a Joiner.
 ## func [NewTCPTransportFromPEM](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func NewTCPTransportFromPEM(certFile string, keyFile string, caFile string, cfg TransportConfig) (*TCPTransport, error)
+func NewTCPTransportFromPEM(certFile string, keyFile string, caFile string, cfg *TransportConfig) (*TCPTransport, error)
 ```
 
 NewTCPTransportFromPEM builds it from a certificate, a key and the consensus CA, as PEM files reloaded in place on renewal.
-
-<a name="OpenDataDir"></a>
-## func [OpenDataDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
-
-```go
-func OpenDataDir(dir string) (DataDir, error)
-```
-
-OpenDataDir takes the directory lock first, then recovers the log.
-
-<a name="OpenDataDirWith"></a>
-## func [OpenDataDirWith](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
-
-```go
-func OpenDataDirWith(dir string, opts DataDirOptions) (DataDir, error)
-```
-
-OpenDataDirWith is OpenDataDir with options.
 
 <a name="ParseMessage"></a>
 ## func [ParseMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func ParseMessage(frame []byte, m *Message) error
+func ParseMessage(frame []byte, m *MessageValue) error
 ```
 
 ParseMessage decodes a frame: FRAME\_INVALID, VERSION\_UNSUPPORTED.
@@ -1235,7 +1245,7 @@ ParseMessage decodes a frame: FRAME\_INVALID, VERSION\_UNSUPPORTED.
 ## func [ParseSnapshotMeta](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func ParseSnapshotMeta(b []byte, m *SnapshotMeta) error
+func ParseSnapshotMeta(b []byte, m *SnapshotMetaValue) error
 ```
 
 ParseSnapshotMeta decodes a SnapshotMeta.
@@ -1244,7 +1254,7 @@ ParseSnapshotMeta decodes a SnapshotMeta.
 ## func [ParseToken](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func ParseToken(b []byte) (Token, error)
+func ParseToken(b []byte) (TokenValue, error)
 ```
 
 ParseToken decodes a token.
@@ -1253,7 +1263,7 @@ ParseToken decodes a token.
 ## func [ProposeAs](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func ProposeAs[R any](ctx context.Context, r Replicated, data []byte) (Token, R, error)
+func ProposeAs[R any](ctx context.Context, r Replicated, data []byte) (TokenValue, R, error)
 ```
 
 ProposeAs types the Apply result. A result of another dynamic type is RESULT\_TYPE\_MISMATCH carrying the committed token: the entry IS committed.
@@ -1271,7 +1281,7 @@ ReceiptMessage returns the bytes a witness signs to attest a fenced voter.
 ## func [Recover](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func Recover(d DataDir, newCluster ClusterID, members []Member, opt RecoverOptions) error
+func Recover(d DataDir, newCluster ClusterID, members []MemberValue, opt *RecoverOptions) error
 ```
 
 Recover starts a new history from this node's committed log, every old voter left out attested fenced by every witness.
@@ -1298,7 +1308,7 @@ RedrawLog draws a new id on an empty joining log.
 ## func [RestoreSnapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func RestoreSnapshot(d DataDir, r io.Reader, newCluster ClusterID, members []Member, opt RestoreOptions) (SnapshotMeta, error)
+func RestoreSnapshot(d DataDir, r io.Reader, newCluster ClusterID, members []MemberValue, opt *RestoreOptions) (SnapshotMetaValue, error)
 ```
 
 RestoreSnapshot starts a new history from a saved snapshot, offline.
@@ -1325,7 +1335,7 @@ SPKIOf returns a certificate's pin: the SHA-256 of its public key info.
 ## func [TimingDefaults](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func TimingDefaults() TimingContract
+func TimingDefaults() TimingContractSpec
 ```
 
 TimingDefaults are the default timings for the three-site RTT matrix.
@@ -1334,7 +1344,7 @@ TimingDefaults are the default timings for the three-site RTT matrix.
 ## func [TokenOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 ```go
-func TokenOf(err error) (Token, bool)
+func TokenOf(err error) (TokenValue, bool)
 ```
 
 TokenOf reads the committed token an error carries (R7-10).
@@ -1354,19 +1364,19 @@ AlarmID is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.Ala
 type AlarmID uint64
 ```
 
-<a name="AuthenticatedPeer"></a>
-## type [AuthenticatedPeer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="AuthenticatedPeerValue"></a>
+## type [AuthenticatedPeerValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type AuthenticatedPeer = coreconsensus.AuthenticatedPeer
+type AuthenticatedPeerValue = coreconsensus.AuthenticatedPeerValue
 ```
 
-AuthenticatedPeer is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.AuthenticatedPeer`, declared as:
+AuthenticatedPeerValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.AuthenticatedPeerValue`, declared as:
 
 ```go
-type AuthenticatedPeer struct {
+type AuthenticatedPeerValue struct {
 	// ID is the admitted member, 0 for a joiner.
 	ID          NodeID
 	// Incarnation is that member's incarnation.
@@ -1392,7 +1402,7 @@ BatchingStateMachine is an alias of `github.com/kitsunium/sdk/internal/core/app/
 ```go
 type BatchingStateMachine interface {
 	// ApplyBatch applies es in order and writes each result into results.
-	ApplyBatch(es []Entry, results []any)
+	ApplyBatch(es []EntryValue, results []any)
 	StateMachine
 }
 ```
@@ -1401,7 +1411,7 @@ type BatchingStateMachine interface {
 ### func \(BatchingStateMachine\) [ApplyBatch](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (BatchingStateMachine) ApplyBatch(es []Entry, results []any)
+func (BatchingStateMachine) ApplyBatch(es []EntryValue, results []any)
 ```
 
 ApplyBatch applies es in order and writes each result into results.
@@ -1471,7 +1481,7 @@ type Config struct {
 	Clock               clock.Timed
 	// InitialTiming is proposed at Bootstrap only; the committed contract
 	// rules.
-	InitialTiming       coreconsensus.TimingContract
+	InitialTiming       coreconsensus.TimingContractSpec
 	MaxBatchBytes       int
 	MaxInflight         int
 	MaxInflightBytes    int
@@ -1516,7 +1526,7 @@ type Config struct {
 ### func \(Config\) [MemoryBudget](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/config.go>)
 
 ```go
-func (Config) MemoryBudget(peers int) int64
+func (*Config) MemoryBudget(peers int) int64
 ```
 
 MemoryBudget is the node's memory budget with two peers, the sum of its bounds (D14).
@@ -1620,7 +1630,7 @@ DurableStateMachine is an alias of `github.com/kitsunium/sdk/internal/core/app/c
 type DurableStateMachine interface {
 	// AppliedPosition returns the log identity and the position of the last
 	// entry whose effects are durable.
-	AppliedPosition() (LogIdentity, Position, error)
+	AppliedPosition() (LogIdentityValue, PositionValue, error)
 	StateMachine
 }
 ```
@@ -1629,44 +1639,10 @@ type DurableStateMachine interface {
 ### func \(DurableStateMachine\) [AppliedPosition](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (DurableStateMachine) AppliedPosition() (LogIdentity, Position, error)
+func (DurableStateMachine) AppliedPosition() (LogIdentityValue, PositionValue, error)
 ```
 
 AppliedPosition returns the log identity and the position of the last entry whose effects are durable.
-
-<a name="Entry"></a>
-## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
-
-Every type needed to implement a published port is aliased here (R2-32).
-
-```go
-type Entry = coreconsensus.Entry
-```
-
-Entry is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.Entry`, declared as:
-
-```go
-type Entry struct {
-	// Position is the entry's term and index.
-	Position Position
-	// Kind says what Data carries.
-	Kind     EntryKind
-	// Version is the payload version the proposer set; it selects the frozen
-	// code path that applies the entry.
-	Version  uint32
-	// BodySum is the CRC-32C of Data, computed by the proposer.
-	BodySum  uint32
-	// ChainSum chains the previous entry's header: computed by the LEADER at
-	// its serialized append point, verified at append and before Apply.
-	ChainSum uint32
-	// Data is the payload: a command for EntryCommand, the engine's encoding
-	// for the other kinds.
-	Data     []byte
-	// Token is the entry's lineage-scoped command identity, set in memory by
-	// the engine before Apply and never encoded in the log.
-	Token    Token
-}
-```
 
 <a name="EntryKind"></a>
 ## type [EntryKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
@@ -1692,19 +1668,53 @@ func (EntryKind) Known() bool
 
 Known reports whether the kind is one protocol version 1 defines.
 
-<a name="FencedAttestation"></a>
-## type [FencedAttestation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="EntryValue"></a>
+## type [EntryValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type FencedAttestation = coreconsensus.FencedAttestation
+type EntryValue = coreconsensus.EntryValue
 ```
 
-FencedAttestation is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.FencedAttestation`, declared as:
+EntryValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue`, declared as:
 
 ```go
-type FencedAttestation struct {
+type EntryValue struct {
+	// Position is the entry's term and index.
+	Position PositionValue
+	// Kind says what Data carries.
+	Kind     EntryKind
+	// Version is the payload version the proposer set; it selects the frozen
+	// code path that applies the entry.
+	Version  uint32
+	// BodySum is the CRC-32C of Data, computed by the proposer.
+	BodySum  uint32
+	// ChainSum chains the previous entry's header: computed by the LEADER at
+	// its serialized append point, verified at append and before Apply.
+	ChainSum uint32
+	// Data is the payload: a command for EntryCommand, the engine's encoding
+	// for the other kinds.
+	Data     []byte
+	// Token is the entry's lineage-scoped command identity, set in memory by
+	// the engine before Apply and never encoded in the log.
+	Token    TokenValue
+}
+```
+
+<a name="FencedAttestationValue"></a>
+## type [FencedAttestationValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type FencedAttestationValue = coreconsensus.FencedAttestationValue
+```
+
+FencedAttestationValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.FencedAttestationValue`, declared as:
+
+```go
+type FencedAttestationValue struct {
 	// Voter is the old voter.
 	Voter    NodeID
 	// Method is how it was fenced: "stopped", "powered-off" or "cut".
@@ -1767,46 +1777,39 @@ type HardState struct {
 }
 ```
 
-<a name="Health"></a>
-## type [Health](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="HealthValue"></a>
+## type [HealthValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type Health = svcconsensus.Health
+type HealthValue = svcconsensus.HealthValue
 ```
 
-Health is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.Health`, declared as:
+HealthValue is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.HealthValue`, declared as:
 
 ```go
-type Health struct {
+type HealthValue struct {
 	// Status is the node's view after its last turn.
-	Status             coreconsensus.Status
-	// Ready is true while a leader is known and the node applied what it
-	// knows committed.
-	Ready              bool
-	// HasLeader is true while a leader is known in the current term.
-	HasLeader          bool
-	// QuorumReachable is true on a leader a majority answered within the
-	// minimum election timeout; false elsewhere.
-	QuorumReachable    bool
+	Status             coreconsensus.StatusValue
+	// Flags are the verdict's yes/no answers: HealthReady, HealthHasLeader,
+	// HealthQuorumReachable, HealthStopped.
+	Flags              HealthFlags
 	// FailureTolerance is how many voters can fail now with a majority
 	// left. Only the leader knows it: -1 elsewhere.
 	FailureTolerance   int
 	// ApplyLagEntries is commit minus applied.
 	ApplyLagEntries    uint64
 	// Peers is the leader's view of every peer, nil elsewhere.
-	Peers              []PeerHealth
+	Peers              []PeerHealthValue
 	// ChainRefusals counts identical chain refusals of this follower at
 	// ChainRefusalIndex from ChainRefusalLeader; the node reports itself
 	// unready while it refuses (D4, R6-05).
 	ChainRefusals      int
 	ChainRefusalIndex  uint64
 	ChainRefusalLeader coreconsensus.NodeID
-	// Stopped is true once the node stopped, closed or not.
-	Stopped            bool
 	// StopReason says why the node stopped itself.
-	StopReason         coreconsensus.StopReason
+	StopReason         coreconsensus.StopReasonValue
 	// DroppedFrames counts frames whose From differed from the
 	// authenticated peer (R7-05).
 	DroppedFrames      int64
@@ -1851,19 +1854,19 @@ func (Incarnation) String() string
 
 String renders the incarnation in lowercase hex.
 
-<a name="InstallAccept"></a>
-## type [InstallAccept](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="InstallAcceptValue"></a>
+## type [InstallAcceptValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type InstallAccept = coreconsensus.InstallAccept
+type InstallAcceptValue = coreconsensus.InstallAcceptValue
 ```
 
-InstallAccept is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.InstallAccept`, declared as:
+InstallAcceptValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.InstallAcceptValue`, declared as:
 
 ```go
-type InstallAccept struct {
+type InstallAcceptValue struct {
 	// SnapshotID is the snapshot answered.
 	SnapshotID string
 	// Offset is the chunk-aligned ENCODED offset to resume from, 0 for a
@@ -1877,47 +1880,47 @@ type InstallAccept struct {
 }
 ```
 
-<a name="InstallOffer"></a>
-## type [InstallOffer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="InstallOfferValue"></a>
+## type [InstallOfferValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type InstallOffer = coreconsensus.InstallOffer
+type InstallOfferValue = coreconsensus.InstallOfferValue
 ```
 
-InstallOffer is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.InstallOffer`, declared as:
+InstallOfferValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.InstallOfferValue`, declared as:
 
 ```go
-type InstallOffer struct {
+type InstallOfferValue struct {
 	// Term is the sender's term.
 	Term       uint64
 	// SnapshotID equals Meta.ID.
 	SnapshotID string
 	// Meta describes the snapshot.
-	Meta       SnapshotMeta
+	Meta       SnapshotMetaValue
 }
 ```
 
-<a name="InstallRequest"></a>
-## type [InstallRequest](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="InstallParams"></a>
+## type [InstallParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type InstallRequest = coreconsensus.InstallRequest
+type InstallParams = coreconsensus.InstallParams
 ```
 
-InstallRequest is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.InstallRequest`, declared as:
+InstallParams is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.InstallParams`, declared as:
 
 ```go
-type InstallRequest struct {
+type InstallParams struct {
 	// Ctx ends with the connection.
 	Ctx    context.Context
 	// From is the peer TLS authenticated.
-	From   AuthenticatedPeer
+	From   AuthenticatedPeerValue
 	// Offer is the accepted offer.
-	Offer  InstallOffer
+	Offer  InstallOfferValue
 	// Offset is the accepted offset.
 	Offset int64
 	// Body is the encoded stream from Offset, ending with the connection.
@@ -1939,7 +1942,7 @@ JoinAuthorizer is an alias of `github.com/kitsunium/sdk/internal/core/app/consen
 ```go
 type JoinAuthorizer interface {
 	// Authorize accepts or refuses the request.
-	Authorize(ctx context.Context, r JoinRequest) (Operator, error)
+	Authorize(ctx context.Context, r JoinRequestValue) (Operator, error)
 }
 ```
 
@@ -1947,7 +1950,7 @@ type JoinAuthorizer interface {
 ### func \(JoinAuthorizer\) [Authorize](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (JoinAuthorizer) Authorize(ctx context.Context, r JoinRequest) (Operator, error)
+func (JoinAuthorizer) Authorize(ctx context.Context, r JoinRequestValue) (Operator, error)
 ```
 
 Authorize accepts or refuses the request.
@@ -1968,7 +1971,7 @@ type JoinConfig struct {
 	// Addresses are the members to try, in order.
 	Addresses []string
 	// Stamp is the joiner's stamp, from Init.
-	Stamp     Stamp
+	Stamp     StampValue
 	// Address is where the joiner listens.
 	Address   string
 	// Pins are the SPKIs of the members the joiner trusts, from the
@@ -1994,7 +1997,7 @@ JoinReasonBinder is an alias of `github.com/kitsunium/sdk/internal/core/app/cons
 type JoinReasonBinder interface {
 	// BindJoinReason registers the group's JOIN callback that also returns
 	// the refusal's reason, empty for none.
-	BindJoinReason(group GroupID, join func(ctx context.Context, from AuthenticatedPeer, r JoinRequest) (Position, errs.Code, string))
+	BindJoinReason(group GroupID, join func(ctx context.Context, from AuthenticatedPeerValue, r JoinRequestValue) (PositionValue, errs.Code, string))
 }
 ```
 
@@ -2002,24 +2005,24 @@ type JoinReasonBinder interface {
 ### func \(JoinReasonBinder\) [BindJoinReason](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (JoinReasonBinder) BindJoinReason(group GroupID, join func(ctx context.Context, from AuthenticatedPeer, r JoinRequest) (Position, errs.Code, string))
+func (JoinReasonBinder) BindJoinReason(group GroupID, join func(ctx context.Context, from AuthenticatedPeerValue, r JoinRequestValue) (PositionValue, errs.Code, string))
 ```
 
 BindJoinReason registers the group's JOIN callback that also returns the refusal's reason, empty for none.
 
-<a name="JoinRequest"></a>
-## type [JoinRequest](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="JoinRequestValue"></a>
+## type [JoinRequestValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type JoinRequest = coreconsensus.JoinRequest
+type JoinRequestValue = coreconsensus.JoinRequestValue
 ```
 
-JoinRequest is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.JoinRequest`, declared as:
+JoinRequestValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.JoinRequestValue`, declared as:
 
 ```go
-type JoinRequest struct {
+type JoinRequestValue struct {
 	// Cluster is the cluster the joiner claims.
 	Cluster     ClusterID
 	// ID is the joiner's new NodeID.
@@ -2050,7 +2053,7 @@ Joiner is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.Join
 type Joiner interface {
 	// Join sends the JOIN and returns the position its AddLearner was
 	// appended at.
-	Join(ctx context.Context, cfg JoinConfig) (Position, error)
+	Join(ctx context.Context, cfg JoinConfig) (PositionValue, error)
 }
 ```
 
@@ -2058,7 +2061,7 @@ type Joiner interface {
 ### func \(Joiner\) [Join](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (Joiner) Join(ctx context.Context, cfg JoinConfig) (Position, error)
+func (Joiner) Join(ctx context.Context, cfg JoinConfig) (PositionValue, error)
 ```
 
 Join sends the JOIN and returns the position its AddLearner was appended at.
@@ -2078,7 +2081,7 @@ LeadershipWatcher is an alias of `github.com/kitsunium/sdk/internal/core/app/con
 type LeadershipWatcher interface {
 	// Watch returns its OWN channel, of capacity one, holding the latest
 	// status; it is unsubscribed and closed when ctx ends or the node closes.
-	Watch(ctx context.Context) <-chan Status
+	Watch(ctx context.Context) <-chan StatusValue
 }
 ```
 
@@ -2086,24 +2089,24 @@ type LeadershipWatcher interface {
 ### func \(LeadershipWatcher\) [Watch](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (LeadershipWatcher) Watch(ctx context.Context) <-chan Status
+func (LeadershipWatcher) Watch(ctx context.Context) <-chan StatusValue
 ```
 
 Watch returns its OWN channel, of capacity one, holding the latest status; it is unsubscribed and closed when ctx ends or the node closes.
 
-<a name="LogIdentity"></a>
-## type [LogIdentity](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="LogIdentityValue"></a>
+## type [LogIdentityValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type LogIdentity = coreconsensus.LogIdentity
+type LogIdentityValue = coreconsensus.LogIdentityValue
 ```
 
-LogIdentity is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.LogIdentity`, declared as:
+LogIdentityValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.LogIdentityValue`, declared as:
 
 ```go
-type LogIdentity struct {
+type LogIdentityValue struct {
 	// Cluster is the cluster the log belongs to.
 	Cluster          ClusterID
 	// Epoch counts the histories of this cluster id: 1 at founding.
@@ -2119,11 +2122,11 @@ type LogIdentity struct {
 }
 ```
 
-<a name="LogIdentity.Same"></a>
-### func \(LogIdentity\) [Same](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/identity.go>)
+<a name="LogIdentityValue.Same"></a>
+### func \(LogIdentityValue\) [Same](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/identity.go>)
 
 ```go
-func (LogIdentity) Same(o LogIdentity) bool
+func (LogIdentityValue) Same(o LogIdentityValue) bool
 ```
 
 Same reports whether two identities name the same history (cluster and epoch), whatever lineage they record.
@@ -2146,7 +2149,7 @@ type LogReader interface {
 	// Entries returns entries in [lo, hi), at most maxBytes, and always at
 	// least one entry when lo < hi, even above maxBytes. lo below first is
 	// COMPACTED.
-	Entries(lo uint64, hi uint64, maxBytes int, dst []Entry) ([]Entry, error)
+	Entries(lo uint64, hi uint64, maxBytes int, dst []EntryValue) ([]EntryValue, error)
 	// Term answers for first-1 too, from the term kept at compaction.
 	Term(index uint64) (uint64, error)
 }
@@ -2165,7 +2168,7 @@ Bounds of an empty log after a snapshot at s are (s+1, s).
 ### func \(LogReader\) [Entries](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (LogReader) Entries(lo uint64, hi uint64, maxBytes int, dst []Entry) ([]Entry, error)
+func (LogReader) Entries(lo uint64, hi uint64, maxBytes int, dst []EntryValue) ([]EntryValue, error)
 ```
 
 Entries returns entries in \[lo, hi), at most maxBytes, and always at least one entry when lo \< hi, even above maxBytes. lo below first is COMPACTED.
@@ -2194,7 +2197,7 @@ LogStore is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.Lo
 type LogStore interface {
 	// Append buffers entries and, when hs is not nil, a hard state, in ONE
 	// record batch.
-	Append(entries []Entry, hs *HardState) error
+	Append(entries []EntryValue, hs *HardState) error
 	// Close releases the store.
 	Close() error
 	// CompactPrefix drops what a snapshot covers, through index through.
@@ -2202,14 +2205,14 @@ type LogStore interface {
 	// HardState returns the last hard state appended.
 	HardState() (HardState, error)
 	// Stamp returns the directory's stamp.
-	Stamp() (Stamp, error)
+	Stamp() (StampValue, error)
 	// Sync makes everything appended so far durable.
 	Sync() error
 	// TruncateSuffix writes ONE durable truncate record removing every entry
 	// from index from on, and nothing else.
 	TruncateSuffix(from uint64) error
 	// WriteStamp writes the stamp, durable on return.
-	WriteStamp(Stamp) error
+	WriteStamp(StampValue) error
 	LogReader
 }
 ```
@@ -2218,7 +2221,7 @@ type LogStore interface {
 ### func \(LogStore\) [Append](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (LogStore) Append(entries []Entry, hs *HardState) error
+func (LogStore) Append(entries []EntryValue, hs *HardState) error
 ```
 
 Append buffers entries and, when hs is not nil, a hard state, in ONE record batch.
@@ -2254,7 +2257,7 @@ HardState returns the last hard state appended.
 ### func \(LogStore\) [Stamp](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (LogStore) Stamp() (Stamp, error)
+func (LogStore) Stamp() (StampValue, error)
 ```
 
 Stamp returns the directory's stamp.
@@ -2281,24 +2284,24 @@ TruncateSuffix writes ONE durable truncate record removing every entry from inde
 ### func \(LogStore\) [WriteStamp](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (LogStore) WriteStamp(Stamp) error
+func (LogStore) WriteStamp(StampValue) error
 ```
 
 WriteStamp writes the stamp, durable on return.
 
-<a name="Member"></a>
-## type [Member](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="MemberValue"></a>
+## type [MemberValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type Member = coreconsensus.Member
+type MemberValue = coreconsensus.MemberValue
 ```
 
-Member is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.Member`, declared as:
+MemberValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue`, declared as:
 
 ```go
-type Member struct {
+type MemberValue struct {
 	// ID is the node.
 	ID               NodeID
 	// Incarnation is the node's data-directory incarnation.
@@ -2322,60 +2325,60 @@ type Member struct {
 }
 ```
 
-<a name="Membership"></a>
-## type [Membership](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="MembershipValue"></a>
+## type [MembershipValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type Membership = coreconsensus.Membership
+type MembershipValue = coreconsensus.MembershipValue
 ```
 
-Membership is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.Membership`, declared as:
+MembershipValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.MembershipValue`, declared as:
 
 ```go
-type Membership struct {
+type MembershipValue struct {
 	// Index is the index of the entry that produced it, 0 at founding.
 	Index   uint64
 	// Members lists every voter and learner.
-	Members []Member
+	Members []MemberValue
 	// Retired lists every removed NodeID.
 	Retired []NodeID
 }
 ```
 
-<a name="Membership.Clone"></a>
-### func \(Membership\) [Clone](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/membership.go>)
+<a name="MembershipValue.Clone"></a>
+### func \(MembershipValue\) [Clone](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/membership.go>)
 
 ```go
-func (Membership) Clone() Membership
+func (MembershipValue) Clone() MembershipValue
 ```
 
 Clone returns a deep copy, so that a membership handed out cannot be changed under the engine.
 
-<a name="Membership.IsRetired"></a>
-### func \(Membership\) [IsRetired](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/membership.go>)
+<a name="MembershipValue.IsRetired"></a>
+### func \(MembershipValue\) [IsRetired](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/membership.go>)
 
 ```go
-func (Membership) IsRetired(id NodeID) bool
+func (MembershipValue) IsRetired(id NodeID) bool
 ```
 
 IsRetired reports whether the id was removed.
 
-<a name="Membership.Member"></a>
-### func \(Membership\) [Member](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/membership.go>)
+<a name="MembershipValue.Member"></a>
+### func \(MembershipValue\) [Member](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/membership.go>)
 
 ```go
-func (Membership) Member(id NodeID) (Member, bool)
+func (MembershipValue) Member(id NodeID) (MemberValue, bool)
 ```
 
 Member returns the member with that id.
 
-<a name="Membership.Voters"></a>
-### func \(Membership\) [Voters](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/membership.go>)
+<a name="MembershipValue.Voters"></a>
+### func \(MembershipValue\) [Voters](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/membership.go>)
 
 ```go
-func (Membership) Voters() []NodeID
+func (MembershipValue) Voters() []NodeID
 ```
 
 Voters returns the ids of the voters, in membership order.
@@ -2399,7 +2402,7 @@ type MemoryLog struct{}
 ### func \(MemoryLog\) [Append](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memlog.go>)
 
 ```go
-func (*MemoryLog) Append(entries []coreconsensus.Entry, hs *coreconsensus.HardState) error
+func (*MemoryLog) Append(entries []coreconsensus.EntryValue, hs *coreconsensus.HardState) error
 ```
 
 Append implements LogStore.
@@ -2435,7 +2438,7 @@ CompactPrefix implements LogStore; compacting past the end leaves an empty log a
 ### func \(MemoryLog\) [Entries](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memlog.go>)
 
 ```go
-func (*MemoryLog) Entries(lo uint64, hi uint64, maxBytes int, dst []coreconsensus.Entry) ([]coreconsensus.Entry, error)
+func (*MemoryLog) Entries(lo uint64, hi uint64, maxBytes int, dst []coreconsensus.EntryValue) ([]coreconsensus.EntryValue, error)
 ```
 
 Entries implements LogReader.
@@ -2462,7 +2465,7 @@ HardState implements LogStore.
 ### func \(MemoryLog\) [Stamp](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memlog.go>)
 
 ```go
-func (*MemoryLog) Stamp() (coreconsensus.Stamp, error)
+func (*MemoryLog) Stamp() (coreconsensus.StampValue, error)
 ```
 
 Stamp implements LogStore.
@@ -2498,7 +2501,7 @@ TruncateSuffix implements LogStore.
 ### func \(MemoryLog\) [WriteStamp](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memlog.go>)
 
 ```go
-func (*MemoryLog) WriteStamp(s coreconsensus.Stamp) error
+func (*MemoryLog) WriteStamp(s coreconsensus.StampValue) error
 ```
 
 WriteStamp implements LogStore.
@@ -2536,15 +2539,6 @@ func (*MemoryNetwork) Isolate(id coreconsensus.NodeID, cut bool)
 
 Isolate cuts, or restores, every link of id in both directions.
 
-<a name="MemoryNetwork.Transport"></a>
-### func \(MemoryNetwork\) [Transport](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
-
-```go
-func (*MemoryNetwork) Transport(id coreconsensus.NodeID) *MemoryTransport
-```
-
-Transport returns the transport of id, creating it.
-
 <a name="MemorySnapshots"></a>
 ## type [MemorySnapshots](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
@@ -2564,7 +2558,7 @@ type MemorySnapshots struct{}
 ### func \(MemorySnapshots\) [Create](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memsnap.go>)
 
 ```go
-func (*MemorySnapshots) Create(id string, meta coreconsensus.SnapshotMeta) (coreconsensus.SnapshotSink, int64, error)
+func (*MemorySnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error)
 ```
 
 Create implements SnapshotStore: an existing spool resumes from its last whole chunk.
@@ -2573,7 +2567,7 @@ Create implements SnapshotStore: an existing spool resumes from its last whole c
 ### func \(MemorySnapshots\) [List](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memsnap.go>)
 
 ```go
-func (*MemorySnapshots) List() ([]coreconsensus.SnapshotMeta, error)
+func (*MemorySnapshots) List() ([]coreconsensus.SnapshotMetaValue, error)
 ```
 
 List implements SnapshotStore.
@@ -2615,16 +2609,16 @@ type MemoryTransport struct{}
 ### func \(MemoryTransport\) [Bind](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
 
 ```go
-func (*MemoryTransport) Bind(group coreconsensus.GroupID, deliver func(coreconsensus.AuthenticatedPeer, []byte), offer func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept, install func(coreconsensus.InstallRequest) error, join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code)) error
+func (*MemoryTransport) Bind(group coreconsensus.GroupID, deliver func(coreconsensus.AuthenticatedPeerValue, []byte), offer func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue, install func(coreconsensus.InstallParams) error, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code)) error
 ```
 
-Bind implements Transport.
+Bind implements Transport. The first Bind after construction or Close launches the background delivery goroutine of its own run, which ends when Close stops that run; a later Bind launches a new one.
 
 <a name="MemoryTransport.BindJoinReason"></a>
 ### func \(MemoryTransport\) [BindJoinReason](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
 
 ```go
-func (*MemoryTransport) BindJoinReason(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string))
+func (*MemoryTransport) BindJoinReason(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string))
 ```
 
 BindJoinReason implements JoinReasonBinder.
@@ -2642,7 +2636,7 @@ Close stops delivery; a later Bind starts it again, as a restarted node does.
 ### func \(MemoryTransport\) [Join](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
 
 ```go
-func (*MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.Position, error)
+func (*MemoryTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error)
 ```
 
 Join implements Joiner over the network, as the TCP transport does.
@@ -2660,7 +2654,7 @@ Send implements Transport: it never blocks and drops when the queue is full.
 ### func \(MemoryTransport\) [SetMembership](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
 
 ```go
-func (*MemoryTransport) SetMembership(_ coreconsensus.GroupID, admitted []coreconsensus.Member)
+func (*MemoryTransport) SetMembership(_ coreconsensus.GroupID, admitted []coreconsensus.MemberValue)
 ```
 
 SetMembership implements Transport.
@@ -2669,24 +2663,57 @@ SetMembership implements Transport.
 ### func \(MemoryTransport\) [Stream](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/memtransport.go>)
 
 ```go
-func (*MemoryTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOffer, open func(int64) (io.ReadCloser, error)) error
+func (*MemoryTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error
 ```
 
 Stream implements Transport: offer, accept, then the stream from the accepted offset.
 
-<a name="Message"></a>
-## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="MessageKind"></a>
+## type [MessageKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type Message = coreconsensus.Message
+type MessageKind = coreconsensus.MessageKind
 ```
 
-Message is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.Message`, declared as:
+MessageKind is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.MessageKind`, declared as:
 
 ```go
-type Message struct {
+type MessageKind uint8
+```
+
+<a name="MessageKind.Known"></a>
+### func \(MessageKind\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/message.go>)
+
+```go
+func (MessageKind) Known() bool
+```
+
+Known reports whether protocol version 1 defines the kind.
+
+<a name="MessageKind.Lane"></a>
+### func \(MessageKind\) [Lane](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/message.go>)
+
+```go
+func (MessageKind) Lane() FrameLane
+```
+
+Lane returns the connection the kind belongs on.
+
+<a name="MessageValue"></a>
+## type [MessageValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type MessageValue = coreconsensus.MessageValue
+```
+
+MessageValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.MessageValue`, declared as:
+
+```go
+type MessageValue struct {
 	// Version is the frame layout version, 1.
 	Version        uint8
 	// Group is the consensus group, 1 in v1.
@@ -2726,42 +2753,9 @@ type Message struct {
 	Code           errs.Code
 	// Entries are the entries an append carries, or the proposal a forward
 	// carries with a zero position.
-	Entries        []Entry
+	Entries        []EntryValue
 }
 ```
-
-<a name="MessageKind"></a>
-## type [MessageKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
-
-Every type needed to implement a published port is aliased here (R2-32).
-
-```go
-type MessageKind = coreconsensus.MessageKind
-```
-
-MessageKind is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.MessageKind`, declared as:
-
-```go
-type MessageKind uint8
-```
-
-<a name="MessageKind.Known"></a>
-### func \(MessageKind\) [Known](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/message.go>)
-
-```go
-func (MessageKind) Known() bool
-```
-
-Known reports whether protocol version 1 defines the kind.
-
-<a name="MessageKind.Lane"></a>
-### func \(MessageKind\) [Lane](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/message.go>)
-
-```go
-func (MessageKind) Lane() FrameLane
-```
-
-Lane returns the connection the kind belongs on.
 
 <a name="Node"></a>
 ## type [Node](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
@@ -2782,7 +2776,7 @@ type Node struct{}
 ### func \(Node\) [AddLearner](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
 
 ```go
-func (*Node) AddLearner(ctx context.Context, op coreconsensus.Operator, m coreconsensus.Member) error
+func (*Node) AddLearner(ctx context.Context, op coreconsensus.Operator, m coreconsensus.MemberValue) error
 ```
 
 AddLearner adds a non-voting member that receives the log (D8).
@@ -2791,7 +2785,7 @@ AddLearner adds a non-voting member that receives the log (D8).
 ### func \(Node\) [Barrier](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
 
 ```go
-func (*Node) Barrier(ctx context.Context) (coreconsensus.Token, error)
+func (*Node) Barrier(ctx context.Context) (coreconsensus.TokenValue, error)
 ```
 
 Barrier returns once the local state machine reflects every write committed before the call (D9).
@@ -2800,7 +2794,7 @@ Barrier returns once the local state machine reflects every write committed befo
 ### func \(Node\) [ClearNoSpace](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
 
 ```go
-func (*Node) ClearNoSpace(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.Precondition) error
+func (*Node) ClearNoSpace(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec) error
 ```
 
 ClearNoSpace clears the no-space alarm the precondition names.
@@ -2830,13 +2824,13 @@ DenyPin withdraws a member's SPKI pin (R9-18).
 func (*Node) HardClose() error
 ```
 
-HardClose stops now: no transfer, no final sync, bounded by HardCloseTimeout (R7-11).
+HardClose stops now: no transfer, no final sync, bounded by HardCloseTimeout (R7-11). It launches one goroutine that waits for the node's goroutines; when the timeout fires first, that waiter is abandoned with them and the data directory stays held until the process exits.
 
 <a name="Node.Health"></a>
-### func \(Node\) [Health](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/bootstrap.go>)
+### func \(Node\) [Health](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/health.go>)
 
 ```go
-func (*Node) Health() Health
+func (*Node) Health() HealthValue
 ```
 
 Health returns the node's verdict, computed on the event loop.
@@ -2845,7 +2839,7 @@ Health returns the node's verdict, computed on the event loop.
 ### func \(Node\) [Membership](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/node.go>)
 
 ```go
-func (*Node) Membership() coreconsensus.Membership
+func (*Node) Membership() coreconsensus.MembershipValue
 ```
 
 Membership returns the configuration the node last appended.
@@ -2863,7 +2857,7 @@ Promote makes a caught-up learner a voter (D8).
 ### func \(Node\) [Propose](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
 
 ```go
-func (*Node) Propose(ctx context.Context, data []byte) (coreconsensus.Token, any, error)
+func (*Node) Propose(ctx context.Context, data []byte) (coreconsensus.TokenValue, any, error)
 ```
 
 Propose replicates data and returns, once the entry is applied locally, its token and the value Apply returned. NOT\_LEADER means certainly not appended; OUTCOME\_UNKNOWN means it may still commit: read the state through Barrier before deciding, never retry blindly (D6, R1-04).
@@ -2872,7 +2866,7 @@ Propose replicates data and returns, once the entry is applied locally, its toke
 ### func \(Node\) [ProposeTimingContract](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
 
 ```go
-func (*Node) ProposeTimingContract(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.Precondition, c coreconsensus.TimingContract) error
+func (*Node) ProposeTimingContract(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec, c coreconsensus.TimingContractSpec) error
 ```
 
 ProposeTimingContract proposes a new timing contract.
@@ -2881,7 +2875,7 @@ ProposeTimingContract proposes a new timing contract.
 ### func \(Node\) [RaiseClusterVersion](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
 
 ```go
-func (*Node) RaiseClusterVersion(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.Precondition, v uint32) error
+func (*Node) RaiseClusterVersion(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec, v uint32) error
 ```
 
 RaiseClusterVersion raises the protocol version every member must speak.
@@ -2899,7 +2893,7 @@ Remove removes a member and retires its id; removing the leader first transfers 
 ### func \(Node\) [SaveSnapshot](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/snapshot.go>)
 
 ```go
-func (*Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io.Writer) (coreconsensus.SnapshotMeta, error)
+func (*Node) SaveSnapshot(ctx context.Context, op coreconsensus.Operator, w io.Writer) (coreconsensus.SnapshotMetaValue, error)
 ```
 
 SaveSnapshot cuts a snapshot now and copies its encoded stream to w.
@@ -2908,7 +2902,7 @@ SaveSnapshot cuts a snapshot now and copies its encoded stream to w.
 ### func \(Node\) [Status](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/node.go>)
 
 ```go
-func (*Node) Status() coreconsensus.Status
+func (*Node) Status() coreconsensus.StatusValue
 ```
 
 Status returns the node's view after its last turn.
@@ -2917,7 +2911,7 @@ Status returns the node's view after its last turn.
 ### func \(Node\) [StopReason](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/node.go>)
 
 ```go
-func (*Node) StopReason() (coreconsensus.StopReason, bool)
+func (*Node) StopReason() (coreconsensus.StopReasonValue, bool)
 ```
 
 StopReason returns why the node stopped itself, if it did.
@@ -2929,7 +2923,7 @@ StopReason returns why the node stopped itself, if it did.
 func (*Node) TransferLeadership(ctx context.Context, op coreconsensus.Operator, to coreconsensus.NodeID) error
 ```
 
-TransferLeadership moves leadership to a voter (D8). It records the operator in an entry, then waits until the target leads or one election timeout passes.
+TransferLeadership moves leadership to a voter (D8). It records the operator in an entry, then waits until the target leads or twice the maximum election timeout passes.
 
 <a name="Node.UpdateAddress"></a>
 ### func \(Node\) [UpdateAddress](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
@@ -2944,7 +2938,7 @@ UpdateAddress changes where a member listens.
 ### func \(Node\) [WaitApplied](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
 
 ```go
-func (*Node) WaitApplied(ctx context.Context, t coreconsensus.Token) error
+func (*Node) WaitApplied(ctx context.Context, t coreconsensus.TokenValue) error
 ```
 
 WaitApplied returns once the local node has applied t. A token of another lineage is LINEAGE\_MISMATCH.
@@ -2953,10 +2947,10 @@ WaitApplied returns once the local node has applied t. A token of another lineag
 ### func \(Node\) [Watch](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/node.go>)
 
 ```go
-func (*Node) Watch(ctx context.Context) <-chan coreconsensus.Status
+func (*Node) Watch(ctx context.Context) <-chan coreconsensus.StatusValue
 ```
 
-Watch implements LeadershipWatcher.
+Watch implements LeadershipWatcher. Each call launches one goroutine that closes the returned channel and ends when ctx ends or the node's event loop stops.
 
 <a name="NodeID"></a>
 ## type [NodeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
@@ -3043,23 +3037,33 @@ func (*PEMIdentity) ReloadFailures() int
 
 ReloadFailures counts the reloads refused so far.
 
-<a name="PeerHealth"></a>
-## type [PeerHealth](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="PEMIdentity.Roots"></a>
+### func \(PEMIdentity\) [Roots](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/pem.go>)
+
+```go
+func (*PEMIdentity) Roots() *x509.CertPool
+```
+
+Roots returns the trusted CA pool the identity was read with, the union of every CA file seen so far, to pass as TransportConfig.Roots.
+
+<a name="PeerHealthValue"></a>
+## type [PeerHealthValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type PeerHealth = svcconsensus.PeerHealth
+type PeerHealthValue = svcconsensus.PeerHealthValue
 ```
 
-PeerHealth is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealth`, declared as:
+PeerHealthValue is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.PeerHealthValue`, declared as:
 
 ```go
-type PeerHealth struct {
+type PeerHealthValue struct {
 	// ID is the peer.
 	ID          coreconsensus.NodeID
-	// Voter is false for a learner.
-	Voter       bool
+	// Flags are the peer's yes/no facts: PeerVoter, PeerUnreachable,
+	// PeerSnapshot.
+	Flags       PeerFlags
 	// Match is the highest index the peer holds durably, as acknowledged.
 	Match       uint64
 	// Lag is how far Match is behind the leader's last index.
@@ -3069,28 +3073,22 @@ type PeerHealth struct {
 	// LastContact is how long ago it last answered; negative when it never
 	// answered in this term.
 	LastContact time.Duration
-	// Unreachable is set when the transport failed to reach it since it
-	// last answered, or it has not answered within the minimum election
-	// timeout.
-	Unreachable bool
-	// Snapshot is set while a snapshot is being sent to it.
-	Snapshot    bool
 }
 ```
 
-<a name="Position"></a>
-## type [Position](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="PositionValue"></a>
+## type [PositionValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type Position = coreconsensus.Position
+type PositionValue = coreconsensus.PositionValue
 ```
 
-Position is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.Position`, declared as:
+PositionValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.PositionValue`, declared as:
 
 ```go
-type Position struct {
+type PositionValue struct {
 	// Term is the leader term the entry was appended in.
 	Term  uint64
 	// Index is the entry's place in the log, from 1.
@@ -3098,21 +3096,21 @@ type Position struct {
 }
 ```
 
-<a name="Precondition"></a>
-## type [Precondition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="PreconditionSpec"></a>
+## type [PreconditionSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type Precondition = coreconsensus.Precondition
+type PreconditionSpec = coreconsensus.PreconditionSpec
 ```
 
-Precondition is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.Precondition`, declared as:
+PreconditionSpec is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.PreconditionSpec`, declared as:
 
 ```go
-type Precondition struct {
+type PreconditionSpec struct {
 	// Log is the identity the precondition was read in.
-	Log        LogIdentity
+	Log        LogIdentityValue
 	// Alarm is the alarm a clearing operation names.
 	Alarm      AlarmID
 	// Generation is the contract or cluster-version generation an operation
@@ -3169,7 +3167,7 @@ type RecoverOptions struct {
 	// Operator is recorded in the audit file.
 	Operator    coreconsensus.Operator
 	// Fenced attests every old voter left out of the new members.
-	Fenced      []coreconsensus.FencedAttestation
+	Fenced      []coreconsensus.FencedAttestationValue
 	// WitnessKeys verify the receipts: one per witness, each must sign.
 	WitnessKeys []ed25519.PublicKey
 }
@@ -3190,17 +3188,17 @@ Replicated is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.
 type Replicated interface {
 	// Barrier returns once the local state machine reflects every write
 	// committed before the call, with the token of the applied index.
-	Barrier(ctx context.Context) (Token, error)
+	Barrier(ctx context.Context) (TokenValue, error)
 	// Propose replicates data and returns, once the entry is applied
 	// locally, its lineage-scoped token and the value Apply returned.
 	// NOT_LEADER means certainly not appended; OUTCOME_UNKNOWN means it may
 	// still commit, and the caller must read the state before deciding.
-	Propose(ctx context.Context, data []byte) (Token, any, error)
+	Propose(ctx context.Context, data []byte) (TokenValue, any, error)
 	// Status returns the node's view after its last turn.
-	Status() Status
+	Status() StatusValue
 	// WaitApplied returns once the local node has applied t. A token of
 	// another lineage is LINEAGE_MISMATCH.
-	WaitApplied(ctx context.Context, t Token) error
+	WaitApplied(ctx context.Context, t TokenValue) error
 }
 ```
 
@@ -3208,7 +3206,7 @@ type Replicated interface {
 ### func \(Replicated\) [Barrier](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (Replicated) Barrier(ctx context.Context) (Token, error)
+func (Replicated) Barrier(ctx context.Context) (TokenValue, error)
 ```
 
 Barrier returns once the local state machine reflects every write committed before the call, with the token of the applied index.
@@ -3217,7 +3215,7 @@ Barrier returns once the local state machine reflects every write committed befo
 ### func \(Replicated\) [Propose](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (Replicated) Propose(ctx context.Context, data []byte) (Token, any, error)
+func (Replicated) Propose(ctx context.Context, data []byte) (TokenValue, any, error)
 ```
 
 Propose replicates data and returns, once the entry is applied locally, its lineage-scoped token and the value Apply returned. NOT\_LEADER means certainly not appended; OUTCOME\_UNKNOWN means it may still commit, and the caller must read the state before deciding.
@@ -3226,7 +3224,7 @@ Propose replicates data and returns, once the entry is applied locally, its line
 ### func \(Replicated\) [Status](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (Replicated) Status() Status
+func (Replicated) Status() StatusValue
 ```
 
 Status returns the node's view after its last turn.
@@ -3235,29 +3233,29 @@ Status returns the node's view after its last turn.
 ### func \(Replicated\) [WaitApplied](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (Replicated) WaitApplied(ctx context.Context, t Token) error
+func (Replicated) WaitApplied(ctx context.Context, t TokenValue) error
 ```
 
 WaitApplied returns once the local node has applied t. A token of another lineage is LINEAGE\_MISMATCH.
 
-<a name="Report"></a>
-## type [Report](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="ReportValue"></a>
+## type [ReportValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type Report = svcconsensus.Report
+type ReportValue = svcconsensus.ReportValue
 ```
 
-Report is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.Report`, declared as:
+ReportValue is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.ReportValue`, declared as:
 
 ```go
-type Report struct {
-	Stamp      coreconsensus.Stamp
+type ReportValue struct {
+	Stamp      coreconsensus.StampValue
 	HardState  coreconsensus.HardState
 	First      uint64
 	Last       uint64
-	Snapshots  []coreconsensus.SnapshotMeta
+	Snapshots  []coreconsensus.SnapshotMetaValue
 	Quarantine string
 	Markers    []string
 }
@@ -3277,7 +3275,7 @@ RestoreOptions is an alias of `github.com/kitsunium/sdk/internal/service/app/con
 ```go
 type RestoreOptions struct {
 	// Expected is the snapshot's metadata, from SaveSnapshot: non-zero.
-	Expected   coreconsensus.SnapshotMeta
+	Expected   coreconsensus.SnapshotMetaValue
 	// Confirm must equal the new cluster id in hex.
 	Confirm    string
 	// Operator is recorded in the audit file.
@@ -3369,7 +3367,7 @@ type SnapshotHandle interface {
 	// Close unpins it.
 	Close() error
 	// Meta describes the snapshot.
-	Meta() SnapshotMeta
+	Meta() SnapshotMetaValue
 	io.ReaderAt
 }
 ```
@@ -3387,34 +3385,34 @@ Close unpins it.
 ### func \(SnapshotHandle\) [Meta](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (SnapshotHandle) Meta() SnapshotMeta
+func (SnapshotHandle) Meta() SnapshotMetaValue
 ```
 
 Meta describes the snapshot.
 
-<a name="SnapshotMeta"></a>
-## type [SnapshotMeta](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="SnapshotMetaValue"></a>
+## type [SnapshotMetaValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type SnapshotMeta = coreconsensus.SnapshotMeta
+type SnapshotMetaValue = coreconsensus.SnapshotMetaValue
 ```
 
-SnapshotMeta is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMeta`, declared as:
+SnapshotMetaValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue`, declared as:
 
 ```go
-type SnapshotMeta struct {
+type SnapshotMetaValue struct {
 	// ID names the snapshot, the same in a spool, an offer and a handle.
 	ID                string
 	// Version is the snapshot format version, 1.
 	Version           uint8
 	// Position is the last entry the snapshot covers.
-	Position          Position
+	Position          PositionValue
 	// Log is the identity of the log the snapshot was cut from.
-	Log               LogIdentity
+	Log               LogIdentityValue
 	// Membership is the configuration valid at Position, never a later one.
-	Membership        Membership
+	Membership        MembershipValue
 	// ChainTip is the authenticated chain value at Position: the chain is
 	// carried across the boundary, never reseeded.
 	ChainTip          uint32
@@ -3429,7 +3427,7 @@ type SnapshotMeta struct {
 	// SHA256 is the digest of the DECODED stream, computed by the engine.
 	SHA256            [32]byte
 	// Timing is the committed timing contract at Position.
-	Timing            TimingContract
+	Timing            TimingContractSpec
 	// ClusterVersion is the committed cluster version at Position.
 	ClusterVersion    uint32
 	// ClusterGeneration counts its raises.
@@ -3458,7 +3456,7 @@ type SnapshotSink interface {
 	Abort() error
 	// Commit publishes the snapshot; final carries the SHA-256 the engine
 	// computed over the DECODED stream.
-	Commit(final SnapshotMeta) error
+	Commit(final SnapshotMetaValue) error
 	io.Writer
 }
 ```
@@ -3476,7 +3474,7 @@ Abort drops the spool.
 ### func \(SnapshotSink\) [Commit](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (SnapshotSink) Commit(final SnapshotMeta) error
+func (SnapshotSink) Commit(final SnapshotMetaValue) error
 ```
 
 Commit publishes the snapshot; final carries the SHA-256 the engine computed over the DECODED stream.
@@ -3496,9 +3494,9 @@ SnapshotStore is an alias of `github.com/kitsunium/sdk/internal/core/app/consens
 type SnapshotStore interface {
 	// Create opens the spool of id. When a spool of that id exists, it is
 	// returned with the ENCODED offset durably spooled so far.
-	Create(id string, meta SnapshotMeta) (sink SnapshotSink, spooled int64, err error)
+	Create(id string, meta SnapshotMetaValue) (sink SnapshotSink, spooled int64, err error)
 	// List returns the complete snapshots, newest first.
-	List() ([]SnapshotMeta, error)
+	List() ([]SnapshotMetaValue, error)
 	// Open pins a snapshot until the handle is closed.
 	Open(id string) (SnapshotHandle, error)
 	// Remove deletes a snapshot; refused while a handle is open.
@@ -3510,7 +3508,7 @@ type SnapshotStore interface {
 ### func \(SnapshotStore\) [Create](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (SnapshotStore) Create(id string, meta SnapshotMeta) (sink SnapshotSink, spooled int64, err error)
+func (SnapshotStore) Create(id string, meta SnapshotMetaValue) (sink SnapshotSink, spooled int64, err error)
 ```
 
 Create opens the spool of id. When a spool of that id exists, it is returned with the ENCODED offset durably spooled so far.
@@ -3519,7 +3517,7 @@ Create opens the spool of id. When a spool of that id exists, it is returned wit
 ### func \(SnapshotStore\) [List](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (SnapshotStore) List() ([]SnapshotMeta, error)
+func (SnapshotStore) List() ([]SnapshotMetaValue, error)
 ```
 
 List returns the complete snapshots, newest first.
@@ -3542,35 +3540,6 @@ func (SnapshotStore) Remove(id string) error
 
 Remove deletes a snapshot; refused while a handle is open.
 
-<a name="Stamp"></a>
-## type [Stamp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
-
-Every type needed to implement a published port is aliased here (R2-32).
-
-```go
-type Stamp = coreconsensus.Stamp
-```
-
-Stamp is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.Stamp`, declared as:
-
-```go
-type Stamp struct {
-	// Log is the log identity the directory belongs to.
-	Log         LogIdentity
-	// ID is the node.
-	ID          NodeID
-	// Incarnation is drawn when the stamp is first written.
-	Incarnation Incarnation
-	// Slot is the placement slot the node's certificate names.
-	Slot        string
-	// State is how far the directory has come.
-	State       StampState
-	// Founding is the digest of the founding member list while a bootstrap
-	// is pending, so that a rerun with another list is refused.
-	Founding    [32]byte
-}
-```
-
 <a name="StampState"></a>
 ## type [StampState](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
@@ -3584,6 +3553,35 @@ StampState is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.
 
 ```go
 type StampState uint8
+```
+
+<a name="StampValue"></a>
+## type [StampValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type StampValue = coreconsensus.StampValue
+```
+
+StampValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.StampValue`, declared as:
+
+```go
+type StampValue struct {
+	// Log is the log identity the directory belongs to.
+	Log         LogIdentityValue
+	// ID is the node.
+	ID          NodeID
+	// Incarnation is drawn when the stamp is first written.
+	Incarnation Incarnation
+	// Slot is the placement slot the node's certificate names.
+	Slot        string
+	// State is how far the directory has come.
+	State       StampState
+	// Founding is the digest of the founding member list while a bootstrap
+	// is pending, so that a rerun with another list is refused.
+	Founding    [32]byte
+}
 ```
 
 <a name="StateMachine"></a>
@@ -3601,10 +3599,10 @@ StateMachine is an alias of `github.com/kitsunium/sdk/internal/core/app/consensu
 type StateMachine interface {
 	// Apply applies one committed command and returns its result, delivered
 	// to the Propose that created it on the node that created it.
-	Apply(e Entry) any
+	Apply(e EntryValue) any
 	// Restore replaces the state with a snapshot's. It is serialised with
 	// Apply.
-	Restore(r io.Reader, meta SnapshotMeta) error
+	Restore(r io.Reader, meta SnapshotMetaValue) error
 	// Snapshot captures a point-in-time view of the state, cheaply: it is
 	// called on the apply goroutine.
 	Snapshot() (Snapshot, error)
@@ -3615,7 +3613,7 @@ type StateMachine interface {
 ### func \(StateMachine\) [Apply](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (StateMachine) Apply(e Entry) any
+func (StateMachine) Apply(e EntryValue) any
 ```
 
 Apply applies one committed command and returns its result, delivered to the Propose that created it on the node that created it.
@@ -3624,7 +3622,7 @@ Apply applies one committed command and returns its result, delivered to the Pro
 ### func \(StateMachine\) [Restore](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (StateMachine) Restore(r io.Reader, meta SnapshotMeta) error
+func (StateMachine) Restore(r io.Reader, meta SnapshotMetaValue) error
 ```
 
 Restore replaces the state with a snapshot's. It is serialised with Apply.
@@ -3638,19 +3636,19 @@ func (StateMachine) Snapshot() (Snapshot, error)
 
 Snapshot captures a point-in-time view of the state, cheaply: it is called on the apply goroutine.
 
-<a name="Status"></a>
-## type [Status](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="StatusValue"></a>
+## type [StatusValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type Status = coreconsensus.Status
+type StatusValue = coreconsensus.StatusValue
 ```
 
-Status is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.Status`, declared as:
+StatusValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.StatusValue`, declared as:
 
 ```go
-type Status struct {
+type StatusValue struct {
 	// ID is this node.
 	ID       NodeID
 	// Role is its role.
@@ -3664,38 +3662,38 @@ type Status struct {
 	// Applied is the highest index its state machine applied.
 	Applied  uint64
 	// Log is the identity of its log.
-	Log      LogIdentity
+	Log      LogIdentityValue
 	// Versions are its capabilities and the committed cluster version.
-	Versions Versions
+	Versions VersionsValue
 	// Timing is the committed timing contract.
-	Timing   TimingContract
+	Timing   TimingContractSpec
 	// NoSpace is the raised no-space alarm, 0 when none.
 	NoSpace  AlarmID
 }
 ```
 
-<a name="Status.Precondition"></a>
-### func \(Status\) [Precondition](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/status.go>)
+<a name="StatusValue.Precondition"></a>
+### func \(StatusValue\) [Precondition](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/status.go>)
 
 ```go
-func (Status) Precondition() Precondition
+func (*StatusValue) Precondition() PreconditionSpec
 ```
 
 Precondition returns the precondition an operation clearing the current alarm, or replacing the current contract, would carry.
 
-<a name="StopReason"></a>
-## type [StopReason](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="StopReasonValue"></a>
+## type [StopReasonValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type StopReason = coreconsensus.StopReason
+type StopReasonValue = coreconsensus.StopReasonValue
 ```
 
-StopReason is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.StopReason`, declared as:
+StopReasonValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.StopReasonValue`, declared as:
 
 ```go
-type StopReason struct {
+type StopReasonValue struct {
 	// Err is the stop's error, built on its sentinel.
 	Err      error
 	// Unmarked is set when a STORAGE_FAILED stop could write its marker
@@ -3704,11 +3702,11 @@ type StopReason struct {
 }
 ```
 
-<a name="StopReason.ExitCode"></a>
-### func \(StopReason\) [ExitCode](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/status.go>)
+<a name="StopReasonValue.ExitCode"></a>
+### func \(StopReasonValue\) [ExitCode](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/status.go>)
 
 ```go
-func (StopReason) ExitCode() int
+func (StopReasonValue) ExitCode() int
 ```
 
 ExitCode returns errs.ExitCodeOf of the stop's error, or 73 for a storage failure whose marker could not be written (ADR 0152 D4).
@@ -3741,7 +3739,7 @@ Addr returns the bound address.
 ### func \(TCPTransport\) [Bind](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
 
 ```go
-func (*TCPTransport) Bind(_ coreconsensus.GroupID, deliver func(coreconsensus.AuthenticatedPeer, []byte), offer func(coreconsensus.AuthenticatedPeer, coreconsensus.InstallOffer) coreconsensus.InstallAccept, install func(coreconsensus.InstallRequest) error, join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code)) error
+func (*TCPTransport) Bind(_ coreconsensus.GroupID, deliver func(coreconsensus.AuthenticatedPeerValue, []byte), offer func(coreconsensus.AuthenticatedPeerValue, coreconsensus.InstallOfferValue) coreconsensus.InstallAcceptValue, install func(coreconsensus.InstallParams) error, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code)) error
 ```
 
 Bind implements Transport.
@@ -3750,7 +3748,7 @@ Bind implements Transport.
 ### func \(TCPTransport\) [BindJoinReason](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
 
 ```go
-func (*TCPTransport) BindJoinReason(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeer, coreconsensus.JoinRequest) (coreconsensus.Position, errs.Code, string))
+func (*TCPTransport) BindJoinReason(_ coreconsensus.GroupID, join func(context.Context, coreconsensus.AuthenticatedPeerValue, coreconsensus.JoinRequestValue) (coreconsensus.PositionValue, errs.Code, string))
 ```
 
 BindJoinReason implements JoinReasonBinder: the JOIN callback that also says why it refused.
@@ -3786,7 +3784,7 @@ Cluster returns the cluster the certificate names.
 ### func \(TCPTransport\) [Join](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
 
 ```go
-func (*TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.Position, error)
+func (*TCPTransport) Join(ctx context.Context, cfg coreconsensus.JoinConfig) (coreconsensus.PositionValue, error)
 ```
 
 Join implements Joiner: the JOIN goes to each address in turn until one member answers JOIN\_ACK with the position its AddLearner was appended at.
@@ -3825,13 +3823,13 @@ ReloadFailures counts the refused reloads of a PEM identity, 0 without one.
 func (*TCPTransport) Send(to coreconsensus.NodeID, frame []byte)
 ```
 
-Send implements Transport: it never blocks, and drops when the peer's queue is full (D4).
+Send implements Transport: it never blocks, and drops when the peer's queue is full (D4). The first frame to a peer and lane launches that lane's background sender goroutine, which ends when Close is called.
 
 <a name="TCPTransport.SetMembership"></a>
 ### func \(TCPTransport\) [SetMembership](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
 
 ```go
-func (*TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []coreconsensus.Member)
+func (*TCPTransport) SetMembership(group coreconsensus.GroupID, admitted []coreconsensus.MemberValue)
 ```
 
 SetMembership implements Transport: the admitted set is the union over the groups; a member that left has its connections cut and its handshakes refused from then on (D4).
@@ -3849,7 +3847,7 @@ Slot returns the slot the certificate names.
 ### func \(TCPTransport\) [Stream](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/tcp.go>)
 
 ```go
-func (*TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOffer, open func(int64) (io.ReadCloser, error)) error
+func (*TCPTransport) Stream(ctx context.Context, to coreconsensus.NodeID, offer coreconsensus.InstallOfferValue, open func(int64) (io.ReadCloser, error)) error
 ```
 
 Stream implements Transport.
@@ -3863,19 +3861,19 @@ func (*TCPTransport) Unreachable(f func(coreconsensus.NodeID))
 
 Unreachable implements UnreachableReporter.
 
-<a name="TimingContract"></a>
-## type [TimingContract](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="TimingContractSpec"></a>
+## type [TimingContractSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type TimingContract = coreconsensus.TimingContract
+type TimingContractSpec = coreconsensus.TimingContractSpec
 ```
 
-TimingContract is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.TimingContract`, declared as:
+TimingContractSpec is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec`, declared as:
 
 ```go
-type TimingContract struct {
+type TimingContractSpec struct {
 	// Generation counts the committed contracts, 1 at founding.
 	Generation         uint64
 	// HeartbeatInterval is how often the leader confirms itself.
@@ -3891,19 +3889,19 @@ type TimingContract struct {
 }
 ```
 
-<a name="Token"></a>
-## type [Token](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="TokenValue"></a>
+## type [TokenValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type Token = coreconsensus.Token
+type TokenValue = coreconsensus.TokenValue
 ```
 
-Token is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.Token`, declared as:
+TokenValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.TokenValue`, declared as:
 
 ```go
-type Token struct {
+type TokenValue struct {
 	// Cluster is the cluster of the log that committed the entry.
 	Cluster ClusterID
 	// Epoch is that log's epoch.
@@ -3915,11 +3913,11 @@ type Token struct {
 }
 ```
 
-<a name="Token.Position"></a>
-### func \(Token\) [Position](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/identity.go>)
+<a name="TokenValue.Position"></a>
+### func \(TokenValue\) [Position](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/identity.go>)
 
 ```go
-func (Token) Position() Position
+func (TokenValue) Position() PositionValue
 ```
 
 Position returns the token's position, without its lineage.
@@ -3940,17 +3938,17 @@ type Transport interface {
 	// Bind registers the group's callbacks. deliver gets the frame and the
 	// peer TLS authenticated, valid until deliver returns; offer is answered
 	// on the event loop; join is answered off it, under a deadline.
-	Bind(group GroupID, deliver func(from AuthenticatedPeer, frame []byte), offer func(from AuthenticatedPeer, o InstallOffer) InstallAccept, install func(InstallRequest) error, join func(ctx context.Context, from AuthenticatedPeer, r JoinRequest) (Position, errs.Code)) error
+	Bind(group GroupID, deliver func(from AuthenticatedPeerValue, frame []byte), offer func(from AuthenticatedPeerValue, o InstallOfferValue) InstallAcceptValue, install func(InstallParams) error, join func(ctx context.Context, from AuthenticatedPeerValue, r JoinRequestValue) (PositionValue, errs.Code)) error
 	// Send hands over an encoded frame. It never blocks and may drop; the
 	// transport owns frame after the call.
 	Send(to NodeID, frame []byte)
 	// SetMembership pushes the group's admitted members; the transport
 	// computes the union over its groups.
-	SetMembership(group GroupID, admitted []Member)
+	SetMembership(group GroupID, admitted []MemberValue)
 	// Stream sends a snapshot from the offset the receiver accepted; open
 	// returns a reader at an encoded offset on a chunk boundary, which
 	// Stream closes.
-	Stream(ctx context.Context, to NodeID, offer InstallOffer, open func(offset int64) (io.ReadCloser, error)) error
+	Stream(ctx context.Context, to NodeID, offer InstallOfferValue, open func(offset int64) (io.ReadCloser, error)) error
 }
 ```
 
@@ -3958,7 +3956,7 @@ type Transport interface {
 ### func \(Transport\) [Bind](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (Transport) Bind(group GroupID, deliver func(from AuthenticatedPeer, frame []byte), offer func(from AuthenticatedPeer, o InstallOffer) InstallAccept, install func(InstallRequest) error, join func(ctx context.Context, from AuthenticatedPeer, r JoinRequest) (Position, errs.Code)) error
+func (Transport) Bind(group GroupID, deliver func(from AuthenticatedPeerValue, frame []byte), offer func(from AuthenticatedPeerValue, o InstallOfferValue) InstallAcceptValue, install func(InstallParams) error, join func(ctx context.Context, from AuthenticatedPeerValue, r JoinRequestValue) (PositionValue, errs.Code)) error
 ```
 
 Bind registers the group's callbacks. deliver gets the frame and the peer TLS authenticated, valid until deliver returns; offer is answered on the event loop; join is answered off it, under a deadline.
@@ -3976,7 +3974,7 @@ Send hands over an encoded frame. It never blocks and may drop; the transport ow
 ### func \(Transport\) [SetMembership](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (Transport) SetMembership(group GroupID, admitted []Member)
+func (Transport) SetMembership(group GroupID, admitted []MemberValue)
 ```
 
 SetMembership pushes the group's admitted members; the transport computes the union over its groups.
@@ -3985,7 +3983,7 @@ SetMembership pushes the group's admitted members; the transport computes the un
 ### func \(Transport\) [Stream](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/consensus/design_gen.go>)
 
 ```go
-func (Transport) Stream(ctx context.Context, to NodeID, offer InstallOffer, open func(offset int64) (io.ReadCloser, error)) error
+func (Transport) Stream(ctx context.Context, to NodeID, offer InstallOfferValue, open func(offset int64) (io.ReadCloser, error)) error
 ```
 
 Stream sends a snapshot from the offset the receiver accepted; open returns a reader at an encoded offset on a chunk boundary, which Stream closes.
@@ -4061,19 +4059,19 @@ func (UnreachableReporter) Unreachable(func(NodeID))
 
 Unreachable registers the callback.
 
-<a name="Versions"></a>
-## type [Versions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+<a name="VersionsValue"></a>
+## type [VersionsValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
 Every type needed to implement a published port is aliased here (R2-32).
 
 ```go
-type Versions = coreconsensus.Versions
+type VersionsValue = coreconsensus.VersionsValue
 ```
 
-Versions is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.Versions`, declared as:
+VersionsValue is an alias of `github.com/kitsunium/sdk/internal/core/app/consensus.VersionsValue`, declared as:
 
 ```go
-type Versions struct {
+type VersionsValue struct {
 	// ProtocolMin is the lowest protocol version it speaks.
 	ProtocolMin       uint32
 	// ProtocolMax is the highest.

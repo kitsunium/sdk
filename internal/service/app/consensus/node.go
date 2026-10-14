@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,6 +18,44 @@ import (
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
+// A proposal's stage says what a cancelled caller may be told: only an
+// unsent proposal is certainly not in the log.
+const (
+	// stageUnsent is a proposal the loop has not handed to raft: a
+	// cancellation is ctx.Err(), nothing was appended.
+	stageUnsent int32 = iota
+	// stagePossible is a proposal raft may have accepted, or forwarded to
+	// the leader: its outcome is unknown until answered.
+	stagePossible
+	// stageAppended is a proposal appended at a known position: it is
+	// resolved when that index is applied.
+	stageAppended
+)
+
+const (
+	// inboxDepth bounds the inbound message lanes and the proposal queue:
+	// a burst a few heartbeats long is absorbed, a flood is dropped at the
+	// lane (and refused at Propose) instead of growing without bound.
+	inboxDepth int = 4096
+	// loopBacklog bounds the closures and storage completions queued for
+	// the event loop; both are produced at most a few per turn.
+	loopBacklog int = 1024
+	// fetchBacklog bounds the log reads answered back to the loop; reads
+	// are issued per lagging peer, so a few dozen cover a cluster.
+	fetchBacklog int = 64
+	// maxChainRefusals is the N of D4's "no silent loop": how many
+	// identical chain refusals of one leader make a follower report itself
+	// unready (R6-05), enough to ride out a transient, few enough that an
+	// operator hears of a real divergence.
+	maxChainRefusals int = 3
+	// maxBatchedProposals caps how many queued proposals one turn drains
+	// into a batch, so one turn never starves the other inputs.
+	maxBatchedProposals int = 1024
+	// maxCtrlPerTurn caps the control messages drained after each turn,
+	// so control comes first without starving the data lane (D4).
+	maxCtrlPerTurn int = 256
+)
+
 // Node is one member of a consensus group: the event loop that owns the step
 // function, its storage actor, its apply goroutine and its snapshot
 // goroutines (D5b). A Node never closes what it was handed.
@@ -24,15 +63,15 @@ type Node struct {
 	cfg   Config
 	clk   clock.Timed
 	r     *raft.Raft
-	ident coreconsensus.LogIdentity
-	stamp coreconsensus.Stamp
+	ident coreconsensus.LogIdentityValue
+	stamp coreconsensus.StampValue
 
-	inCtrl chan coreconsensus.Message
-	inData chan coreconsensus.Message
+	inCtrl chan coreconsensus.MessageValue
+	inData chan coreconsensus.MessageValue
 	propc  chan *proposal
 	execc  chan func()
 	storec chan storeDone
-	fetchq *fifo[raft.FetchRequest]
+	fetchq *fifo[raft.FetchSpec]
 	fetchc chan fetchDone
 	stopc  chan struct{}
 	hard   atomic.Bool
@@ -40,7 +79,7 @@ type Node struct {
 	sq *fifo[storeReq]
 	aq *fifo[applyItem]
 
-	status atomic.Pointer[coreconsensus.Status]
+	status atomic.Pointer[coreconsensus.StatusValue]
 
 	am          sync.Mutex
 	acond       *sync.Cond
@@ -76,15 +115,17 @@ type Node struct {
 	snapState     snapState
 
 	watchMu  sync.Mutex
-	watchers map[chan coreconsensus.Status]struct{}
+	watchers map[chan coreconsensus.StatusValue]struct{}
 
 	stopMu      sync.Mutex
-	stopReason  *coreconsensus.StopReason
+	stopReason  *coreconsensus.StopReasonValue
 	stopped     atomic.Bool
 	closeOnce   sync.Once
 	releaseOnce sync.Once
 	wg          sync.WaitGroup
 	loopDone    chan struct{}
+	// loopDoneOnce closes loopDone, which only the loop does, on its way out.
+	loopDoneOnce sync.Once
 
 	obs         *obs
 	pendingProp atomic.Int64
@@ -93,11 +134,16 @@ type Node struct {
 	joinMu      sync.Mutex
 	lastJoin    map[string]time.Time
 	joinRefused atomic.Int64
-	// trustFrom is set by the package's own tests only: the engine then
-	// trusts a frame's From over the transport's peer (R7-05 mutation).
-	trustFrom bool
 	// crashAfterPublish is set by the package's own tests only.
 	crashAfterPublish atomic.Bool
+}
+
+// snapState tracks the cuts: at most one in flight, coalesced (D7).
+type snapState struct {
+	mu       sync.Mutex
+	last     uint64
+	inFlight bool
+	spools   map[string]coreconsensus.SnapshotSink
 }
 
 type applyResult struct {
@@ -106,10 +152,10 @@ type applyResult struct {
 }
 
 type proposal struct {
-	entry coreconsensus.Entry
+	entry coreconsensus.EntryValue
 	admin bool
 	stage atomic.Int32 // 0 unsent, 1 possibly accepted, 2 appended at pos
-	pos   coreconsensus.Position
+	pos   coreconsensus.PositionValue
 	local bool
 	done  chan propResult
 	// changedAt is when leadership changed while it was unresolved; only
@@ -117,14 +163,8 @@ type proposal struct {
 	changedAt time.Time
 }
 
-const (
-	stageUnsent int32 = iota
-	stagePossible
-	stageAppended
-)
-
 type propResult struct {
-	tok coreconsensus.Token
+	tok coreconsensus.TokenValue
 	val any
 	err error
 }
@@ -139,7 +179,7 @@ type readResult struct {
 }
 
 type storeReq struct {
-	rd raft.Ready
+	rd raft.ReadyValue
 }
 
 type storeDone struct {
@@ -148,17 +188,20 @@ type storeDone struct {
 	to               []coreconsensus.NodeID
 }
 
+// newSubEpoch draws a random epoch in the high 32 bits of a forward
+// submission id, so ids never repeat across restarts (R7-23, R9-17); it
+// also seeds the election timeouts when the caller set no Seed.
 func newSubEpoch() uint64 {
 	var b [4]byte
 	_, _ = rand.Read(b[:])
 	return uint64(binary.LittleEndian.Uint32(b[:])) << 32
 }
 
-// NewRaft opens a node over what an offline tool founded or initialised. It
+// NewNode opens a node over what an offline tool founded or initialised. It
 // never bootstraps (D8). The start sequence is fixed (D14): the stamp, the
 // latest snapshot whose checksums pass, the log to its end, then serve.
-func NewRaft(cfg Config) (*Node, error) {
-	cfg, err := cfg.withDefaults()
+func NewNode(cfg Config) (*Node, error) {
+	cfg, err := withDefaults(&cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -182,66 +225,137 @@ type dirHolder interface {
 	release()
 }
 
+// newRaft opens the node once NewNode holds the data directory: it checks
+// the stamp, loads the snapshot and the log, binds the transport, then
+// launches the node's four background goroutines (reader, storage actor,
+// apply, event loop). Each is counted in n.wg and ends once stopc closes,
+// through Close, HardClose or a self-stop; nothing is launched on an error.
 func newRaft(cfg Config) (*Node, error) {
+	stamp, err := startStamp(&cfg)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ID = stamp.ID
+	n := newNode(&cfg, &stamp)
+	n.obs = newObs(&cfg)
+	start, err := n.load()
+	if err != nil {
+		return nil, err
+	}
+	n.canVote = stamp.State == coreconsensus.StampMember
+	silentTerm, silentIndex, err := silenceOf(cfg.Log, n.obs)
+	if err != nil {
+		return nil, err
+	}
+	seed := cfg.Seed
+	if seed == 0 {
+		seed = newSubEpoch() | uint64(stamp.ID)
+	}
+	n.r = raft.NewRaft(&raft.Config{
+		ID: stamp.ID, Group: cfg.Group, Log: stamp.Log, Seed: seed, Timing: cfg.InitialTiming,
+		MaxInflight: cfg.MaxInflight, MaxInflightBytes: cfg.MaxInflightBytes, MaxBatchBytes: cfg.MaxBatchBytes,
+		MinVoters: cfg.MinVoters, PromoteLag: cfg.PromoteLag, Lease: cfg.Reads == ReadLease,
+		CanVote: n.canVote, MaxChainRefusals: maxChainRefusals, NoTable: n.noTable, RecentEntriesBytes: cfg.RecentEntriesBytes,
+		SilentTerm: silentTerm, SilentIndex: silentIndex,
+		MaxEntryBytes: cfg.MaxEntryBytes, MaxForwardBytes: cfg.MaxPendingBytes,
+	}, &start)
+	n.publish()
+	if err := n.bindTransport(); err != nil {
+		return nil, err
+	}
+	n.wg.Add(4)
+	go n.reader()
+	go n.storageActor()
+	go n.applyLoop()
+	go n.loop()
+	return n, nil
+}
+
+// startStamp reads the stamp a node may start on, refusing a directory
+// with a stop marker, one never stamped, one whose bootstrap is pending,
+// one of another cluster or node, and a transport whose certificate names
+// another cluster (R3-24).
+func startStamp(cfg *Config) (coreconsensus.StampValue, error) {
 	if mc, ok := cfg.Log.(interface{ checkMarkers() error }); ok {
 		if err := mc.checkMarkers(); err != nil {
-			return nil, err
+			return coreconsensus.StampValue{}, err
 		}
 	}
-	st, err := cfg.Log.Stamp()
+	stamp, err := cfg.Log.Stamp()
 	if err != nil {
-		return nil, storageFailed("stamp", err)
+		return stamp, storageFailed("stamp", err)
 	}
-	switch {
-	case st.State == 0:
-		return nil, origin(coreconsensus.DataDirMismatch, errs.String("why", "unstamped: Init or Bootstrap first"))
-	case st.State == coreconsensus.StampBootstrapPending:
-		return nil, origin(coreconsensus.BootstrapRefused, errs.String("why", "bootstrap pending: rerun Bootstrap"))
-	case st.Log.Cluster != cfg.Cluster:
-		return nil, origin(coreconsensus.DataDirMismatch, errs.String("why", "cluster"))
-	case cfg.ID != 0 && st.ID != cfg.ID:
-		return nil, origin(coreconsensus.DataDirMismatch, errs.String("why", "node id"))
+	if err := refuseStamp(cfg, &stamp); err != nil {
+		return stamp, err
 	}
 	if t, ok := cfg.Transport.(interface {
 		Cluster() coreconsensus.ClusterID
 	}); ok && t.Cluster() != cfg.Cluster {
 		// The transport took its cluster from its certificate's SAN (R3-24).
-		return nil, misconfigured("Cluster", "differs from the certificate's URI SAN")
+		return stamp, misconfigured("Cluster", "differs from the certificate's URI SAN")
 	}
-	cfg.ID = st.ID
+	return stamp, nil
+}
+
+// refuseStamp is the stamp half of startStamp: a node starts only on a
+// founded or joining directory of its own cluster and, when cfg names one,
+// its own id.
+func refuseStamp(cfg *Config, stamp *coreconsensus.StampValue) error {
+	switch {
+	case stamp.State == 0:
+		return origin(coreconsensus.DataDirMismatch, errs.String("why", "unstamped: Init or Bootstrap first"))
+	case stamp.State == coreconsensus.StampBootstrapPending:
+		return origin(coreconsensus.BootstrapRefused, errs.String("why", "bootstrap pending: rerun Bootstrap"))
+	case stamp.Log.Cluster != cfg.Cluster:
+		return origin(coreconsensus.DataDirMismatch, errs.String("why", "cluster"))
+	case cfg.ID != 0 && stamp.ID != cfg.ID:
+		return origin(coreconsensus.DataDirMismatch, errs.String("why", "node id"))
+	}
+	return nil
+}
+
+// newNode allocates a node's queues and maps; it starts nothing.
+func newNode(cfg *Config, stamp *coreconsensus.StampValue) *Node {
 	n := &Node{
-		cfg: cfg, clk: cfg.Clock, ident: st.Log, stamp: st,
-		inCtrl: make(chan coreconsensus.Message, 4096), inData: make(chan coreconsensus.Message, 4096),
-		propc: make(chan *proposal, 4096), execc: make(chan func(), 1024), storec: make(chan storeDone, 1024),
-		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchRequest](), fetchc: make(chan fetchDone, 64), aq: newFifo[applyItem](),
+		cfg: *cfg, clk: cfg.Clock, ident: stamp.Log, stamp: *stamp,
+		inCtrl: make(chan coreconsensus.MessageValue, inboxDepth), inData: make(chan coreconsensus.MessageValue, inboxDepth),
+		propc: make(chan *proposal, inboxDepth), execc: make(chan func(), loopBacklog), storec: make(chan storeDone, loopBacklog),
+		stopc: make(chan struct{}), sq: newFifo[storeReq](), fetchq: newFifo[raft.FetchSpec](), fetchc: make(chan fetchDone, fetchBacklog), aq: newFifo[applyItem](),
 		waiters: map[uint64]*proposal{}, results: map[uint64]applyResult{},
 		forwards: map[uint64]*proposal{}, reads: map[uint64]*readWait{}, sending: map[coreconsensus.NodeID]bool{}, unreachableAt: map[coreconsensus.NodeID]time.Time{},
-		watchers: map[chan coreconsensus.Status]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
+		watchers: map[chan coreconsensus.StatusValue]struct{}{}, subEpoch: newSubEpoch(), loopDone: make(chan struct{}),
 	}
 	n.acond = sync.NewCond(&n.am)
-	n.obs = newObs(cfg)
-	start, err := n.load()
-	if err != nil {
-		return nil, err
+	return n
+}
+
+// silenceOf reads the silence condition a recovered log persists, the term
+// and index raft stays silent until; a store that keeps none answers zeros,
+// which is no silence. A condition that cannot be read stops the start.
+//
+// A condition that exists but cannot be read keeps the node silent past the
+// end of its log, the safe side, and is reported: an operator otherwise
+// finds a node that never votes and no line saying why.
+func silenceOf(log coreconsensus.LogStore, o *obs) (term, index uint64, err error) {
+	if s, ok := log.(interface {
+		silence() (term, index uint64, unreadable, err error)
+	}); ok {
+		var unreadable error
+		if term, index, unreadable, err = s.silence(); err != nil {
+			return 0, 0, storageFailed("silence condition", err)
+		}
+		if unreadable != nil {
+			o.warn("consensus: silence condition unreadable, the node stays silent past the end of its log", lstr("error", unreadable.Error()))
+		}
 	}
-	n.canVote = st.State == coreconsensus.StampMember
-	var silentTerm, silentIndex uint64
-	if s, ok := cfg.Log.(interface{ silence() (uint64, uint64) }); ok {
-		silentTerm, silentIndex = s.silence()
-	}
-	seed := cfg.Seed
-	if seed == 0 {
-		seed = newSubEpoch() | uint64(st.ID)
-	}
-	n.r = raft.New(raft.Config{
-		ID: st.ID, Group: cfg.Group, Log: st.Log, Seed: seed, Timing: cfg.InitialTiming,
-		MaxInflight: cfg.MaxInflight, MaxInflightBytes: cfg.MaxInflightBytes, MaxBatchBytes: cfg.MaxBatchBytes,
-		MinVoters: cfg.MinVoters, PromoteLag: cfg.PromoteLag, Lease: cfg.Reads == ReadLease,
-		CanVote: n.canVote, MaxChainRefusals: 3, NoTable: n.noTable, RecentEntriesBytes: cfg.RecentEntriesBytes,
-		SilentTerm: silentTerm, SilentIndex: silentIndex,
-		MaxEntryBytes: cfg.MaxEntryBytes, MaxForwardBytes: cfg.MaxPendingBytes,
-	}, start)
-	n.publish()
+	return term, index, nil
+}
+
+// bindTransport hands the transport the node's callbacks. An unreachable
+// report is queued to the loop and dropped when the loop is saturated, as
+// it is advisory; the JOIN handler with reasons is bound when supported.
+func (n *Node) bindTransport() error {
+	cfg := &n.cfg
 	if ur, ok := cfg.Transport.(coreconsensus.UnreachableReporter); ok {
 		ur.Unreachable(func(id coreconsensus.NodeID) {
 			select {
@@ -254,115 +368,177 @@ func newRaft(cfg Config) (*Node, error) {
 		})
 	}
 	if err := cfg.Transport.Bind(cfg.Group, n.deliver, n.offer, n.install, n.join); err != nil {
-		return nil, err
+		return err
 	}
 	if jb, ok := cfg.Transport.(coreconsensus.JoinReasonBinder); ok {
 		jb.BindJoinReason(cfg.Group, n.joinReason)
 	}
-	n.wg.Add(4)
-	go n.reader()
-	go n.storageActor()
-	go n.applyLoop()
-	go n.loop()
-	return n, nil
+	return nil
 }
 
 // load restores the latest snapshot whose checksums pass and reads the log
 // after it.
-func (n *Node) load() (raft.Start, error) {
-	var base coreconsensus.SnapshotMeta
+func (n *Node) load() (raft.StartState, error) {
 	metas, err := n.cfg.Snapshots.List()
 	if err != nil {
-		return raft.Start{}, storageFailed("snapshots", err)
+		return raft.StartState{}, storageFailed("snapshots", err)
 	}
-	var durIdx uint64
-	if d, ok := n.cfg.Machine.(coreconsensus.DurableStateMachine); ok {
-		li, pos, derr := d.AppliedPosition()
-		if derr != nil {
-			return raft.Start{}, derr
-		}
-		if li.Same(n.ident) || (pos.Index <= n.ident.KeptIndex && li.Cluster == n.ident.Predecessor) {
-			durIdx = pos.Index
-		}
+	durIdx, err := n.durableIndex()
+	if err != nil {
+		return raft.StartState{}, err
 	}
+	base := n.restoreLatest(metas, durIdx)
+	n.snapState.last = base.Position.Index
+	hs, err := n.cfg.Log.HardState()
+	if err != nil {
+		return raft.StartState{}, origin(coreconsensus.HardStateCorrupt, errs.String("cause", err.Error()))
+	}
+	first, last := n.cfg.Log.Bounds()
+	if base, err = n.baseOrNoTable(base, metas, first); err != nil {
+		return raft.StartState{}, err
+	}
+	snapIdx := base.Position.Index
+	if first, last, err = n.finishInstall(&base, first, last); err != nil {
+		return raft.StartState{}, err
+	}
+	ents, err := n.readTail(first, last, snapIdx)
+	if err != nil {
+		return raft.StartState{}, err
+	}
+	applied := n.startApplied(&base, durIdx)
+	return raft.StartState{HardState: hs, Snapshot: base, Entries: ents, Applied: applied, Now: n.clk.Now()}, nil
+}
+
+// durableIndex is the index a DurableStateMachine already holds applied,
+// counted only when it was applied in this log's lineage, or in the
+// predecessor's below the kept index; any other machine answers 0.
+func (n *Node) durableIndex() (uint64, error) {
+	d, ok := n.cfg.Machine.(coreconsensus.DurableStateMachine)
+	if !ok {
+		return 0, nil
+	}
+	li, pos, err := d.AppliedPosition()
+	if err != nil {
+		return 0, err
+	}
+	if li.Same(n.ident) || (pos.Index <= n.ident.KeptIndex && li.Cluster == n.ident.Predecessor) {
+		return pos.Index, nil
+	}
+	return 0, nil
+}
+
+// restoreLatest restores from the newest snapshot that verifies, falling
+// back to the older one when it does not (D7); none restores is the zero
+// base.
+func (n *Node) restoreLatest(metas []coreconsensus.SnapshotMetaValue, durIdx uint64) coreconsensus.SnapshotMetaValue {
 	for _, m := range metas {
 		if err := n.restoreFrom(m, durIdx); err != nil {
 			continue // fall back to the older one (D7)
 		}
-		base = m
-		break
+		return m
 	}
-	n.snapState.last = base.Position.Index
-	hs, err := n.cfg.Log.HardState()
+	return coreconsensus.SnapshotMetaValue{}
+}
+
+// baseOrNoTable keeps a restored base, or starts the node with no table
+// when a snapshot was needed and none restored.
+func (n *Node) baseOrNoTable(base coreconsensus.SnapshotMetaValue, metas []coreconsensus.SnapshotMetaValue, first uint64) (coreconsensus.SnapshotMetaValue, error) {
+	if base.Position.Index != 0 || (len(metas) == 0 && first <= 1) {
+		return base, nil
+	}
+	// Every snapshot fails its checksums, or none is left where the
+	// log needs one: the node starts with NO table. It keeps its term,
+	// vote and commit index, votes and keeps its log, never campaigns,
+	// applies nothing and asks the leader for an install (D7, R6-13,
+	// R7-18).
+	n.noTable = true
+	base, err := noTableBase(n.cfg.Log, metas, first)
 	if err != nil {
-		return raft.Start{}, origin(coreconsensus.HardStateCorrupt, errs.String("cause", err.Error()))
+		return base, storageFailed("term", err)
 	}
-	first, last := n.cfg.Log.Bounds()
-	if base.Position.Index == 0 && (len(metas) > 0 || first > 1) {
-		// Every snapshot fails its checksums, or none is left where the
-		// log needs one: the node starts with NO table. It keeps its term,
-		// vote and commit index, votes and keeps its log, never campaigns,
-		// applies nothing and asks the leader for an install (D7, R6-13,
-		// R7-18).
-		n.noTable = true
-		base = noTableBase(n.cfg.Log, metas, first)
-	}
-	s := base.Position.Index
-	if first > s+1 {
-		return raft.Start{}, origin(coreconsensus.LogCorrupt, errs.String("why", "gap after the snapshot"))
+	return base, nil
+}
+
+// finishInstall refuses a log that starts past the base, then completes an
+// install interrupted after its snapshot was published, and returns the
+// log's bounds as they now stand.
+func (n *Node) finishInstall(base *coreconsensus.SnapshotMetaValue, first, last uint64) (newFirst, newLast uint64, err error) {
+	snapIdx := base.Position.Index
+	if first > snapIdx+1 {
+		return first, last, origin(coreconsensus.LogCorrupt, errs.String("why", "gap after the snapshot"))
 	}
 	// A published snapshot is the commit point of an install (D7): a crash
 	// after it, before the log was moved onto it, is finished here. The
 	// suffix is kept only when the boundary entry matches; otherwise the
 	// whole log is replaced, and a log that ends below the snapshot is
-	// compacted to it, so the next append continues at s+1.
-	if s >= first {
-		match := false
-		if s <= last {
-			t, terr := n.cfg.Log.Term(s)
-			match = terr == nil && t == base.Position.Term
-		}
-		if !match {
-			if err := n.cfg.Log.TruncateSuffix(first); err != nil {
-				return raft.Start{}, storageFailed("truncate", err)
-			}
-		}
-		if !match || s > last {
-			if err := n.cfg.Log.CompactPrefix(s); err != nil {
-				return raft.Start{}, storageFailed("compact", err)
-			}
-			if err := n.cfg.Log.Sync(); err != nil {
-				return raft.Start{}, storageFailed("sync", err)
-			}
-			first, last = n.cfg.Log.Bounds()
+	// compacted to it, so the next append continues at snapIdx+1.
+	if snapIdx < first {
+		return first, last, nil
+	}
+	match := false
+	if snapIdx <= last {
+		t, terr := n.cfg.Log.Term(snapIdx)
+		match = terr == nil && t == base.Position.Term
+	}
+	if !match {
+		if err := n.cfg.Log.TruncateSuffix(first); err != nil {
+			return first, last, storageFailed("truncate", err)
 		}
 	}
-	var ents []coreconsensus.Entry
-	if last > s && last >= first {
-		ents, err = n.cfg.Log.Entries(max(first, s+1), last+1, int(^uint(0)>>1), nil)
-		if err != nil {
-			return raft.Start{}, err
-		}
-		for i := range ents {
-			ents[i].Data = bytes.Clone(ents[i].Data)
-		}
+	if match && snapIdx <= last {
+		return first, last, nil
 	}
-	applied := max(s, durIdx)
+	if err := n.cfg.Log.CompactPrefix(snapIdx); err != nil {
+		return first, last, storageFailed("compact", err)
+	}
+	if err := n.cfg.Log.Sync(); err != nil {
+		return first, last, storageFailed("sync", err)
+	}
+	newFirst, newLast = n.cfg.Log.Bounds()
+	return newFirst, newLast, nil
+}
+
+// readTail reads the log after the base into memory, each entry's payload
+// copied so the step function never holds a store's buffer.
+func (n *Node) readTail(first, last, snapIdx uint64) ([]coreconsensus.EntryValue, error) {
+	if last <= snapIdx || last < first {
+		return nil, nil
+	}
+	ents, err := n.cfg.Log.Entries(max(first, snapIdx+1), last+1, int(^uint(0)>>1), nil)
+	if err != nil {
+		return nil, err
+	}
+	for i := range ents {
+		ents[i].Data = bytes.Clone(ents[i].Data)
+	}
+	return ents, nil
+}
+
+// startApplied sets where apply resumes: past the base, or past what a
+// durable machine already holds. It returns the applied index raft starts
+// from; a node with no table records nothing applied until an install.
+func (n *Node) startApplied(base *coreconsensus.SnapshotMetaValue, durIdx uint64) uint64 {
+	snapIdx := base.Position.Index
+	applied := max(snapIdx, durIdx)
 	n.applied = applied
-	if applied == s {
+	if applied == snapIdx {
 		n.appliedTerm = base.Position.Term
 	}
-	if n.noTable && durIdx < s {
+	if n.noTable && durIdx < snapIdx {
 		n.applied, n.appliedTerm = 0, 0 // nothing is applied until an install
 	}
-	return raft.Start{HardState: hs, Snapshot: base, Entries: ents, Applied: applied, Now: n.clk.Now()}, nil
+	return applied
 }
 
 // noTableBase is the base a node with no usable snapshot starts from: the
 // log's compaction point, with the configuration and chain tip the newest
 // snapshot's metadata records, which stays readable when its bytes do not.
-func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMeta, first uint64) coreconsensus.SnapshotMeta {
-	var b coreconsensus.SnapshotMeta
+//
+// The term at first-1 is the log's own compaction term, which every LogStore
+// answers; a store that cannot is one whose base this node must not guess,
+// since a wrong term there is a log-matching check answered falsely.
+func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMetaValue, first uint64) (coreconsensus.SnapshotMetaValue, error) {
+	var b coreconsensus.SnapshotMetaValue
 	if len(metas) > 0 {
 		b = metas[0]
 		for _, m := range metas {
@@ -372,21 +548,29 @@ func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMeta,
 		}
 	}
 	b.Position.Index = first - 1
-	b.Position.Term, _ = log.Term(first - 1)
-	return b
+	term, err := log.Term(first - 1)
+	if err != nil {
+		return coreconsensus.SnapshotMetaValue{}, err
+	}
+	b.Position.Term = term
+	return b, nil
 }
 
 // ---- transport callbacks ----
 
-func (n *Node) deliver(from coreconsensus.AuthenticatedPeer, frame []byte) {
+// deliver is the transport's inbound callback: it parses a frame, drops it
+// when its From is not the authenticated peer (R7-05), and queues it on its
+// lane without ever blocking the transport; a full lane drops the frame,
+// which raft's retransmission absorbs.
+func (n *Node) deliver(from coreconsensus.AuthenticatedPeerValue, frame []byte) {
 	if n.stopped.Load() {
 		return
 	}
-	var m coreconsensus.Message
+	var m coreconsensus.MessageValue
 	if err := wire.ParseMessage(bytes.Clone(frame), &m); err != nil {
 		return
 	}
-	if m.From != from.ID && !n.trustFrom {
+	if m.From != from.ID {
 		// The engine trusts the transport's authenticated peer, never the
 		// frame's From (R7-05).
 		n.droppedFrom.Add(1)
@@ -421,79 +605,190 @@ func (n *Node) exec(f func()) bool {
 
 // ---- the event loop ----
 
+// loop is the event loop, the only goroutine that touches raft: one input
+// per turn, then the control lane drained first, then the turn's Ready
+// handled. It ends when stopc closes, after failing every caller still
+// waiting on it, and closes loopDone on the way out.
 func (n *Node) loop() {
 	defer n.wg.Done()
-	defer close(n.loopDone)
+	defer n.loopDoneOnce.Do(func() { close(n.loopDone) })
 	every := n.tickInterval()
 	n.tickEvery.Store(int64(every))
 	tick := n.clk.NewTicker(every)
 	defer tick.Stop()
 	var props []*proposal
 	for {
-		var turn time.Time
-		select {
-		case <-n.stopc:
+		turn, open := n.turn(tick, &props)
+		if !open {
 			n.failAllOnStop()
 			return
-		case <-tick.C():
-			turn = n.clk.Now()
-			n.r.Tick(n.clk.Now())
-			if d := n.tickInterval(); d != every {
-				// A committed contract changed the heartbeat (review of PR
-				// #301, L5).
-				every = d
-				n.tickEvery.Store(int64(d))
-				tick.Reset(d)
-			}
-			n.sweep()
-			n.observePeers()
-			n.observeResources()
-		case m := <-n.inCtrl:
-			turn = n.clk.Now()
-			n.r.SetOverloaded(n.applyLag.Load() >= n.cfg.MaxApplyLagBytes)
-			n.r.Step(n.clk.Now(), m)
-		case m := <-n.inData:
-			turn = n.clk.Now()
-			n.r.SetOverloaded(n.applyLag.Load() >= n.cfg.MaxApplyLagBytes)
-			n.r.Step(n.clk.Now(), m)
-		case d := <-n.storec:
-			turn = n.clk.Now()
-			n.r.StorageDone(d.seq, d.index, d.term)
-			for i, f := range d.after {
-				n.cfg.Transport.Send(d.to[i], f)
-			}
-		case p := <-n.propc:
-			turn = n.clk.Now()
-			props = append(props[:0], p)
-		drain:
-			for len(props) < 1024 {
-				select {
-				case p := <-n.propc:
-					props = append(props, p)
-				default:
-					break drain
-				}
-			}
-			n.handleProposals(props)
-		case f := <-n.execc:
-			turn = n.clk.Now()
-			f()
-		case f := <-n.fetchc:
-			turn = n.clk.Now()
-			n.r.Fetched(f.req.To, f.req.Lo, f.ents, f.compacted)
 		}
-		// Control first: a flood of entries never starves a vote (D4).
-	ctrl:
-		for k := 0; k < 256; k++ {
-			select {
-			case m := <-n.inCtrl:
-				n.r.Step(n.clk.Now(), m)
-			default:
-				break ctrl
-			}
-		}
+		n.drainControl()
 		n.handleReady()
 		n.checkTurn(turn)
+	}
+}
+
+// turn waits for one input of the event loop and steps it, returning when
+// the turn started. It reports false on stop. The inputs are never closed;
+// were one closed, its handler reports false and the loop ends as it does
+// on stop instead of spinning on the closed channel.
+//
+// The select stays whole: every case is one call into its handler, and the
+// runtime's uniform choice among the ready inputs is the loop's fairness.
+// Splitting it to lower its cyclomatic count would let the outer inputs
+// starve the inner ones (KTN-FUNC-CYCLO counts the dispatch as eight
+// decisions: kodflow/ktn-linter#727).
+func (n *Node) turn(tick clock.Ticker, props *[]*proposal) (time.Time, bool) {
+	select {
+	case <-n.stopc:
+		return time.Time{}, false
+	case _, ok := <-tick.C():
+		return n.onTick(tick, ok)
+	case m, ok := <-n.inCtrl:
+		return n.onMessage(&m, ok)
+	case m, ok := <-n.inData:
+		return n.onMessage(&m, ok)
+	case d, ok := <-n.storec:
+		return n.onStored(&d, ok)
+	case p, ok := <-n.propc:
+		return n.onProposal(p, ok, props)
+	case f, ok := <-n.execc:
+		return n.onExec(f, ok)
+	case f, ok := <-n.fetchc:
+		return n.onFetched(&f, ok)
+	}
+}
+
+// onTick advances raft's clock, follows a committed contract that changed
+// the heartbeat, answers the proposals whose grace ended, and publishes the
+// periodic gauges.
+func (n *Node) onTick(tick clock.Ticker, ok bool) (time.Time, bool) {
+	if !ok {
+		return time.Time{}, false
+	}
+	turn := n.clk.Now()
+	n.r.Tick(n.clk.Now())
+	if d := n.tickInterval(); d != time.Duration(n.tickEvery.Load()) {
+		// A committed contract changed the heartbeat (review of PR
+		// #301, L5).
+		n.tickEvery.Store(int64(d))
+		tick.Reset(d)
+	}
+	n.sweep()
+	n.observePeers()
+	n.observeResources()
+	return turn, true
+}
+
+// onMessage steps one inbound message, of either lane, after telling raft
+// whether the apply backlog is over MaxApplyLagBytes.
+func (n *Node) onMessage(m *coreconsensus.MessageValue, ok bool) (time.Time, bool) {
+	if !ok {
+		return time.Time{}, false
+	}
+	turn := n.clk.Now()
+	n.r.SetOverloaded(n.applyLag.Load() >= n.cfg.MaxApplyLagBytes)
+	n.r.Step(n.clk.Now(), *m)
+	return turn, true
+}
+
+// onStored takes a completion of the storage actor.
+func (n *Node) onStored(d *storeDone, ok bool) (time.Time, bool) {
+	if !ok {
+		return time.Time{}, false
+	}
+	turn := n.clk.Now()
+	n.storageDone(d)
+	return turn, true
+}
+
+// onProposal batches the proposal that woke the loop with those queued
+// behind it.
+func (n *Node) onProposal(p *proposal, ok bool, props *[]*proposal) (time.Time, bool) {
+	if !ok {
+		return time.Time{}, false
+	}
+	turn := n.clk.Now()
+	n.batchProposals(p, props)
+	return turn, true
+}
+
+// onExec runs a closure exec queued for the loop.
+func (n *Node) onExec(f func(), ok bool) (time.Time, bool) {
+	if !ok {
+		return time.Time{}, false
+	}
+	turn := n.clk.Now()
+	f()
+	return turn, true
+}
+
+// onFetched hands raft the entries the reader fetched below its window.
+func (n *Node) onFetched(f *fetchDone, ok bool) (time.Time, bool) {
+	if !ok {
+		return time.Time{}, false
+	}
+	turn := n.clk.Now()
+	n.r.Fetched(f.req.To, f.req.Lo, f.ents, f.compacted)
+	return turn, true
+}
+
+// storageDone tells raft a write is durable, then sends the replies that
+// waited on it: only now may they leave (D5b).
+func (n *Node) storageDone(d *storeDone) {
+	n.r.StorageDone(d.seq, d.index, d.term)
+	for i, f := range d.after {
+		n.cfg.Transport.Send(d.to[i], f)
+	}
+}
+
+// batchProposals hands raft the proposal that woke the loop together with
+// those already queued behind it, up to maxBatchedProposals, as one batch.
+func (n *Node) batchProposals(first *proposal, props *[]*proposal) {
+	batch := append((*props)[:0], first)
+	for len(batch) < maxBatchedProposals {
+		p, ok := n.queuedProposal()
+		if !ok {
+			break
+		}
+		batch = append(batch, p)
+	}
+	*props = batch
+	n.handleProposals(batch)
+}
+
+// queuedProposal takes a proposal already queued, without waiting. The
+// queue is never closed, so a closed one reads as empty.
+func (n *Node) queuedProposal() (*proposal, bool) {
+	select {
+	case p, ok := <-n.propc:
+		return p, ok
+	default:
+		return nil, false
+	}
+}
+
+// drainControl steps the control messages queued after a turn, up to
+// maxCtrlPerTurn: a flood of entries never starves a vote (D4).
+func (n *Node) drainControl() {
+	for range maxCtrlPerTurn {
+		m, ok := n.queuedControl()
+		if !ok {
+			return
+		}
+		n.r.Step(n.clk.Now(), m)
+	}
+}
+
+// queuedControl takes a control message already queued, without waiting.
+// The lane is never closed, so a closed one reads as empty.
+func (n *Node) queuedControl() (coreconsensus.MessageValue, bool) {
+	select {
+	case m, ok := <-n.inCtrl:
+		return m, ok
+	default:
+		return coreconsensus.MessageValue{}, false
 	}
 }
 
@@ -526,6 +821,13 @@ func (n *Node) sweep() {
 			p.done <- propResult{err: outcomeUnknown("leader changed before the answer")}
 		}
 	}
+	n.sweepWaiters(now, grace)
+}
+
+// sweepWaiters is sweep's half for appended proposals: one still above the
+// commit index when its grace ends is answered OUTCOME_UNKNOWN and its
+// pending bytes are released.
+func (n *Node) sweepWaiters(now time.Time, grace time.Duration) {
 	commit := n.r.Status().Commit
 	n.am.Lock()
 	for idx, p := range n.waiters {
@@ -540,6 +842,8 @@ func (n *Node) sweep() {
 	n.am.Unlock()
 }
 
+// dropForward forgets a forwarded proposal and the applied result kept for
+// its answer.
 func (n *Node) dropForward(ctx uint64) {
 	delete(n.forwards, ctx)
 	n.am.Lock()
@@ -547,72 +851,124 @@ func (n *Node) dropForward(ctx uint64) {
 	n.am.Unlock()
 }
 
-// tickInterval is a fifth of the committed contract's heartbeat.
+// tickInterval is a fifth of the committed contract's heartbeat, so raft's
+// timers fire within a fifth of a heartbeat of their due time, and never
+// below a millisecond.
 func (n *Node) tickInterval() time.Duration {
 	return max(n.r.Status().Timing.HeartbeatInterval/5, time.Millisecond)
 }
 
+// handleReady drains every Ready raft has, in order, then reacts to a
+// change of leadership and publishes the status. It runs on the loop, and
+// returns at once when a Ready stopped the node.
 func (n *Node) handleReady() {
 	for n.r.HasReady() {
-		rd := n.r.Ready()
-		if u := rd.Unsupported; u.Index != 0 {
-			n.stop(unsupportedKind(u.Kind, u.Index), false)
+		rd := new(n.r.Ready())
+		if n.stopOnUnsupported(rd) {
 			return
 		}
-		for _, m := range rd.Messages {
-			n.cfg.Transport.Send(m.To, wire.AppendMessage(nil, &m))
-		}
-		if len(rd.Membership) > 0 {
-			n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
-			n.obs.info("consensus: admitted members changed", lattr("members", uint64(len(rd.Membership))))
-		}
-		if rd.SilenceEnded {
-			if s, ok := n.cfg.Log.(interface{ endSilence() error }); ok {
-				if err := s.endSilence(); err != nil {
-					n.stop(storageFailed("end silence", err), true)
-				}
-			}
-			n.obs.info("consensus: silence condition met, the node votes and acknowledges again")
-		}
-		if rd.TruncateFrom != 0 {
-			n.obs.info("consensus: log truncated", lattr("from", rd.TruncateFrom))
-		}
-		if rd.NeedsWrite() {
-			n.sq.push(storeReq{rd: rd})
-		}
-		if len(rd.Apply) > 0 {
-			var b int64
-			for i := range rd.Apply {
-				b += int64(len(rd.Apply[i].Data))
-			}
-			n.obs.setGauge(mApplyLagBytes, float64(n.applyLag.Add(b)))
-			n.aq.push(applyItem{entries: rd.Apply})
-		}
-		for _, f := range rd.Fetch {
-			n.fetchq.push(f)
-		}
-		for _, to := range rd.SendSnapshot {
-			n.sendSnapshot(to)
-		}
-		for _, rs := range rd.ReadStates {
-			if w, ok := n.reads[rs.Context]; ok {
-				delete(n.reads, rs.Context)
-				w.done <- readResult{index: rs.Index, code: rs.Code}
-			}
-		}
-		for _, m := range rd.Forwarded {
-			n.forwardAnswered(m)
-		}
-		for _, t := range rd.Transfers {
-			for _, w := range n.transfers {
-				w <- t.Code
-			}
-			n.transfers = nil
-		}
-		n.checkAdmission()
+		n.handleOne(rd)
 	}
 	n.leadershipChanged()
 	n.publish()
+}
+
+// stopOnUnsupported stops the node with VERSION_UNSUPPORTED when a Ready
+// names an entry whose kind this version does not know, and reports whether
+// it did; that Ready is then not carried out at all, and handleReady
+// returns without publishing.
+func (n *Node) stopOnUnsupported(rd *raft.ReadyValue) bool {
+	u := rd.Unsupported
+	if u.Index == 0 {
+		return false
+	}
+	n.stop(unsupportedKind(u.Kind, u.Index), false)
+	return true
+}
+
+// handleOne carries out one Ready: messages sent, membership and silence
+// applied, writes and entries queued to the storage actor and the apply
+// goroutine, fetches and snapshot sends started, waiters answered.
+func (n *Node) handleOne(rd *raft.ReadyValue) {
+	for _, m := range rd.Messages {
+		n.cfg.Transport.Send(m.To, wire.AppendMessage(nil, &m))
+	}
+	if len(rd.Membership) > 0 {
+		n.cfg.Transport.SetMembership(n.cfg.Group, rd.Membership)
+		n.obs.info("consensus: admitted members changed", lattr("members", uint64(len(rd.Membership))))
+	}
+	n.reportNotices(rd)
+	if rd.NeedsWrite() {
+		n.sq.push(storeReq{rd: *rd})
+	}
+	n.queueApply(rd.Apply)
+	for _, f := range rd.Fetch {
+		n.fetchq.push(f)
+	}
+	for _, to := range rd.SendSnapshot {
+		n.sendSnapshot(to)
+	}
+	n.answerReady(rd)
+	n.checkAdmission()
+}
+
+// reportNotices acts on the Ready's notices that change no state of the
+// loop: the end of the silence condition, the chain refusals D13 counts by
+// leader, and a truncation worth a line in the log.
+func (n *Node) reportNotices(rd *raft.ReadyValue) {
+	if rd.SilenceEnded {
+		n.endSilence()
+	}
+	for _, lead := range rd.ChainRefusedBy {
+		n.obs.inc(mChainRefusals, coreotel.String("leader", lead.String()))
+	}
+	if rd.TruncateFrom != 0 {
+		n.obs.info("consensus: log truncated", lattr("from", rd.TruncateFrom))
+	}
+}
+
+// endSilence persists the end of the silence condition; a store that
+// cannot record it stops the node, since a restart would be silent again.
+func (n *Node) endSilence() {
+	if s, ok := n.cfg.Log.(interface{ endSilence() error }); ok {
+		if err := s.endSilence(); err != nil {
+			n.stop(storageFailed("end silence", err), true)
+		}
+	}
+	n.obs.info("consensus: silence condition met, the node votes and acknowledges again")
+}
+
+// queueApply hands committed entries to the apply goroutine, counting
+// their payload into the apply lag first.
+func (n *Node) queueApply(entries []coreconsensus.EntryValue) {
+	if len(entries) == 0 {
+		return
+	}
+	var b int64
+	for i := range entries {
+		b += int64(len(entries[i].Data))
+	}
+	n.obs.setGauge(mApplyLagBytes, float64(n.applyLag.Add(b)))
+	n.aq.push(applyItem{entries: entries})
+}
+
+// answerReady answers the reads, forwards and transfers a Ready resolved.
+func (n *Node) answerReady(rd *raft.ReadyValue) {
+	for _, rs := range rd.ReadStates {
+		if w, ok := n.reads[rs.Context]; ok {
+			delete(n.reads, rs.Context)
+			w.done <- readResult{index: rs.Index, code: rs.Code}
+		}
+	}
+	for _, m := range rd.Forwarded {
+		n.forwardAnswered(m)
+	}
+	for _, t := range rd.Transfers {
+		for _, w := range n.transfers {
+			w <- t.Code
+		}
+		n.transfers = nil
+	}
 }
 
 // checkAdmission turns a joining directory into a member once its own
@@ -642,24 +998,7 @@ func (n *Node) leadershipChanged() {
 		return
 	}
 	n.lastTerm, n.lastLead, n.lastRole = st.Term, st.Lead, st.Role
-	// Forwarded and appended proposals are NOT answered here: an entry at a
-	// known position resolves when that index is applied (success or
-	// ENTRY_SUPERSEDED), and a forward may still be answered by the leader
-	// it went to. A leadership change only starts their grace period; the
-	// tick sweep answers OUTCOME_UNKNOWN once it ends (D6).
-	now := n.clk.Now()
-	for _, p := range n.forwards {
-		if p.changedAt.IsZero() {
-			p.changedAt = now
-		}
-	}
-	n.am.Lock()
-	for idx, p := range n.waiters {
-		if idx > st.Commit && p.changedAt.IsZero() {
-			p.changedAt = now
-		}
-	}
-	n.am.Unlock()
+	n.startGrace(st.Commit)
 	for ctx, w := range n.reads {
 		delete(n.reads, ctx)
 		w.done <- readResult{code: coreconsensus.CodeNotLeader}
@@ -669,13 +1008,33 @@ func (n *Node) leadershipChanged() {
 	}
 }
 
+// startGrace starts the grace period of every unresolved proposal.
+// Forwarded and appended proposals are NOT answered on a leadership change:
+// an entry at a known position resolves when that index is applied
+// (success or ENTRY_SUPERSEDED), and a forward may still be answered by the
+// leader it went to. The change only starts their grace period; the tick
+// sweep answers OUTCOME_UNKNOWN once it ends (D6).
+func (n *Node) startGrace(commit uint64) {
+	now := n.clk.Now()
+	for _, p := range n.forwards {
+		if p.changedAt.IsZero() {
+			p.changedAt = now
+		}
+	}
+	n.am.Lock()
+	for idx, p := range n.waiters {
+		if idx > commit && p.changedAt.IsZero() {
+			p.changedAt = now
+		}
+	}
+	n.am.Unlock()
+}
+
 // preferLeader transfers to a preferred node after an election when this
 // one is not preferred (D8).
-func (n *Node) preferLeader(st raft.Status) {
-	for _, id := range n.cfg.PreferredLeaders {
-		if id == n.stamp.ID {
-			return
-		}
+func (n *Node) preferLeader(st raft.StatusValue) {
+	if slices.Contains(n.cfg.PreferredLeaders, n.stamp.ID) {
+		return
 	}
 	for _, id := range n.cfg.PreferredLeaders {
 		if m, ok := st.Conf.Member(id); ok && m.Voter {
@@ -687,15 +1046,18 @@ func (n *Node) preferLeader(st raft.Status) {
 	}
 }
 
+// publish stores the status a turn produced and wakes every watcher with
+// it, replacing a value the watcher has not read yet so a slow reader sees
+// the newest status, never a backlog; an unchanged status publishes nothing.
 func (n *Node) publish() {
 	st := n.r.Status()
 	n.am.Lock()
 	applied := n.applied
 	n.am.Unlock()
-	s := &coreconsensus.Status{
+	s := &coreconsensus.StatusValue{
 		ID: n.stamp.ID, Role: st.Role, Term: st.Term, Leader: st.Lead, Commit: st.Commit, Applied: applied,
 		Log: n.ident, Timing: st.Timing, NoSpace: st.NoSpace,
-		Versions: coreconsensus.Versions{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
+		Versions: coreconsensus.VersionsValue{ProtocolMin: 1, ProtocolMax: raft.ProtocolMax, Cluster: st.Cluster, ClusterGeneration: st.ClusterG},
 	}
 	old := n.status.Load()
 	if old != nil && *old == *s {
@@ -718,8 +1080,8 @@ func (n *Node) publish() {
 }
 
 type fetchDone struct {
-	req       raft.FetchRequest
-	ents      []coreconsensus.Entry
+	req       raft.FetchSpec
+	ents      []coreconsensus.EntryValue
 	compacted bool
 }
 
@@ -728,36 +1090,51 @@ type fetchDone struct {
 // only (D4, R8-06).
 func (n *Node) reader() {
 	defer n.wg.Done()
-	var reqs []raft.FetchRequest
+	var reqs []raft.FetchSpec
 	for {
 		select {
-		case <-n.fetchq.signal:
+		case _, ok := <-n.fetchq.signal:
+			// The fifo never closes its signal channel; were it closed, the
+			// reader ends as it does on stop rather than spinning on it.
+			if !ok {
+				return
+			}
 		case <-n.stopc:
 			return
 		}
 		reqs = n.fetchq.take(reqs)
 		for _, f := range reqs {
-			d := fetchDone{req: f}
-			ents, err := n.cfg.Log.Entries(f.Lo, f.Hi, n.cfg.MaxBatchBytes, nil)
-			switch {
-			case errs.HasCode(err, coreconsensus.CodeCompacted):
-				d.compacted = true
-			case err != nil:
-				// An impossible answer stops the node: a log that cannot be
-				// read cannot be trusted to agree with itself (D4).
-				n.stop(err, true)
-				return
-			}
-			for i := range ents {
-				ents[i].Data = bytes.Clone(ents[i].Data)
-			}
-			d.ents = ents
-			select {
-			case n.fetchc <- d:
-			case <-n.stopc:
+			if !n.fetch(f) {
 				return
 			}
 		}
+	}
+}
+
+// fetch reads one range for raft and hands it to the loop; a compacted
+// range is reported as such. It returns false when the reader must end:
+// the read failed and stopped the node, or the node stopped meanwhile.
+func (n *Node) fetch(f raft.FetchSpec) bool {
+	d := fetchDone{req: f}
+	ents, err := n.cfg.Log.Entries(f.Lo, f.Hi, n.cfg.MaxBatchBytes, nil)
+	switch {
+	case errs.HasCode(err, coreconsensus.CodeCompacted):
+		d.compacted = true
+	case err != nil:
+		// An impossible answer stops the node: a log that cannot be
+		// read cannot be trusted to agree with itself (D4).
+		n.stop(err, true)
+		return false
+	}
+	for i := range ents {
+		ents[i].Data = bytes.Clone(ents[i].Data)
+	}
+	d.ents = ents
+	select {
+	case n.fetchc <- d:
+		return true
+	case <-n.stopc:
+		return false
 	}
 }
 
@@ -772,77 +1149,139 @@ func (n *Node) storageActor() {
 	var synced uint64
 	for {
 		select {
-		case <-n.sq.signal:
-		case <-n.stopc:
-			if n.hard.Load() {
+		case _, ok := <-n.sq.signal:
+			// The fifo never closes its signal channel; were it closed, the
+			// actor ends as a hard stop does rather than spinning on it.
+			if !ok {
 				return
 			}
-			// The storage actor owns the final sync: on Close it writes and
-			// syncs what it holds before it exits (D5b).
-			for _, q := range n.sq.take(reqs) {
-				if !n.write(q, &synced) {
-					return
-				}
-			}
+		case <-n.stopc:
+			n.finalWrites(reqs, &synced)
 			return
 		}
 		reqs = n.sq.take(reqs)
-		for _, q := range reqs {
-			if n.hard.Load() {
-				return
-			}
-			if !n.write(q, &synced) {
-				return
-			}
+		if !n.writeAll(reqs, &synced) {
+			return
 		}
 	}
 }
 
-func (n *Node) write(q storeReq, synced *uint64) bool {
-	rd := &q.rd
-	log := n.cfg.Log
-	if rd.TruncateFrom != 0 {
-		if err := log.TruncateSuffix(rd.TruncateFrom); err != nil {
-			n.stop(storageFailed("truncate", err), true)
+// finalWrites is the storage actor's exit on stop. The actor owns the
+// final sync: on Close it writes and syncs what it holds before it exits
+// (D5b); on a hard stop it writes nothing more.
+func (n *Node) finalWrites(reqs []storeReq, synced *uint64) {
+	if n.hard.Load() {
+		return
+	}
+	for _, q := range n.sq.take(reqs) {
+		if !n.write(&q, synced) {
+			return
+		}
+	}
+}
+
+// writeAll writes a batch of requests in order, and returns false when the
+// actor must end: a hard stop arrived, or a write stopped the node.
+func (n *Node) writeAll(reqs []storeReq, synced *uint64) bool {
+	for _, q := range reqs {
+		if n.hard.Load() {
 			return false
 		}
-		*synced = min(*synced, rd.TruncateFrom-1)
+		if !n.write(&q, synced) {
+			return false
+		}
 	}
-	var hs *coreconsensus.HardState
+	return true
+}
+
+// write persists one Ready, truncation, entries with their hard state,
+// then compaction, syncs it, and only then hands the loop its completion
+// with the replies that waited on it. Any storage failure stops the node
+// and is never retried (D4); it returns false then, or when the node
+// stopped before the completion was taken.
+func (n *Node) write(q *storeReq, synced *uint64) bool {
+	rd := &q.rd
+	if !n.truncateFor(rd, synced) {
+		return false
+	}
 	last := *synced
 	if k := len(rd.Entries); k > 0 {
 		last = rd.Entries[k-1].Position.Index
 	}
-	if rd.HardState != nil || rd.Commit != 0 {
-		h, err := log.HardState()
-		if err != nil {
-			n.stop(storageFailed("hard state", err), true)
-			return false
-		}
-		if rd.HardState != nil {
-			h.Term, h.Vote = rd.HardState.Term, rd.HardState.Vote
-		}
-		if rd.Commit != 0 {
-			// A persisted commit never passes the last synced index; the
-			// record rides this batch, synced with it (R7-13).
-			h.Commit = max(h.Commit, min(rd.Commit, last))
-		}
-		hs = &h
-	}
-	if len(rd.Entries) > 0 || hs != nil {
-		if err := log.Append(rd.Entries, hs); err != nil {
-			n.stop(storageFailed("append", err), true)
-			return false
-		}
+	if !n.appendFor(rd, last) {
+		return false
 	}
 	if rd.Compact != 0 {
-		if err := log.CompactPrefix(rd.Compact); err != nil {
+		if err := n.cfg.Log.CompactPrefix(rd.Compact); err != nil {
 			n.stop(storageFailed("compact", err), true)
 			return false
 		}
 	}
+	if !n.syncFor(rd) {
+		return false
+	}
+	*synced = max(*synced, last)
+	return n.completeWrite(rd)
+}
+
+// truncateFor removes the log suffix a Ready overwrites, and lowers the
+// synced index with it, since what was synced there no longer exists.
+func (n *Node) truncateFor(rd *raft.ReadyValue, synced *uint64) bool {
+	if rd.TruncateFrom == 0 {
+		return true
+	}
+	if err := n.cfg.Log.TruncateSuffix(rd.TruncateFrom); err != nil {
+		n.stop(storageFailed("truncate", err), true)
+		return false
+	}
+	*synced = min(*synced, rd.TruncateFrom-1)
+	return true
+}
+
+// appendFor appends a Ready's entries together with the hard state they
+// change, in one record, so the two are synced together.
+func (n *Node) appendFor(rd *raft.ReadyValue, last uint64) bool {
+	hs, ok := n.hardStateFor(rd, last)
+	if !ok {
+		return false
+	}
+	if len(rd.Entries) > 0 || hs != nil {
+		if err := n.cfg.Log.Append(rd.Entries, hs); err != nil {
+			n.stop(storageFailed("append", err), true)
+			return false
+		}
+	}
+	return true
+}
+
+// hardStateFor is the hard state a Ready changes, or nil when it changes
+// none: the term and vote raft set, and a commit capped at the last index
+// this batch makes durable (R7-13).
+func (n *Node) hardStateFor(rd *raft.ReadyValue, last uint64) (*coreconsensus.HardState, bool) {
+	if rd.HardState == nil && rd.Commit == 0 {
+		return nil, true
+	}
+	h, err := n.cfg.Log.HardState()
+	if err != nil {
+		n.stop(storageFailed("hard state", err), true)
+		return nil, false
+	}
+	if rd.HardState != nil {
+		h.Term, h.Vote = rd.HardState.Term, rd.HardState.Vote
+	}
+	if rd.Commit != 0 {
+		// A persisted commit never passes the last synced index; the
+		// record rides this batch, synced with it (R7-13).
+		h.Commit = max(h.Commit, min(rd.Commit, last))
+	}
+	return &h, true
+}
+
+// syncFor syncs the log and records the latency and the batch's size. A
+// failed sync stops the node and is never retried (D4).
+func (n *Node) syncFor(rd *raft.ReadyValue) bool {
 	syncStart := n.clk.Now()
-	err := log.Sync()
+	err := n.cfg.Log.Sync()
 	n.obs.record(mFsyncLatency, n.clk.Since(syncStart).Seconds())
 	if len(rd.Entries) > 0 {
 		size := 0
@@ -857,7 +1296,12 @@ func (n *Node) write(q storeReq, synced *uint64) bool {
 		n.stop(storageFailed("sync", err), true)
 		return false
 	}
-	*synced = max(*synced, last)
+	return true
+}
+
+// completeWrite hands the loop the completion of a synced Ready with the
+// replies that waited on it; false when the node stopped first.
+func (n *Node) completeWrite(rd *raft.ReadyValue) bool {
 	d := storeDone{seq: rd.Seq}
 	if k := len(rd.Entries); k > 0 {
 		d.index, d.term = rd.Entries[k-1].Position.Index, rd.Entries[k-1].Position.Term
@@ -884,14 +1328,16 @@ func (n *Node) stop(err error, storage bool) {
 		n.stopMu.Unlock()
 		return
 	}
-	reason := &coreconsensus.StopReason{Err: err}
+	reason := &coreconsensus.StopReasonValue{Err: err}
 	if m, ok := n.cfg.Log.(interface {
-		markStop(code errs.Code, detail string) bool
+		markStopEach(code errs.Code, detail string) (dirErr, runErr error)
 	}); ok {
 		code, _ := errs.CodeOf(err)
-		if !m.markStop(code, err.Error()) && storage {
+		dirErr, runErr := m.markStopEach(code, err.Error())
+		if dirErr != nil && (runErr != nil || code != coreconsensus.CodeStorageFailed) && storage {
 			reason.Unmarked = true
 		}
+		n.reportUnwrittenMarkers(dirErr, runErr)
 	}
 	n.stopReason = reason
 	n.stopMu.Unlock()
@@ -903,16 +1349,31 @@ func (n *Node) stop(err error, storage bool) {
 	n.closeOnce.Do(func() { close(n.stopc) })
 }
 
+// reportUnwrittenMarkers logs each place a stop marker could not be written.
+// R9-05 accepts a stop that left one marker of the two; the line says which
+// one is missing, so an operator knows what protects the next start.
+func (n *Node) reportUnwrittenMarkers(dirErr, runErr error) {
+	if dirErr != nil {
+		n.obs.warn("consensus: stop marker not written in the data directory", lstr("error", dirErr.Error()))
+	}
+	if runErr != nil {
+		n.obs.warn("consensus: boot-scoped stop marker not written", lstr("error", runErr.Error()))
+	}
+}
+
 // StopReason returns why the node stopped itself, if it did.
-func (n *Node) StopReason() (coreconsensus.StopReason, bool) {
+func (n *Node) StopReason() (coreconsensus.StopReasonValue, bool) {
 	n.stopMu.Lock()
 	defer n.stopMu.Unlock()
 	if n.stopReason == nil {
-		return coreconsensus.StopReason{}, false
+		return coreconsensus.StopReasonValue{}, false
 	}
 	return *n.stopReason, true
 }
 
+// failAllOnStop answers every caller the loop still owes on its way out:
+// an unsent proposal or read with NODE_STOPPED, and anything that may have
+// been appended with OUTCOME_UNKNOWN, since it may yet commit elsewhere.
 func (n *Node) failAllOnStop() {
 	err := n.stoppedErr()
 	for ctx, p := range n.forwards {
@@ -928,22 +1389,23 @@ func (n *Node) failAllOnStop() {
 		w.done <- readResult{code: coreconsensus.CodeNodeStopped}
 	}
 	for {
-		select {
-		case p := <-n.propc:
-			p.done <- propResult{err: err}
-		default:
-			n.am.Lock()
-			for idx, p := range n.waiters {
-				delete(n.waiters, idx)
-				p.done <- propResult{err: outcomeUnknown("node stopped")}
-			}
-			n.acond.Broadcast()
-			n.am.Unlock()
-			return
+		p, ok := n.queuedProposal()
+		if !ok {
+			break
 		}
+		p.done <- propResult{err: err}
 	}
+	n.am.Lock()
+	for idx, p := range n.waiters {
+		delete(n.waiters, idx)
+		p.done <- propResult{err: outcomeUnknown("node stopped")}
+	}
+	n.acond.Broadcast()
+	n.am.Unlock()
 }
 
+// stoppedErr is NODE_STOPPED, carrying the self-stop's cause when there was
+// one, so a caller failed by a stop learns why.
 func (n *Node) stoppedErr() error {
 	if r, ok := n.StopReason(); ok {
 		return origin(coreconsensus.NodeStopped, errs.String("cause", r.Err.Error()))
@@ -970,6 +1432,8 @@ func (n *Node) Close(ctx context.Context) error {
 	return nil
 }
 
+// releaseDir gives the data directory back, once, so offline tools may use
+// it again; HardClose skips it when a goroutine may still be writing.
 func (n *Node) releaseDir() {
 	n.releaseOnce.Do(func() {
 		if a, ok := n.cfg.Log.(dirHolder); ok {
@@ -998,11 +1462,18 @@ func (n *Node) handOff(ctx context.Context) {
 	}
 	tctx, cancel := context.WithTimeout(ctx, n.cfg.InitialTiming.ElectionTimeoutMax)
 	defer cancel()
-	_ = n.transferLocal(tctx, to)
+	// Close goes on whatever the transfer answered: the hand-off only
+	// spares the cluster an election timeout, so a failed one is worth a
+	// line in the log and nothing more.
+	if err := n.transferLocal(tctx, to); err != nil {
+		n.obs.info("consensus: leadership hand-off at close did not complete", lattr("to", uint64(to)), lstr("error", err.Error()))
+	}
 }
 
 // HardClose stops now: no transfer, no final sync, bounded by
-// HardCloseTimeout (R7-11).
+// HardCloseTimeout (R7-11). It launches one goroutine that waits for the
+// node's goroutines; when the timeout fires first, that waiter is abandoned
+// with them and the data directory stays held until the process exits.
 func (n *Node) HardClose() error {
 	n.hard.Store(true)
 	n.stopped.Store(true)
@@ -1025,16 +1496,18 @@ func (n *Node) HardClose() error {
 }
 
 // Status returns the node's view after its last turn.
-func (n *Node) Status() coreconsensus.Status {
+func (n *Node) Status() coreconsensus.StatusValue {
 	if s := n.status.Load(); s != nil {
 		return *s
 	}
-	return coreconsensus.Status{}
+	return coreconsensus.StatusValue{}
 }
 
-// Watch implements LeadershipWatcher.
-func (n *Node) Watch(ctx context.Context) <-chan coreconsensus.Status {
-	ch := make(chan coreconsensus.Status, 1)
+// Watch implements LeadershipWatcher. Each call launches one goroutine that
+// closes the returned channel and ends when ctx ends or the node's event
+// loop stops.
+func (n *Node) Watch(ctx context.Context) <-chan coreconsensus.StatusValue {
+	ch := make(chan coreconsensus.StatusValue, 1)
 	ch <- n.Status()
 	n.watchMu.Lock()
 	n.watchers[ch] = struct{}{}
@@ -1053,10 +1526,10 @@ func (n *Node) Watch(ctx context.Context) <-chan coreconsensus.Status {
 }
 
 // Membership returns the configuration the node last appended.
-func (n *Node) Membership() coreconsensus.Membership {
-	var m coreconsensus.Membership
+func (n *Node) Membership() coreconsensus.MembershipValue {
+	var m coreconsensus.MembershipValue
 	if !n.exec(func() { m = n.r.Status().Conf }) {
-		return coreconsensus.Membership{}
+		return coreconsensus.MembershipValue{}
 	}
 	return m
 }

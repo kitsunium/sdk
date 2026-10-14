@@ -20,22 +20,26 @@ type PEMIdentity struct {
 	id *tlsid.Identity
 }
 
-// LoadPEMIdentity reads the files once and returns the identity and the CA
-// pool to pass as TransportConfig.Roots.
-func LoadPEMIdentity(certFile, keyFile, caFile string) (*PEMIdentity, *x509.CertPool, error) {
-	id, err := tlsid.LoadReloadable(tlsid.Files{CertFile: certFile, KeyFile: keyFile, RootsFile: caFile})
+// NewPEMIdentity reads the files once and returns the identity; Roots is
+// the CA pool to pass as TransportConfig.Roots.
+func NewPEMIdentity(certFile, keyFile, caFile string) (*PEMIdentity, error) {
+	id, err := tlsid.LoadReloadable(tlsid.FilesConfig{CertFile: certFile, KeyFile: keyFile, RootsFile: caFile})
 	if err != nil {
-		return nil, nil, transportMisconfigured("CertFile", err.Error())
+		return nil, transportMisconfigured("CertFile", err.Error())
 	}
 	leaf, err := id.Leaf()
 	if err != nil {
-		return nil, nil, transportMisconfigured("CertFile", err.Error())
+		return nil, transportMisconfigured("CertFile", err.Error())
 	}
 	if _, _, err := parseSAN(leaf); err != nil {
-		return nil, nil, transportMisconfigured("CertFile", "URI SAN")
+		return nil, transportMisconfigured("CertFile", "URI SAN")
 	}
-	return &PEMIdentity{CertFile: certFile, KeyFile: keyFile, CAFile: caFile, id: id}, id.Roots(), nil
+	return &PEMIdentity{CertFile: certFile, KeyFile: keyFile, CAFile: caFile, id: id}, nil
 }
+
+// Roots returns the trusted CA pool the identity was read with, the union of
+// every CA file seen so far, to pass as TransportConfig.Roots.
+func (p *PEMIdentity) Roots() *x509.CertPool { return p.id.Roots() }
 
 // GetCertificate returns the current certificate, reloading it in place when
 // its files changed.
@@ -46,14 +50,17 @@ func (p *PEMIdentity) ReloadFailures() int { return int(p.id.ReloadFailures()) }
 
 // NewTCPTransportFromPEM builds the shipped transport from PEM files, over
 // the reloadable identity, its roots included.
-func NewTCPTransportFromPEM(certFile, keyFile, caFile string, cfg TransportConfig) (*TCPTransport, error) {
-	p, pool, err := LoadPEMIdentity(certFile, keyFile, caFile)
+//
+// cfg is read, never written: the identity and the defaults go into a copy.
+func NewTCPTransportFromPEM(certFile, keyFile, caFile string, cfgIn *TransportConfig) (*TCPTransport, error) {
+	p, err := NewPEMIdentity(certFile, keyFile, caFile)
 	if err != nil {
 		return nil, err
 	}
-	cfg.Certificate, cfg.GetCertificate, cfg.Roots = nil, p.GetCertificate, pool
+	cfg := *cfgIn
+	cfg.Certificate, cfg.GetCertificate, cfg.Roots = nil, p.GetCertificate, p.Roots()
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	return newTCPTransport(cfg, p.id)
+	return newTCPTransport(&cfg, p.id)
 }

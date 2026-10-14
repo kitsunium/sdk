@@ -10,6 +10,7 @@ go_library(
         "leader.go",
         "log.go",
         "mutation.go",
+        "peerstat.go",
         "progress.go",
         "raft.go",
         "step.go",
@@ -39,6 +40,7 @@ go_test(
     name = "raft_test",
     srcs = [
         "api_gen_test.go",
+        "chainrefusal_internal_test.go",
         "checks_internal_test.go",
         "lincheck_internal_test.go",
         "sim_internal_test.go",

@@ -52,7 +52,7 @@ func pct(ds []time.Duration, p float64) time.Duration {
 // second one fsync per batch gives (D16: ≥ 10 000 entries/s of 256 B).
 func TestDMCryptBench(t *testing.T) {
 	dir := dmDir(t)
-	d, err := OpenDataDir(dir + "/bench")
+	d, err := NewDataDir(dir + "/bench")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,11 +68,11 @@ func TestDMCryptBench(t *testing.T) {
 		var lat []time.Duration
 		start := time.Now()
 		for k := 0; k < shape.n; k++ {
-			es := make([]coreconsensus.Entry, shape.batch)
+			es := make([]coreconsensus.EntryValue, shape.batch)
 			for i := range es {
 				last++
-				es[i] = coreconsensus.Entry{
-					Position: coreconsensus.Position{Term: 1, Index: last},
+				es[i] = coreconsensus.EntryValue{
+					Position: coreconsensus.PositionValue{Term: 1, Index: last},
 					Kind:     coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data,
 				}
 			}
@@ -97,7 +97,7 @@ func TestDMCryptBench(t *testing.T) {
 func TestDMCryptWriter(t *testing.T) {
 	dir := dmDir(t)
 	// Small segments so the cut often lands near a rotation.
-	d, err := OpenDataDirWith(dir+"/crash", DataDirOptions{SegmentBytes: 256 << 10})
+	d, err := NewDataDirWith(dir+"/crash", DataDirOptions{SegmentBytes: 256 << 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,12 +116,12 @@ func TestDMCryptWriter(t *testing.T) {
 	ackFirst := os.Getenv("DMCRYPT_ACK_BEFORE_SYNC") == "1"
 	for {
 		n := 1 + rng.IntN(32)
-		es := make([]coreconsensus.Entry, n)
+		es := make([]coreconsensus.EntryValue, n)
 		for i := range es {
 			last++
 			p := payload(last)
-			es[i] = coreconsensus.Entry{
-				Position: coreconsensus.Position{Term: 1, Index: last},
+			es[i] = coreconsensus.EntryValue{
+				Position: coreconsensus.PositionValue{Term: 1, Index: last},
 				Kind:     coreconsensus.EntryCommand, BodySum: wire.BodySum(p), Data: p,
 			}
 		}
@@ -158,7 +158,7 @@ func TestDMCryptVerify(t *testing.T) {
 			d.Close()
 		}
 		var err error
-		if d, err = OpenDataDirWith(dir+"/crash", DataDirOptions{SegmentBytes: 256 << 10}); err != nil {
+		if d, err = NewDataDirWith(dir+"/crash", DataDirOptions{SegmentBytes: 256 << 10}); err != nil {
 			t.Fatalf("open %d: %v", pass, err)
 		}
 		if err := d.d.log.checkMarkers(); err != nil {

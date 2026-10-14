@@ -4,7 +4,7 @@
 ## Purpose
 
 The consensus domain's hand-written fixed layouts (ADR 0152 D4, D18): the
-frame of a `Message`, the 41-byte `Token`, `SnapshotMeta`, `Membership`,
+frame of a `MessageValue`, the 41-byte `TokenValue`, `SnapshotMetaValue`, `MembershipValue`,
 the timing contract, the admin payload, and the CRC-32C body and chain sums.
 They are not codec formats: two nodes must write the same bytes.
 
