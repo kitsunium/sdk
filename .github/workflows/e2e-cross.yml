@@ -382,7 +382,17 @@ jobs:
             docker exec init systemd-run --quiet --wait --pipe --collect \
               -p Delegate=yes -p WorkingDirectory=/opt sh /opt/bins/run.sh
           else
-            docker exec -w /opt init sh /opt/bins/run.sh
+            # No systemd here to delegate a subtree: do what a container
+            # entrypoint does. Move every process of the container's cgroup
+            # into a leaf (cgroup v2 forbids a cgroup holding processes AND
+            # controllers for its children), then enable the controllers.
+            docker exec -w /opt init sh -c '
+              set -e
+              cd /sys/fs/cgroup
+              mkdir -p init
+              for p in $(cat cgroup.procs); do echo "$p" > init/cgroup.procs 2>/dev/null || true; done
+              echo "+cpu +memory +pids +io" > cgroup.subtree_control
+              exec sh /opt/bins/run.sh'
           fi
 
       - name: Container log (on failure)
