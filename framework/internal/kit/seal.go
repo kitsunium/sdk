@@ -36,7 +36,11 @@ import (
 //
 // A record is sealed under its subject's data key — "s:" and the subject's
 // reference —, or, without a subject, under a data key of its own — "r:"
-// and the record's reference. A message is sealed under its subject's, the
+// and the record's reference. An entry of the privacy journal is sealed
+// under the journal's key for the month of its instant, in UTC — "j:" and
+// the month, "j:2026-10" (ADR 0178 §C3) —: twelve keys a year, never one
+// per entry; an entry sealed before under its own key names that key in
+// its box, and keeps opening. A message is sealed under its subject's, the
 // dispatcher's for a queued command without one, or under data-key itself
 // — a box "sealed:v1:root:" — when it has no subject at all. Every data key
 // is 32 random bytes, wrapped under kit's generated secret data-key — a
@@ -63,10 +67,13 @@ const (
 	// sealed under data-key itself.
 	boxPrefix  = "sealed:v1:"
 	rootPrefix = boxPrefix + "root:"
-	// personKey and ownKey start the reference of a data key: a person's,
-	// and a record's own.
-	personKey = "s:"
-	ownKey    = "r:"
+	// personKey, ownKey and journalKey start the reference of a data key: a
+	// person's, a record's own, and the privacy journal's for one month.
+	personKey  = "s:"
+	ownKey     = "r:"
+	journalKey = "j:"
+	// journalMonth is the layout of a journal key's month, in UTC.
+	journalMonth = "2006-01"
 	// keyCacheSize and keyCacheTTL bound the data keys a run keeps opened.
 	// The TTL is how long a key another process destroyed keeps opening
 	// here: a store belongs to one process, and this one destroys through
@@ -154,6 +161,13 @@ func (k *referenceKeys) personRef(identity string) string {
 // ownRef is the reference of a record's own data key.
 func (k *referenceKeys) ownRef(store, key string) string {
 	return ownKey + k.recordRef(store, key)
+}
+
+// journalRef is the reference of the privacy journal's data key for the
+// month at falls in, in UTC: "j:2026-10" (ADR 0178 §C3). It names a month,
+// never a person nor a record, so no erasure ever destroys it.
+func journalRef(at time.Time) string {
+	return journalKey + at.UTC().Format(journalMonth)
 }
 
 // seal seals plaintext, a member's JSON, under the data key ref — data-key
