@@ -59,9 +59,13 @@ var _ = installTrampoline()
 // (the sentinel env var is present), else returns a zero marker so the
 // package-level var initialiser above has a value to bind.
 func installTrampoline() struct{} {
-	payload := os.Getenv(trampolineEnv)
-	//: a normal process has no payload — return immediately, zero overhead.
-	if payload == "" {
+	payload, isTrampoline := os.LookupEnv(trampolineEnv)
+	//: a normal process does not carry the variable at all — return immediately,
+	//: zero overhead. PRESENCE decides, not content: a spawn that asks for a cgroup
+	//: placement alone encodes an EMPTY payload, and reading that as "not a
+	//: trampoline" ran the host's main() in the child instead — a program that
+	//: spawned itself again and the parent blocked on a handshake forever (#118).
+	if !isTrampoline {
 		//: not a trampoline invocation; continue to the host's main().
 		return struct{}{}
 	}
