@@ -543,10 +543,10 @@ func (l *Loop) sleep(ctx context.Context, r *loopRun, n nextWake, held **WakeEve
 		return WakeEvent{}, false, true
 	case <-fire:
 		// A wake that came as the timer fired is this run's too.
+		// A held wake keeps the instant it came at: the first wake's instant
+		// stays the run's.
 		if *held != nil {
-			w := **held
-			w.At = a.clock.Now()
-			return l.after(r, w), true, true
+			return l.after(r, **held), true, true
 		}
 		return l.after(r, wakeOf(n.reason, a.clock.Now(), "")), true, true
 	case _, open := <-r.wake:

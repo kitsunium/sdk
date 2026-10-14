@@ -89,3 +89,26 @@ func TestALoopsWakeSaysEveryReason(t *testing.T) {
 		t.Errorf("the nudge waited for the backoff's end: timers armed for %v", clk.armed)
 	}
 }
+
+// A wake held through a backoff keeps the instant it came at: the run it
+// starts says when the publish happened, not when the backoff ended — the
+// first wake's instant stays the run's.
+func TestAHeldWakeKeepsItsInstant(t *testing.T) {
+	clk := clock.NewManualClock(time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC))
+	came := clk.Now()
+	r := &loopRun{a: &App{clock: clk}, wake: make(chan struct{}, 1)}
+	l := &Loop{running: r}
+	failed := nextWake{at: came.Add(time.Hour), reason: model.WakeInterval, floor: came.Add(time.Second)}
+
+	l.signal(WakeEvent{Reason: model.WakeTopic, Topic: "members/topic/joined"})
+	done := make(chan WakeEvent, 1)
+	go func() {
+		w, _ := l.wait(t.Context(), r, failed)
+		done <- w
+	}()
+	clk.BlockUntil(1) // the backoff's timer, armed
+	clk.Advance(time.Second)
+	if w := <-done; w.Reason != model.WakeTopic || !w.At.Equal(came) {
+		t.Errorf("a publish held through a backoff: %+v, want its own instant %v", w, came)
+	}
+}
