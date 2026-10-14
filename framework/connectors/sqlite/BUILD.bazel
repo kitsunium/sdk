@@ -78,7 +78,9 @@ go_test(
     srcs = [
         "api_gen_test.go",
         "filestore_test.go",
+        "floor_test.go",
         "keys_test.go",
+        "queue_test.go",
         "revisions_test.go",
         "sqlite_internal_test.go",
         "sqlite_test.go",

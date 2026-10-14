@@ -35,7 +35,7 @@ const localName = "the data directory"
 //		if err := Decisions.Insert(ctx, d); err != nil {
 //			return err
 //		}
-//		return Changes.Publish(ctx, Closed{ID: id}) // held: queued after the commit
+//		return Changes.Publish(ctx, Closed{ID: id}) // held: queued at the commit
 //	})
 //
 // A transaction belongs to one database: the one its first store call
@@ -51,8 +51,13 @@ const localName = "the data directory"
 // returns at once —, a watch's notice, the store's write hooks that wake
 // workflows and loops, a workflow's OnTransition hooks. Each is checked when
 // it is made, so a caller's mistake returns to the caller; a rollback drops
-// them, and a savepoint's rollback its own. One a queue refuses after the
-// commit is logged and reported, and the commit stands; a process that dies
+// them, and a savepoint's rollback its own. A publish, a dispatch or a notice
+// whose queue lives on the transaction's database — the one that keeps the
+// service of its subscription, command or watch, by a store's rules — is
+// written in the transaction, just before it commits: a queue that refuses
+// it fails the transaction, every write undone, and Transact returns the
+// refusal. Every other one leaves after the commit: one a queue refuses then
+// is logged and reported, and the commit stands; a process that dies
 // between the commit and the release loses what was held.
 //
 // On a database the transaction is the database's own, at its default
@@ -235,11 +240,7 @@ func newUnit(ctx context.Context, a *App) *unit {
 // they are dropped. It returns the level's outcome: fn's error, or the
 // database's refusal to commit.
 func (u *unit) end(ctx context.Context, err error) error {
-	if u.scope != nil {
-		if serr := u.scope.close(err); err == nil {
-			err = serr
-		}
-	}
+	err = u.closeScope(err)
 	t := u.tx
 	if err != nil {
 		t.rollback(ctx, u)
@@ -260,6 +261,24 @@ func (u *unit) end(ctx context.Context, err error) error {
 	}
 	if err == nil {
 		t.let(held)
+	}
+	return err
+}
+
+// closeScope ends the level's transaction or savepoint on its database,
+// when it opened one, with err: for the outermost level that commits, the
+// effects whose queue lives on that database are published in it first
+// (join), and a refusal is the outcome. It returns the outcome: err, the
+// refusal, or the database's refusal to commit.
+func (u *unit) closeScope(err error) error {
+	if u.scope == nil {
+		return err
+	}
+	if err == nil && u.parent == nil {
+		err = u.tx.join(u.scope)
+	}
+	if serr := u.scope.close(err); err == nil {
+		err = serr
 	}
 	return err
 }
@@ -392,6 +411,14 @@ type heldEffect struct {
 	// inside marks an effect that stays in the process — a store's write
 	// hook —: a transaction's span does not count it among what it held.
 	inside bool
+	// queue is the database the effect's queue lives on, nil for a file or
+	// a memory queue. When it is the transaction's own, joined publishes the
+	// effect in the transaction, just before its commit (ADR 0178 C1), with
+	// a context that carries it, and release is not run; sent records that
+	// it was.
+	queue  *databaseRun
+	joined func(ctx context.Context) error
+	sent   bool
 }
 
 // hold keeps effect until the commit of the transaction ctx carries, and
@@ -430,11 +457,48 @@ func atEnd(ctx context.Context, fn func()) bool {
 	return true
 }
 
+// join publishes, in the transaction's scope s on its database just before
+// the commit, the held effects whose queue lives on that database (ADR 0178
+// C1), in the order they were made, each within <name>-timeout: the
+// messages and the writes then stand or fall together. The first refusal is
+// the transaction's outcome — the commit is not asked, every write and every
+// message written before it rolls back, and a rollback drops the effects as
+// any other. A publication never claims the transaction for a database: one
+// made before the transaction's first write joins it all the same, and one
+// whose queue is elsewhere waits for the commit.
+func (t *txn) join(s *sqlScope) error {
+	t.mu.Lock()
+	db := t.db
+	var due []int
+	for i, e := range t.held {
+		if !e.inside && db != nil && e.queue == db && e.joined != nil {
+			due = append(due, i)
+		}
+	}
+	held := slices.Clone(t.held)
+	t.mu.Unlock()
+	for _, i := range due {
+		call, cancel := context.WithTimeout(s.ctx, db.timeout())
+		err := letOne(call, heldEffect{release: held[i].joined})
+		cancel()
+		if err != nil {
+			return err
+		}
+		t.mu.Lock()
+		t.held[i].sent = true
+		t.mu.Unlock()
+	}
+	return nil
+}
+
 // let releases the effects a committed transaction held, in the order they
-// were made. One that fails is logged and reported on its node: the commit
-// stands.
+// were made — but those published in it (join). One that fails is logged
+// and reported on its node: the commit stands.
 func (t *txn) let(held []heldEffect) {
 	for _, e := range held {
+		if e.sent {
+			continue
+		}
 		if err := letOne(t.releasing(e.made), e); err != nil && t.app != nil {
 			t.app.problem(e.node, say("transaction.effect", "node", e.node, "detail", describeText(err)))
 		}

@@ -3894,6 +3894,21 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeDatabaseVersion",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "CodeDatabaseVersion",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262732",
+      "code": {
+        "value": "0.4.2.76"
+      },
+      "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
+      "file": "framework/internal/kit/codes_gen.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeHandlerPanic",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/internal/kit",
@@ -5744,6 +5759,29 @@
       "canonical": "interface{listenerConfigure(o *github.com/kitsunium/sdk/framework/internal/kit.listenerOptions)}",
       "doc": "ListenerConfigurer tunes a listener.\n",
       "file": "framework/internal/kit/listener.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.LockWaiter",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "LockWaiter",
+      "spelled": "interface{OpenWaiting(url secret.Value, current func(context.Context) (secret.Value, error), wait time.Duration) (*stdsql.DB, error)}",
+      "canonical": "interface{OpenWaiting(url github.com/kitsunium/sdk/pkg/v1/security/secret.Value, current func(context.Context) (github.com/kitsunium/sdk/pkg/v1/security/secret.Value, error), wait time.Duration) (*database/sql.DB, error)}",
+      "doc": "LockWaiter is an [Engine] whose connections wait a bounded time for a lock\nanother connection holds — SQLite's busy timeout —, a sibling of Engine\n(ADR 0178 C2). kit opens such an engine's pool with OpenWaiting instead\nof Open, and gives it a wait under <name>-timeout, so that a lost race on\nthe lock comes back as the engine's refusal before the call's own\ndeadline. An engine that does not implement it keeps its own wait.\n",
+      "file": "framework/internal/kit/database_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.LockWaiter.OpenWaiting",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "OpenWaiting",
+      "recv": "LockWaiter",
+      "spelled": "func(url secret.Value, current func(context.Context) (secret.Value, error), wait time.Duration) (*stdsql.DB, error)",
+      "canonical": "func(url github.com/kitsunium/sdk/pkg/v1/security/secret.Value, current func(context.Context) (github.com/kitsunium/sdk/pkg/v1/security/secret.Value, error), wait time.Duration) (*database/sql.DB, error)",
+      "doc": "OpenWaiting opens the pool url names, as Open does, its connections\nwaiting wait for a lock when url writes no wait of its own.\n",
+      "file": "framework/internal/kit/database_interface.go",
       "layer": "framework"
     },
     {
@@ -7782,7 +7820,7 @@
       "recv": "TopicService",
       "spelled": "func(ctx context.Context, msg T) error",
       "canonical": "func(ctx context.Context, msg T) error",
-      "doc": "Publish sends msg to every subscription. It returns once every\nsubscription's queue has accepted the message; delivery happens later.\nInside a transaction ([Transact], a command's) the message is encoded now\nand queued once the transaction commits: a rollback drops it.\n",
+      "doc": "Publish sends msg to every subscription. It returns once every\nsubscription's queue has accepted the message; delivery happens later.\nInside a transaction ([Transact], a command's) the message is encoded now\nand queued at the commit: in the transaction, just before it commits, for\na subscription whose queue lives on the transaction's database — a queue\nthat refuses it then fails the transaction —, once it committed for the\nothers. A rollback drops it.\n",
       "file": "framework/internal/kit/topic.go",
       "layer": "framework"
     },
@@ -7793,7 +7831,7 @@
       "name": "Transact",
       "spelled": "func(ctx context.Context, fn func(context.Context) error) error",
       "canonical": "func(ctx context.Context, fn func(context.Context) error) error",
-      "doc": "Transact runs fn in one transaction and returns fn's error: nil commits\nwhat fn wrote, an error undoes it — a panic too, which then continues.\n\n\terr := kit.Transact(ctx, func(ctx context.Context) error {\n\t\tif _, err := Cases.Update(ctx, id, closeCase); err != nil {\n\t\t\treturn err // what this function wrote is undone\n\t\t}\n\t\tif err := Decisions.Insert(ctx, d); err != nil {\n\t\t\treturn err\n\t\t}\n\t\treturn Changes.Publish(ctx, Closed{ID: id}) // held: queued after the commit\n\t})\n\nA transaction belongs to one database: the one its first store call\nreaches — at its first call on a database, at its first write on the data\ndirectory, which counts as one, memory with it. Inside it, a store of\nanother database is read as usual; writing one is refused ([Invalid],\n[CodeTransactionSpan]). A Transact inside another is a savepoint: its\nfailure undoes its own writes, and the outer transaction goes on if its\ncaller handles the error.\n\nWhat leaves the process waits for the outermost commit: a topic's\npublish, a queued command's dispatch, a mail — whose outbox ID [Mailer.Send]\nreturns at once —, a watch's notice, the store's write hooks that wake\nworkflows and loops, a workflow's OnTransition hooks. Each is checked when\nit is made, so a caller's mistake returns to the caller; a rollback drops\nthem, and a savepoint's rollback its own. One a queue refuses after the\ncommit is logged and reported, and the commit stands; a process that dies\nbetween the commit and the release loses what was held.\n\nOn a database the transaction is the database's own, at its default\nisolation. On the data directory and in memory kit keeps its own: it takes\nthe data's writer turn — one transaction at a time; a write outside any\nwaits for it, and such writes share the turn among themselves —, its\nwrites land at once, and an error writes each entity's previous value\nback, newest first. It is atomic against an error, not against a crash,\nand a reader may see a write before its commit. A store kept in memory by\n[InMemory] — a cache — is in no transaction: its writes land and stay.\n\nA command's handler runs in one already ([NoTransaction] opts out), and\nso does a workflow's transition.\n",
+      "doc": "Transact runs fn in one transaction and returns fn's error: nil commits\nwhat fn wrote, an error undoes it — a panic too, which then continues.\n\n\terr := kit.Transact(ctx, func(ctx context.Context) error {\n\t\tif _, err := Cases.Update(ctx, id, closeCase); err != nil {\n\t\t\treturn err // what this function wrote is undone\n\t\t}\n\t\tif err := Decisions.Insert(ctx, d); err != nil {\n\t\t\treturn err\n\t\t}\n\t\treturn Changes.Publish(ctx, Closed{ID: id}) // held: queued at the commit\n\t})\n\nA transaction belongs to one database: the one its first store call\nreaches — at its first call on a database, at its first write on the data\ndirectory, which counts as one, memory with it. Inside it, a store of\nanother database is read as usual; writing one is refused ([Invalid],\n[CodeTransactionSpan]). A Transact inside another is a savepoint: its\nfailure undoes its own writes, and the outer transaction goes on if its\ncaller handles the error.\n\nWhat leaves the process waits for the outermost commit: a topic's\npublish, a queued command's dispatch, a mail — whose outbox ID [Mailer.Send]\nreturns at once —, a watch's notice, the store's write hooks that wake\nworkflows and loops, a workflow's OnTransition hooks. Each is checked when\nit is made, so a caller's mistake returns to the caller; a rollback drops\nthem, and a savepoint's rollback its own. A publish, a dispatch or a notice\nwhose queue lives on the transaction's database — the one that keeps the\nservice of its subscription, command or watch, by a store's rules — is\nwritten in the transaction, just before it commits: a queue that refuses\nit fails the transaction, every write undone, and Transact returns the\nrefusal. Every other one leaves after the commit: one a queue refuses then\nis logged and reported, and the commit stands; a process that dies\nbetween the commit and the release loses what was held.\n\nOn a database the transaction is the database's own, at its default\nisolation. On the data directory and in memory kit keeps its own: it takes\nthe data's writer turn — one transaction at a time; a write outside any\nwaits for it, and such writes share the turn among themselves —, its\nwrites land at once, and an error writes each entity's previous value\nback, newest first. It is atomic against an error, not against a crash,\nand a reader may see a write before its commit. A store kept in memory by\n[InMemory] — a cache — is in no transaction: its writes land and stay.\n\nA command's handler runs in one already ([NoTransaction] opts out), and\nso does a workflow's transition.\n",
       "file": "framework/internal/kit/transact.go",
       "layer": "framework"
     },
@@ -10610,6 +10648,22 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.CodeDatabaseVersion",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "CodeDatabaseVersion",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262732",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeDatabaseVersion",
+      "code": {
+        "value": "0.4.2.76"
+      },
+      "doc": "CodeDatabaseVersion refuses the start of a database whose server is below\nkit's floor: MySQL 8.0.1 or MariaDB 10.6, which lease with SKIP LOCKED.\n",
+      "file": "framework/kit/errors.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/kit.CodeHandlerPanic",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/kit",
@@ -12225,6 +12279,18 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.LockWaiter",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "LockWaiter",
+      "spelled": "ikit.LockWaiter",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit.LockWaiter",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/kit.LockWaiter",
+      "doc": "LockWaiter is an [Engine] whose connections wait a bounded time for a lock\nanother connection holds — SQLite's busy timeout —, a sibling of Engine\n(ADR 0178 C2). kit opens such an engine's pool with OpenWaiting instead\nof Open, and gives it a wait under <name>-timeout, so that a lost race on\nthe lock comes back as the engine's refusal before the call's own\ndeadline. An engine that does not implement it keeps its own wait.\n",
+      "file": "framework/kit/database_interface.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/kit.Log",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/kit",
@@ -13310,7 +13376,7 @@
       "name": "Transact",
       "spelled": "func(ctx context.Context, fn func(context.Context) error) error",
       "canonical": "func(ctx context.Context, fn func(context.Context) error) error",
-      "doc": "Transact runs fn in one transaction and returns fn's error: nil commits\nwhat fn wrote, an error undoes it — a panic too, which then continues.\n\n\terr := kit.Transact(ctx, func(ctx context.Context) error {\n\t\tif _, err := Cases.Update(ctx, id, closeCase); err != nil {\n\t\t\treturn err // what this function wrote is undone\n\t\t}\n\t\tif err := Decisions.Insert(ctx, d); err != nil {\n\t\t\treturn err\n\t\t}\n\t\treturn Changes.Publish(ctx, Closed{ID: id}) // held: queued after the commit\n\t})\n\nA transaction belongs to one database: the one its first store call\nreaches — at its first call on a database, at its first write on the data\ndirectory, which counts as one, memory with it. Inside it, a store of\nanother database is read as usual; writing one is refused ([Invalid],\n[CodeTransactionSpan]). A Transact inside another is a savepoint: its\nfailure undoes its own writes, and the outer transaction goes on if its\ncaller handles the error.\n\nWhat leaves the process waits for the outermost commit: a topic's\npublish, a queued command's dispatch, a mail — whose outbox ID [Mailer].Send\nreturns at once —, a watch's notice, the store's write hooks that wake\nworkflows and loops, a workflow's OnTransition hooks. Each is checked when\nit is made, so a caller's mistake returns to the caller; a rollback drops\nthem, and a savepoint's rollback its own. One a queue refuses after the\ncommit is logged and reported, and the commit stands; a process that dies\nbetween the commit and the release loses what was held.\n\nOn a database the transaction is the database's own, at its default\nisolation. On the data directory and in memory kit keeps its own: it takes\nthe data's writer turn — one transaction at a time; a write outside any\nwaits for it, and such writes share the turn among themselves —, its\nwrites land at once, and an error writes each entity's previous value\nback, newest first. It is atomic against an error, not against a crash,\nand a reader may see a write before its commit. A store kept in memory by\n[InMemory] — a cache — is in no transaction: its writes land and stay.\n\nA command's handler runs in one already ([NoTransaction] opts out), and\nso does a workflow's transition.\n",
+      "doc": "Transact runs fn in one transaction and returns fn's error: nil commits\nwhat fn wrote, an error undoes it — a panic too, which then continues.\n\n\terr := kit.Transact(ctx, func(ctx context.Context) error {\n\t\tif _, err := Cases.Update(ctx, id, closeCase); err != nil {\n\t\t\treturn err // what this function wrote is undone\n\t\t}\n\t\tif err := Decisions.Insert(ctx, d); err != nil {\n\t\t\treturn err\n\t\t}\n\t\treturn Changes.Publish(ctx, Closed{ID: id}) // held: queued at the commit\n\t})\n\nA transaction belongs to one database: the one its first store call\nreaches — at its first call on a database, at its first write on the data\ndirectory, which counts as one, memory with it. Inside it, a store of\nanother database is read as usual; writing one is refused ([Invalid],\n[CodeTransactionSpan]). A Transact inside another is a savepoint: its\nfailure undoes its own writes, and the outer transaction goes on if its\ncaller handles the error.\n\nWhat leaves the process waits for the outermost commit: a topic's\npublish, a queued command's dispatch, a mail — whose outbox ID [Mailer].Send\nreturns at once —, a watch's notice, the store's write hooks that wake\nworkflows and loops, a workflow's OnTransition hooks. Each is checked when\nit is made, so a caller's mistake returns to the caller; a rollback drops\nthem, and a savepoint's rollback its own. A publish, a dispatch or a notice\nwhose queue lives on the transaction's database — the one that keeps the\nservice of its subscription, command or watch, by a store's rules — is\nwritten in the transaction, just before it commits: a queue that refuses\nit fails the transaction, every write undone, and Transact returns the\nrefusal. Every other one leaves after the commit: one a queue refuses then\nis logged and reported, and the commit stands; a process that dies\nbetween the commit and the release loses what was held.\n\nOn a database the transaction is the database's own, at its default\nisolation. On the data directory and in memory kit keeps its own: it takes\nthe data's writer turn — one transaction at a time; a write outside any\nwaits for it, and such writes share the turn among themselves —, its\nwrites land at once, and an error writes each entity's previous value\nback, newest first. It is atomic against an error, not against a crash,\nand a reader may see a write before its commit. A store kept in memory by\n[InMemory] — a cache — is in no transaction: its writes land and stay.\n\nA command's handler runs in one already ([NoTransaction] opts out), and\nso does a workflow's transition.\n",
       "file": "framework/kit/transact.go",
       "layer": "framework"
     },
@@ -19589,7 +19655,7 @@
           "name": "Queue",
           "type": "string",
           "tag": "json:\"queue,omitempty\"",
-          "doc": "Queue is \"memory\" or \"file\": where a queued command waits.\n"
+          "doc": "Queue is \"memory\", \"file\" or \"sql\": where a queued command waits — \"sql\"\non the database that keeps its service.\n"
         },
         {
           "name": "DeadLetters",
@@ -26714,7 +26780,7 @@
           "name": "Broker",
           "type": "string",
           "tag": "json:\"broker,omitempty\"",
-          "doc": "Broker is \"memory\" or \"file\".\n"
+          "doc": "Broker is \"memory\", \"file\" or \"sql\": where a subscription of the topic's\nown service waits — \"sql\" on the database that keeps it.\n"
         }
       ],
       "doc": "TopicSpec describes a topic.\nIt carries the message's schema; its subscriptions are the nodes it\ndelivers to.\n",

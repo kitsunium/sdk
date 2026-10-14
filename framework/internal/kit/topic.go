@@ -3,7 +3,6 @@ package kit
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"sync"
@@ -48,7 +47,10 @@ type envelope[T any] struct {
 // Publish sends msg to every subscription. It returns once every
 // subscription's queue has accepted the message; delivery happens later.
 // Inside a transaction ([Transact], a command's) the message is encoded now
-// and queued once the transaction commits: a rollback drops it.
+// and queued at the commit: in the transaction, just before it commits, for
+// a subscription whose queue lives on the transaction's database — a queue
+// that refuses it then fails the transaction —, once it committed for the
+// others. A rollback drops it.
 func (t *TopicService[T]) Publish(ctx context.Context, msg T) error {
 	a := t.app()
 	if a == nil {
@@ -57,20 +59,42 @@ func (t *TopicService[T]) Publish(ctx context.Context, msg T) error {
 	ctx, sp := a.begin(ctx, &spanStart{node: t.id, from: currentNode(ctx), edge: model.EdgePublishes, op: model.OpPublish, name: "Publish"})
 	payload, err := t.payload(ctx, a, msg)
 	if err == nil {
-		release := func(rctx context.Context) error {
-			err := t.publish(context.WithoutCancel(rctx), a, payload)
-			t.wake()
-			return err
-		}
-		if hold(ctx, heldEffect{node: t.id, release: release}) {
-			sp.attr("held", "commit")
-		} else {
-			err = t.publish(ctx, a, payload)
-			t.wake()
-		}
+		err = t.send(ctx, a, sp, payload)
 	}
 	sp.end(err)
 	return err
+}
+
+// send puts payload in every subscription's queue, then wakes the loops a
+// publish wakes. Inside a transaction each subscription's publication is
+// held on its own, tagged with the database its queue lives on (ADR 0178
+// C1), and the wake after them stays in the process.
+func (t *TopicService[T]) send(ctx context.Context, a *App, sp *span, payload []byte) error {
+	if unitOf(ctx) == nil {
+		err := t.publish(ctx, a, payload)
+		t.wake()
+		return err
+	}
+	var failed []error
+	for _, sub := range t.subscribers(a) {
+		release := func(rctx context.Context) error { return t.publishTo(context.WithoutCancel(rctx), sub, payload) }
+		joined := func(tctx context.Context) error { return t.publishTo(tctx, sub, payload) }
+		if hold(ctx, heldEffect{node: t.id, release: release, joined: joined, queue: sub.queueDB}) {
+			continue
+		}
+		if err := t.publishTo(ctx, sub, payload); err != nil {
+			failed = append(failed, err)
+		}
+	}
+	wake := func(context.Context) error {
+		t.wake()
+		return nil
+	}
+	if !hold(ctx, heldEffect{node: t.id, release: wake, inside: true}) {
+		t.wake()
+	}
+	sp.attr("held", "commit")
+	return errors.Join(failed...)
 }
 
 // payload is what a subscription's queue carries of msg: the message — its
@@ -89,28 +113,41 @@ func (t *TopicService[T]) payload(ctx context.Context, a *App, msg T) ([]byte, e
 
 // publish puts payload in every subscription's queue.
 func (t *TopicService[T]) publish(ctx context.Context, a *App, payload []byte) error {
-	t.mu.Lock()
-	subs := slices.Clone(t.subs)
-	t.mu.Unlock()
 	var failed []error
-	for _, sub := range subs {
-		if sub.app() != a || sub.broker == nil {
-			continue
-		}
-		if _, err := sub.broker.Publish(ctx, payload); err != nil {
-			failed = append(failed, failure(CodeTopicPublish, "TOPIC_PUBLISH", "a subscription's queue refused the message", err,
-				errs.String("topic", t.id), errs.String("subscription", sub.id)))
+	for _, sub := range t.subscribers(a) {
+		if err := t.publishTo(ctx, sub, payload); err != nil {
+			failed = append(failed, err)
 		}
 	}
 	return errors.Join(failed...)
 }
 
+// subscribers are the subscriptions of the topic running in a, their queue
+// open.
+func (t *TopicService[T]) subscribers(a *App) []*SubscriptionWorker[T] {
+	t.mu.Lock()
+	subs := slices.Clone(t.subs)
+	t.mu.Unlock()
+	return slices.DeleteFunc(subs, func(sub *SubscriptionWorker[T]) bool { return sub.app() != a || sub.broker == nil })
+}
+
+// publishTo puts payload in sub's queue.
+func (t *TopicService[T]) publishTo(ctx context.Context, sub *SubscriptionWorker[T], payload []byte) error {
+	if _, err := sub.broker.Publish(ctx, payload); err != nil {
+		return failure(CodeTopicPublish, "TOPIC_PUBLISH", "a subscription's queue refused the message", err,
+			errs.String("topic", t.id), errs.String("subscription", sub.id))
+	}
+	return nil
+}
+
 // describe fills the graph node out with what the Topic declares, and returns
 // its edges.
 func (t *TopicService[T]) describe(a *App, out *model.Node) []model.Edge {
+	// Where a subscription of the topic's own service waits: every one, in a
+	// product whose one default database keeps them all.
 	broker := "memory"
 	if a != nil && a.data != nil {
-		broker = "file"
+		broker = queueWhere(a, &t.nodeBase)
 	}
 	out.Topic = &model.TopicInfo{Message: keptSchemaOf(reflect.TypeFor[T](), a != nil && t.sealsAtRest(a)), Delivery: "at-least-once", Broker: broker}
 	t.mu.Lock()
@@ -135,10 +172,17 @@ type SubscriptionWorker[T any] struct {
 	parallelism int
 
 	broker queue.Broker
+	// queueDB is the database its queue lives on, nil for a file or a
+	// memory queue: a publication in a transaction on it joins the
+	// transaction (ADR 0178 C1).
+	queueDB *databaseRun
 	// sup runs the subscription's consumer while the app runs: the SDK's
 	// supervisor, which restarts it after its queue fails.
 	sup *lifecycle.Supervisor
 }
+
+// queueUnder is what the subscription's queue is kept under.
+func (sb *SubscriptionWorker[T]) queueUnder() string { return underQueues }
 
 // SubscriptionConfigurer configures a subscription.
 type SubscriptionConfigurer interface {
@@ -256,7 +300,7 @@ func (sb *SubscriptionWorker[T]) start(_ context.Context, a *App) error {
 			errs.String("subscription", sb.id), errs.String("topic", sb.topic.id))
 	}
 	var err error
-	sb.broker, err = a.openQueue(filepath.Join(sb.svc.name, "queues", sb.name), sb.maxDeliver)
+	sb.broker, sb.queueDB, err = a.openConsumerQueue(&sb.nodeBase, sb.queueUnder(), sb.maxDeliver)
 	if err != nil {
 		return failure(CodeQueueOpen, "QUEUE_OPEN", "a subscription's queue cannot be opened", err, errs.String("subscription", sb.id))
 	}

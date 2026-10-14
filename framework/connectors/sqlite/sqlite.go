@@ -4,7 +4,9 @@ import (
 	"context"
 	stdsql "database/sql"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kitsunium/sdk/framework/kit"
 	"github.com/kitsunium/sdk/pkg/v1/data/sql"
@@ -16,6 +18,8 @@ import (
 const (
 	// driver is how the graph names what reads the file.
 	driver string = "modernc.org/sqlite"
+	// busyKey is the busy timeout's parameter, in milliseconds.
+	busyKey string = "_busy_timeout"
 )
 
 var (
@@ -24,13 +28,14 @@ var (
 		"sqlite connector: the driver refused the URL; the URL is never quoted, the driver's text would name its user and host")
 
 	// defaults are the parameters the engine opens every file with, unless the
-	// URL writes its own: WAL, so readers do not wait for a writer; a busy
-	// timeout, so a writer waits for another; and the write lock taken when a
-	// transaction begins, so two writers queue instead of failing on upgrade.
-	defaults = []struct{ key, value string }{
-		{"_journal_mode", "WAL"},
-		{"_busy_timeout", "5000"},
-		{"_txlock", "immediate"},
+	// URL writes its own under either spelling the driver reads: WAL, so
+	// readers do not wait for a writer; a busy timeout, so a writer waits for
+	// another; and the write lock taken when a transaction begins, so two
+	// writers queue instead of failing on upgrade.
+	defaults = []struct{ key, alias, value string }{
+		{"_journal_mode", "_journal", "WAL"},
+		{busyKey, "_timeout", "5000"},
+		{"_txlock", "", "immediate"},
 	}
 )
 
@@ -53,14 +58,22 @@ func (engine) Describe(u secret.Value) (kit.DatabaseURL, error) {
 	return kit.DatabaseURL{Driver: driver, Database: path}, nil
 }
 
-// Open opens the file, creating it if need be, with the engine's defaults.
-// A file has no credentials to rotate: current is not asked.
-func (engine) Open(u secret.Value, _ func(context.Context) (secret.Value, error)) (*stdsql.DB, error) {
+// Open opens the file, creating it if need be, with the engine's defaults —
+// a busy timeout of five seconds. A file has no credentials to rotate:
+// current is not asked.
+func (e engine) Open(u secret.Value, current func(context.Context) (secret.Value, error)) (*stdsql.DB, error) {
+	return e.OpenWaiting(u, current, 0)
+}
+
+// OpenWaiting opens the file as Open does, its connections waiting wait for
+// the file's write lock — kit's busy timeout, under <name>-timeout (ADR
+// 0178 C2) — when the URL writes none; zero keeps the engine's default.
+func (engine) OpenWaiting(u secret.Value, _ func(context.Context) (secret.Value, error), wait time.Duration) (*stdsql.DB, error) {
 	if !driverLinked {
 		// modernc.org/sqlite has no port to this GOOS (driver_none.go).
 		return nil, proc.UnsupportedPlatform
 	}
-	name, err := dsn(u.RevealString())
+	name, err := dsn(u.RevealString(), wait)
 	if err != nil {
 		return nil, err
 	}
@@ -68,16 +81,22 @@ func (engine) Open(u secret.Value, _ func(context.Context) (secret.Value, error)
 }
 
 // dsn is what the driver opens: the file, the URL's parameters, and the
-// engine's defaults the URL does not write.
-func dsn(raw string) (string, error) {
+// engine's defaults the URL does not write — the busy timeout wait, in
+// milliseconds, when it is not zero.
+func dsn(raw string, wait time.Duration) (string, error) {
 	path, query, err := split(raw)
 	if err != nil {
 		return "", err
 	}
 	for _, d := range defaults {
-		if !query.Has(d.key) {
-			query.Set(d.key, d.value)
+		if query.Has(d.key) || (d.alias != "" && query.Has(d.alias)) {
+			continue
 		}
+		value := d.value
+		if d.key == busyKey && wait > 0 {
+			value = strconv.FormatInt(wait.Milliseconds(), 10)
+		}
+		query.Set(d.key, value)
 	}
 	return path + "?" + query.Encode(), nil
 }

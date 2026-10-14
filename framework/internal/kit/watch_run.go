@@ -3,7 +3,6 @@ package kit
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"slices"
 
 	"github.com/kitsunium/sdk/framework/model"
@@ -34,11 +33,11 @@ type watchNotice struct {
 // queue until stop cancels it and waits for it; a consumer whose queue
 // fails comes back after kit's backoff.
 func (w *Watch) start(_ context.Context, a *App) error {
-	broker, err := a.openQueue(filepath.Join(w.svc.name, "queues", w.name), w.maxDeliver)
+	broker, db, err := a.openConsumerQueue(&w.nodeBase, w.queueUnder(), w.maxDeliver)
 	if err != nil {
 		return failure(CodeWatchQueue, "WATCH_QUEUE", "a watch's queue cannot be opened", err, errs.String("watch", w.id))
 	}
-	r := &watchRun{broker: broker, fields: map[string][]FieldRefValue{}}
+	r := &watchRun{broker: broker, db: db, fields: map[string][]FieldRefValue{}}
 	feeders := w.feeders(a)
 	for _, st := range feeders {
 		r.fields[st.base().id] = markedFields(st, w.mark)
@@ -59,6 +58,9 @@ func (w *Watch) start(_ context.Context, a *App) error {
 	}
 	return nil
 }
+
+// queueUnder is what the watch's queue is kept under.
+func (w *Watch) queueUnder() string { return underQueues }
 
 // consume runs the watch's consumer until ctx ends or its queue fails: one
 // notice at a time per worker, as a queued command's consumer does — a
@@ -116,25 +118,43 @@ func (w *Watch) stop(ctx context.Context, _ *App) error {
 	return r.sup.Stop(ctx)
 }
 
-// notice queues in the watch's queue what a store says it wrote: which
-// store, which key, whether it was deleted, and the write's trace. The
-// write stands whatever happens here: a queue that refuses the notice loses
-// it, and kit says so.
-func (w *Watch) notice(ctx context.Context, store, key string, deleted bool) {
-	r, a := w.run.Load(), w.app()
-	if r == nil || a == nil {
+// noticeOf is what a watch's queue carries of a write a store says it made:
+// which store, which key, whether it was deleted, and the write's trace —
+// read from ctx, the write's context.
+func noticeOf(ctx context.Context, store, key string, deleted bool) ([]byte, error) {
+	header, _ := trace.FormatTraceParent(trace.SpanContextFromContext(ctx))
+	return json.Marshal(watchNotice{Trace: header, Store: store, Key: key, Deleted: deleted})
+}
+
+// notice queues payload, a notice of a write to store, in the watch's queue
+// r, once the write stands — outside a transaction, or after its commit: a
+// queue that refuses the notice loses it, and kit says so.
+func (w *Watch) notice(ctx context.Context, r *watchRun, store string, payload []byte) {
+	// The write is done: a caller that gives up now does not take its notice
+	// back.
+	if err := w.post(context.WithoutCancel(ctx), r, store, payload); err != nil {
+		w.lost(store, err)
+	}
+}
+
+// post puts payload in the watch's queue r: in the transaction ctx carries,
+// when it carries the one of the database r lives on (ADR 0178 C1). Its
+// refusal is the watch's.
+func (w *Watch) post(ctx context.Context, r *watchRun, store string, payload []byte) error {
+	if _, err := r.broker.Publish(ctx, payload); err != nil {
+		return failure(CodeWatchQueue, "WATCH_NOTICE_REFUSED", "the watch's queue refused the notice", err,
+			errs.String("watch", w.id), errs.String("store", store))
+	}
+	return nil
+}
+
+// lost says that the notice of a write to store, which stands, is lost.
+func (w *Watch) lost(store string, err error) {
+	a := w.app()
+	if a == nil {
 		return
 	}
-	header, _ := trace.FormatTraceParent(trace.SpanContextFromContext(ctx))
-	payload, err := json.Marshal(watchNotice{Trace: header, Store: store, Key: key, Deleted: deleted})
-	if err == nil {
-		// The write is done: a caller that gives up now does not take its
-		// notice back.
-		_, err = r.broker.Publish(context.WithoutCancel(ctx), payload)
-	}
-	if err != nil {
-		lost := failure(CodeWatchQueue, "WATCH_NOTICE_LOST", "the watch's queue refused the notice", err,
-			errs.String("watch", w.id), errs.String("store", store))
-		a.problem(w.id, say("watch.lost", "watch", w.id, "store", store, "detail", errs.PublicOf(lost)))
-	}
+	lost := failure(CodeWatchQueue, "WATCH_NOTICE_LOST", "the watch's queue refused the notice", err,
+		errs.String("watch", w.id), errs.String("store", store))
+	a.problem(w.id, say("watch.lost", "watch", w.id, "store", store, "detail", errs.PublicOf(lost)))
 }

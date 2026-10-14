@@ -3,6 +3,7 @@ package kit
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -33,18 +34,90 @@ const defaultMaxDeliveries int = 5
 // consumerBatch is how many messages a consumer takes from its queue at once.
 const consumerBatch int = 8
 
+// What a consumer's queue is kept under, beside its consumer's name: a
+// subscription's and a watch's, and a queued command's.
+const (
+	underQueues   string = "queues"
+	underCommands string = "commands"
+)
+
+// queueTableService is what a queue's table is named under, in place of a
+// service: kit_queue__<service>__<consumer>.
+const queueTableService string = "kit_queue"
+
 // consumerHow is how a consumer loop is said to wake, in the Studio.
 var consumerHow string = "on publish · poll " + pollInterval.String()
 
-// openQueue opens a consumer's queue — a subscription's, a watch's, a queued
-// command's —: a file queue at dir under the data directory, memory without
-// one. A message is leased for thirty seconds, retried half a second after
-// its first failure, the wait doubling after each — the queue's own growing
-// delay (ADR 0151 §D7), never more than kit's backoff ceiling, a minute —,
-// and dead-lettered after maxDeliveries attempts, or at its first failure
-// when no retry can help (queue.DoNotRetry).
+// queueOwner is a consumer, whatever its message type, as a database's
+// tables see it: its node, and what its queue is kept under — "" for a
+// command that is not queued, which has none.
+type queueOwner interface {
+	base() *nodeBase
+	queueUnder() string
+}
+
+// queueTable is the table of the queue of the consumer b, kept under under,
+// on the database that keeps it (ADR 0178 C1): kit_queue__<service>__<name>,
+// a queued command's ending __command, so that a subscription and a command
+// of one name keep two queues as their directories do.
+func queueTable(b *nodeBase, under string) string {
+	suffix := "__" + b.name
+	if under == underCommands {
+		suffix += "__command"
+	}
+	return tableName(queueTableService, b.svc.name, suffix)
+}
+
+// consumerPolicy is the policy of every consumer's queue: a message is leased
+// for thirty seconds, retried half a second after its first failure, the
+// wait doubling after each — the queue's own growing delay (ADR 0151 §D7),
+// never more than kit's backoff ceiling, a minute —, and dead-lettered after
+// maxDeliveries attempts, or at its first failure when no retry can help
+// (queue.DoNotRetry).
+func consumerPolicy(maxDeliveries int) queue.Policy {
+	return queue.Policy{VisibilityTimeout: 30 * time.Second, RetryDelay: 500 * time.Millisecond, MaxRetryDelay: loopBackoffMax, MaxDeliveries: maxDeliveries}
+}
+
+// openConsumerQueue opens the queue of the consumer b — a subscription's, a
+// watch's, a queued command's —, kept under under: on the database that
+// keeps the consumer when it is open (ADR 0178 C1), one table of the SDK's
+// SQL broker, and the database it returns is where a publication made in a
+// transaction on it joins that transaction; else a file or a memory queue
+// (openQueue), and no database.
+func (a *App) openConsumerQueue(b *nodeBase, under string, maxDeliveries int) (queue.Broker, *databaseRun, error) {
+	r := a.queueDatabase(b)
+	if r == nil {
+		broker, err := a.openQueue(filepath.Join(b.svc.name, under, b.name), maxDeliveries)
+		return broker, nil, err
+	}
+	broker, err := queue.NewSQL(queue.SQLConfig{
+		Transactor: r.transactor(), Dialect: r.d.dialect(), Table: queueTable(b, under),
+		Policy: consumerPolicy(maxDeliveries), Clock: a.clock,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	a.warnFileQueueLeft(b, under, r)
+	return a.wrapped(broker), r, nil
+}
+
+// warnFileQueueLeft says, at its start, that a consumer's queue moved from
+// the data directory to a database and left messages behind: they wait in
+// the file queue, which nothing consumes now, until a copy moves them.
+func (a *App) warnFileQueueLeft(b *nodeBase, under string, r *databaseRun) {
+	dir := filepath.Join(a.dataDir, b.svc.name, under, b.name)
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) == 0 {
+		return
+	}
+	a.problem(b.id, say("consumer.file-queue-left", "node", b.id, "database", r.d.name))
+}
+
+// openQueue opens a consumer's queue that no open database keeps: a file
+// queue at dir under the data directory, memory without one, under
+// consumerPolicy.
 func (a *App) openQueue(dir string, maxDeliveries int) (queue.Broker, error) {
-	policy := queue.Policy{VisibilityTimeout: 30 * time.Second, RetryDelay: 500 * time.Millisecond, MaxRetryDelay: loopBackoffMax, MaxDeliveries: maxDeliveries}
+	policy := consumerPolicy(maxDeliveries)
 	var (
 		b   queue.Broker
 		err error
@@ -54,10 +127,18 @@ func (a *App) openQueue(dir string, maxDeliveries int) (queue.Broker, error) {
 	} else {
 		b, err = queue.NewFile(queue.FileConfig{Clock: a.clock, Dir: filepath.Join(a.dataDir, dir), Policy: policy})
 	}
-	if err != nil || a.wrapQueue == nil {
+	if err != nil {
 		return b, err
 	}
-	return a.wrapQueue(b), nil
+	return a.wrapped(b), nil
+}
+
+// wrapped is b behind the test's wrapper, when a test set one.
+func (a *App) wrapped(b queue.Broker) queue.Broker {
+	if a.wrapQueue == nil {
+		return b
+	}
+	return a.wrapQueue(b)
 }
 
 // consumer is who runs a queue's deliveries — a subscription, a watch —:

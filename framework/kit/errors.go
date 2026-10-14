@@ -149,6 +149,10 @@ const (
 	// CodeDatabaseConfig is CodeDatabaseConfig.
 	CodeDatabaseConfig errs.Code = ikit.CodeDatabaseConfig
 
+	// CodeDatabaseVersion refuses the start of a database whose server is below
+	// kit's floor: MySQL 8.0.1 or MariaDB 10.6, which lease with SKIP LOCKED.
+	CodeDatabaseVersion errs.Code = ikit.CodeDatabaseVersion
+
 	// CodeTransactionSpan is CodeTransactionSpan.
 	CodeTransactionSpan errs.Code = ikit.CodeTransactionSpan
 

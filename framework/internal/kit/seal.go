@@ -529,7 +529,9 @@ func (a *App) sealsAnything() bool {
 }
 
 // sealsOnDisk reports whether a's queues and stores are on disk: what a
-// message or a record sealed needs.
+// message or a record sealed needs. A queue or a store on a database is
+// one only with a data directory (placementOf, queueKeptOn), so a message
+// queued in a database's table is sealed as in a file queue (ADR 0178 C1).
 func (a *App) sealsOnDisk() bool { return a != nil && a.dataDir != "" && !a.opts.memory }
 
 // measureOf is the register's measure for a store's sealing: sealed when it

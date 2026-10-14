@@ -53,6 +53,8 @@ type FakeDB struct {
 	urls   []string
 	// turn is held by the transaction that runs: one at a time.
 	turn chan struct{}
+	// version is what SELECT VERSION() answers, "" for 8.0.36.
+	version string
 }
 
 // fakeData is what the database holds: its version tables, the product's
@@ -64,6 +66,9 @@ type fakeData struct {
 	executed []string
 	docs     map[string]*fakeTable
 	vs       map[string]map[string]map[int64]fakeVersion
+	// queues are the SQL broker's tables (ADR 0178 C1), by table and
+	// message id.
+	queues map[string]map[string]fakeMessage
 }
 
 // fakeVersion is one row of a versions table: nil where the column is NULL
@@ -92,7 +97,10 @@ type fakeIx struct{ name, key, doc string }
 func (d *fakeData) clone() *fakeData {
 	out := &fakeData{
 		versions: map[string]map[int64]string{}, executed: slices.Clone(d.executed), docs: map[string]*fakeTable{},
-		vs: map[string]map[string]map[int64]fakeVersion{},
+		vs: map[string]map[string]map[int64]fakeVersion{}, queues: map[string]map[string]fakeMessage{},
+	}
+	for t, q := range d.queues {
+		out.queues[t] = maps.Clone(q)
 	}
 	for t, v := range d.versions {
 		out.versions[t] = maps.Clone(v)
@@ -113,7 +121,10 @@ func (d *fakeData) clone() *fakeData {
 func NewFakeDB(dialect sql.Dialect) *FakeDB {
 	return &FakeDB{
 		dialect: dialect, locks: map[int64]*fakeConn{}, turn: make(chan struct{}, 1),
-		data: &fakeData{versions: map[string]map[int64]string{}, docs: map[string]*fakeTable{}, vs: map[string]map[string]map[int64]fakeVersion{}},
+		data: &fakeData{
+			versions: map[string]map[int64]string{}, docs: map[string]*fakeTable{}, vs: map[string]map[string]map[int64]fakeVersion{},
+			queues: map[string]map[string]fakeMessage{},
+		},
 	}
 }
 
@@ -135,6 +146,13 @@ func (f *FakeDB) SetPassword(password string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.password = password
+}
+
+// SetVersion is what SELECT VERSION() answers: "8.0.36" until set.
+func (f *FakeDB) SetVersion(version string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.version = version
 }
 
 // Retire makes every open connection invalid: the pool opens new ones.
@@ -455,6 +473,12 @@ func (c *fakeConn) lockQuery(query string, args []driver.NamedValue) (driver.Row
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	switch {
+	case query == "SELECT VERSION()":
+		version := f.version
+		if version == "" {
+			version = "8.0.36"
+		}
+		return &fakeRows{cols: []string{"VERSION()"}, rows: [][]driver.Value{{version}}}, true
 	case strings.HasPrefix(query, "SELECT pg_try_advisory_lock("):
 		key := args[0].Value.(int64)
 		if holder, held := f.locks[key]; held && holder != c {
@@ -483,6 +507,9 @@ func statement(d *fakeData, query string, args []driver.NamedValue) (driver.Rows
 	}
 	if strings.Contains(query, "LEFT JOIN") {
 		return readVersions(d, query, args)
+	}
+	if names := quoted.FindStringSubmatch(query); names != nil && strings.HasPrefix(names[1], queueTableService+"__") {
+		return queueStatement(d, query, names[1], args)
 	}
 	if names := quoted.FindStringSubmatch(query); names != nil && strings.HasSuffix(names[1], "___vs") {
 		return versionStatement(d, query, strings.TrimSuffix(names[1], "___vs"), args)

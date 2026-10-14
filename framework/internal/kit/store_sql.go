@@ -334,11 +334,15 @@ type kitTable struct {
 	// versionsOf is, for a store's versions, the store's table: the SDK
 	// derives the versions' table from it (docstore.SQLVersionsMigration).
 	versionsOf string
+	// queue marks a consumer's queue: the SDK's SQL broker's one table
+	// (queue.SQLMigration), not a document store's.
+	queue bool
 }
 
 // kitTables are the tables kit keeps on d: each store it keeps, the former
-// values of those that remember, the journals of the workflows over them;
-// in the order the app mounts them.
+// values of those that remember, the journals of the workflows over them,
+// the queues of the consumers it keeps (ADR 0178 C1); in the order the app
+// mounts them.
 func (a *App) kitTables(d *database) []kitTable {
 	var out []kitTable
 	for _, st := range a.placedStores() {
@@ -347,10 +351,23 @@ func (a *App) kitTables(d *database) []kitTable {
 		}
 	}
 	for _, n := range a.mountedNodes() {
-		if w, ok := n.(journaled); ok {
-			if st := w.journalStore(); st != nil && a.keptOn(st, d) {
-				out = append(out, kitTable{name: w.journalTable(), node: n.base().id})
-			}
+		out = append(out, a.nodeTables(n, d)...)
+	}
+	return out
+}
+
+// nodeTables are the tables kit keeps on d for a node that is no store: a
+// workflow's journal, a consumer's queue.
+func (a *App) nodeTables(n node, d *database) []kitTable {
+	var out []kitTable
+	if w, ok := n.(journaled); ok {
+		if st := w.journalStore(); st != nil && a.keptOn(st, d) {
+			out = append(out, kitTable{name: w.journalTable(), node: n.base().id})
+		}
+	}
+	if q, ok := n.(queueOwner); ok {
+		if under := q.queueUnder(); under != "" && a.queueKeptOn(q.base(), d) {
+			out = append(out, kitTable{name: queueTable(q.base(), under), node: q.base().id, queue: true})
 		}
 	}
 	return out

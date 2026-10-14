@@ -2447,7 +2447,8 @@ type CommandSpec struct {
 	// Parallelism is how many dispatches of a queued command are handled at
 	// once.
 	Parallelism   int                 `json:"parallelism,omitempty"`
-	// Queue is "memory" or "file": where a queued command waits.
+	// Queue is "memory", "file" or "sql": where a queued command waits — "sql"
+	// on the database that keeps its service.
 	Queue         string              `json:"queue,omitempty"`
 	// DeadLetters is how many dispatches of a queued command were
 	// abandoned, on a runtime graph.
@@ -4774,7 +4775,8 @@ type TopicSpec struct {
 	Message  *SchemaMessage `json:"message,omitempty"`
 	// Delivery is the guarantee: "at-least-once".
 	Delivery string         `json:"delivery"`
-	// Broker is "memory" or "file".
+	// Broker is "memory", "file" or "sql": where a subscription of the topic's
+	// own service waits — "sql" on the database that keeps it.
 	Broker   string         `json:"broker,omitempty"`
 }
 ```

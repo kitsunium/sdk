@@ -33,13 +33,18 @@ import (
 // record is copied into a queue. It is delivered at least once, retried and
 // dead-lettered, like a subscription's message.
 //
-// The gap: the notice is queued right after the write, not in its
-// transaction — kit keeps none until ADR 0004's step 2 —, so a crash
-// between the two loses it, and so does a queue that refuses it: the write
-// stands, and kit says the notice was lost. A notice queued is kept as the
-// queue keeps it: on disk under a data directory, in memory without one. A
-// store no watch hears pays one atomic load per write, and a product that
-// mounts no watch nothing else.
+// Where a notice is atomic with its write (ADR 0178 C1): a watch's queue
+// lives on the database that keeps the watch's service, by a store's rules.
+// A write in a transaction on that database queues its notice in the
+// transaction, just before the commit — a queue that refuses it fails the
+// transaction, and the write with it. The gap stays everywhere else: a write
+// outside any transaction, or in one on another database, the data
+// directory or memory, queues its notice once it stands, so a crash between
+// the two loses it, and so does a queue that refuses it — the write stands,
+// and kit says the notice was lost. A notice queued is kept as the queue
+// keeps it: in its table on a database, on disk under a data directory, in
+// memory without one. A store no watch hears pays one atomic load per write,
+// and a product that mounts no watch nothing else.
 
 // WrittenEvent is what a watch is told of a write: which store, which record, and
 // whether it was deleted — never a value. The watch reads the record itself
@@ -165,6 +170,10 @@ type FieldRefValue struct {
 // what it hears — the marked fields of each store that feeds it.
 type watchRun struct {
 	broker queue.Broker
+	// db is the database the queue lives on, nil for a file or a memory
+	// queue: a notice of a write in a transaction on it joins the
+	// transaction (ADR 0178 C1).
+	db *databaseRun
 	// sup runs the watch's consumer while the app runs: the SDK's
 	// supervisor, which restarts it after its queue fails.
 	sup *lifecycle.Supervisor
@@ -278,12 +287,25 @@ func (s *StoreService[T]) notify(ctx context.Context, key string, deleted bool) 
 		if w.ownWrite(ctx) {
 			continue
 		}
+		r := w.run.Load()
+		if r == nil || w.app() == nil {
+			continue
+		}
+		payload, err := noticeOf(ctx, s.id, key, deleted)
+		if err != nil {
+			w.lost(s.id, err)
+			continue
+		}
+		// In the transaction, a notice whose queue is on its database is
+		// written before the commit, and a refusal fails it; any other is
+		// queued once it committed, and a refusal loses it.
 		release := func(rctx context.Context) error {
-			w.notice(rctx, s.id, key, deleted)
+			w.notice(rctx, r, s.id, payload)
 			return nil
 		}
-		if !hold(ctx, heldEffect{node: w.id, release: release}) {
-			w.notice(ctx, s.id, key, deleted)
+		joined := func(tctx context.Context) error { return w.post(tctx, r, s.id, payload) }
+		if !hold(ctx, heldEffect{node: w.id, release: release, joined: joined, queue: r.db}) {
+			w.notice(ctx, r, s.id, payload)
 		}
 	}
 }

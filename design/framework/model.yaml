@@ -5402,7 +5402,9 @@ packages:
               name: Parallelism
               tag: json:"parallelism,omitempty"
               type: int
-            - doc: "Queue is \"memory\" or \"file\": where a queued command waits."
+            - doc: |-
+                Queue is "memory", "file" or "sql": where a queued command waits — "sql"
+                on the database that keeps its service.
               name: Queue
               tag: json:"queue,omitempty"
               type: string
@@ -5691,7 +5693,9 @@ packages:
               name: Delivery
               tag: json:"delivery"
               type: string
-            - doc: Broker is "memory" or "file".
+            - doc: |-
+                Broker is "memory", "file" or "sql": where a subscription of the topic's
+                own service waits — "sql" on the database that keeps it.
               name: Broker
               tag: json:"broker,omitempty"
               type: string

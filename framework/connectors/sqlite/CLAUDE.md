@@ -10,7 +10,7 @@ product stays one static binary (CI builds the module with `CGO_ENABLED=0`).
 
 | File | Holds |
 |---|---|
-| `sqlite.go` | `Engine()`: `Dialect` (the SDK's `sql.DialectSQLite`); `Describe` — the file, and no address, user or password —; `Open` — the file, made if need be; `current` is never asked, a file has no credentials to rotate —; `dsn` and `split`, which read a path or a `file:` URI and add the `defaults` the URL does not write: `_journal_mode=WAL`, `_busy_timeout=5000`, `_txlock=immediate` |
+| `sqlite.go` | `Engine()`: `Dialect` (the SDK's `sql.DialectSQLite`); `Describe` — the file, and no address, user or password —; `Open` — the file, made if need be; `current` is never asked, a file has no credentials to rotate —; `OpenWaiting` — `kit.LockWaiter`, the busy timeout kit gives —; `dsn` and `split`, which read a path or a `file:` URI and add the `defaults` the URL does not write under either spelling: `_journal_mode=WAL`, `_busy_timeout=5000` (or kit's wait), `_txlock=immediate` |
 | `driver.go` / `driver_none.go` | the blank import of modernc.org/sqlite, on every GOOS it has a port to; on dragonfly, illumos and solaris (its libc excludes them) `driverLinked` is false and `Open` refuses with `proc.UnsupportedPlatform`, so the module still builds there (the cross-build lane) |
 
 Rules:
@@ -20,7 +20,20 @@ Rules:
 - The defaults let two writers queue rather than fail: WAL, so readers do not
   wait for a writer; a busy timeout, so a writer waits for another; and the
   write lock taken when a transaction begins. A parameter the URL writes
-  wins.
+  wins — under either spelling the driver reads (`_busy_timeout` or
+  `_timeout`, `_journal_mode` or `_journal`).
+- The busy timeout is kit's (ADR 0178 C2): the engine is a `kit.LockWaiter`,
+  and kit opens it with `OpenWaiting` and `B = T − max(250ms, T/10)`, `T`
+  being `<name>-timeout` — 4.5 s for the default 5 s —, so a lost race on the
+  write lock comes back as SQLite's refusal before the call's deadline
+  (`TestALostLockComesBackBeforeTheCallsDeadline`). kit refuses at start a
+  `T` under 500 ms and a URL whose own busy timeout reaches `T`
+  (`database.sqlite-busy-timeout`), and never rewrites it; `Open` alone
+  keeps the engine's 5 s.
+- kit's consumer queues live on the database that keeps their service
+  (ADR 0178 C1): `queue_test.go` runs the outbox on a real file — a
+  publication, a queued dispatch and a watch's notice written in the
+  transaction, absent after a rollback, a refusal failing the transaction.
 - Migrations run — kit's own set, which makes the tables of the stores the
   database keeps, then the modules' and the product's — under the database
   file's own write lock, one transaction per run (the SDK's ADR 0140). A
