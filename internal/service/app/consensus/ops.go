@@ -401,9 +401,28 @@ func (n *Node) TransferLeadership(ctx context.Context, op coreconsensus.Operator
 		// under way: its outcome is the leader, not the entry's answer.
 		return n.awaitLeader(ctx, to)
 	case n.Status().Leader == to:
-		return nil
+		return n.confirmLeader(ctx, to, err)
 	}
 	return err
+}
+
+// confirmLeader turns the node's own view that to already leads into a
+// fact before a refused transfer is reported as done. A view is the node's
+// last turn, not the cluster: a leader deposed by a transfer it has not yet
+// heard about still names itself, refuses a transfer to itself as
+// MEMBERSHIP_INVALID, and would answer success while another node leads a
+// newer term. A barrier is a read index the leader confirms with a quorum,
+// so the view it leaves behind is current. A barrier that fails is
+// TRANSFER_FAILED, the answer a transfer whose target does not lead owes
+// (D8); a confirmed view naming another leader keeps the refusal.
+func (n *Node) confirmLeader(ctx context.Context, to coreconsensus.NodeID, refused error) error {
+	if _, err := n.Barrier(ctx); err != nil {
+		return origin(coreconsensus.TransferFailed, errs.String("target", to.String()), errs.String("cause", err.Error()))
+	}
+	if n.Status().Leader == to {
+		return nil
+	}
+	return refused
 }
 
 // transferLocal starts a leadership transfer on this node's own raft
