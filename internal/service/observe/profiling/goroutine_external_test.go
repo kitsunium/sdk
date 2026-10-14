@@ -106,9 +106,13 @@ func TestLiveGoroutinesCarryTheirLabelsEitherWay(t *testing.T) {
 	for _, godebug := range []string{"tracebacklabels=1", "tracebacklabels=0"} {
 		t.Run(godebug, func(t *testing.T) {
 			t.Setenv("GODEBUG", godebug)
+			// The label is set before the waiter reaches its select, so a
+			// labelled goroutine can still be runnable inside time.NewTicker:
+			// the wait is for three PARKED waiters, the state the assertions
+			// below describe, and a waiter that never parks fails here.
 			var waiters []coreprofiling.GoroutineValue
 			deadline := time.Now().Add(10 * time.Second)
-			for len(waiters) < 3 && time.Now().Before(deadline) {
+			for parked(waiters) < 3 && time.Now().Before(deadline) {
 				gs, err := profiling.Goroutines()
 				if err != nil {
 					t.Fatal(err)
@@ -116,8 +120,8 @@ func TestLiveGoroutinesCarryTheirLabelsEitherWay(t *testing.T) {
 				waiters = slices.DeleteFunc(gs, func(g coreprofiling.GoroutineValue) bool { return g.Labels["node"] != "waiter" })
 				time.Sleep(10 * time.Millisecond)
 			}
-			if len(waiters) != 3 {
-				t.Fatalf("found %d labelled waiters", len(waiters))
+			if len(waiters) != 3 || parked(waiters) != 3 {
+				t.Fatalf("found %d labelled waiters, %d parked in select: %+v", len(waiters), parked(waiters), waiters)
 			}
 			for _, g := range waiters {
 				top := profiling.GroupGoroutines([]coreprofiling.GoroutineValue{g}, profiling.GroupConfig{})[0].Top
@@ -127,6 +131,17 @@ func TestLiveGoroutinesCarryTheirLabelsEitherWay(t *testing.T) {
 			}
 		})
 	}
+}
+
+// parked counts the goroutines of gs waiting in a select.
+func parked(gs []coreprofiling.GoroutineValue) int {
+	n := 0
+	for _, g := range gs {
+		if g.State == "select" {
+			n++
+		}
+	}
+	return n
 }
 
 // parkInSelect waits in a select until release is closed.
