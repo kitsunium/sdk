@@ -117,6 +117,20 @@ func Define(code Code, reason, public, private string, opts ...DefineOption) *Er
 	return sentinel
 }
 
+// Static builds a sentinel-style *Error from constants alone, so the linker
+// can initialise it: the body is one composite literal, with no validation,
+// no panic, no variadic and no closure, and the call inlines. It is Define's
+// sibling (ADR 0039), not a replacement: Define keeps validating at package
+// init and keeps its options. Static does not validate — the design does
+// (kit gen checks the reason's pattern, the public text, the code's layer and
+// the status ranges, ADR 0176) and the registry audits read Static calls as
+// they read Define calls. A zero http or exit means the default (500 / 70).
+func Static(code Code, reason, public, private string, http, exit int) *Error {
+	//: one literal and nothing else — any statement here would cost the
+	//: inlining, and with it the static initialisation of every sentinel.
+	return &Error{code: code, reason: reason, public: public, private: private, httpOverride: http, exitOverride: exit}
+}
+
 // newValidationError is the BOOTSTRAP constructor used by validateDefineArgs
 // to surface structural failures WITHOUT re-entering Define (which would
 // recurse into validateDefineArgs again and blow the stack at init).

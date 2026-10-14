@@ -43355,6 +43355,18 @@
       "family": "root"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/kernel/errs.Static",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/kernel/errs",
+      "name": "Static",
+      "spelled": "func(code Code, reason string, public string, private string, http int, exit int) *Error",
+      "canonical": "func(code github.com/kitsunium/sdk/internal/kernel/errs.Code, reason string, public string, private string, http int, exit int) *github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "doc": "Static builds a sentinel-style *Error from constants alone, so the linker\ncan initialise it: the body is one composite literal, with no validation,\nno panic, no variadic and no closure, and the call inlines. It is Define's\nsibling (ADR 0039), not a replacement: Define keeps validating at package\ninit and keeps its options. Static does not validate — the design does\n(kit gen checks the reason's pattern, the public text, the code's layer and\nthe status ranges, ADR 0176) and the registry audits read Static calls as\nthey read Define calls. A zero http or exit means the default (500 / 70).\n",
+      "file": "kernel/errs/error.go",
+      "layer": "kernel",
+      "family": "root"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/kernel/errs.String",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/kernel/errs",

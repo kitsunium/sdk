@@ -59,7 +59,7 @@ arbitrary expression, kit cannot write a sentinel as a constant.
    `errs.Static` is a sibling of `Define` (ADR 0039), not a change of it: it takes
    constants only, its body is one composite literal, and it has no panic, no
    variadic and no closure, so it inlines and the variable initialises at link
-   time. The final name is fixed in PR 1.
+   time. The name is fixed in PR 1: `Static`.
 
 3. **Validation moves to `kit gen`.** Today `Define` validates at init and
    panics. For `Static` kit checks, when it generates: the reason's pattern, the
@@ -126,9 +126,21 @@ files, the 95 blocks, the 364 and 92 option uses, the 22 `exit*` declarations of
 from ADR 0172, not re-measured here: the 0.1 to 0.2 ms ceiling, and the shape of
 kit's code in Decision 5.
 
-To be proved in PR 1: that `errs.Static` is initialised statically by the
-toolchain pinned in `MODULE.bazel`, and that `docs/api` is byte-identical for
-every sentinel after the rewrite.
+Proved in PR 1, with the toolchain pinned in `MODULE.bazel` (Go 1.27.2), on a
+probe package declaring `var P = errs.Static(code, "PROBE_STATIC", "public",
+"private", 401, 78)` and, as a control, `var D = errs.Define(code, ..., 
+errs.WithExitCode(78))`: `go build -gcflags=-m` prints `can inline Static` in
+`internal/kernel/errs` and `inlining call to errs.Static` at the probe; `go tool
+nm` puts `P` in the data section (`D`, 8 bytes) and `D` in the bss (`B`); a
+probe holding only `Static` has no `main.init` and `GODEBUG=inittrace=1` prints
+no `init main` line, where the control's line shows one allocation. The result
+is the same under `-race`, `GOARCH=386 CGO_ENABLED=0` and `-gcflags=all=-N`.
+`Define` does not inline, as expected. `Static`'s behaviour is
+pinned by `TestStaticMatchesDefine` (same error, texts and statuses as
+`Define`).
+
+To be proved in PR 3: that `docs/api` is byte-identical for every sentinel
+after the rewrite.
 
 ## Alternatives considered
 
