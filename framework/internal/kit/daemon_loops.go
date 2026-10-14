@@ -134,6 +134,31 @@ func (l *loopState) died(a *App, err error) {
 	a.hub.publish(model.Event{Type: model.EventLoop, Loop: &snapshot})
 }
 
+// failed records that the loop's consumer failed while the product still
+// serves, and is to be restarted: its last error says why in kit's words.
+// The state stays what the restart makes it.
+func (l *loopState) failed(a *App, err error) {
+	a.mu.Lock()
+	l.Errors++
+	_, body := describe(err)
+	l.LastError = body.Message
+	snapshot := l.Loop
+	a.mu.Unlock()
+	a.hub.publish(model.Event{Type: model.EventLoop, Loop: &snapshot})
+}
+
+// restarted records that the loop's supervisor ran it again after a
+// failure: one more restart, and it waits for its work again.
+func (l *loopState) restarted(a *App) {
+	a.mu.Lock()
+	l.Restarts++
+	l.State = model.LoopWaiting
+	l.NextRun = nil
+	snapshot := l.Loop
+	a.mu.Unlock()
+	a.hub.publish(model.Event{Type: model.EventLoop, Loop: &snapshot})
+}
+
 // skipped counts a fire the loop dropped because a run was going.
 func (l *loopState) skipped(a *App) {
 	a.mu.Lock()

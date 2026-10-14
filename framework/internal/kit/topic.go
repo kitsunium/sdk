@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/lifecycle"
 	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
@@ -134,8 +135,9 @@ type SubscriptionWorker[T any] struct {
 	parallelism int
 
 	broker queue.Broker
-	cancel context.CancelFunc
-	done   chan struct{}
+	// sup runs the subscription's consumer while the app runs: the SDK's
+	// supervisor, which restarts it after its queue fails.
+	sup *lifecycle.Supervisor
 }
 
 // SubscriptionConfigurer configures a subscription.
@@ -243,10 +245,11 @@ func (s *Service) Subscribe[T any](name string, topic *TopicService[T], handler 
 	return sub
 }
 
-// start consumes the subscription's queue until stop.
+// start consumes the subscription's queue until stop, under the SDK's
+// supervisor: a consumer whose queue fails comes back after kit's backoff.
 //
-// Goroutine lifecycle: one goroutine consumes the subscription's queue until
-// stop cancels its context; it closes sb.done, which stop waits for.
+// Goroutine lifecycle: the supervisor's goroutine consumes the
+// subscription's queue until stop cancels it and waits for it.
 func (sb *SubscriptionWorker[T]) start(_ context.Context, a *App) error {
 	if sb.topic.svc.app.Load() != a {
 		return failure(CodeNotMounted, "TOPIC_NOT_MOUNTED", "a subscription consumes a topic whose service is not mounted in this app", nil,
@@ -258,25 +261,21 @@ func (sb *SubscriptionWorker[T]) start(_ context.Context, a *App) error {
 		return failure(CodeQueueOpen, "QUEUE_OPEN", "a subscription's queue cannot be opened", err, errs.String("subscription", sb.id))
 	}
 	loop := a.loop(sb.id+" consumer", sb.id, model.LoopConsumer, consumerHow)
-	ctx, cancel := context.WithCancel(context.WithoutCancel(a.baseCtx))
-	sb.cancel, sb.done = cancel, make(chan struct{})
-	go func() {
-		done := sb.done
-		defer close(done)
-		ctx := a.asLoop(ctx, loop.Name)
-		err := queue.Consume(ctx, sb.broker, queue.ConsumerConfig{
-			Handler:             sb.deliver(a, loop),
+	c := consumer{a: a, loop: loop, node: sb.id, name: sb.name, wake: model.WakeTopic}
+	broker, handler := sb.broker, sb.deliver(&c)
+	sb.sup, err = c.supervise(func(ctx context.Context) error {
+		return queue.Consume(ctx, broker, queue.ConsumerConfig{
+			Handler:             handler,
 			Clock:               a.clock,
 			PollInterval:        pollInterval,
 			Parallelism:         sb.parallelism,
 			BatchSize:           consumerBatch,
 			HandlerIsIdempotent: true,
 		})
-		if err != nil && ctx.Err() == nil {
-			a.problem(sb.id, say("subscription.stopped", "subscription", sb.id, "detail", errs.PublicOf(err)))
-			loop.died(a, err)
-		}
-	}()
+	})
+	if err != nil {
+		return failure(CodeLoopStart, "LOOP_START", "a subscription's consumer cannot start", err, errs.String("subscription", sb.id))
+	}
 	return nil
 }
 
@@ -285,8 +284,8 @@ func (sb *SubscriptionWorker[T]) start(_ context.Context, a *App) error {
 // the run to the internal loop. A message that does not decode is
 // dead-lettered on its first delivery: no retry makes it decode (ADR 0151
 // §D8).
-func (sb *SubscriptionWorker[T]) deliver(a *App, loop *loopState) queue.Handler {
-	c := consumer{a: a, loop: loop, node: sb.id, name: sb.name, wake: model.WakeTopic}
+func (sb *SubscriptionWorker[T]) deliver(c *consumer) queue.Handler {
+	a := c.a
 	return func(ctx context.Context, d queue.Delivery) error {
 		msg, tr, decodeErr, openErr := sb.topic.decode(ctx, a, d.Message.Payload)
 		if decodeErr != nil {
@@ -310,16 +309,10 @@ func (sb *SubscriptionWorker[T]) deliver(a *App, loop *loopState) queue.Handler 
 
 // stop ends the consumer and waits for it until ctx ends.
 func (sb *SubscriptionWorker[T]) stop(ctx context.Context, _ *App) error {
-	if sb.cancel == nil {
+	if sb.sup == nil {
 		return nil
 	}
-	sb.cancel()
-	select {
-	case <-sb.done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return sb.sup.Stop(ctx)
 }
 
 // describe fills the graph node out with what the Subscription declares, and
