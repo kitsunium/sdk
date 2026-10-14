@@ -15,6 +15,7 @@ go_library(
         "build.go",
         "catalog.go",
         "classify.go",
+        "classify_judge.go",
         "classify_plan.go",
         "classify_walk.go",
         "classify_warn.go",
