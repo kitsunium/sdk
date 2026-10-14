@@ -453,7 +453,7 @@ NewChecker returns a liveness probe bounded by cfg.CheckTimeout.
 func NewMigrator(cfg Config, mig MigrateConfig) (runner Migrator, err error)
 ```
 
-NewMigrator returns the migration runner. It refuses a dialect with no session-scoped advisory lock, by name and at construction.
+NewMigrator returns the migration runner. Every migration execution is serialised: on the session's advisory lock where the engine has one (PostgreSQL, MySQL), and on the database file's write lock on SQLite, which has none (ADR 0140). No dialect the SDK speaks is refused for the lock.
 
 <a name="NewTransactor"></a>
 ## func [NewTransactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/sql/facade_gen.go>)
