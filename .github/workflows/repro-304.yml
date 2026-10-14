@@ -34,9 +34,9 @@ jobs:
           go test -c -o exec.test.exe ./proc/exec
           fails=0
           for i in $(seq 1 300); do
-            ./exec.test.exe -test.run 'TestWindows' -test.count=10 > out.txt 2>&1 || { fails=$((fails+1)); grep -E 'FAIL|exec_windows_test' out.txt | head -5; }
+            ./exec.test.exe -test.run 'TestWindows|Test_confine|Test_anExited' -test.count=10 > out.txt 2>&1 || { fails=$((fails+1)); grep -E 'FAIL|exec_windows' out.txt | head -5; }
           done
-          echo "RESULT rlimit: $fails failing invocations of 300 (x10 counts, whole TestWindows set)"
+          echo "RESULT rlimit: $fails failing invocations of 300 (x10 counts, TestWindows* + the two order tests)"
 
   # A/B on many fresh hosts: main's harness suite (with the recovered nil
   # dereference) against this branch's, alternating on the same host, and each
@@ -80,9 +80,12 @@ jobs:
         run: |
           (cd stock/e2e && go test -c -o "$RUNNER_TEMP/stock.exe" ./harness)
           (cd fixed/e2e && go test -c -o "$RUNNER_TEMP/fixed.exe" ./harness)
+          set +e
           sf=0 ff=0 n=60
           for i in $(seq 1 $n); do
-            "$RUNNER_TEMP/stock.exe" -test.count=20 > s.txt 2>&1 || { sf=$((sf+1)); echo "=== stock run $i:"; grep -m3 -E 'fatal error|unexpected|FAIL|panic' s.txt; }
-            "$RUNNER_TEMP/fixed.exe" -test.count=20 > f.txt 2>&1 || { ff=$((ff+1)); echo "=== fixed run $i:"; grep -m3 -E 'fatal error|unexpected|FAIL|panic' f.txt; }
+            "$RUNNER_TEMP/stock.exe" -test.count=20 > s.txt 2>&1; rc=$?
+            if [ $rc -ne 0 ]; then sf=$((sf+1)); echo "=== stock run $i: exit $rc"; grep -m4 -E 'fatal error|unexpected|--- FAIL|panic|exception' s.txt; [ $sf -le 3 ] && tail -c 3000 s.txt; fi
+            "$RUNNER_TEMP/fixed.exe" -test.count=20 > f.txt 2>&1; rc=$?
+            if [ $rc -ne 0 ]; then ff=$((ff+1)); echo "=== fixed run $i: exit $rc"; grep -m4 -E 'fatal error|unexpected|--- FAIL|panic|exception' f.txt; [ $ff -le 3 ] && tail -c 3000 f.txt; fi
           done
           echo "RESULT shard ${{ matrix.shard }}: stock $sf/$n failed, fixed $ff/$n failed (each run -test.count=20)"

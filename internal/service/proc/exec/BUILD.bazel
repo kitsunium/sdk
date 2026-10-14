@@ -128,6 +128,7 @@ go_test(
         "exec_unix_bench_test.go",
         "exec_unix_external_test.go",
         "exec_unix_internal_test.go",
+        "exec_windows_internal_test.go",
         "exec_windows_test.go",
         "handle_unix_internal_test.go",
         "handshake_unix_internal_test.go",
