@@ -482,6 +482,9 @@ func statement(d *fakeData, query string, args []driver.NamedValue) (driver.Rows
 		return nil, 0, fmt.Errorf("fake: syntax error in %q", query)
 	}
 	if strings.Contains(query, "LEFT JOIN") {
+		if names := quoted.FindStringSubmatch(query); names != nil && strings.HasSuffix(names[1], "___vs") {
+			return readTrashed(d, strings.TrimSuffix(names[1], "___vs"), args)
+		}
 		return readVersions(d, query, args)
 	}
 	if names := quoted.FindStringSubmatch(query); names != nil && strings.HasSuffix(names[1], "___vs") {
@@ -676,6 +679,17 @@ func versionStatement(d *fakeData, query, name string, args []driver.NamedValue)
 	if table == nil {
 		return nil, 0, fmt.Errorf("fake: no table %s___vs", name)
 	}
+	// The trash: every row numbered 0, in key order — the one statement
+	// that names no key.
+	if strings.HasPrefix(query, "SELECT doc_key, made_at, made_ns FROM ") {
+		out := &fakeRows{cols: []string{"doc_key", "made_at", "made_ns"}}
+		for _, k := range slices.Sorted(maps.Keys(table)) {
+			if v, trashed := table[k][0]; trashed {
+				out.rows = append(out.rows, []driver.Value{[]byte(k), v.at, v.ns})
+			}
+		}
+		return out, 0, nil
+	}
 	key := string(bound(args[0].Value))
 	rows := table[key]
 	nums := slices.Sorted(maps.Keys(rows))
@@ -718,6 +732,14 @@ func versionStatement(d *fakeData, query, name string, args []driver.NamedValue)
 			out.rows = append(out.rows, []driver.Value{formers[at]})
 		}
 		return out, 0, nil
+	// A key's lowest row — the trash's, numbered 0, before any version.
+	case strings.HasPrefix(query, "SELECT num, doc FROM "):
+		out := &fakeRows{cols: []string{"num", "doc"}}
+		if len(nums) > 0 {
+			low := nums[len(nums)-1]
+			out.rows = append(out.rows, []driver.Value{low, nilOr(rows[low].doc)})
+		}
+		return out, 0, nil
 	case strings.HasPrefix(query, "SELECT num, made_at"):
 		out := &fakeRows{cols: []string{"num", "made_at", "made_ns", "meta", "doc"}}
 		for _, n := range formers {
@@ -743,6 +765,13 @@ func versionStatement(d *fakeData, query, name string, args []driver.NamedValue)
 			}
 		}
 		return nil, n, nil
+	// The trash row alone.
+	case strings.HasPrefix(query, "DELETE FROM ") && strings.HasSuffix(query, "AND num = 0"):
+		if _, trashed := rows[0]; !trashed {
+			return nil, 0, nil
+		}
+		delete(rows, 0)
+		return nil, 1, nil
 	case strings.HasPrefix(query, "DELETE FROM ") && strings.Contains(query, "doc IS NOT NULL"):
 		for _, num := range formers {
 			delete(rows, num)
@@ -781,6 +810,37 @@ func readVersions(d *fakeData, query string, args []driver.NamedValue) (driver.R
 		v, doc := rows[n], rows[n].doc
 		if doc == nil {
 			doc = r.doc
+		}
+		out.rows = append(out.rows, []driver.Value{n, v.at, v.ns, nilOr(v.meta), slices.Clone(doc)})
+	}
+	return out, 0, nil
+}
+
+// readTrashed answers the read of every version a trashed document kept,
+// newest first, the trashed document as the current one's: the LEFT JOIN of
+// the row numbered 0 and the version rows — one row without a number when no
+// version row names the key, none without a row numbered 0.
+func readTrashed(d *fakeData, name string, args []driver.NamedValue) (driver.Rows, int64, error) {
+	table := d.vs[name]
+	if table == nil {
+		return nil, 0, fmt.Errorf("fake: no table %s___vs", name)
+	}
+	out := &fakeRows{cols: []string{"num", "made_at", "made_ns", "meta", "doc"}}
+	rows := table[boundKey(args[0].Value)]
+	tomb, trashed := rows[0]
+	if !trashed {
+		return out, 0, nil
+	}
+	nums := slices.DeleteFunc(slices.Sorted(maps.Keys(rows)), func(n int64) bool { return n == 0 })
+	if len(nums) == 0 {
+		out.rows = append(out.rows, []driver.Value{nil, nil, nil, nil, slices.Clone(tomb.doc)})
+		return out, 0, nil
+	}
+	slices.Reverse(nums)
+	for _, n := range nums {
+		v, doc := rows[n], rows[n].doc
+		if doc == nil {
+			doc = tomb.doc
 		}
 		out.rows = append(out.rows, []driver.Value{n, v.at, v.ns, nilOr(v.meta), slices.Clone(doc)})
 	}
