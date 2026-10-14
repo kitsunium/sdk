@@ -1,6 +1,6 @@
 # ADR 0178 — kit's effects join the transaction on the database that keeps their queue
 
-- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status and each choice's *Decision* line. Implemented: C5 (PR 2 of C7's order, the subject in a list). The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
+- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), and C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key). The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
 - **Date**: 2026-10-14
 - **Accepted**: 2026-10-14
 - **Deciders**: SDK maintainers (issue #274); arbitrated by the owner
@@ -60,13 +60,18 @@ checked, and says what would check it.
   queue on disk** (`seal_message.go:62-80`, `seal.go:519`: `sealsOnDisk`
   reads the data directory). A watch's notice carries no value
   (`watch_run.go:19-27`). **(verified)**
-- **The journal seals every entry under a data key of its own.** A
-  `journalRecord` has no subject tag (`journal.go:37-50`), and a record
-  without a subject is sealed under its own key, `"r:"` and its reference
-  (`seal_store.go:291-302`). Every entry therefore files one more wrapped key
-  in `kit.privacy/store/keys`, and the journal is never pruned. Every
-  `Records.Get` a module makes journals a read (`records.go:153`): a watch
-  that reads each record it is told of files one key per notice. **(verified)**
+- **The journal seals every entry that carries a reason under a data key of
+  its own.** A `journalRecord` has no subject tag (`journal.go:37-50`), and a
+  record without a subject is sealed under its own key, `"r:"` and its
+  reference (`seal_store.go:291-302`). Every entry with a reason therefore
+  files one more wrapped key in `kit.privacy/store/keys` — a hold placed,
+  `EraseFields`, an erasure or a deletion on request —, and the journal is
+  never pruned. **(corrected by #323)** This line first said that every
+  `Records.Get` a module makes (`records.go:153`) files a key, so that a
+  watch reading each record it is told of files one per notice. It does
+  not: a read is journaled without a reason, so nothing of it is sealed and
+  no key is made. #323 measured it: 20 `EraseFields` with a reason and 20
+  `Get` in one month add 20 keys before C3, and 1 after.
 - **A subject in a list is refused in every type a declaration carries.**
   `judgeSubject` refuses a subject reached through a list or a map
   (`classify_plan.go:180-188`), and the type judge runs on every type of
@@ -179,6 +184,29 @@ that the spool's announcement can be deferred without breaking ADR 0141's
 "a delivery waits for its announcement"; to be proved by the SDK PR's
 tests.)**
 
+**(refuted, as the SDK stands — measured after acceptance.)** Deferring
+`EventQueued` alone breaks ADR 0141. A `Send`'s registration
+(`internal/service/app/mail/spool/spool.go:273`) must stay open until the
+commit: otherwise the consumer, woken by the wake the SQL broker holds
+(`internal/service/data/queue/sql.go:365`) before the held functions run,
+can announce `sent` before `queued` between the settle and the held
+functions (`internal/service/data/sql/tx.go:97-102`). But a rollback calls
+nothing (`txstate.go`, `drain(false)`; `tx.go:80-81`): the registration
+stays open forever and, the identifier being reusable (ADR 0141 D3), every
+later delivery of that identifier waits for ever — with `Parallelism: 1`
+the whole spool stops (a temporary test: `sent=[]` after 2 s).
+
+**The remedy retained (way A).** A cancellation signal in `core/data/sql`,
+a sibling interface of `Deferrer` (ADR 0039), told when the transaction
+rolls back; it amends ADR 0139. The spool closes its registration there,
+and ADR 0141 is unchanged. The spool reaches the `Deferrer` and its sibling
+through a second optional field, `mailspool.Config.Deferrer` — never by
+probing the `Broker`. It is its own pull request, before the spool's (C7,
+item 4). Ways set aside: **B**, a registration per `Send` — it replaces ADR
+0141 D4 and leaves one entry in memory per cancelled `Send`; **C**, giving
+up the order `queued` before `sent` — it weakens ADR 0111 D5 and ADR 0141
+D4.
+
 **Recommendation: A, with the two-phase release.** It makes the product kit
 is built for — one default database — atomic end to end with no new loop
 and no new table shape, keeps one mechanism (`hold`) instead of four, and
@@ -258,9 +286,10 @@ its two start refusals, by the owner's decision, 2026-10-14.
 
 ### C3 — the journal's key: its own, or derived
 
-**Question.** One data key per journal entry grows `kit.privacy/store/keys`
-by one wrapped key per entry, forever, and a watch reading every record it
-is told of adds one per notice. What does the journal seal under?
+**Question.** One data key per journal entry that carries a reason grows
+`kit.privacy/store/keys` by one wrapped key per such entry, forever (a read,
+journaled without a reason, adds none — corrected by #323). What does the
+journal seal under?
 
 **Options.**
 
@@ -274,6 +303,9 @@ is told of adds one per notice. What does the journal seal under?
   cryptographic erase of that month's reasons — the journal's own retention,
   when one is decided, costs one destruction, and the hash chain still
   verifies (the chain hashes before sealing, `journal.go:29-31`).
+  **(corrected by #323)** The month is the UTC month of the entry's
+  instant, read on the app's injected clock — "a calendar month" named no
+  time zone.
 - **B. A key derived from `index-key` or `data-key` by HKDF.** No storage.
   *Cost*: a derived key cannot be destroyed without destroying its parent;
   derived from `data-key`'s keyring, every rotation needs `InUse` to keep
@@ -288,8 +320,10 @@ erasure is possible and whose rotation needs nothing new; the period is a
 month so that a journal retention, when the owner sets one, has a grain
 finer than a year and coarser than a day.
 
-**Decision.** A — a journal key of its own per calendar month, `"j:YYYY-MM"`
-— by the owner's decision, 2026-10-14.
+**Decision.** A — a journal key of its own per month, `"j:YYYY-MM"`, the
+month being the UTC month of the entry's instant on the app's injected clock
+— by the owner's decision, 2026-10-14. Implemented in #323 (PR 3 of C7's
+order).
 
 ### C4 — the trash: a default age limit, and its value
 
@@ -464,7 +498,7 @@ the boxes open under the target's keys — the keys are copied as boxes too,
 and a sample of records is read through kit, opened, as the last step.
 **(assumed: that a dead letter can be written into the SQL broker as dead,
 with its reason and count; `DeadLetterManager` replays or deletes, it does
-not insert — to check before PR 10, and an SDK addition if not.)**
+not insert — to check before PR 11, and an SDK addition if not.)**
 
 **Options for the split.**
 
@@ -477,22 +511,28 @@ not insert — to check before PR 10, and an SDK addition if not.)**
 1. This ADR.
 2. C5 — the subject in a list (framework only; unblocks Vigie).
 3. C3 — the journal's key (framework only; stops the keys store's growth).
-4. SDK — `mailspool.Config.Broker` and the deferred `EventQueued`
+4. SDK — the transaction's cancellation signal in `core/data/sql`, a
+   sibling of `Deferrer` (ADR 0039), amending ADR 0139 (design first;
+   inserted after acceptance, C1's refuted assumption).
+5. SDK — `mailspool.Config.Broker`, `mailspool.Config.Deferrer` and the
+   deferred `EventQueued`, the registration closed on a rollback, after 4
    (design first, `kit gen`; released on its own as `pkg/v1/app` and
    `internal`).
-5. C1 + C2 — kit's queues on SQL for topics, queued commands and watches;
+6. C1 + C2 — kit's queues on SQL for topics, queued commands and watches;
    the two-phase release; the MySQL floor; the SQLite busy timeout tied to
    `<name>-timeout`; message sealing extended to SQL queues.
-6. C1 for the mailer — the outbox on SQL, sealed (below), after 4.
-7. C6 — `Records.Keys` and the watches' catch-up.
-8. SDK — docstore's tombstone (design first).
-9. C4 — the trash, after 8.
-10. `data copy`, last.
+7. C1 for the mailer — the outbox on SQL, sealed (below), after 5.
+8. C6 — `Records.Keys` and the watches' catch-up.
+9. SDK — docstore's tombstone (design first).
+10. C4 — the trash, after 9.
+11. `data copy`, last.
 
 **Decision.** A — small pull requests, in this order, `data copy` verified
-by fingerprints — by the owner's decision, 2026-10-14.
+by fingerprints — by the owner's decision, 2026-10-14. Item 4 was inserted
+after acceptance, when C1's assumption about the spool was refuted (C1);
+the items after it moved down by one.
 
-**Sealing the mail outbox (item 6).** kit seals the spool's payload in a
+**Sealing the mail outbox (item 7).** kit seals the spool's payload in a
 broker that wraps the one C1 gives the spool — the way `wrapQueue` already
 stands in front of a queue in tests (`consumer.go:57-60`) — under `data-key`
 itself: a mail names no subject kit can read, and a dead letter older than
@@ -510,7 +550,7 @@ not follow that person's erasure) and sealing hooks in the spool's `Config`
   says where.
 - A publication refused inside the transaction now fails the transaction,
   where today it is logged after a commit that stands. That is a behaviour
-  change of `kit.Transact`'s doc (`transact.go:49-56`), rewritten in PR 5.
+  change of `kit.Transact`'s doc (`transact.go:49-56`), rewritten in PR 6.
 - `queue.SQLMigration` tables join kit's set and its registry; the
   database check's rule that two of kit's tables never take one name
   (`database_check.go:17-18`) covers them.
@@ -525,29 +565,37 @@ not follow that person's erasure) and sealing hooks in the spool's `Config`
 - **The flush at commit runs product code paths later than today**: a
   publication's encoding stays at the call, but its `INSERT` happens at the
   end of the transaction, so a slow queue table lengthens the transaction.
-  Measured in PR 5 against `transact_test.go`'s timings.
+  Measured in PR 6 against `transact_test.go`'s timings.
 - **Sealing an SQL queue reads `sealsOnDisk`**, which checks the data
   directory (`seal.go:519`). A product whose queues are all on a database
   and which has no data directory would seal nothing. **(assumed: that a
   product with databases always has a data directory outside dev; to check
-  in `app.go` and `database.go` before PR 5.)**
-- **The deferred `EventQueued`** may interact with ADR 0141's waiting for
-  an announcement (C1, assumed above).
+  in `app.go` and `database.go` before PR 6.)**
+- **The deferred `EventQueued`** interacts with ADR 0141's waiting for an
+  announcement — no longer a risk but a fact: deferred alone, a rolled-back
+  `Send` leaves its registration open and stalls every later delivery of
+  its identifier (C1, refuted). The cancellation signal of item 4 is the
+  answer; the spool's PR (item 5) proves it with a rollback test.
 
 ### Verified and not yet proved
 
 Verified by reading the code at `55c542da`: every **(verified)** line of the
 Context, with its file and line. Not proved, and owned by the PR that needs
-it: the five **(assumed)** lines — the spool's deferred announcement, the
-file engine's key order, the data directory always present with a
-database, WordPress's 30 days, a dead letter written as dead by `data copy`.
+it: four **(assumed)** lines — the file engine's key order, the data
+directory always present with a database, WordPress's 30 days, a dead
+letter written as dead by `data copy`. A fifth, the spool's deferred
+announcement, was **refuted** after acceptance (C1): a rolled-back `Send`
+holds its registration open for ever, and the remedy is a cancellation
+signal beside `Deferrer` (C7, item 4). Corrected by #323: a read is
+journaled without a reason and files no key (Context), and C3's month is
+the UTC month on the app's clock.
 
 ## Breaking changes
 
 None so far: C5, the one choice implemented, only accepts types that were
 refused. The pull requests still to come change:
 
-- **`kit.Transact`'s outcome** (PR 5). Today a held publication, dispatch,
+- **`kit.Transact`'s outcome** (PR 6). Today a held publication, dispatch,
   mail or notice that its queue refuses after the commit is logged and
   reported, and the commit stands (`transact.go:49-56`, `transact.go:436-442`).
   Once its queue is on the transaction's database, the refusal happens
@@ -557,10 +605,10 @@ refused. The pull requests still to come change:
   nil; one that relied on writes standing whatever the queue said must
   handle it. The doc of `kit.Transact` is rewritten in the same PR. Where
   the queue is elsewhere, the outcome is unchanged.
-- **Start refusals** (PR 5): a MySQL older than 8.0.1, a MariaDB older than
+- **Start refusals** (PR 6): a MySQL older than 8.0.1, a MariaDB older than
   10.6, a SQLite `<name>-timeout` under 500 ms, and a SQLite URL whose busy
   timeout reaches `<name>-timeout` no longer start.
-- **Deletion** (PR 9): on a store with `Revisions(n)`, a product's deletion
+- **Deletion** (PR 10): on a store with `Revisions(n)`, a product's deletion
   keeps the record restorable 30 days unless `<store>-trash` is 0.
 - C3 and C5 break nothing: entries sealed under their own keys keep
   opening, and C5 only accepts types that were refused.
@@ -570,7 +618,7 @@ refused. The pull requests still to come change:
 | Version | Date | What changed |
 |---|---|---|
 | Proposed | 2026-10-14 | The design, merged in #320 |
-| Accepted | the owner's decision, 2026-10-14 | The recommendation of each choice retained as written; a *Decision* line per choice. C5 implemented in the same pull request |
+| Accepted | the owner's decision, 2026-10-14 | The recommendation of each choice retained as written; a *Decision* line per choice. C5 implemented in the same pull request. Two facts #323 established written in: a read is journaled without a reason and files no key (the Context's growth claim corrected), and C3's month is the UTC month of the entry's instant on the app's injected clock. C1's assumption about the spool's deferred `EventQueued` refuted (a rolled-back `Send` keeps its registration open): the remedy, a cancellation signal in `core/data/sql` beside `Deferrer` (amends ADR 0139) reached through `mailspool.Config.Deferrer`, inserted as item 4 of C7's order; ways B and C set aside |
 
 ## Alternatives considered
 
