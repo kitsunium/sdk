@@ -27,6 +27,8 @@ type placementSource interface {
 	memoryOnly() bool
 	// apart reports whether the store is in no transaction (Store.apart).
 	apart() bool
+	// indexed reports whether the store files index keys (Store.indexed).
+	indexed() bool
 }
 
 // placementOf says where a store's data is. A store InMemory keeps its data

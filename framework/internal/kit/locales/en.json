@@ -148,6 +148,7 @@
   "principal.missing": "the auth data of {handler} ({type}) does not implement kit.Principal: every Allow of {nodes} refuses",
   "privacy.by-product-retention": "store \"{store}\" says the product keeps its retention (kit.RetentionByProduct) and gives kit one (kit.EraseAfter, kit.EraseAt, kit.DeleteAfter or kit.DeleteAt): a store's retention is kit's or the product's — drop one",
   "privacy.delay": "store \"{store}\": the delay of {option} must be positive",
+  "privacy.index-key-memory": "kit's index key lives in memory alone and is made again at every start, while what the app keeps persists: after a restart it no longer finds what it referenced before — a hold, a record's own data key, a person's references —, and a database files its index rows again — pin {variable} (openssl rand -base64 32), or keep the secrets on disk (KIT_SECRETS=file:<dir> with KIT_SECRETS_KEY)",
   "privacy.no-retention": "store {store} keeps personal data but says nowhere for how long: declare kit.EraseAfter, kit.EraseAt, kit.DeleteAfter or kit.DeleteAt",
   "privacy.no-subject": "store {store} keeps personal data, but no field tagged subject says whom a record is about: nobody can have its records exported or erased",
   "privacy.option-nil": "store \"{store}\": {option} has a nil function",

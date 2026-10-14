@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 )
 
 // Cryptographic erasure (ADR 0006 §4, §6): a data key destroyed, every box it
@@ -57,9 +58,10 @@ func (a *App) shredPeople(ctx context.Context, ids []string, refs map[string]boo
 	return err
 }
 
-// shredIfLast destroys the data key of identity once no store keeps a
-// record of theirs: a retention's erasure or deletion, an erasure of one
-// record, took their last. Under the key's stripe, a write sealing under it
+// shredIfLast destroys the data key of identity once nothing kit keeps
+// still needs it (lastOf): a retention's erasure or deletion, an erasure of
+// one record, or the product's own Delete took their last record. Under the
+// key's stripe, a write sealing under it
 // meanwhile either stood before — and keeps it — or makes a new one after.
 func (a *App) shredIfLast(ctx context.Context, identity string) error {
 	keys := a.privacyKeyStore()
@@ -77,7 +79,7 @@ func (a *App) shredIfLast(ctx context.Context, identity string) error {
 	if err != nil {
 		return err
 	}
-	last, err := a.lastOf(ctx, identity)
+	last, err := a.lastOf(ctx, z, identity)
 	if err != nil || !last {
 		release()
 		return err
@@ -94,15 +96,32 @@ func (a *App) shredIfLast(ctx context.Context, identity string) error {
 	return err
 }
 
-// lastOf reports whether no store of the product keeps a record whose
-// subject is identity.
-func (a *App) lastOf(ctx context.Context, identity string) (bool, error) {
+// lastOf reports whether nothing kit keeps still needs the data key of
+// identity: no store of the product keeps a record whose subject is
+// identity, no hold names them, and no former value nor version of a record
+// — one whose subject changed since — rests sealed under their key. When
+// kit cannot tell, the key stays.
+func (a *App) lastOf(ctx context.Context, z *sealer, identity string) (bool, error) {
 	for _, st := range a.productStores() {
 		if st.plan().subject == nil {
 			continue
 		}
 		left, err := st.subjectKeys(ctx, a, []string{identity})
 		if err != nil || len(left) > 0 {
+			return false, err
+		}
+	}
+	all, err := a.allHolds(ctx)
+	if err != nil {
+		return false, err
+	}
+	subject := z.refs.subjectRef(identity)
+	if slices.ContainsFunc(all, func(h holdRecord) bool { return h.Subject == subject }) {
+		return false, nil
+	}
+	ref := z.refs.personRef(identity)
+	for _, st := range a.productStores() {
+		if kept, err := st.sealsUnder(ctx, ref); err != nil || kept {
 			return false, err
 		}
 	}
@@ -118,4 +137,65 @@ func (a *App) destroyKey(ctx context.Context, z *sealer, ref string) (bool, erro
 	}
 	defer release()
 	return z.destroy(ctx, ref)
+}
+
+// sealsUnder reports whether a record of the store keeps, in its former
+// values or its versions, a value sealed under the data key ref: those of a
+// record whose subject changed since stay sealed under its former person's
+// key, which they still need. A store that seals nothing keeps none.
+func (s *StoreService[T]) sealsUnder(ctx context.Context, ref string) (bool, error) {
+	se := s.sealing()
+	if se == nil {
+		return false, nil
+	}
+	if h := s.historied(); h != nil && h.hist != nil {
+		docs, err := h.hist.List(ctx)
+		if err != nil {
+			return false, err
+		}
+		for _, d := range docs {
+			for _, entries := range d.Fields {
+				if slices.ContainsFunc(entries, func(e formerEntry) bool { return sealedUnder(e.Value, ref) }) {
+					return true, nil
+				}
+			}
+		}
+	}
+	if s.revisions == 0 {
+		return false, nil
+	}
+	entries, err := se.resting(ctx, 0)
+	if err != nil {
+		return false, err
+	}
+	for _, en := range entries {
+		versions, err := se.storedVersions(ctx, en.Key)
+		switch {
+		case errors.Is(err, docstore.DocumentNotFound):
+			continue // deleted meanwhile, its versions with it
+		case err != nil:
+			return false, err
+		}
+		if slices.ContainsFunc(versions, func(v docstore.Version) bool { return sealedUnder(v.JSON, ref) }) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// sealedUnder reports whether raw — a record, a version, a former value —
+// holds a box sealed under the data key ref.
+func sealedUnder(raw []byte, ref string) bool {
+	if isBoxValue(raw) {
+		got, ok := boxRef(raw)
+		return ok && got == ref
+	}
+	found := false
+	_, _, _ = boxWalk(raw, nil, "", false, func(_ memberAt, value []byte) ([]byte, bool, error) {
+		if got, ok := boxRef(value); ok && got == ref {
+			found = true
+		}
+		return value, false, nil
+	})
+	return found
 }

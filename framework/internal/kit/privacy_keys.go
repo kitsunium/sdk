@@ -139,6 +139,40 @@ func (a *App) makeIndexKey(ctx context.Context) ([]byte, error) {
 	return nil, failure(CodePrivacyKey, "INDEX_KEY_MAKE", "kit's index key could not be made", err)
 }
 
+// usesIndexKey reports whether the app makes and reads index-key: it keeps
+// personal data — its subjects' references, its records' in the holds and
+// the journal —, seals what it keeps on disk — its data keys are named by
+// references —, or keeps an indexed store on a database, whose index keys
+// the table files hashed under it (ADR 0004).
+func (a *App) usesIndexKey() bool {
+	if a.keepsPersonalData() || a.privacyKeyStore() != nil {
+		return true
+	}
+	for _, st := range a.placedStores() {
+		if p := a.placementOf(st); p.db != nil && !p.memory && st.indexed() && a.storesOnDatabase(p.db) {
+			return true
+		}
+	}
+	return false
+}
+
+// indexKeyProblems warns of index-key kept in memory alone — the
+// environment keeps its secrets in memory, KIT_INDEX_KEY is unset — while
+// what the app keeps persists: made again at every start, it would no
+// longer find what it referenced before a restart — a hold, a record's own
+// data key, a person's references — and a database would file its index
+// rows again. In dev, in config and at every start.
+func (a *App) indexKeyProblems() []model.Diagnostic {
+	st := a.secrets.Load()
+	if st == nil || st.kept == nil || st.from != model.SecretFromMemory || !a.sealsOnDisk() || !a.usesIndexKey() {
+		return nil
+	}
+	if _, err := st.kitEnv.Get(context.Background(), indexSecret); !errors.Is(err, secret.NotFound) {
+		return nil // pinned — or a variable the first use refuses, saying why
+	}
+	return []model.Diagnostic{diagnosticOf("warning", "", nil, say("privacy.index-key-memory", "variable", secretVariable("KIT", indexSecret)))}
+}
+
 // subjectRef is the reference of a person's identity, as the product
 // stores it.
 func (k *referenceKeys) subjectRef(identity string) string {

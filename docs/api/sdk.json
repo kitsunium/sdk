@@ -6609,7 +6609,7 @@
       "name": "Queued",
       "spelled": "func() CommandConfigurer",
       "canonical": "func() github.com/kitsunium/sdk/framework/internal/kit.CommandConfigurer",
-      "doc": "Queued sends a command to the background. Dispatch returns once the\ncommand's own queue accepted it — a file queue under the data directory,\nmemory without one —, and a consumer handles it, [Parallelism] at a time,\nretried after half a second up to [MaxDeliveries] attempts (5), then\ndead-lettered. It answers nothing: its result is [EmptyValue], and exposed, it\nanswers 202 Accepted.\n\nDelivery is at least once: Queued is the product's promise that the\nhandler tolerates a redelivery, and a [Command.Key] narrows the duplicates\nwithout removing them. The handler runs in the dispatcher's trace, as the\nuser who dispatched it ([UserID]); what the auth handler said about that\nuser is not queued. A queued command's input is a contract with the\nmessages already queued: add a field, never rename one.\n",
+      "doc": "Queued sends a command to the background. Dispatch returns once the\ncommand's own queue accepted it — a file queue under the data directory,\nmemory without one —, and a consumer handles it, [Parallelism] at a time,\nretried up to [MaxDeliveries] attempts (5) — half a second after the first\nfailure, the wait doubling after each, never more than a minute —, then\ndead-lettered; a dispatch that does not decode is dead-lettered at its\nfirst failure, since no retry makes it decode. It answers nothing: its\nresult is [EmptyValue], and exposed, it answers 202 Accepted.\n\nDelivery is at least once: Queued is the product's promise that the\nhandler tolerates a redelivery, and a [Command.Key] narrows the duplicates\nwithout removing them. The handler runs in the dispatcher's trace, as the\nuser who dispatched it ([UserID]); what the auth handler said about that\nuser is not queued. A queued command's input is a contract with the\nmessages already queued: add a field, never rename one.\n",
       "file": "framework/internal/kit/command.go",
       "layer": "framework"
     },
@@ -7493,7 +7493,7 @@
       "recv": "StoreService",
       "spelled": "func(ctx context.Context, key string) error",
       "canonical": "func(ctx context.Context, key string) error",
-      "doc": "Delete removes the entity with the given key, or returns a [NotFound] error.\n",
+      "doc": "Delete removes the entity with the given key, or returns a [NotFound] error.\nWhen the store seals at rest and the entity was its person's last record,\ntheir data key goes with it, as with an erasure — at the commit, in a\n[Transact] —, once nothing kit keeps still needs it: a held record, or a\nformer value or version sealed under it, keeps the key.\n",
       "file": "framework/internal/kit/store.go",
       "layer": "framework"
     },
@@ -7903,13 +7903,13 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit",
       "name": "WakeEvent",
-      "spelled": "struct{Reason string; At time.Time; Topic string}",
-      "canonical": "struct{Reason string; At time.Time; Topic string}",
+      "spelled": "struct{Reason string; At time.Time; Topic string; Reasons []string; Topics []string}",
+      "canonical": "struct{Reason string; At time.Time; Topic string; Reasons []string; Topics []string}",
       "fields": [
         {
           "name": "Reason",
           "type": "string",
-          "doc": "Reason is model.WakeInterval, WakeDeadline, WakeTopic, WakeStart or\nWakeManual.\n"
+          "doc": "Reason is model.WakeInterval, WakeDeadline, WakeTopic, WakeStart or\nWakeManual: WakeManual when a nudge is among the wakes the run\ngathers — the one wake that cuts a backoff short —, else the first\nthat came.\n"
         },
         {
           "name": "At",
@@ -7919,10 +7919,20 @@
         {
           "name": "Topic",
           "type": "string",
-          "doc": "Topic is the topic node that woke the loop, for a topic wake.\n"
+          "doc": "Topic is the topic node whose publish woke the loop first, when a\ntopic's did.\n"
+        },
+        {
+          "name": "Reasons",
+          "type": "[]string",
+          "doc": "Reasons are the reasons of every wake the run gathers, each once, in\nthe order they came: Reason is among them.\n"
+        },
+        {
+          "name": "Topics",
+          "type": "[]string",
+          "doc": "Topics are the topic nodes whose publish woke the loop into this run,\neach once, in the order they came: Topic is the first.\n"
         }
       ],
-      "doc": "WakeEvent says why a declared loop runs: the reason, the instant, and the\ntopic that woke it when one did.\n",
+      "doc": "WakeEvent says why a declared loop runs: the reason, the instant, and the\ntopic that woke it when one did. Wakes that come while it runs, or while\nit backs off after a failure, are gathered into one run: Reasons and\nTopics say every one of them, and Reason the one that decides the run.\n",
       "file": "framework/internal/kit/loop.go",
       "layer": "framework"
     },
@@ -12801,7 +12811,7 @@
       "name": "Queued",
       "spelled": "func() CommandOption",
       "canonical": "func() github.com/kitsunium/sdk/framework/kit.CommandOption",
-      "doc": "Queued sends a command to the background. Dispatch returns once the\ncommand's own queue accepted it — a file queue under the data directory,\nmemory without one —, and a consumer handles it, [Parallelism] at a time,\nretried after half a second up to [MaxDeliveries] attempts (5), then\ndead-lettered. It answers nothing: its result is [Empty], and exposed, it\nanswers 202 Accepted.\n\nDelivery is at least once: Queued is the product's promise that the\nhandler tolerates a redelivery, and a [Command].Key narrows the duplicates\nwithout removing them. The handler runs in the dispatcher's trace, as the\nuser who dispatched it ([UserID]); what the auth handler said about that\nuser is not queued. A queued command's input is a contract with the\nmessages already queued: add a field, never rename one.\n",
+      "doc": "Queued sends a command to the background. Dispatch returns once the\ncommand's own queue accepted it — a file queue under the data directory,\nmemory without one —, and a consumer handles it, [Parallelism] at a time,\nretried up to [MaxDeliveries] attempts (5) — half a second after the first\nfailure, the wait doubling after each, never more than a minute —, then\ndead-lettered; a dispatch that does not decode is dead-lettered at its\nfirst failure, since no retry makes it decode. It answers nothing: its\nresult is [Empty], and exposed, it answers 202 Accepted.\n\nDelivery is at least once: Queued is the product's promise that the\nhandler tolerates a redelivery, and a [Command].Key narrows the duplicates\nwithout removing them. The handler runs in the dispatcher's trace, as the\nuser who dispatched it ([UserID]); what the auth handler said about that\nuser is not queued. A queued command's input is a contract with the\nmessages already queued: add a field, never rename one.\n",
       "file": "framework/kit/command.go",
       "layer": "framework"
     },
@@ -13384,7 +13394,7 @@
       "spelled": "ikit.WakeEvent",
       "canonical": "github.com/kitsunium/sdk/framework/internal/kit.WakeEvent",
       "owner": "go:github.com/kitsunium/sdk/framework/internal/kit.WakeEvent",
-      "doc": "Wake says why a declared loop runs: the reason, the instant, and the\ntopic that woke it when one did.\n",
+      "doc": "Wake says why a declared loop runs: the reason, the instant, and the\ntopic that woke it when one did. Wakes that come while it runs, or while\nit backs off after a failure, are gathered into one run: Reasons and\nTopics say every one of them, and Reason the one that decides the run.\n",
       "file": "framework/kit/loop.go",
       "layer": "framework"
     },

@@ -37,9 +37,12 @@ var consumerHow string = "on publish · poll " + pollInterval.String()
 // openQueue opens a consumer's queue — a subscription's, a watch's, a queued
 // command's —: a file queue at dir under the data directory, memory without
 // one. A message is leased for thirty seconds, retried half a second after
-// a failure at least, and dead-lettered after maxDeliveries attempts.
+// its first failure, the wait doubling after each — the queue's own growing
+// delay (ADR 0151 §D7), never more than kit's backoff ceiling, a minute —,
+// and dead-lettered after maxDeliveries attempts, or at its first failure
+// when no retry can help (queue.DoNotRetry).
 func (a *App) openQueue(dir string, maxDeliveries int) (queue.Broker, error) {
-	policy := queue.Policy{VisibilityTimeout: 30 * time.Second, RetryDelay: 500 * time.Millisecond, MaxDeliveries: maxDeliveries}
+	policy := queue.Policy{VisibilityTimeout: 30 * time.Second, RetryDelay: 500 * time.Millisecond, MaxRetryDelay: loopBackoffMax, MaxDeliveries: maxDeliveries}
 	if a.dataDir == "" {
 		return queue.NewMemory(queue.MemoryConfig{Clock: a.clock, Policy: policy})
 	}

@@ -3,8 +3,11 @@ package kit
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
+	"slices"
+	"strings"
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
@@ -25,7 +28,9 @@ type clearParts uint8
 // sealed is read as written and sealed at its record's next write; the
 // command seals a whole store now — every record that keeps such a member in
 // clear, and every former value kept in clear —, as their next write would,
-// and changes no value.
+// and changes no value. `privacy seal -all` does it for every store that
+// seals at rest, in the order of their IDs: a product with many stores need
+// not name each one.
 
 // sealAller is a store the privacy command can seal, whatever its
 // entity type.
@@ -35,13 +40,29 @@ type sealAller interface {
 	sealAll(ctx context.Context) (sealed, total int, err error)
 }
 
-// sealCommand runs `privacy seal STORE…`.
-func (a *App) sealCommand(ctx context.Context, stores []string, stdout, stderr io.Writer) int {
-	if len(stores) == 0 {
-		fmt.Fprintf(stderr, "usage: %s privacy seal STORE…   a store's node ID, as privacy register names it\n", a.name)
+// sealCommand runs `privacy seal STORE…` and `privacy seal -all`.
+func (a *App) sealCommand(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("privacy seal", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	all := fs.Bool("all", false, "every store that seals at rest")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	// Flags stop at the first store, so -all after one would be read as a
+	// store's name: it is a usage error wherever it stands.
+	if *all == (fs.NArg() > 0) || slices.ContainsFunc(fs.Args(), isAllFlag) {
+		fmt.Fprintf(stderr, "usage: %s privacy seal STORE…   a store's node ID, as privacy register names it\n"+
+			"       %[1]s privacy seal -all       every store that seals at rest\n", a.name)
 		return 2
 	}
 	return a.onData(ctx, stderr, func(ctx context.Context) error {
+		stores := fs.Args()
+		if *all {
+			if stores = a.sealableStores(); len(stores) == 0 {
+				fmt.Fprintln(stdout, "no store seals anything at rest")
+				return nil
+			}
+		}
 		var failed []error
 		for _, id := range stores {
 			failed = append(failed, a.sealStore(ctx, id, stdout))
@@ -50,10 +71,42 @@ func (a *App) sealCommand(ctx context.Context, stores []string, stdout, stderr i
 	})
 }
 
+// isAllFlag reports whether arg spells -all, in any of the forms flag
+// accepts.
+func isAllFlag(arg string) bool {
+	name, _, _ := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(arg, "-"), "-"), "=")
+	return strings.HasPrefix(arg, "-") && name == "all"
+}
+
+// sealableStores are the node IDs of every store `privacy seal` takes that
+// seals at rest, sorted.
+func (a *App) sealableStores() []string {
+	var ids []string
+	for _, svc := range a.services {
+		if svc == nil {
+			continue
+		}
+		nodes, _ := svc.snapshot()
+		for _, n := range nodes {
+			if st, ok := n.(sealAller); ok && sealable(st.base().id) && st.sealsAtRest(a) {
+				ids = append(ids, st.base().id)
+			}
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// sealable says whether `privacy seal` takes the store id: a product's, or
+// kit's holds and journal — never another of kit's privacy service.
+func sealable(id string) bool {
+	return model.ServiceOf(id) != privacyService || id == privacyService+"/store/holds" || id == privacyService+"/store/journal"
+}
+
 // sealStore seals the store whose node ID is id, and says what it did.
 func (a *App) sealStore(ctx context.Context, id string, stdout io.Writer) error {
 	st, ok := a.findNode(id).(sealAller)
-	if !ok || model.ServiceOf(id) == privacyService && id != privacyService+"/store/holds" && id != privacyService+"/store/journal" {
+	if !ok || !sealable(id) {
 		return NotFound("no such store: " + clip(id))
 	}
 	if !st.sealsAtRest(a) {

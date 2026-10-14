@@ -30,6 +30,7 @@ const privacyUsageFormat string = `usage:
   %[1]s privacy journal [-verify]        the privacy journal, and whether its chain holds
   %[1]s privacy retention [-dry-run]     the stores' retention, run once now
   %[1]s privacy seal STORE…              what a store keeps in clear — written before its fields were sealed — sealed now
+  %[1]s privacy seal -all                the same, for every store that seals at rest
 Every sub-command but register opens the data directory: stop the product first.
 `
 
@@ -44,6 +45,7 @@ Every sub-command but register opens the data directory: stop the product first.
 //	privacy journal [-verify]          the privacy journal, and whether its chain holds
 //	privacy retention [-dry-run]       the stores' retention, run once now
 //	privacy seal STORE…                what a store keeps in clear, sealed now
+//	privacy seal -all                  the same, for every store that seals at rest
 //
 // A store belongs to one process: every sub-command but register opens the
 // data directory itself, and refuses while the product answers on its

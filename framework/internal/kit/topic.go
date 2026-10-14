@@ -282,7 +282,9 @@ func (sb *SubscriptionWorker[T]) start(_ context.Context, a *App) error {
 
 // deliver is the queue handler: it restores the publisher's trace context,
 // runs the subscription's handler inside the subscription node, and reports
-// the run to the internal loop.
+// the run to the internal loop. A message that does not decode is
+// dead-lettered on its first delivery: no retry makes it decode (ADR 0151
+// §D8).
 func (sb *SubscriptionWorker[T]) deliver(a *App, loop *loopState) queue.Handler {
 	c := consumer{a: a, loop: loop, node: sb.id, name: sb.name, wake: model.WakeTopic}
 	return func(ctx context.Context, d queue.Delivery) error {
@@ -295,8 +297,8 @@ func (sb *SubscriptionWorker[T]) deliver(a *App, loop *loopState) queue.Handler 
 			case openErr != nil:
 				return openErr
 			case decodeErr != nil:
-				return failure(CodeUndecodable, "MESSAGE_UNDECODABLE", "the message does not decode into the topic's type", decodeErr,
-					errs.String("subscription", sb.id), errs.String("message", d.Message.ID))
+				return queue.DoNotRetry(failure(CodeUndecodable, "MESSAGE_UNDECODABLE", "the message does not decode into the topic's type", decodeErr,
+					errs.String("subscription", sb.id), errs.String("message", d.Message.ID)))
 			}
 			if sp.detailed() {
 				sp.request(msg)

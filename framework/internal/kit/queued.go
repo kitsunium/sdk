@@ -161,7 +161,10 @@ func (c *Command[C, R]) put(ctx context.Context, q *commandQueue, key string, en
 // handler is the consumer's: it restores the dispatch's trace and user,
 // runs the command inside its node — the policies around its key and its
 // handler — and reports the run to the consumer's loop. A dispatch handled,
-// or dead-lettered after its last attempt, gives its key back.
+// or dead-lettered — after its last attempt, or at once when no retry can
+// help (queue.DoNotRetry) —, gives its key back. A dispatch that does not
+// decode will not decode on its next attempt either: it is dead-lettered on
+// its first (ADR 0151 §D8).
 func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) queue.Handler {
 	return func(ctx context.Context, d queue.Delivery) (err error) {
 		env, decodeErr, openErr := c.decode(ctx, a, d.Message.Payload)
@@ -177,7 +180,7 @@ func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) queue.
 			}
 			sp.end(err)
 			loop.ran(a, started, a.clock.Now(), err)
-			if err == nil || d.Deliveries >= c.opts.deliveries.maxDeliveries {
+			if err == nil || d.Deliveries >= c.opts.deliveries.maxDeliveries || errs.HasCode(err, queue.CodeNotRetryable) {
 				q.release(env.Key)
 			}
 		}()
@@ -185,8 +188,8 @@ func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) queue.
 		case openErr != nil:
 			return openErr
 		case decodeErr != nil:
-			return failure(CodeUndecodable, "MESSAGE_UNDECODABLE", "the queued command does not decode into its input", decodeErr,
-				errs.String("command", c.id), errs.String("message", d.Message.ID))
+			return queue.DoNotRetry(failure(CodeUndecodable, "MESSAGE_UNDECODABLE", "the queued command does not decode into its input", decodeErr,
+				errs.String("command", c.id), errs.String("message", d.Message.ID)))
 		}
 		return c.handle(ctx, a, sp, env)
 	}

@@ -148,6 +148,7 @@
   "principal.missing": "les données d’authentification de {handler} ({type}) n’implémentent pas kit.Principal : chaque Allow de {nodes} refuse",
   "privacy.by-product-retention": "le store « {store} » dit que le produit tient sa rétention (kit.RetentionByProduct) et en donne une à kit (kit.EraseAfter, kit.EraseAt, kit.DeleteAfter ou kit.DeleteAt) : la rétention d’un store est celle de kit ou celle du produit — retirez l’une des deux",
   "privacy.delay": "store « {store} » : le délai de {option} doit être positif",
+  "privacy.index-key-memory": "la clé d’index de kit ne vit qu’en mémoire et est refaite à chaque démarrage, alors que ce que l’app garde persiste : après un redémarrage, elle ne retrouve plus ce qu’elle référençait avant — une conservation, la clé de données propre à un enregistrement, les références d’une personne —, et une base range à nouveau ses lignes d’index — épinglez {variable} (openssl rand -base64 32), ou gardez les secrets sur disque (KIT_SECRETS=file:<dir> avec KIT_SECRETS_KEY)",
   "privacy.no-retention": "le store {store} garde des données personnelles sans dire combien de temps : déclarez kit.EraseAfter, kit.EraseAt, kit.DeleteAfter ou kit.DeleteAt",
   "privacy.no-subject": "le store {store} garde des données personnelles, mais aucun champ marqué subject ne dit qui un enregistrement concerne : personne ne peut en obtenir l’export ni l’effacement",
   "privacy.option-nil": "store « {store} » : {option} n’a pas de fonction",
