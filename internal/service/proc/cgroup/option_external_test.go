@@ -65,7 +65,7 @@ func Test_WithRoot(t *testing.T) {
 		{"an absolute path", "/sys/fs/cgroup/delegated"},
 		{"a relative path", "relative/root"},
 		{"an empty string", ""},
-		{"a path with a trailing separator", "/sys/fs/cgroup/"},
+		{"a path with a trailing separator", "/sys/fs/cgroup/delegated-nowhere/"},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

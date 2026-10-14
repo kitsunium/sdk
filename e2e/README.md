@@ -42,9 +42,11 @@ Only `FAIL` counts against the exit code.
 
 ## Where it runs
 
-`.github/workflows/e2e-vm.yml` cross-compiles this binary per GOOS, ships it to
-each real OS VM (kodflow/labs Proxmox), and runs it on the real kernel — the
-definitive "the SDK works everywhere" proof. Locally it runs on whatever host you
+`.github/workflows/e2e-cross.yml` cross-compiles or builds this binary per OS and
+runs it on the real kernel of each (GitHub's runners and VMs; its `linux-init`
+job runs it as root under systemd and OpenRC). `.github/workflows/e2e-vm.yml`
+ships it by hand to the lab's three Linux VMs, which boot each distro's own
+kernel — the "the SDK works everywhere" proof. Locally it runs on whatever host you
 are on.
 
 ## Integration suites (Docker)
