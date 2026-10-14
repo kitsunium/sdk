@@ -48,8 +48,12 @@ const (
 // service: kit_queue__<service>__<consumer>.
 const queueTableService string = "kit_queue"
 
-// consumerHow is how a consumer loop is said to wake, in the Studio.
-var consumerHow string = "on publish · poll " + pollInterval.String()
+var (
+	// consumerHow is how a consumer loop is said to wake, in the Studio.
+	consumerHow string = "on publish · poll " + pollInterval.String()
+	// fileQueueStates are the state directories of the SDK's file broker.
+	fileQueueStates = []string{"ready", "inflight", "dead"}
+)
 
 // queueOwner is a consumer, whatever its message type, as a database's
 // tables see it: its node, and what its queue is kept under — "" for a
@@ -151,9 +155,6 @@ func fileQueueHolds(dir string) bool {
 	}
 	return false
 }
-
-// fileQueueStates are the state directories of the SDK's file broker.
-var fileQueueStates = []string{"ready", "inflight", "dead"}
 
 // openQueue opens a consumer's queue that no open database keeps: a file
 // queue at dir under the data directory, memory without one, under
