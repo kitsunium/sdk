@@ -27,6 +27,19 @@ import (
 	svcent "github.com/kitsunium/sdk/framework/internal/service/entitlement"
 )
 
+// ciSeatKeyBits matches the smallest modulus the verifier accepts.
+const ciSeatKeyBits int = 2048
+
+// ciAccountID is the account the roster covers in these tests.
+const ciAccountID string = "133899878"
+
+// sampleUUID is a well-formed subject identifier used across the fixtures.
+const sampleUUID string = "11111111-2222-3333-4444-555555555555"
+
+// otherUUID is a second, unrelated identity. Discovery must refuse to choose
+// between two usable ones rather than let sort order decide.
+const otherUUID string = "99999999-8888-4777-8666-555544443333"
+
 // TestMain clears the runner's OIDC variables before any test of the package
 // runs. Verify takes the CI path whenever ACTIONS_ID_TOKEN_REQUEST_URL is set,
 // and a GitHub Actions job granted id-token sets it for every process — so on
@@ -44,19 +57,6 @@ func TestMain(m *testing.M) {
 	}
 	os.Exit(m.Run())
 }
-
-// ciSeatKeyBits matches the smallest modulus the verifier accepts.
-const ciSeatKeyBits int = 2048
-
-// ciAccountID is the account the roster covers in these tests.
-const ciAccountID string = "133899878"
-
-// sampleUUID is a well-formed subject identifier used across the fixtures.
-const sampleUUID string = "11111111-2222-3333-4444-555555555555"
-
-// otherUUID is a second, unrelated identity. Discovery must refuse to choose
-// between two usable ones rather than let sort order decide.
-const otherUUID string = "99999999-8888-4777-8666-555544443333"
 
 // stubGetter answers roster requests with one canned bundle, so admission
 // logic is exercised without a network.
