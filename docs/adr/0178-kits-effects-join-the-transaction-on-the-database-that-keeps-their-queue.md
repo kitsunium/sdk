@@ -1,0 +1,479 @@
+# ADR 0178 — kit's effects join the transaction on the database that keeps their queue
+
+- **Status**: Proposed. A design only: nothing in this ADR is implemented. Every choice below is put to the owner with its options and a recommendation; the recommendations become decisions when the owner accepts them, choice by choice.
+- **Date**: 2026-10-14
+- **Deciders**: SDK maintainers (issue #274)
+- **Depends on**: [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) (the SQL broker: a message published in a transaction exists if and only if it commits), [ADR 0139](0139-a-document-store-over-sql-joins-the-transaction-its-context-carries.md) (`Joiner`, `Deferrer`, every call runs where its context says), [ADR 0143](0143-a-document-keeps-its-versions-in-its-own-write.md) (versions, and the trash it deferred)
+- **Related**: [ADR 0140](0140-sqlites-migration-lock-is-the-database-files-write-lock.md) (SQLite's write lock), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (kit's engine is `framework/`), [ADR 0111](0111-a-mail-spool-retries-on-a-backoff-and-resends-only-after-a-crash.md) and [ADR 0141](0141-a-mail-spool-keeps-an-identifier-its-caller-minted.md) (the mail spool), [ADR 0112](0112-a-loop-that-must-keep-running-is-supervised-beside-the-lifecycle.md) (the supervisor), [ADR 0172](0172-a-product-initialises-what-it-imports-and-the-stores-stay-in-the-core.md), [ADR 0175](0175-a-products-tests-reach-the-disk-with-one-option.md) (`kittest.NewDisk`, which the tests of this work run on), [ADR 0040](0040-changing-a-published-shape-while-v0.md); kitsunium/platform#34 decision 4, kitsunium/platform#35, kodmain/moderation#16
+
+## Context
+
+kit's engine moved from files to a SQL database store by store (ADR 0139,
+ADR 0143). Its queues did not. Issue #274 lists what is left; this ADR
+designs the part of it that touches the transaction and what rests on
+disk, and the order to ship it in.
+
+Every line marked **(verified)** was read in the tree at `55c542da`
+(`origin/main` on 2026-10-14). Every line marked **(assumed)** was not
+checked, and says what would check it.
+
+### What kit does today
+
+- **A transaction holds every effect that leaves the process, and lets it go
+  after the commit.** `hold` appends a `heldEffect` to the transaction
+  (`framework/internal/kit/transact.go:397-413`); the outermost level's
+  `end` closes the database scope — the commit — and only then calls
+  `let`, which runs each effect in order and logs a failure without undoing
+  the commit (`transact.go:237-265`, `transact.go:436-442`). A rollback runs
+  the effects' `drop` (`transact.go:286-290`). The package doc says it out
+  loud: "a process that dies between the commit and the release loses what
+  was held" (`transact.go:55-56`). **(verified)**
+- **Four effects of #274 go through it**: a topic's publication
+  (`topic.go:52-74`), a queued command's dispatch (`queued.go:131-161`,
+  whose `drop` gives the command's key back), a mail (`mailer.go:257-270`,
+  the outbox ID minted before the commit), a watch's notice
+  (`watch.go:272-289`). The privacy journal's entry is held the same way
+  (`journal.go:72-90`). **(verified)**
+- **Every queue is a file or memory queue.** `openQueue` builds
+  `queue.NewMemory` without a data directory and `queue.NewFile` with one
+  (`consumer.go:46-61`). No call to `queue.NewSQL` exists in `framework/`.
+  **(verified)**
+- **Part of #274's adoption list is already done**: `openQueue` sets
+  `MaxRetryDelay` (`consumer.go:47`); a queued command and a watch
+  dead-letter an undecodable message with `queue.DoNotRetry`
+  (`queued.go:189-195`, `watch_run.go:92-96`); both consumers run under
+  `lifecycle`'s supervisor (`queued.go:268-273`, `watch_run.go:53`); the
+  SQLite connector opens every file with `_busy_timeout=5000`,
+  `_journal_mode=WAL` and `_txlock=immediate`
+  (`framework/connectors/sqlite/sqlite.go:29-33`), parameters the pinned
+  driver honours (`modernc.org/sqlite@v1.59.0/sqlite.go:307,328,385`).
+  **(verified)**
+- **The mail spool builds its own queue.** `mailspool.New` makes a memory
+  broker without `Config.Dir` and a file broker with it
+  (`internal/service/app/mail/spool/spool.go:101-105`); its `Config` has no
+  field that takes a broker. The spool writes each mail as JSON — the
+  addresses, the subject, the body — in that queue (`spool.go:22-32`): the
+  outbox under `<data>/<service>/outbox/<mailer>` (`mailer.go:435-438`) is
+  personal data in clear. **(verified)**
+- **A topic's and a queued command's members kit seals are sealed for a
+  queue on disk** (`seal_message.go:62-80`, `seal.go:519`: `sealsOnDisk`
+  reads the data directory). A watch's notice carries no value
+  (`watch_run.go:19-27`). **(verified)**
+- **The journal seals every entry under a data key of its own.** A
+  `journalRecord` has no subject tag (`journal.go:37-50`), and a record
+  without a subject is sealed under its own key, `"r:"` and its reference
+  (`seal_store.go:291-302`). Every entry therefore files one more wrapped key
+  in `kit.privacy/store/keys`, and the journal is never pruned. Every
+  `Records.Get` a module makes journals a read (`records.go:153`): a watch
+  that reads each record it is told of files one key per notice. **(verified)**
+- **A subject in a list is refused in every type a declaration carries.**
+  `judgeSubject` refuses a subject reached through a list or a map
+  (`classify_plan.go:180-188`), and the type judge runs on every type of
+  every declaration — an endpoint's request and response included
+  (`classify_walk.go:275-277`, `classify_walk.go:331-344`). A subject is
+  read only by stores and by message sealing (`seal_message.go:71`,
+  `seal_store.go:297`, `privacy_keys.go:224`, `hold.go`). Vigie works around
+  the refusal with JSON written by hand in a `personal` field
+  (kodmain/moderation#16). **(verified)**
+- **Records has `Get`, `EraseFields` and `Delete`, no way to list**
+  (`records.go:86-124`). **(verified)**
+- **A deletion takes every version with it**, and a trash was deferred
+  because it needs a number kept across a deletion — a tombstone in both
+  engines (ADR 0143, lines 70-74 and 422-423). An age limit on versions was
+  deferred too: "a record's retention bounds its history" (ADR 0143,
+  line 396). **(verified)**
+- **A transaction belongs to the database its first store call reaches.**
+  `joinCall` claims the transaction for that database and refuses a write
+  to another (`transact_sql.go:114-145`). **(verified)**
+- **kit checks no server version.** Neither `database_check.go` nor the
+  MySQL connector reads `VERSION()`. **(verified)** ADR 0151's broker needs
+  `SKIP LOCKED`: MySQL 8.0.1 or MariaDB 10.6 (ADR 0151, "does NOT
+  guarantee" 3); docstore's floor is MySQL 5.7.9 and MariaDB 10.2 (ADR 0139
+  §D9). **(verified in the ADRs)**
+
+## Decision
+
+Seven choices. Each states the question, the options with their concrete
+cost, and the recommendation.
+
+### C1 — how the outbox adopts `queue.NewSQL`, and what becomes of holding
+
+**Question.** A queue on SQL makes a publication atomic with the
+transaction — but only with a transaction on the same database. A kit
+transaction belongs to the database of its first store call, a queue has one
+table on one database, and a topic's subscriptions or a watch's feeding
+stores may be kept by different databases (`Keeps`). Where does each queue
+live, and what becomes of `hold` at the four call sites?
+
+**Options.**
+
+- **A. Each queue lives on the database that keeps its consumer**, by the
+  rules a store follows (`database_place.go:47-80`: by name, service,
+  module, default database; the data directory, then memory). A
+  publication whose transaction belongs to that database is written in it;
+  any other — a transaction on another database, on the data directory, in
+  memory, or no transaction — keeps today's path (held, released after the
+  commit). *Migration*: a queue table per consumer, created by kit's own
+  migration set as kit's other tables are (`store_sql_migrate.go`, one
+  generation-numbered version per table); messages waiting in file queues
+  must be drained or copied (C7, `data copy`). *Compatibility*: nothing
+  changes for a product with no database; the common product — one default
+  database — gets every effect atomic. *Security*: the queue table holds
+  sealed payloads as a file queue does (C1 consequences). *Performance*: one
+  `INSERT` per subscription in the transaction, in a savepoint (ADR 0151
+  §D2); the consumer polls its table every 5 s (`consumer.go:26`) besides the
+  in-process wake.
+- **B. One outbox table per database, relayed into the consumers' queues.**
+  Every publication, whatever its target, is one row in `kit_outbox` of the
+  transaction's database; a relay loop moves rows into each consumer's
+  queue. *Cost*: always atomic, but two writes and a second hop per
+  message, a relay that can itself duplicate, one more loop to supervise,
+  and the latency of its poll. ADR 0151 rejected exactly this shape in the
+  SDK ("an outbox table relayed into the file broker").
+- **C. One queue per consumer and per publishing database.** Always atomic;
+  a consumer reads N brokers, tables multiply as consumers × databases, and
+  the Studio draws N queues for one subscription.
+
+**And holding, under A.** The release becomes two phases in one place,
+`unit.end`:
+
+1. **In the transaction, just before the commit**: the outermost level's
+   held effects whose queue lives on the transaction's database are
+   published in its scope (`u.scope.ctx`), before `u.scope.close(nil)`. A
+   publication refused there fails the transaction — the outbox's own
+   semantics: the message and the write stand or fall together. Because the
+   flush happens at the commit, a publication made *before* the
+   transaction's first write still joins it; nothing about the order of a
+   handler's calls matters, and a publication never claims the transaction
+   for a database (it would turn a later write elsewhere into
+   `TRANSACTION_SPAN`).
+2. **After the commit**: everything else, as today — a queue on another
+   database, the data directory or memory, and every effect that stays in
+   the process (`inside`: a store's write hooks, a workflow's hooks, a
+   topic's loop wake, the queued command's key).
+
+At the call sites:
+
+- `put` (`queued.go:131-161`): the effect names its queue's database and
+  keeps its `drop` — the rollback still gives the key back. The in-process
+  `pending` set stays in-process: with a queue shared by several processes it
+  deduplicates within one process only, as today.
+- `Publish` (`topic.go:52-74`): one held effect per subscription instead of
+  one for all, each tagged with its queue's database; `t.wake()` stays an
+  `inside` effect after the commit (the SDK's `Deferrer` wakes the
+  consumer's queue itself, ADR 0151 §D2).
+- `enqueue` (`mailer.go:248-277`): see C1's SDK change below.
+- `notify` (`watch.go:272-289`): one held effect per watch, tagged likewise.
+  The stale paragraph "The gap" (`watch.go:36-42`, which still says the
+  notice is queued outside the transaction) is rewritten.
+
+**The SDK change the mailer needs.** `mailspool.Config` grows a `Broker`
+field (an addition, ADR 0040), used instead of `Dir` when set; and the
+spool's `EventQueued` — today told when `Send` returns — is told through the
+transaction's `Deferrer`, after the commit, when `Send` ran inside one, so
+kit's mailbox never shows a mail a rollback took back. Design first
+(`design/app/mail.yaml`, `kit gen`), which only the owner can run. **(assumed:
+that the spool's announcement can be deferred without breaking ADR 0141's
+"a delivery waits for its announcement"; to be proved by the SDK PR's
+tests.)**
+
+**Recommendation: A, with the two-phase release.** It makes the product kit
+is built for — one default database — atomic end to end with no new loop
+and no new table shape, keeps one mechanism (`hold`) instead of four, and
+degrades to exactly today's behaviour where atomicity cannot exist. B is the
+right answer only for a product whose publishers and consumers sit on
+different databases, which `Keeps` makes possible but no product we know
+does; it can be added later behind the same tag without changing a call
+site. The analyser should warn when a declared publishes/delivers edge
+crosses two databases (the graph has both ends), so the non-atomic case is
+said at the declaration rather than discovered after a crash.
+
+### C2 — the floors: MySQL `SKIP LOCKED`, SQLite's busy timeout
+
+**Question.** The SQL broker needs MySQL 8.0.1 or MariaDB 10.6; an older
+server fails every lease with `QUEUE_BACKEND_FAILED` (ADR 0151). SQLite
+answers busy at once without a busy timeout. What does kit require, and
+when does it say so?
+
+**Options.**
+
+- **A. One floor for every MySQL database kit opens, checked at start.**
+  `SELECT VERSION()` once, at the database's start, refused below
+  8.0.1 / MariaDB 10.6 with a diagnostic naming the version found.
+  *Cost*: a product on MySQL 5.7 (end of life October 2023) or MariaDB
+  10.5 (end of life June 2025) stops starting even if it publishes nothing.
+  One round trip per start.
+- **B. The floor only where a queue lives on the database.** Same check,
+  refused only when C1 places a queue there. *Cost*: a product may start on
+  an old server and fail later, at its first `Keeps` change that moves a
+  queue there; two floors to document.
+- **C. No check.** The broker's error at the first lease, in a supervised
+  consumer that restarts forever. *Cost*: an outage that looks like a
+  transient failure.
+
+For SQLite, the busy timeout already exists (5 s, `sqlite.go:32`), and a URL
+may write its own. The open question is its relation to kit's own bound:
+`<name>-timeout` defaults to 5 s too (`transact_sql.go:196-203`). With both at
+5 s, a call can reach its context's deadline exactly as SQLite gives up.
+
+**Recommendation: A for MySQL; for SQLite, keep 5 s but derive it from
+`<name>-timeout` minus a margin when the URL writes none.** One floor is one
+sentence in the docs and one refusal at start, and both servers below it are
+out of support. The SQLite busy timeout must stay under the call's bound so
+that a lost race says `SQLITE_BUSY` (a retryable storage failure the
+supervisor handles) rather than a cancelled context. PostgreSQL needs no
+floor beyond docstore's.
+
+### C3 — the journal's key: its own, or derived
+
+**Question.** One data key per journal entry grows `kit.privacy/store/keys`
+by one wrapped key per entry, forever, and a watch reading every record it
+is told of adds one per notice. What does the journal seal under?
+
+**Options.**
+
+- **A. A journal key of its own, one per calendar month**, `"j:2026-10"`, a
+  data key like the others: 32 random bytes, wrapped under `data-key`,
+  filed in the keys store, re-wrapped by `data-key`'s rotation. *Cost*:
+  twelve keys a year; a new key reference kind. *Migration*: none — every
+  box names its key (`seal_erase.go:228-243`, `keyOfBox`), so entries sealed
+  under their own key keep opening, and their keys stay until a later
+  clean-up folds them. *Security*: destroying a month's key is a
+  cryptographic erase of that month's reasons — the journal's own retention,
+  when one is decided, costs one destruction, and the hash chain still
+  verifies (the chain hashes before sealing, `journal.go:29-31`).
+- **B. A key derived from `index-key` or `data-key` by HKDF.** No storage.
+  *Cost*: a derived key cannot be destroyed without destroying its parent;
+  derived from `data-key`'s keyring, every rotation needs `InUse` to keep
+  each version the journal needs, which is every version ever.
+- **C. Seal under `data-key` itself** (a `root:` box, as a message without
+  subject is sealed). *Cost*: `data-key` keeps three versions over 30-day
+  rotations (`seal.go:40-46`): a reason older than ~90 days stops opening
+  unless `InUse` pins every version, which defeats the rotation.
+
+**Recommendation: A.** It is the only option whose growth is bounded, whose
+erasure is possible and whose rotation needs nothing new; the period is a
+month so that a journal retention, when the owner sets one, has a grain
+finer than a year and coarser than a day.
+
+### C4 — the trash: a default age limit, and its value
+
+**Question.** ADR 0143 deferred a trash — a deleted document's last version
+kept for some days — and an age limit on versions. Does kit keep one by
+default, for how long, and what does privacy do with it?
+
+**Options.**
+
+- **A. A trash for every store with `Revisions(n)`, 30 days by default**,
+  a setting `<store>-trash` (0 turns it off). A deletion by the product
+  keeps the record's last version and its versions for 30 days, restorable;
+  a deletion kit makes for privacy — retention's `DeleteAfter`, an erasure,
+  `Records.Delete` — bypasses the trash, and a person's erasure shreds what
+  the trash holds because it is sealed under the same key. *Cost*: the SDK's
+  docstore needs the tombstone ADR 0143 deferred, in both engines — an SDK
+  PR, design first; a store with revisions holds deleted records for a
+  month (space); a re-insert under a trashed key continues its numbering.
+- **B. A trash opt-in only (`kit.Trash(d)`), no default.** *Cost*: the same
+  SDK work for a feature most products will not turn on; an accidental
+  deletion is unrecoverable by default, as today.
+- **C. 7 days by default.** Shorter exposure; too short to notice a
+  deletion made on a Friday by a job nobody watches.
+
+The age limit on versions stays deferred, as ADR 0143 argued: the count
+bound `n` and the record's retention already bound a history, and an age
+pruning needs a sweep or an agenda per store.
+
+**Recommendation: A, 30 days, and only for stores that already keep
+revisions.** A store that asked for history is the one whose owner expects
+to undo; 30 days is WordPress's trash, the model `Revisions` already
+follows, and the privacy bypass keeps retention and erasure exactly as
+strict as today. **(assumed: WordPress's `EMPTY_TRASH_DAYS` default is 30;
+to be cited from its documentation in the PR.)**
+
+### C5 — a `subject` in a list
+
+**Question.** Vigie's endpoints return lists of records whose type has a
+subject, and kit refuses the response type. A subject identifies the one
+person a *record* or a *message at rest* is about; it decides a data key.
+Does it mean anything in a list?
+
+**Options.**
+
+- **A. Refuse a subject in a list only where kit reads one identity**: a
+  store's entity, a topic's message and a queued command's input — the
+  types that rest and are sealed. Accept it in an endpoint's request and
+  response, a query's result, a synchronous command's result and an
+  authenticator's types, where the field is personal data for redaction and
+  nothing else. *Cost*: the judge learns which role a type plays (it
+  already knows the declaration it judges, `classify_walk.go:313`); a type
+  used both as a store's entity and inside a response is judged per role.
+  *Security*: redaction is unchanged — a subject is personal data wherever
+  it sits.
+- **B. Keep refusing; document `wire.Records[T]`** or a projection type
+  without the tag. *Cost*: every product that lists records writes a second
+  type, and Vigie's hand-written JSON in a `personal` field stays.
+- **C. Accept a list of subjects everywhere**, sealing a message under
+  `data-key` itself when it names several people. *Cost*: a person's erasure
+  no longer shreds the messages that mention them among others — a
+  weakening of ADR 0006's promise for a convenience.
+
+**Recommendation: A.** The refusal protects a decision — which key seals
+what rests — that a response never makes; keeping it where that decision is
+made and lifting it where it is not removes Vigie's workaround without
+weakening any erasure.
+
+### C6 — `Records.Keys`, and the watches' catch-up at start
+
+**Question.** A module has no way to list a store's records, and a watch
+cannot recover the notices a crash lost where C1 cannot make them atomic
+(a feeding store on another database than the watch's queue, the data
+directory, memory). What does `Records.Keys` expose, under which
+confidentiality, at what engine cost, and how does the catch-up use it?
+
+**Options for the shape.**
+
+- **A. `Keys(ctx) iter.Seq2[string, error]`**, every key in the store's key
+  order, read in pages of a few hundred underneath. *Exposure*: the keys
+  only, which a module already receives one at a time in
+  `WrittenEvent.Key`; enumeration is new. *Engine cost*: the file engine
+  keeps its documents in memory, so a page is a sorted slice; the SQL engine
+  is `SELECT id … WHERE id > ? ORDER BY id LIMIT ?` on the primary key.
+  **(assumed: that the file engine's key order is reachable without copying
+  every document; to check in `internal/service/data/docstore`.)**
+- **B. `Keys(ctx, after string, limit int) ([]string, string, error)`**, the
+  page made explicit. Same cost; the caller writes the loop.
+- **C. `Changed(ctx, since Cursor)`**, the keys written since a cursor.
+  Exact catch-up, but each engine needs a change sequence it does not keep
+  today (the SQL engine's `rev` counts writes per row, not a store-wide
+  order — ADR 0143), a schema change in both engines and a migration.
+
+**Confidentiality, for A or B.** `Keys` is offered only on a store that
+feeds one of the calling module's watches (the mark already decides what a
+module may hear, `watch.go:181-190`) — any other store answers `Forbidden`.
+A key can itself be personal data (an email as a key): each call — not each
+key — journals one `list` entry, under C3's journal key, naming the store and
+the caller.
+
+**Catch-up.** At a watch's start, after a stop that was not clean — a
+marker kit writes at start and removes at a clean stop — kit queues one
+notice per key of each feeding store whose notices could not be atomic,
+through `Keys`. A clean stop costs nothing; a crash costs one notice per
+record of those stores, which the watch's handler already tolerates (at
+least once, idempotent). A command, `<product> watch replay <watch>`, does
+the same on demand.
+
+**Recommendation: A, offered to watching modules only, and catch-up on an
+unclean stop.** C is the precise tool, but it changes both engines for a
+case C1 makes rare; A costs one method and is what a full re-scan needs
+anyway.
+
+### C7 — `data copy`, the pull requests, and their order
+
+`data copy --to <database>` copies a product's data directory into a
+database: stores, their histories and versions, kit's own stores but the
+data keys when the target is SQLite (they never live there,
+`database_place.go:40-46`), and the waiting and dead messages of each file
+queue C1 moves. It runs with the product stopped, refuses a target whose
+tables hold rows, copies sealed boxes as they are (no key changes hands) and
+verifies by counting. It comes last because it must copy what the other
+pull requests place.
+
+**Options for the split.**
+
+- **A. Small PRs, independent ones first.**
+- **B. One framework PR after the SDK ones.** Easier to review as a whole,
+  impossible to bisect, and blocks Vigie's fix behind the outbox.
+
+**Recommendation: A, in this order.**
+
+1. This ADR.
+2. C5 — the subject in a list (framework only; unblocks Vigie).
+3. C3 — the journal's key (framework only; stops the keys store's growth).
+4. SDK — `mailspool.Config.Broker` and the deferred `EventQueued`
+   (design first, `kit gen`; released on its own as `pkg/v1/app` and
+   `internal`).
+5. C1 + C2 — kit's queues on SQL for topics, queued commands and watches;
+   the two-phase release; the MySQL floor; the SQLite busy timeout tied to
+   `<name>-timeout`; message sealing extended to SQL queues.
+6. C1 for the mailer — the outbox on SQL, sealed (below), after 4.
+7. C6 — `Records.Keys` and the watches' catch-up.
+8. SDK — docstore's tombstone (design first).
+9. C4 — the trash, after 8.
+10. `data copy`, last.
+
+**Sealing the mail outbox (item 6).** kit seals the spool's payload in a
+broker that wraps the one C1 gives the spool — the way `wrapQueue` already
+stands in front of a queue in tests (`consumer.go:57-60`) — under `data-key`
+itself: a mail names no subject kit can read, and a dead letter older than
+`data-key`'s three kept versions stops opening, which suits mail. The
+alternatives were the sending user's key (a system mail to a person would
+not follow that person's erasure) and sealing hooks in the spool's `Config`
+(an SDK surface for one consumer).
+
+## Consequences
+
+- The product with one default database gets every topic publication,
+  queued command, mail and watch notice atomic with its writes; the
+  documented loss "between the commit and the release" remains only where a
+  queue and the transaction are on two different places, and the analyser
+  says where.
+- A publication refused inside the transaction now fails the transaction,
+  where today it is logged after a commit that stands. That is a behaviour
+  change of `kit.Transact`'s doc (`transact.go:49-56`), rewritten in PR 5.
+- `queue.SQLMigration` tables join kit's set and its registry; the
+  database check's rule that two of kit's tables never take one name
+  (`database_check.go:17-18`) covers them.
+- A MySQL older than 8.0.1, or a MariaDB older than 10.6, no longer starts.
+- The keys store stops growing with the journal; the journal can be given a
+  retention later at the grain of a month.
+- A store with revisions keeps deleted records 30 days unless its setting
+  says 0.
+
+## Risks
+
+- **The flush at commit runs product code paths later than today**: a
+  publication's encoding stays at the call, but its `INSERT` happens at the
+  end of the transaction, so a slow queue table lengthens the transaction.
+  Measured in PR 5 against `transact_test.go`'s timings.
+- **Sealing an SQL queue reads `sealsOnDisk`**, which checks the data
+  directory (`seal.go:519`). A product whose queues are all on a database
+  and which has no data directory would seal nothing. **(assumed: that a
+  product with databases always has a data directory outside dev; to check
+  in `app.go` and `database.go` before PR 5.)**
+- **The deferred `EventQueued`** may interact with ADR 0141's waiting for
+  an announcement (C1, assumed above).
+
+## Verified and not yet proved
+
+Verified by reading the code at `55c542da`: every **(verified)** line of the
+Context, with its file and line. Not proved, and owned by the PR that needs
+it: the four **(assumed)** lines — the spool's deferred announcement, the
+file engine's key order, the data directory always present with a
+database, WordPress's 30 days.
+
+## Alternatives considered
+
+The options of each choice above, with why the recommendation was
+preferred. Two more were set aside before the choices:
+
+- **Keeping file queues and adding a crash-recovery scan for every
+  effect.** It would recover watches (C6) but not publications, commands or
+  mail, which carry values no scan can rebuild.
+- **Moving the held effects into the SDK's transactor** (a `Deferrer` for
+  everything). The SDK's `Deferrer` runs after a commit (ADR 0139 §D1); kit's
+  transactions also exist on the data directory and in memory, where no
+  SDK transactor runs.
+
+## References
+
+- Issue #274, and kitsunium/platform#35's hand-over comment it reproduces.
+- `framework/internal/kit`: `transact.go`, `transact_sql.go`, `queued.go`,
+  `topic.go`, `mailer.go`, `watch.go`, `watch_run.go`, `consumer.go`,
+  `journal.go`, `seal.go`, `seal_store.go`, `seal_message.go`,
+  `seal_erase.go`, `records.go`, `classify_plan.go`, `classify_walk.go`,
+  `database_place.go`, `store_sql_migrate.go`.
+- `internal/service/app/mail/spool/spool.go`.
+- `framework/connectors/sqlite/sqlite.go`; `modernc.org/sqlite` v1.59.0,
+  `sqlite.go` (the DSN parameters it reads).
+- MySQL 8.0 Reference Manual, `SKIP LOCKED` (8.0.1); MariaDB 10.6 release
+  notes, `SKIP LOCKED`.
