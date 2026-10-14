@@ -32,6 +32,11 @@ setup() {
   mkdir -p "$REPO"
   cd "$REPO"
   g init -q -b main
+  # Every commit and every push spawns `git maintenance run --auto --detach`
+  # (git 2.47 measured), which outlives the command and takes
+  # objects/maintenance.lock: a teardown's `rm -rf` racing it fails with
+  # "objects: Directory not empty". A disposable repository needs no upkeep.
+  g config maintenance.auto false
   g config user.email "ci@example.invalid"
   g config user.name "ci"
   mkdir -p pkg/v1/resilience internal/service/resilience framework/model docs

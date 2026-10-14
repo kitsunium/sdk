@@ -33,6 +33,11 @@ setup() {
   REPO="$(mktemp -d)"
   cd "$REPO"
   g init -q -b main
+  # Every commit and every push spawns `git maintenance run --auto --detach`
+  # (git 2.47 measured), which outlives the command and takes
+  # objects/maintenance.lock: a teardown's `rm -rf` racing it fails with
+  # "objects: Directory not empty". A disposable repository needs no upkeep.
+  g config maintenance.auto false
   g config user.email "ci@example.invalid"
   g config user.name  "ci"
   mkdir -p pkg/v1 internal/kernel/errs
@@ -134,6 +139,7 @@ release_tag() {
 @test "bootstrap repo with no tags uses root commit as fallback" {
   cd "$(mktemp -d)"
   g init -q -b main
+  g config maintenance.auto false
   g config user.email "ci@example.invalid"
   g config user.name  "ci"
   printf 'go 1.27\n\nuse .\n' >go.work
@@ -149,6 +155,7 @@ release_tag() {
 @test "empty repo with no pkg dirs emits nothing" {
   cd "$(mktemp -d)"
   g init -q -b main
+  g config maintenance.auto false
   g config user.email "ci@example.invalid"
   g config user.name  "ci"
   printf 'go 1.27\n\nuse .\n' >go.work
@@ -290,6 +297,7 @@ STUB
 @test "detached release tag + no new main commits emits nothing (no spurious bump)" {
   cd "$(mktemp -d)"
   g init -q -b main
+  g config maintenance.auto false
   g config user.email "ci@example.invalid"; g config user.name "ci"
   mkdir -p pkg/v1
   printf 'module github.com/kitsunium/sdk\n\ngo 1.27\n' > go.mod
@@ -305,6 +313,7 @@ STUB
 @test "detached release tag + a real pkg change after the base emits the SDK module (.)" {
   cd "$(mktemp -d)"
   g init -q -b main
+  g config maintenance.auto false
   g config user.email "ci@example.invalid"; g config user.name "ci"
   mkdir -p pkg/v1
   printf 'module github.com/kitsunium/sdk\n\ngo 1.27\n' > go.mod
@@ -413,6 +422,7 @@ STUB
 bazel_subtree_fixture() {
   cd "$(mktemp -d)"
   g init -q -b main
+  g config maintenance.auto false
   g config user.email "ci@example.invalid"; g config user.name "ci"
   mkdir -p pkg/v1 internal/kernel/errs
   printf 'module github.com/kitsunium/sdk\n\ngo 1.27\n' > go.mod
