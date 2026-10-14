@@ -7,6 +7,7 @@ permissions:
   contents: read
 jobs:
   rlimit:
+    if: ${{ false }}
     runs-on: windows-latest
     timeout-minutes: 30
     strategy:
@@ -42,13 +43,12 @@ jobs:
   # dereference) against this branch's, alternating on the same host, and each
   # host's CPU and Windows exception-context size recorded (golang/go#81238).
   harness-ab:
-    if: ${{ false }}
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -82,11 +82,18 @@ jobs:
           (cd stock/e2e && go test -c -o "$RUNNER_TEMP/stock.exe" ./harness)
           (cd fixed/e2e && go test -c -o "$RUNNER_TEMP/fixed.exe" ./harness)
           set +e
-          sf=0 ff=0 n=60
-          for i in $(seq 1 $n); do
-            "$RUNNER_TEMP/stock.exe" -test.count=20 > s.txt 2>&1; rc=$?
-            if [ $rc -ne 0 ]; then sf=$((sf+1)); echo "=== stock run $i: exit $rc"; grep -m4 -E 'fatal error|unexpected|--- FAIL|panic|exception' s.txt; [ $sf -le 3 ] && tail -c 3000 s.txt; fi
-            "$RUNNER_TEMP/fixed.exe" -test.count=20 > f.txt 2>&1; rc=$?
-            if [ $rc -ne 0 ]; then ff=$((ff+1)); echo "=== fixed run $i: exit $rc"; grep -m4 -E 'fatal error|unexpected|--- FAIL|panic|exception' f.txt; [ $ff -le 3 ] && tail -c 3000 f.txt; fi
-          done
-          echo "RESULT shard ${{ matrix.shard }}: stock $sf/$n failed, fixed $ff/$n failed (each run -test.count=20)"
+          ctx=$(cd "$RUNNER_TEMP/ctx" && go run . | sed -n 's/.*= \([0-9]*\) bytes.*/\1/p')
+          # Only a host whose exception frame carries the AMX tile state
+          # reproduces (golang/go#81238); the others were measured clean.
+          [ "${ctx:-0}" -ge 8000 ] || { echo "RESULT shard ${{ matrix.shard }}: context $ctx bytes, not an AMX host, skipped"; exit 0; }
+          run() { # run TAG EXE I — one invocation, a hang dumped by -test.timeout
+            timeout 300 "$2" -test.count=20 -test.timeout=120s > "$1.txt" 2>&1; local rc=$?
+            if [ $rc -ne 0 ]; then echo "=== $1 run $3: exit $rc"; grep -m6 -E 'fatal error|unexpected|--- FAIL|panic:|test timed out' "$1.txt"; fi
+            return $rc
+          }
+          ff=0 nf=150
+          for i in $(seq 1 $nf); do run fixed "$RUNNER_TEMP/fixed.exe" $i || ff=$((ff+1)); done
+          echo "RESULT shard ${{ matrix.shard }}: fixed $ff/$nf failed (each run -test.count=20)"
+          sf=0 ns=30
+          for i in $(seq 1 $ns); do run stock "$RUNNER_TEMP/stock.exe" $i || sf=$((sf+1)); done
+          echo "RESULT shard ${{ matrix.shard }}: stock $sf/$ns failed (each run -test.count=20)"
