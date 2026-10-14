@@ -130,3 +130,27 @@ func TestKitDevLabelsOnlyWhatItForced(t *testing.T) {
 		t.Errorf("without kit dev's list, the environment is the environment: %+v", s)
 	}
 }
+
+// The last of kit.InMemory and kit.DataDir given to an app says where its
+// data is: a suite's helper that runs the product in memory runs it on disk
+// with the one option a test adds (kittest.NewDisk), and an InMemory given
+// after a DataDir still keeps everything in memory.
+func TestTheLastOfInMemoryAndDataDirWins(t *testing.T) {
+	getenv := func(string) string { return "" }
+	for _, c := range []struct {
+		name string
+		opts []AppConfigurer
+		want string
+	}{
+		{"a data directory after memory", []AppConfigurer{InMemory(), DataDir("/data")}, "/data"},
+		{"memory after a data directory", []AppConfigurer{DataDir("/data"), InMemory()}, ""},
+	} {
+		var o appOptions
+		for _, opt := range c.opts {
+			opt.appConfigure(&o)
+		}
+		if dir, _ := resolveDataDir(&o, getenv, true); dir != c.want {
+			t.Errorf("%s: the data directory is %q; want %q", c.name, dir, c.want)
+		}
+	}
+}

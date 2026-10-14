@@ -1629,7 +1629,7 @@ Conflict reports a request the resource's current state refuses (409).
 func DataDir(dir string) AppConfigurer
 ```
 
-DataDir sets where stores and queues persist, instead of KIT\_DATA\_DIR.
+DataDir sets where stores and queues persist, instead of KIT\_DATA\_DIR. Given to an app after [InMemory](#InMemory), it wins: the last of the two says where the data is — so a test helper that runs the product in memory runs it on disk with the one option its test gives (kittest.NewDisk).
 
 <a name="Database"></a>
 ## func [Database](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database.go>)
@@ -1861,7 +1861,7 @@ IdleStop makes a daemon stop itself once, for d, no connection was open on any o
 func InMemory() interface{StoreConfigurer; AppConfigurer}
 ```
 
-InMemory keeps data in memory. On an app, it overrides the data directory for every store and queue — what a test wants. On a store, it keeps that store in memory even when the app has a data directory.
+InMemory keeps data in memory. On an app, it overrides the data directory for every store and queue — KIT\_DATA\_DIR, and a [DataDir](#DataDir) given before it: what a test wants. On a store, it keeps that store in memory even when the app has a data directory.
 
 <a name="Index"></a>
 ## func [Index](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/index.go>)
