@@ -8,8 +8,10 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/lifecycle"
 	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 )
 
@@ -43,10 +45,19 @@ var consumerHow string = "on publish · poll " + pollInterval.String()
 // when no retry can help (queue.DoNotRetry).
 func (a *App) openQueue(dir string, maxDeliveries int) (queue.Broker, error) {
 	policy := queue.Policy{VisibilityTimeout: 30 * time.Second, RetryDelay: 500 * time.Millisecond, MaxRetryDelay: loopBackoffMax, MaxDeliveries: maxDeliveries}
+	var (
+		b   queue.Broker
+		err error
+	)
 	if a.dataDir == "" {
-		return queue.NewMemory(queue.MemoryConfig{Clock: a.clock, Policy: policy})
+		b, err = queue.NewMemory(queue.MemoryConfig{Clock: a.clock, Policy: policy})
+	} else {
+		b, err = queue.NewFile(queue.FileConfig{Clock: a.clock, Dir: filepath.Join(a.dataDir, dir), Policy: policy})
 	}
-	return queue.NewFile(queue.FileConfig{Clock: a.clock, Dir: filepath.Join(a.dataDir, dir), Policy: policy})
+	if err != nil || a.wrapQueue == nil {
+		return b, err
+	}
+	return a.wrapQueue(b), nil
 }
 
 // consumer is who runs a queue's deliveries — a subscription, a watch —:
@@ -85,6 +96,61 @@ func (c *consumer) deliver(ctx context.Context, d *queue.Delivery, from origin, 
 		c.loop.ran(a, started, a.clock.Now(), err)
 	}()
 	return handle(ctx, sp)
+}
+
+// supervise runs consume — the consumer's queue.Consume — under the SDK's
+// supervisor (ADR 0112) until the returned supervisor is stopped. Consume
+// returns when its queue's storage fails, which no poll gets out of: the
+// supervisor runs it again after kit's backoff — one second, doubling, up
+// to a minute —, and the consumer's loop shows the failure and counts the
+// restart, where an unsupervised consumer stayed down while its app served.
+// The consumer's goroutine carries its loop's label (dev).
+func (c *consumer) supervise(consume func(context.Context) error) (*lifecycle.Supervisor, error) {
+	a, loop := c.a, c.loop
+	sup, err := lifecycle.NewSupervisor(loop.Name, func(ctx context.Context) error {
+		return consume(a.asLoop(ctx, loop.Name))
+	}, lifecycle.SupervisorConfig{
+		Clock:        a.clock,
+		Backoff:      loopBackoff,
+		HealthyAfter: healthyRun,
+		Observe: func(e lifecycle.SupervisionEvent) {
+			c.observe(&e)
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := sup.Start(context.WithoutCancel(a.baseCtx)); err != nil {
+		return nil, err
+	}
+	return sup, nil
+}
+
+// observe draws what the supervisor did on the consumer's loop. It runs on
+// the supervisor's goroutine, one event at a time. A run is not one of the
+// loop's runs — each delivery is (deliver) —, so only its failure, its
+// restart and the end of the supervision show.
+func (c *consumer) observe(e *lifecycle.SupervisionEvent) {
+	a, loop := c.a, c.loop
+	switch e.Phase {
+	case lifecycle.SupervisionRunStarted:
+		if e.Run > 1 {
+			loop.restarted(a)
+		}
+	case lifecycle.SupervisionRunEnded:
+		if e.Err != nil && !e.Stopping {
+			a.problem(c.node, say("consumer.failed", "node", c.node, "detail", errs.PublicOf(e.Err)))
+			loop.failed(a, e.Err)
+		}
+	case lifecycle.SupervisionRestarting:
+		logger.Warn(context.Background(), a.log, "a consumer stopped; restarting it", logger.String("node", c.node), logger.String("after", e.Delay.String()))
+		loop.idle(a, e.At.Add(e.Delay))
+		loop.setState(a, model.LoopRestarting)
+	case lifecycle.SupervisionStopped:
+		loop.setState(a, model.LoopStopped)
+	default:
+		// Every other phase changes nothing the Studio shows.
+	}
 }
 
 // defaultDeliveries are a consumer's delivery options until one is given:

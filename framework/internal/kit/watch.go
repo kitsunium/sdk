@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/lifecycle"
 	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 )
 
@@ -164,8 +165,9 @@ type FieldRefValue struct {
 // what it hears — the marked fields of each store that feeds it.
 type watchRun struct {
 	broker queue.Broker
-	cancel context.CancelFunc
-	done   chan struct{}
+	// sup runs the watch's consumer while the app runs: the SDK's
+	// supervisor, which restarts it after its queue fails.
+	sup *lifecycle.Supervisor
 	// fields are the marked fields of each store that feeds the watch, by
 	// store ID; unfeed takes the watch off those stores.
 	fields map[string][]FieldRefValue

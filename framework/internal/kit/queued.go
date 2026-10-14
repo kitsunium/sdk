@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/lifecycle"
 	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
@@ -25,8 +26,9 @@ import (
 // commandQueue is a queued command's queue in one run of the app.
 type commandQueue struct {
 	broker queue.Broker
-	cancel context.CancelFunc
-	done   chan struct{}
+	// sup runs the command's consumer while the app runs: the SDK's
+	// supervisor, which restarts it after its queue fails.
+	sup *lifecycle.Supervisor
 
 	mu sync.Mutex
 	// pending are the keys queued or being handled: a dispatch with one of
@@ -249,8 +251,9 @@ func (c *Command[C, R]) handling(a *App, key string) steps[C] {
 // start opens a queued command's queue and starts its consumer; a command
 // that is not queued starts nothing, and is not a component of the app.
 //
-// Goroutine lifecycle: one goroutine consumes the queue until stop cancels its
-// context; it closes q.done, which stop waits for.
+// Goroutine lifecycle: the supervisor's goroutine consumes the queue until
+// stop cancels it and waits for it; a consumer whose queue fails comes back
+// after kit's backoff.
 func (c *Command[C, R]) start(_ context.Context, a *App) error {
 	if !c.opts.queued {
 		return nil
@@ -259,16 +262,18 @@ func (c *Command[C, R]) start(_ context.Context, a *App) error {
 	if err != nil {
 		return failure(CodeCommandQueue, "COMMAND_QUEUE", "a queued command's queue cannot be opened", err, errs.String("command", c.id))
 	}
-	q := &commandQueue{broker: broker, pending: map[string]bool{}, done: make(chan struct{})}
+	q := &commandQueue{broker: broker, pending: map[string]bool{}}
 	loop := a.loop(c.id+" consumer", c.id, model.LoopConsumer, consumerHow)
-	ctx, cancel := context.WithCancel(context.WithoutCancel(a.baseCtx))
-	q.cancel = cancel
 	c.queue.Store(q)
-	go func() {
-		done := q.done
-		defer close(done)
-		c.consume(a.asLoop(ctx, loop.Name), a, q, loop)
-	}()
+	run := consumer{a: a, loop: loop, node: c.id, name: c.name, wake: model.WakeTopic}
+	handler := c.handler(a, q, loop)
+	sup, err := run.supervise(func(ctx context.Context) error { return c.consume(ctx, a, q, handler) })
+	if err != nil {
+		return failure(CodeLoopStart, "LOOP_START", "a queued command's consumer cannot start", err, errs.String("command", c.id))
+	}
+	q.mu.Lock()
+	q.sup = sup
+	q.mu.Unlock()
 	return nil
 }
 
@@ -282,35 +287,31 @@ func (c *Command[C, R]) open(a *App) (queue.Broker, error) {
 // worker handles its batch in turn, so a batch of several would hold
 // dispatches behind a slow one — their leases lapsing — and Parallelism
 // would not say how many run.
-func (c *Command[C, R]) consume(ctx context.Context, a *App, q *commandQueue, loop *loopState) {
-	err := queue.Consume(ctx, q.broker, queue.ConsumerConfig{
-		Handler:             c.handler(a, q, loop),
+func (c *Command[C, R]) consume(ctx context.Context, a *App, q *commandQueue, handler queue.Handler) error {
+	return queue.Consume(ctx, q.broker, queue.ConsumerConfig{
+		Handler:             handler,
 		Clock:               a.clock,
 		PollInterval:        pollInterval,
 		Parallelism:         c.opts.deliveries.parallelism,
 		BatchSize:           1,
 		HandlerIsIdempotent: true,
 	})
-	if err != nil && ctx.Err() == nil {
-		a.problem(c.id, say("command.stopped", "command", c.id, "detail", errs.PublicOf(err)))
-		loop.died(a, err)
-	}
 }
 
 // stop ends a queued command's consumer; what waits in a file queue is
 // handled at the next start.
 func (c *Command[C, R]) stop(ctx context.Context, _ *App) error {
 	q := c.queue.Load()
-	if q == nil || q.cancel == nil {
+	if q == nil {
 		return nil
 	}
-	q.cancel()
-	select {
-	case <-q.done:
+	q.mu.Lock()
+	sup := q.sup
+	q.mu.Unlock()
+	if sup == nil {
 		return nil
-	case <-ctx.Done():
-		return ctx.Err()
 	}
+	return sup.Stop(ctx)
 }
 
 // describeQueue fills what a queued command's node says of its queue: its
