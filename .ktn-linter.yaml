@@ -985,6 +985,23 @@ rules:
       - "**/internal/service/net/server/**"
       - "internal/service/net/server/**"
 
+  # KTN-FUNC-MAXPARAM (phase 5) — "group the parameters in a struct".
+  #
+  # Function-level, never a file: errs.Static(code, reason, public, private,
+  # http, exit) takes six parameters because a struct would defeat what it is
+  # for. Its body is one composite literal so the call inlines and the linker
+  # initialises every sentinel built from constants (ADR 0176); an options
+  # struct or a variadic is exactly what Define carries and Static exists not
+  # to. The six are Define's four plus the two status overrides Define takes as
+  # options. Only this function; every other signature in the package stays
+  # bound by the rule. The rule ignored exclude_functions until
+  # kodflow/ktn-linter#734, fixed by #735 and shipped in v1.46.0 — the minimum
+  # this entry needs (Makefile KTN_LINTER_VERSION).
+  KTN-FUNC-MAXPARAM:
+    exclude_functions:
+      - "**/internal/kernel/errs/error.go:Static"
+      - "internal/kernel/errs/error.go:Static"
+
   # KTN-STRUCT-CTOR (phase 4) — Effective Go's own naming rule wins.
   #
   # The rule wants a struct named Client to be built by NewClient(). This package
