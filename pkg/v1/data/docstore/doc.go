@@ -123,9 +123,11 @@
 //
 // [Store] and [SQLStore] are engines. A caller that must stand a double in for
 // one depends instead on the port it implements: [Collection], [Versioned],
-// [Trashable] and [KeyLister] for a [Store], whose calls take no context,
-// [CollectionContext], [VersionedContext], [TrashableContext] and
-// [KeyListerContext] for a [SQLStore], whose every call takes one, and
+// [Trashable], [KeyLister], [VersionWriter] and [VersionWeigher] for a
+// [Store], whose calls take no context, [CollectionContext],
+// [VersionedContext], [TrashableContext], [KeyListerContext],
+// [VersionWriterContext] and [VersionWeigherContext] for a [SQLStore], whose
+// every call takes one, and
 // [Announcer] — OnWrite and OnDelete — for either. Each pair carries the same
 // methods, the same documents and the same refusals; there is no single port
 // over both, because the file engine waits on nothing a context could abandon
@@ -184,6 +186,19 @@
 // once, which is what an erasure needs, and finds no trashed document. How
 // long a document stays in the trash is the caller's to decide; the store
 // empties nothing by itself.
+//
+// # What the versions weigh
+//
+// VersionWeight says what a store keeps beyond its documents — for a page
+// that shows what a history costs (ADR 0143):
+//
+//	w, err := pages.VersionWeight() // w.Former versions and w.Trashed documents, w.Bytes of JSON
+//
+// A document's current version is the document itself and is not counted.
+// [Store] keeps the weight as a counter every write moves — Stats reports it
+// too — so asking reads no version; [SQLStore] asks its database one
+// aggregate statement over the versions table, which sends back one row. The
+// same writes weigh the same on both.
 //
 // # Keys
 //

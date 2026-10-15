@@ -292,12 +292,63 @@ func (s *Store[T]) setVersions(key string, record *versionsRecord) {
 	if s.keep == 0 {
 		return
 	}
+	//: the weight moves by what the key's record weighs now, less what it
+	//: weighed: a record is never changed once stored, so both are exact.
+	s.weight = record.weighed(s.versions[key].weighed(s.weight, -1), 1)
 	//: none left, or a document the store held before it kept versions.
 	if record == nil {
 		delete(s.versions, key)
 		return
 	}
 	s.versions[key] = record
+}
+
+// weighed is w with what the record weighs added sign times — its former
+// versions, its trashed document, and the bytes of the JSON they hold. A nil
+// record weighs nothing.
+func (r *versionsRecord) weighed(w coredocstore.VersionWeightValue, sign int) coredocstore.VersionWeightValue {
+	//: no record: nothing kept beyond the document.
+	if r == nil {
+		//: as it was.
+		return w
+	}
+	//: summed in 64 bits: an int is 32 on a 32-bit platform.
+	var size int64
+	for i := range r.Former {
+		size += int64(len(r.Former[i].Document))
+	}
+	w.Former += sign * len(r.Former)
+	//: a trashed document weighs as a version does.
+	if r.Trashed != nil {
+		w.Trashed += sign
+		size += int64(len(r.Trashed.Document))
+	}
+	w.Bytes += int64(sign) * size
+	//: moved.
+	return w
+}
+
+// VersionWeight reports what the store keeps beyond its documents — its
+// former versions, its trashed documents and the bytes of their JSON — as
+// core/data/docstore.VersionWeigher says. It reads the counter every
+// write moves, which Stats also reports, and no document.
+// VersionsNotKept on a store that keeps none, StoreClosed after Close.
+func (s *Store[T]) VersionWeight() (coredocstore.VersionWeightValue, error) {
+	//: a store that keeps none weighs no history.
+	if s.keep == 0 {
+		//: VersionsNotKept, naming the store.
+		return coredocstore.VersionWeightValue{}, versionsNotKept(s.path)
+	}
+	s.mu.RLock()
+	w, closed := s.weight, s.closed
+	s.mu.RUnlock()
+	//: a closed store answers nothing.
+	if closed {
+		//: StoreClosed.
+		return coredocstore.VersionWeightValue{}, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
+	}
+	//: the counter, as the last write left it.
+	return w, nil
 }
 
 // now is the instant a version is made at, in UTC, without the monotonic

@@ -10,7 +10,7 @@ import (
 type (
 	// StoreHistory is what a store remembers of its records.
 	// Fields names the fields it keeps former values of; Kept and Bytes weigh
-	// them.
+	// them, and Versions, Trashed and VersionBytes weigh its records' versions.
 	StoreHistory = core.StoreHistoryMessage
 )
 

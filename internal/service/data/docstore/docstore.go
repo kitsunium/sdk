@@ -34,6 +34,9 @@ type Store[T any] struct {
 	// kept versions, and not versioned since, has none here. A record is
 	// never changed once stored: a write stores a new one.
 	versions map[string]*versionsRecord
+	// weight is what versions weigh, moved by every change of versions
+	// (setVersions), so asking reads no record.
+	weight coredocstore.VersionWeightValue
 	// pending names the overlay entries the snapshot does not contain yet.
 	pending map[string]struct{}
 	// clock stamps each version.
@@ -53,8 +56,8 @@ type Store[T any] struct {
 	// writing serialises writers, folds and Close; they hold it across the
 	// filesystem work.
 	writing sync.Mutex
-	// mu guards docs, versions, pending, the index maps, closed, folds and
-	// foldErr: changed under writing AND mu, read under either.
+	// mu guards docs, versions, weight, pending, the index maps, closed, folds
+	// and foldErr: changed under writing AND mu, read under either.
 	mu sync.RWMutex
 	// foldAt is the configured fold threshold.
 	foldAt int
@@ -68,7 +71,8 @@ type Store[T any] struct {
 }
 
 // StatsValue is what a store can say about itself: how many documents it
-// holds, how far its overlay has grown, and how its folds have gone.
+// holds, how far its overlay has grown, how its folds have gone, and what
+// its versions weigh.
 type StatsValue struct {
 	// FoldError is the last automatic fold's failure, nil once a fold
 	// succeeds. The write that triggered the fold succeeded either way — its
@@ -81,6 +85,10 @@ type StatsValue struct {
 	Pending int
 	// Folds is how many folds ran since the store opened, Open's own included.
 	Folds int
+	// Versions is what the store's versions weigh — its former versions, its
+	// trashed documents and their bytes —, a counter every write moves:
+	// zero on a store that keeps none (ADR 0143).
+	Versions coredocstore.VersionWeightValue
 }
 
 // Get returns the document stored under key, or DocumentNotFound.
@@ -288,7 +296,7 @@ func (s *Store[T]) Stats() StatsValue {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	//: one consistent reading.
-	return StatsValue{FoldError: s.foldErr, Documents: len(s.docs), Pending: len(s.pending), Folds: s.folds}
+	return StatsValue{FoldError: s.foldErr, Documents: len(s.docs), Pending: len(s.pending), Folds: s.folds, Versions: s.weight}
 }
 
 // snapshotEntries takes up to limit documents, in key order — all of them

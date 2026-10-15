@@ -35,6 +35,7 @@ func (s *StoreService[T]) historyInfo(a *App) *model.StoreHistory {
 		kept, size := h.weigh(context.Background())
 		info.Kept, info.Bytes = &kept, &size
 	}
+	s.weighVersions(a, info)
 	return info
 }
 

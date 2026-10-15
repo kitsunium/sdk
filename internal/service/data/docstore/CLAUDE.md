@@ -21,7 +21,11 @@ keeps versions also has a trash — `Trash`, `Restore`, `Purge`, `Tombstones` �
 where a trashed document leaves every read and keeps its versions and its
 number. **ADR 0143, amended for ADR 0178 C4.** And both write a document with
 its versions and its trash as they are given — `PutDocument`, for a copy from
-one engine to another. **ADR 0143, amended for ADR 0178's `data copy`.**
+one engine to another. **ADR 0143, amended for ADR 0178's `data copy`.** And
+both say what their versions weigh — `VersionWeight`: the file engine from a
+counter every write moves, which `Stats` reports too, the SQL engine from one
+aggregate statement over the versions table. **ADR 0143, amended for kit's
+Studio.**
 
 Public facade: `pkg/v1/data/docstore`.
 
@@ -31,12 +35,13 @@ versions add `VERSIONS_NOT_KEPT`, `VERSION_NOT_FOUND` and
 `VERSIONS_REWRITE_REFUSED` to both, the trash `DOCUMENT_NOT_TRASHED`,
 `PutDocument` `VERSIONS_INVALID`. The codes
 and sentinels, the values both engines read and return (`EntryValue`,
-`VersionValue`, `StampValue`, `TombstoneValue`), the index declaration both take
+`VersionValue`, `StampValue`, `TombstoneValue`, `VersionWeightValue`), the index declaration both take
 (`IndexSpec`, `Unique`, `Index`) and the ports are declared in
 `internal/core/data/docstore` (ADR 0160): `Collection`, `Versioned` and
-`Trashable`, `KeyLister` and `VersionWriter` for the file engine,
-`CollectionContext`, `VersionedContext`, `TrashableContext`, `KeyListerContext`
-and `VersionWriterContext` for the SQL engine — two families, because the engines differ on the one thing a
+`Trashable`, `KeyLister`, `VersionWriter` and `VersionWeigher` for the file
+engine, `CollectionContext`, `VersionedContext`, `TrashableContext`,
+`KeyListerContext`, `VersionWriterContext` and `VersionWeigherContext` for the
+SQL engine — two families, because the engines differ on the one thing a
 single port would have to fix, a context (ADR 0139 §D2) — and `Announcer`,
 which both implement as they are. This package holds the engines, their
 configurations and the file engine's `StatsValue` (ADR 0074).
@@ -46,25 +51,25 @@ configurations and the file engine's `StatsValue` (ADR 0074).
 | File | Surface |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `docstore.go` | `Store[T]`, `StatsValue`; the reads — `Get`, `List`, `Filter`, `Entries`, `Keys` (the keys above `after`, taken and sorted once under the read lock when the range starts — the map's own strings, no document copied: ADR 0178) and `yieldKeys` (shared: the keys, then a failure once as the last yield), `Lookup`, `Find`, `Stats`; `decode` → `decodeAs` (shared), `jsonCause` (a decoding failure described without a byte of the document) |
+| `docstore.go` | `Store[T]` (its `weight`, the versions' counter), `StatsValue` (`Versions`, that counter); the reads — `Get`, `List`, `Filter`, `Entries`, `Keys` (the keys above `after`, taken and sorted once under the read lock when the range starts — the map's own strings, no document copied: ADR 0178) and `yieldKeys` (shared: the keys, then a failure once as the last yield), `Lookup`, `Find`, `Stats`; `decode` → `decodeAs` (shared), `jsonCause` (a decoding failure described without a byte of the document) |
 | `open.go` | `Open[T](Config[T], ...IndexSpec[T])`; `newStore`; `open` — load, rebuild, THEN fold, so a refused open writes no data |
 | `config.go` | `Config[T]` (`Key`, `FS`, `Clock`, `Held`, `Path`, `FoldAt`, `Versions`), `DefaultFoldAt`; the refusals (`StoreMisconfigured`), `validateIndexes` — over `core/data/docstore.IndexSpec` — and `validateVersions` (shared) |
 | `write.go` | `Put` / `Insert` / `Replace` (the three write modes), `Update`, `Delete`; `prepare` → `encodeAs` (shared, outside every lock) → `commit` / `modify` / `remove` (under the writers' lock) → `persistAndApply`, which computes the versions a write leaves before it persists anything; `encodeCause` |
-| `version.go` | the file engine's `PutStamped` / `InsertStamped` / `ReplaceStamped` / `UpdateStamped`, `Versions`, `Version`, `RewriteVersions`; `versionsRecord` (a record is never changed once stored), `nextVersions` → `pruned` (asks `Held` only when something would go), `checkRewrite` and `pickVersion` (shared), `compactJSON`; the file engine's `PutDocument` (`preparedDocument`, `persistDocument`, `recordOf`) and, shared by both engines, `checkDocument` → `versionProblem`, `documentJSON`, `metaOrNil` and the `VERSIONS_INVALID` problems (ADR 0178) |
+| `version.go` | the file engine's `PutStamped` / `InsertStamped` / `ReplaceStamped` / `UpdateStamped`, `Versions`, `Version`, `RewriteVersions`; `versionsRecord` (a record is never changed once stored), `nextVersions` → `pruned` (asks `Held` only when something would go), `checkRewrite` and `pickVersion` (shared), `compactJSON`; the file engine's `PutDocument` (`preparedDocument`, `persistDocument`, `recordOf`) and, shared by both engines, `checkDocument` → `versionProblem`, `documentJSON`, `metaOrNil` and the `VERSIONS_INVALID` problems (ADR 0178); `setVersions` — the one place a key's record changes, which moves `weight` by what the new record weighs less what the old one did (`versionsRecord.weighed`: its former versions, its trashed document, their bytes) — and `VersionWeight`, that counter read under the read lock |
 | `trash.go` | the file engine's `Trash` / `Restore` / `Purge` / `Tombstones`: a trashed document is its versions record with `Trashed` (`trashedDocument`: the document and the instant), published as one deletion entry that keeps versions; `trashedRecord`, `notTrashed` (shared) |
 | `index.go` | the index maps (`entries`, `owned`), `fileableKeys` (shared: the empty key is no key, a repeated one is filed once), `uniqueTaken`, `file` / `unfile`, `rebuild` on open: every document decoded, checked against its own `Key` (`LOAD_FAILED` otherwise, naming the file via `origin`) and filed; a broken unique index or a panicking key function refuses the open |
 | `persist.go` | the files: `entryName` (SHA-256 of the key), `persist` (one overlay entry per write, the document and its versions), `publish` (PersistFailed vs WriteUnconfirmed), `maybeFold`, `Fold`, `Close`, `fold` / `foldVersions` (the versions file, then the snapshot) / `removeFolded` / `recordFold`, `encodeSnapshot` |
 | `load.go` | `load`: the directories, `readSnapshot`, `replayOverSnapshot` → `readVersions` (refused by a store that keeps none), `readOverlay` / `replay` / `checkEntryVersions`, `versionsWithoutDocument`, `checkRecord`, `compacted`, the crash leftovers removed; it reports whether `open` must fold, and folds nothing itself |
 | `hooks.go` | `OnWrite` / `OnDelete`, called with the key after the write is durable (file engine) or committed (SQL engine), outside every lock |
 | `sql_config.go` | `SQLConfig[T]` (`Key`, `Clock`, `Held`, `Transactor`, `IndexKey`, `Table`, `Dialect`, `Versions`), `MaxSQLTableLen`, `MaxSQLKeyLen`, `MaxSQLIndexNameLen`, the table-name rule (`isTableName`, written out rather than a regular expression compiled at initialisation, held to `^[a-z_][a-z0-9_]*$` by `table_internal_test.go` — #276), `indexTable`, `versionsTable`, the refusals |
-| `sql_dialect.go` | **the only place the SQL engine renders SQL**: every statement per dialect, rendered once at `OpenSQL` (`sqlStatements`: the claim, the version rows' reads under `Dialect.ForUpdate`, the pruning, `keysAfter` — a page of keys alone, for `Keys` — and `trashStatements`' four: the key's lowest row, the trash row's removal, a trashed document's versions, the trash), the five rendered per call (a write's index rows and unique-key check, its version rows, `Reindex`'s shared-key check and unique marking), the DDL of the three tables; every marker, quoted name and row lock is `core/data/sql.Dialect`'s, and `shareLockClause` — MySQL's `LOCK IN SHARE MODE`, the one clause whose choice is this store's isolation reasoning rather than an engine's grammar — is the store's own |
+| `sql_dialect.go` | **the only place the SQL engine renders SQL**: every statement per dialect, rendered once at `OpenSQL` (`sqlStatements`: the claim, the version rows' reads under `Dialect.ForUpdate`, the pruning, `keysAfter` — a page of keys alone, for `Keys` — and `trashStatements`' four: the key's lowest row, the trash row's removal, a trashed document's versions, the trash; and `versionWeight`, one aggregate over the versions table — former rows, trash rows, `LENGTH(doc)` of the binary documents —, for `VersionWeight`), the five rendered per call (a write's index rows and unique-key check, its version rows, `Reindex`'s shared-key check and unique marking), the DDL of the three tables; every marker, quoted name and row lock is `core/data/sql.Dialect`'s, and `shareLockClause` — MySQL's `LOCK IN SHARE MODE`, the one clause whose choice is this store's isolation reasoning rather than an engine's grammar — is the store's own |
 | `sql_store.go` | `OpenSQL`, `SQLStore[T]`; the reads — `Get`, `List`, `Filter`, `Entries`, `Keys` (pages of `keysPageLen` = 256 keys, each one `keysAfter` statement on the primary key resuming after the last key read, on the context's transaction or the pool; no document read, and no trashed one listed, since the trash is a version row — ADR 0178), `Count`, `Lookup`, `Find`; `OnWrite` / `OnDelete`; `failed` (STATEMENT_FAILED + the driver's error through `service/data/sql`'s `Withheld`, its text out of every rendering) |
 | `sql_write.go` | `Put` / `Insert` / `Replace`, `Update`, `UpdateStamped`, `Delete`; `run` (a savepoint of the caller's transaction, a transaction of the store's own, or one statement), `several`, `claimRow` / `lockedReplace` (a store that keeps versions reads what it replaces first), `announce` (hooks through `Deferrer`), the unique check, `mayConflict` and `classify` (a raced collision asked about after the rollback) |
-| `sql_version.go` | the SQL engine's `PutStamped` / `InsertStamped` / `ReplaceStamped`, `Versions` (one LEFT JOIN, and a second for a trashed document), `readVersionRows`, `Version`, `RewriteVersions`; `keepVersions` (the version rows a write leaves, in its transaction), `keepCreation` (a creation's: version 1, after a leftover's rows, or a write over a trashed document), `readHead`, `prune`, `insertVersionRows` (150 a statement), `versionOf`; the SQL engine's `PutDocument` (`preparedDocument`, `putDocument`, `keyTaken` — the key's lowest version row and its document's row, both read locked) |
+| `sql_version.go` | the SQL engine's `PutStamped` / `InsertStamped` / `ReplaceStamped`, `Versions` (one LEFT JOIN, and a second for a trashed document), `readVersionRows`, `Version`, `RewriteVersions`; `keepVersions` (the version rows a write leaves, in its transaction), `keepCreation` (a creation's: version 1, after a leftover's rows, or a write over a trashed document), `readHead`, `prune`, `insertVersionRows` (150 a statement), `versionOf`; the SQL engine's `PutDocument` (`preparedDocument`, `putDocument`, `keyTaken` — the key's lowest version row and its document's row, both read locked); `VersionWeight` — the `versionWeight` statement, one row, on the context's transaction or the pool |
 | `sql_trash.go` | the SQL engine's `Trash` / `Restore` / `Purge` / `Tombstones`: a trashed document is the version row numbered 0 (`tombstoneNum`); `firstVersion` — the key's lowest row, locked — which a creation, `Restore` and `Purge` read |
 | `sql_reindex.go` | `Reindex`: every index row rebuilt from the documents, a page at a time, `INDEX_BROKEN` for a unique key two documents share |
 | `sql_migration.go` | `SQLMigration`: the two tables as one idempotent `core/data/sql` migration the caller numbers; `SQLVersionsMigration`: the versions table, beside it |
-| `docstore_compliance.go` | the compile-time assertions that `Store[T]` implements `core/data/docstore.Collection`, `Versioned`, `Trashable`, `KeyLister` and `VersionWriter`, `SQLStore[T]` `CollectionContext`, `VersionedContext`, `TrashableContext`, `KeyListerContext` and `VersionWriterContext`, and both `Announcer` |
+| `docstore_compliance.go` | the compile-time assertions that `Store[T]` implements `core/data/docstore.Collection`, `Versioned`, `Trashable`, `KeyLister`, `VersionWriter` and `VersionWeigher`, `SQLStore[T]` `CollectionContext`, `VersionedContext`, `TrashableContext`, `KeyListerContext`, `VersionWriterContext` and `VersionWeigherContext`, and both `Announcer` |
 | `BENCH.md` | what a write costs as the file store grows, against the whole-file rewrite it replaces |
 
 ## Why-this-shape
@@ -248,6 +253,33 @@ configurations and the file engine's `StatsValue` (ADR 0074).
   file, and SQL on each dialect — plus a reopen of the file store before and
   after a fold.
 
+### What the versions weigh (ADR 0143, amended for kit's Studio)
+
+- **`VersionWeight()`** answers `VersionWeightValue{Former, Trashed, Bytes}`:
+  the former versions every document keeps — a trashed one's included —, the
+  documents in the trash, and the length of the JSON they hold. A current
+  version is the document and counts in none. A store keeping no versions
+  answers `VERSIONS_NOT_KEPT`.
+- **File engine: a counter, not a scan.** `setVersions` is the one place a
+  key's record changes — every write, a trash, a rewrite, a load — and moves
+  `weight` by what the new record weighs less what the old one did; a record
+  never changes once stored, so both are exact. `VersionWeight` and `Stats`
+  read it under the read lock: 20-30 ns whatever the store holds, where
+  reading every document's versions costs 3 ms at 1 000 documents of ten
+  versions and 60-100 ms at 10 000. A write pays one loop over the versions it
+  already built: no allocation more, within noise (`BenchmarkPutVersioned`).
+- **SQL engine: one aggregate.** `COUNT` of the former rows (`num > 0` holding
+  a document), of the trash rows (`num = 0`), and `SUM(LENGTH(doc))` — `doc`
+  is binary on every engine, so `LENGTH` counts bytes, and a current version's
+  NULL counts in nothing. The database scans the versions table and sends one
+  row: on SQLite 5 ms at 11 000 rows and 53 ms at 110 000, against 130 ms and
+  1.3 s for a recount through `Versions`. A D7 leftover — rows a document
+  deleted while the store kept no versions left behind — weighs what it holds.
+- `weight_external_test.go` runs the contract on every engine — each step's
+  weight recomputed from `Versions` and `Tombstones` —, the file engine's
+  counter in `Stats`, through a reopen after a crash and after a fold, under
+  concurrent writers, and the SQL statement on the context's transaction.
+
 ## Do NOT
 
 - **Persist the file engine's indexes.** Rebuild them. See above.
@@ -294,6 +326,8 @@ The trash is ONE contract run on every engine — memory, file, and SQL on each
 dialect — through an adapter, `trash_external_test.go`, with each engine's
 own cases beside it: `trash_persist_external_test.go` (crash, fold, refused
 files) and `sql_trash_external_test.go` (the row numbered 0, rollbacks).
+What the versions weigh is one contract too, `weight_external_test.go`, every
+step held to a recount through `Versions` and `Tombstones`.
 The same contract runs on SQLite, PostgreSQL 17 and MySQL 8.4 through real
 drivers in `e2e/integration/sql`, under `-tags integration` — see its
 CLAUDE.md.

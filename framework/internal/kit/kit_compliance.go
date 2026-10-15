@@ -142,6 +142,11 @@ var (
 	_ trasher = (*sealedEngine[struct{}])(nil)
 	_ trasher = (*sqlEngine[struct{}])(nil)
 
+	_ versionWeighter = (*docEngine[struct{}])(nil)
+	_ versionWeighter = (*historied[struct{}])(nil)
+	_ versionWeighter = (*sealedEngine[struct{}])(nil)
+	_ versionWeighter = (*sqlEngine[struct{}])(nil)
+
 	_ sealingSource = (*TopicService[struct{}])(nil)
 	_ topicWaker    = (*TopicService[struct{}])(nil)
 	_ typeSource    = (*TopicService[struct{}])(nil)
