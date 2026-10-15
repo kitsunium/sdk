@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T00:00:00Z -->
+<!-- updated: 2026-10-15T00:00:00Z -->
 # framework/internal/service/selfupdate/
 
 ## Purpose
@@ -25,6 +25,7 @@ semver that ADR 0158 §2 routes every version through.
 | `signature.go` | authenticity: detached ed25519 over the manifest, `WithVendorKey`; the check itself is `keys.go`'s, through `pkg/v1/crypto/sign` |
 | `keys.go` | ADR 0150: `WithVendorKeys` (an ordered list, at most four, any key verifies, through `pkg/v1/crypto/sign`), `WithSignatureDomain` (the signed bytes are domain + NUL + manifest, and the manifest must say `# tag` and `# expires`), `checkStatement` — the expiry read against the Service's `pkg/v1/clock` clock, the system one unless a suite injects a manual one |
 | `probe.go` | ADR 0150: `WithProbe` — the previous binary kept as `<binary>.prev` by a hard link (the `linker` sibling of the FileSystem port), the new one run with the product's arguments, `PROBE_FAILED` (`0.3.66.8`) and the rollback |
+| `companions.go` | `WithCompanions` — the other executables of the release archive, replaced with the binary from the same verified bytes as one set: `installedCompanions`, `replaceSet` (stage all, keep all as `.prev`, rename in order, put back on a failed rename or probe) |
 | `checksum.go` | integrity: SHA-256, through `pkg/v1/crypto/hash`, against the ALREADY-AUTHENTICATED manifest |
 | `transport.go` | bounded, https-only redirects and the response read cap |
 | `consent.go` | whether an unrequested upgrade may proceed, and the advice when it may not |
@@ -57,6 +58,8 @@ written by `tools/genindex` from `docs/api`, as every framework package's is
    2. the archive's SHA-256 against the now-trusted manifest entry.
 5. Extract the inner binary from the verified bytes.
 6. Replace atomically: temp file → `chmod 0755` → `os.Rename`.
+   With `WithCompanions` and at least one companion installed beside the
+   binary, step 6 replaces the SET instead (see "Companions" below).
 
 Step 4's order is load-bearing and the suite asserts it.
 
@@ -147,6 +150,34 @@ binary's own name is never absent, which a rename-aside would make it for a
 moment — and a probe that fails renames it back (ADR 0150). A FileSystem
 without the `Link` sibling keeps nothing, and a failed probe then says
 `rolled_back=false`.
+
+### Companions: one archive, one check, one set
+
+A release archive may carry more than the product binary — ktn-linter ships a
+thin hook client, `ktn-hook`, beside it — and replacing only the running binary
+left the two at different versions. `WithCompanions(names...)` names the other
+members. Rules, each pinned in `companions_internal_test.go`:
+
+- **Same verified bytes.** The companions come out of the archive
+  `verifyArchive` already passed; nothing is downloaded a second time, so the
+  one signature and the one digest cover every file installed.
+- **Installed only.** A companion is replaced at its real path (symlinks
+  resolved, as the binary is) when it exists beside the binary; one that does
+  not is never created — installing it is the product's installer's job.
+- **All or none.** Every file is staged (temp in its own directory, closed,
+  `chmod 0755`) before any rename; every installed file is then hard-linked to
+  `<file>.prev`; the renames run binary first; a failed rename, or a failed
+  probe, renames the kept links back over every file already replaced
+  (`ReplacementFailed` / `ProbeFailed`, `rolled_back=` saying whether it all
+  came back). A member the archive lacks is `BinaryNotInArchive` with nothing
+  replaced. Without a probe the `.prev` links are dropped once all stand; with
+  one they are kept, as the single-binary probe keeps the binary's.
+- **Never elevated.** A set is not moved through `sudo -n mv`: a directory the
+  user cannot write, or a FileSystem without the `Link` sibling, refuses it as
+  `StagingFailed` before any rename. Rolling back several privileged moves is a
+  second mechanism nobody asked for.
+- **No companion installed, no change.** The single-binary flow — its OS-temp
+  fallback and its elevation included — runs exactly as before.
 
 ### Keys rotate, a signature names its release, the product may consent
 

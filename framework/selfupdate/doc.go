@@ -75,6 +75,16 @@
 // probe arguments; a probe that fails puts the previous one back
 // (CodeProbeFailed).
 //
+// # Companions: a second executable from the same archive
+//
+// A product that ships more than one executable in its release archive — a
+// thin client beside a daemon — declares the others with
+// Service.WithCompanions. Each one installed beside the running binary is
+// replaced from the archive that was already authenticated, as one set with
+// the binary: every file staged, every previous one kept, then renamed, and a
+// rename or a probe that fails puts back the files already replaced. One that
+// is not installed is not created.
+//
 // # Two limits a caller must know before relying on this
 //
 // **Without a signature domain, a compromised release host can serve an OLDER
