@@ -92,6 +92,8 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type FrameLane](<#FrameLane>)
 - [type GroupID](<#GroupID>)
 - [type HardState](<#HardState>)
+- [type HealthFlags](<#HealthFlags>)
+  - [func \(HealthFlags\) Has\(x HealthFlags\) bool](<#HealthFlags.Has>)
 - [type HealthValue](<#HealthValue>)
 - [type Incarnation](<#Incarnation>)
   - [func \(Incarnation\) IsZero\(\) bool](<#Incarnation.IsZero>)
@@ -192,6 +194,8 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(\*PEMIdentity\) GetCertificate\(\) \(\*tls.Certificate, error\)](<#PEMIdentity.GetCertificate>)
   - [func \(\*PEMIdentity\) ReloadFailures\(\) int](<#PEMIdentity.ReloadFailures>)
   - [func \(\*PEMIdentity\) Roots\(\) \*x509.CertPool](<#PEMIdentity.Roots>)
+- [type PeerFlags](<#PeerFlags>)
+  - [func \(PeerFlags\) Has\(x PeerFlags\) bool](<#PeerFlags.Has>)
 - [type PeerHealthValue](<#PeerHealthValue>)
 - [type PositionValue](<#PositionValue>)
 - [type PreconditionSpec](<#PreconditionSpec>)
@@ -325,6 +329,42 @@ const FlagTruncated coreconsensus.MessageFlags = 8
 The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.FlagTruncated`.
+
+<a name="HealthHasLeader"></a>
+```go
+const HealthHasLeader svcconsensus.HealthFlags = 2
+```
+
+The answers a HealthValue carries, read with HealthFlags.Has.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.HealthHasLeader`.
+
+<a name="HealthQuorumReachable"></a>
+```go
+const HealthQuorumReachable svcconsensus.HealthFlags = 4
+```
+
+The answers a HealthValue carries, read with HealthFlags.Has.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.HealthQuorumReachable`.
+
+<a name="HealthReady"></a>
+```go
+const HealthReady svcconsensus.HealthFlags = 1
+```
+
+The answers a HealthValue carries, read with HealthFlags.Has.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.HealthReady`.
+
+<a name="HealthStopped"></a>
+```go
+const HealthStopped svcconsensus.HealthFlags = 8
+```
+
+The answers a HealthValue carries, read with HealthFlags.Has.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.HealthStopped`.
 
 <a name="LaneControl"></a>
 ```go
@@ -496,6 +536,33 @@ const MsgVoteResp coreconsensus.MessageKind = 4
 The read modes and durabilities.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/app/consensus.MsgVoteResp`.
+
+<a name="PeerSnapshot"></a>
+```go
+const PeerSnapshot svcconsensus.PeerFlags = 4
+```
+
+The facts a PeerHealthValue carries, read with PeerFlags.Has.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerSnapshot`.
+
+<a name="PeerUnreachable"></a>
+```go
+const PeerUnreachable svcconsensus.PeerFlags = 2
+```
+
+The facts a PeerHealthValue carries, read with PeerFlags.Has.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerUnreachable`.
+
+<a name="PeerVoter"></a>
+```go
+const PeerVoter svcconsensus.PeerFlags = 1
+```
+
+The facts a PeerHealthValue carries, read with PeerFlags.Has.
+
+Initialised with `github.com/kitsunium/sdk/internal/service/app/consensus.PeerVoter`.
 
 <a name="ReadIndex"></a>
 ```go
@@ -1777,6 +1844,30 @@ type HardState struct {
 }
 ```
 
+<a name="HealthFlags"></a>
+## type [HealthFlags](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type HealthFlags = svcconsensus.HealthFlags
+```
+
+HealthFlags is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.HealthFlags`, declared as:
+
+```go
+type HealthFlags uint8
+```
+
+<a name="HealthFlags.Has"></a>
+### func \(HealthFlags\) [Has](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/health.go>)
+
+```go
+func (HealthFlags) Has(x HealthFlags) bool
+```
+
+Has reports whether every answer of x is set.
+
 <a name="HealthValue"></a>
 ## type [HealthValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
@@ -3045,6 +3136,30 @@ func (*PEMIdentity) Roots() *x509.CertPool
 ```
 
 Roots returns the trusted CA pool the identity was read with, the union of every CA file seen so far, to pass as TransportConfig.Roots.
+
+<a name="PeerFlags"></a>
+## type [PeerFlags](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type PeerFlags = svcconsensus.PeerFlags
+```
+
+PeerFlags is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.PeerFlags`, declared as:
+
+```go
+type PeerFlags uint8
+```
+
+<a name="PeerFlags.Has"></a>
+### func \(PeerFlags\) [Has](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/health.go>)
+
+```go
+func (PeerFlags) Has(x PeerFlags) bool
+```
+
+Has reports whether every fact of x is set.
 
 <a name="PeerHealthValue"></a>
 ## type [PeerHealthValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)

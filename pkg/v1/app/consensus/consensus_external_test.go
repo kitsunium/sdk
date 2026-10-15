@@ -145,3 +145,21 @@ func TestFacadeThreeNodesInMemory(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// A consumer reads a health verdict by name through the facade: the flags
+// are distinct bits, and Has answers for each.
+func TestHealthFlagsReadByName(t *testing.T) {
+	h := consensus.HealthReady | consensus.HealthHasLeader
+	if !h.Has(consensus.HealthReady) || !h.Has(consensus.HealthHasLeader) || h.Has(consensus.HealthStopped) || h.Has(consensus.HealthQuorumReachable) {
+		t.Fatalf("health flags: %b", h)
+	}
+	p := consensus.PeerVoter | consensus.PeerSnapshot
+	if !p.Has(consensus.PeerVoter) || !p.Has(consensus.PeerSnapshot) || p.Has(consensus.PeerUnreachable) {
+		t.Fatalf("peer flags: %b", p)
+	}
+	var v consensus.HealthValue
+	v.Flags = consensus.HealthStopped
+	if !v.Flags.Has(consensus.HealthStopped) {
+		t.Fatal("a verdict's flags do not read through the facade")
+	}
+}
