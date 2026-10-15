@@ -390,6 +390,7 @@ Package kit — workflows: a state machine over the entities of one store.
   - [func \(Records\) Delete\(ctx context.Context, key string, reason string\) error](<#Records.Delete>)
   - [func \(Records\) EraseFields\(ctx context.Context, key string, reason string, paths ...string\) error](<#Records.EraseFields>)
   - [func \(Records\) Get\(ctx context.Context, key string\) \(json.RawMessage, error\)](<#Records.Get>)
+  - [func \(Records\) Keys\(ctx context.Context\) iter.Seq2\[string, error\]](<#Records.Keys>)
 - [type Revision](<#Revision>)
 - [type Routine](<#Routine>)
 - [type Scope](<#Scope>)
@@ -927,6 +928,17 @@ CodeQueueOpen is CodeQueueOpen.
 Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeQueueOpen`.
 
 Code `0.4.2.8`
+
+<a name="CodeRecordsKeys"></a>
+```go
+const CodeRecordsKeys errs.Code = 262733
+```
+
+CodeRecordsKeys refuses [Records](#Records).Keys to a caller none of whose module's watches the store feeds: only a module that watches a store lists its keys (ADR 0178 C6).
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeRecordsKeys`.
+
+Code `0.4.2.77`
 
 <a name="CodeResealInPlace"></a>
 ```go
@@ -4057,7 +4069,7 @@ type QueryOption interface {
 <a name="Records"></a>
 ## type [Records](<https://github.com/kitsunium/sdk/blob/main/framework/kit/records.go>)
 
-Records is one store's records without their type. Get returns a record without its secret members; EraseFields and Delete take a reason and are refused on a held record. Each call is a span on the store's node and an entry in the privacy journal.
+Records is one store's records without their type. Get returns a record without its secret members; Keys lists the records' keys, to a module that watches the store; EraseFields and Delete take a reason and are refused on a held record. Each call is a span on the store's node and an entry in the privacy journal.
 
 ```go
 type Records = ikit.RecordsService
@@ -4095,6 +4107,15 @@ func (Records) Get(ctx context.Context, key string) (json.RawMessage, error)
 ```
 
 Get returns the record under key as JSON, its secret members left out.
+
+<a name="Records.Keys"></a>
+### func \(Records\) [Keys](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/records.go>)
+
+```go
+func (Records) Keys(ctx context.Context) iter.Seq2[string, error]
+```
+
+Keys yields the key of every record the store holds, in key order, and nothing of a record: what a watch reads to catch up on the writes it may have missed. It is offered only to a module one of whose watches the store feeds — any other caller, code outside a module's node included, is refused with a [Forbidden](#Forbidden) error ([CodeRecordsKeys](#CodeRecordsKeys)) —, and each listing is one entry in the privacy journal, however many keys it yields. A record in the store's trash is not listed. A failure is yielded once, with an empty key, and ends the listing.
 
 <a name="Revision"></a>
 ## type [Revision](<https://github.com/kitsunium/sdk/blob/main/framework/kit/revisions.go>)
@@ -4496,7 +4517,7 @@ Topic declares a topic carrying messages of type T.
 func (*Service) Watch(name string, mark Mark, handler func(context.Context, WrittenEvent) error, opts ...SubscriptionConfigurer) *Watch
 ```
 
-Watch declares a watch of the service: handler is told of every write kit confirms on a store whose entity holds a field that carries mark — the product's stores and the other modules', never those of the module the service belongs to (for a service of the product's, never the product's own) unless [OwnStores](#OwnStores) says so. The notice says which store, which record and whether it was deleted; the handler reads the record itself ([RecordsOf](#RecordsOf)). Delivery is at least once and in no set order, retried and dead-lettered after [MaxDeliveries](#MaxDeliveries) attempts: handler must be idempotent, and it hears the writes it makes itself on another's store — with OwnStores, never a write its own handler makes.
+Watch declares a watch of the service: handler is told of every write kit confirms on a store whose entity holds a field that carries mark — the product's stores and the other modules', never those of the module the service belongs to (for a service of the product's, never the product's own) unless [OwnStores](#OwnStores) says so. The notice says which store, which record and whether it was deleted; the handler reads the record itself ([RecordsOf](#RecordsOf)). Delivery is at least once and in no set order, retried and dead-lettered after [MaxDeliveries](#MaxDeliveries) attempts: handler must be idempotent, and it hears the writes it makes itself on another's store — with OwnStores, never a write its own handler makes. After a stop that was not clean — the process died with the watch running —, its next start queues a notice for every record of every store that feeds it, so that no write a crash took the notice of goes unheard; a deletion whose notice was lost is not among them. The mark that says a watch runs is kept in the data directory: an app without one does not catch up (ADR 0178 C6).
 
 ```
 var Content = Service.Watch("content", kit.Moderated, Screen)

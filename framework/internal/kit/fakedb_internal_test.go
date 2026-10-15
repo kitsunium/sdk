@@ -619,6 +619,15 @@ func docRowStatement(t *fakeTable, query string, args []driver.NamedValue, arg f
 			out.rows = append(out.rows, []driver.Value{[]byte(k), slices.Clone(t.rows[k].doc)})
 		}
 		return out, 0, nil
+	case strings.HasPrefix(query, "SELECT doc_key FROM ") && strings.Contains(query, "doc_key >"):
+		// A page of keys alone (docstore.KeyListerContext): no document.
+		after := string(arg(0))
+		keys := slices.DeleteFunc(slices.Sorted(maps.Keys(t.rows)), func(k string) bool { return k <= after })
+		out := &fakeRows{cols: []string{"doc_key"}}
+		for _, k := range keys[:min(int(args[1].Value.(int64)), len(keys))] {
+			out.rows = append(out.rows, []driver.Value{[]byte(k)})
+		}
+		return out, 0, nil
 	case strings.HasPrefix(query, "SELECT COUNT(*) FROM "):
 		return one("count", int64(len(t.rows))), 0, nil
 	case strings.HasPrefix(query, "SELECT 1 FROM "):
