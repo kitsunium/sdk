@@ -107,7 +107,6 @@ the package comment is `doc.go`'s alone, written by kit from the design (ADR 016
 | `value.go` | `EntryValue` (a document as JSON, with its key), `VersionValue` (`Number` from 1, `At`, `Meta`, `JSON`), `StampValue` (`Meta`, `InPlace`), `TombstoneValue` (`Key`, `At`), `VersionWeightValue` (`Former`, `Trashed`, `Bytes`) |
 | `index.go` | `IndexSpec[T]` (`Keys`, `Name`, `Unique`) and its two constructors, `Unique` — one key, the empty key filed as none, a nil function kept nil for the engine to refuse by name — and `Index` |
 | `codes_gen.go` | `0.3.80.1`–`0.3.80.22` and their twenty-two sentinels — written by kit gen from `design/data/docstore.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `exitConfig`, `exitDataErr`, `exitIOErr`, `exitTempFail`, `httpBadRequest`, `httpNotFound`, `httpConflict`, `httpInternalServerError`, `httpServiceUnavailable` |
 | `docstore_external_test.go` | one double per port holding exactly its methods (the ADR 0039 guard), every sentinel's code, reason, exit status and HTTP status, and the index declarations |
 
 `internal/service/data/docstore/docstore_compliance.go` asserts at compile time
@@ -146,9 +145,9 @@ Range `0.3.80.*`, shared by both engines — a caller that maps them maps both:
 | `0.3.80.21` | `DocumentNotTrashed` (ADR 0143, amended for ADR 0178) | 404 | 70 |
 | `0.3.80.22` | `VersionsInvalid` (ADR 0143, amended for ADR 0178's `data copy`) | 400 | 70 |
 
-The HTTP statuses are integers named after their status (`httpNotFound int =
-404`, …) rather than `net/http` constants: a core package does not import
-`net/http` to read five numbers (ADR 0160). The Privates still begin
+The HTTP statuses are the sentinels' `http:` fields in `design/data/docstore.yaml`,
+plain integers rather than `net/http` constants: a core package does not import
+`net/http` to read five numbers (ADR 0160, ADR 0176). The Privates still begin
 `service/data/docstore:`, because that is where every one of them is emitted.
 
 ## Do NOT

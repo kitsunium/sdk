@@ -181,9 +181,8 @@ packages:
               declaration ADR 0031 refuses. A name an operator can type that does
               nothing looks configured, reports success, and is discovered only by
               somebody wondering why the tool did not do the thing.
+            exit: CONFIG
             name: InvalidCommand
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/cli: blank or unreachable name, missing summary, or neither Run nor Commands; the fields name the path and the clause"
             public: The command declaration is not runnable and was refused
             reason: INVALID_COMMAND
@@ -199,9 +198,8 @@ packages:
               declaration whose meaning depends on which siblings exist today is the
               same class of failure as prefix matching, and it is refused for the same
               reason.
+            exit: CONFIG
             name: AmbiguousCommand
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/cli: Run and Commands are both set; adding a child would silently change what an existing command line means"
             public: A command may declare an action or sub-commands, not both
             reason: AMBIGUOUS_COMMAND
@@ -210,9 +208,8 @@ packages:
               DuplicateCommand is returned by the constructor when two children of one
               group share a name. The resolver stops at the first match, so the second
               declaration would be unreachable code that looks reachable.
+            exit: CONFIG
             name: DuplicateCommand
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/cli: sibling names are unique per group; the fields carry the parent path and the repeated name"
             public: Two sub-commands are declared under the same name
             reason: DUPLICATE_COMMAND
@@ -227,9 +224,8 @@ packages:
               from "the operator got it wrong" (exit 64). A command that binds -h
               takes that signal away, and the engine would report a successful parse
               where an operator expected a help page.
+            exit: CONFIG
             name: ReservedFlag
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/cli: a Binder bound h or help; the engine needs flag.ErrHelp to tell a help request from a usage error"
             public: The flag names -h and -help are answered by the SDK
             reason: RESERVED_FLAG
@@ -243,14 +239,13 @@ packages:
               the complete answer, cannot be wrong, and costs no edit-distance table
               to keep correct. A suggestion is a second answer that can differ from
               the first.
+            exit: USAGE
             name: UnknownCommand
             note: |-
               The engine's verdicts on a command line, raised by internal/service/app/cli
               as it resolves an argument vector and runs the command it names. They are
               declared here, with the declaration refusals, so that the domain's codes and
               sentinels are in one place (ADR 0160).
-            options:
-              - errs.WithExitCode(exitUsage)
             private: "service/app/cli: the token names no child of this group; the fields carry the group path and the token"
             public: That sub-command does not exist
             reason: UNKNOWN_COMMAND
@@ -262,9 +257,8 @@ packages:
               It is a failure and not a quiet success on purpose: a group declares no
               action, so `tool db` did nothing, and a script that read exit status 0
               there would treat "I forgot the verb" as "the migration ran".
+            exit: USAGE
             name: MissingCommand
-            options:
-              - errs.WithExitCode(exitUsage)
             private: "service/app/cli: a group has no action of its own; the field carries the group path and its help was written"
             public: This command needs a sub-command
             reason: MISSING_COMMAND
@@ -275,9 +269,8 @@ packages:
               flag's own message quotes the operator's value ("invalid value \"abc\"
               for flag -n"), so it lives in a field and in Private and never in
               Public, which is the wire-safe half.
+            exit: USAGE
             name: InvalidFlags
-            options:
-              - errs.WithExitCode(exitUsage)
             private: "service/app/cli: flag.FlagSet.Parse refused the vector; the fields carry the command path and flag's own text"
             public: The flags for this command could not be parsed
             reason: INVALID_FLAGS
@@ -304,9 +297,8 @@ packages:
               Only the -h path returns it. After a bad command line the usage error is
               the verdict and the help is the actionable half of it, so a failed write
               there does not replace the status the operator's mistake earned.
+            exit: IOERR
             name: HelpWriteFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "service/app/cli: the diagnostic stream refused the help -h asked for, or took part of it; the fields carry the command path"
             public: The help could not be written
             reason: HELP_WRITE_FAILED
@@ -709,8 +701,9 @@ packages:
       # The exit status
 
       The status is carried by the SDK's existing error model and NOT by a second
-      convention: a sentinel declares it with errs.WithExitCode and a caller reads
-      it with errs.ExitCodeOf. [Status] is the single guard on top of that, and it
+      convention: a sentinel declares it (its design's exit: field, or
+      errs.WithExitCode) and a caller reads it with errs.ExitCodeOf. [Status] is
+      the single guard on top of that, and it
       exists for one sharp reason: errs.ExitCodeOf(nil) is 70, because it answers
       "what status does this error map to" and nil is not an error. Passing a
       successful Execute straight into it would exit 70 on every success.

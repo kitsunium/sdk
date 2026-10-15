@@ -509,9 +509,8 @@ packages:
             reason: CTX_CANCELLED
           - code: CodeWriteFailed
             doc: WriteFailed wraps the underlying writer's error at Handle time.
+            exit: IOERR
             name: WriteFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: service/observe/logger.TextHandler.Handle underlying writer returned an error
             public: Log write failed
             reason: WRITE_FAILED

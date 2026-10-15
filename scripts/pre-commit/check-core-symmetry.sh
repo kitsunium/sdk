@@ -27,9 +27,10 @@
 #
 # A Go package is what the go tool builds: a directory holding a non-test .go
 # file, testdata and names starting with "." or "_" skipped (the same reading
-# as check-domain-docs.sh). A file DECLARES A CODE when it calls Define on
-# internal/kernel/errs under any import name (errs.Define, kerrs.Define, a dot
-# import's bare Define), or declares a Code constant the way
+# as check-domain-docs.sh). A file DECLARES A CODE when it calls Define, or
+# its static sibling Static (ADR 0176), on internal/kernel/errs under any
+# import name (errs.Define, kerrs.Static, a dot import's bare Define), or
+# declares a Code constant the way
 # check-audit-coverage.sh counts one — a re-export (`CodeX errs.Code =
 # core.CodeX`) allocates nothing and is not one. Full-line comments are not
 # read, and neither is a _test.go file: an audit fixture declares codes on
@@ -215,9 +216,9 @@ declares() {
 	while IFS= read -r name; do
 		[ -n "$name" ] || continue
 		if [ "$name" = "." ]; then
-			pattern='(^|[^[:alnum:]_.])Define[[:space:]]*\('
+			pattern='(^|[^[:alnum:]_.])(Define|Static)[[:space:]]*\('
 		else
-			pattern="(^|[^[:alnum:]_.])${name}\\.Define[[:space:]]*\\("
+			pattern="(^|[^[:alnum:]_.])${name}\\.(Define|Static)[[:space:]]*\\("
 		fi
 		status=0
 		grep -qE "$pattern" <<<"$body" || status=$?

@@ -52,7 +52,6 @@ are different statements about different guarantees.
 | `events_subscription.go` | `Priority` + `PriorityNormal`, `SubscriptionValue` — `Name` / `Priority` / `MayHalt` / `Listener` |
 | `events_dispatch.go` | `DispatchValue` — `Delivered` / `Failed` / `Halted` / `HaltedBy` / `Skipped` |
 | `codes_gen.go` | `Code*` constants — ranges 0.2.22.* and 0.3.52.*; `InvalidSubscription` / `DuplicateListener` / `UnknownListener` / `InvalidEventType` / `ListenerPanicked` / `Halt`, and the dispatch verdicts `ListenerFailed` / `HaltNotPermitted` (`errs.Define`) — written by kit gen from `design/app/events.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `exitConfig` |
 
 ## Conventions
 

@@ -10,7 +10,6 @@ go_library(
         "design_gen.go",
         "doc.go",
         "entry.go",
-        "errors.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/data/cache",
     visibility = [

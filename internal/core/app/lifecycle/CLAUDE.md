@@ -31,7 +31,6 @@ whose header digests `make api-check` verifies. It moved there from
 | `lifecycle_component.go` | `ComponentValue` — `Name` / `Start` / `Stop` |
 | `lifecycle_phase.go` | `Phase` + `PhaseStart` / `PhaseStop` + `String()`, and `TransitionValue` — `Name` / `Phase` / `Begun` / `Ended` / `TimedOut` / `Err` |
 | `codes_gen.go` | `Code*` constants — ranges 0.2.19.* and 0.3.49.*; `InvalidComponent` / `DuplicateComponent` / `LifecycleRunning` / `ComponentPanicked`; the run outcomes `StartFailed` / `StopFailed` / `StopTimeout` / `UnwindFailed` / `ReadinessFailed`; the supervisor's `RunPanicked` / `SupervisorMisconfigured` / `SupervisorRunning` (`errs.Define`) — written by kit gen from `design/app/lifecycle.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `exitConfig`, `exitTempFail` |
 
 ## Conventions
 

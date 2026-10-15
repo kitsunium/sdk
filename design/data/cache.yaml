@@ -325,9 +325,8 @@ packages:
               configuration still answers every call correctly, it just never HOLDS
               anything, and nothing downstream can tell the difference between that
               and a genuinely cold workload.
+            exit: CONFIG
             name: CacheMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/data/cache: a store constructor received a capacity or a default TTL it cannot honour; the fields name the option and the value"
             public: The cache cannot be built from the given configuration
             reason: CACHE_MISCONFIGURED
@@ -361,9 +360,8 @@ packages:
               would be read by the underlying primitive as "no expiry" — so the three
               silent outcomes of accepting them are an entry nobody meant to write, an
               entry nobody can invalidate, and an entry that never goes away.
+            exit: DATAERR
             name: CacheEntryRejected
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/data/cache: Set received an empty key, an empty tag, or a negative TTL that is not cache.NoExpiry; the fields name the offending part"
             public: The cache entry is not storable as given
             reason: CACHE_ENTRY_REJECTED
@@ -381,9 +379,8 @@ packages:
               serving it until its TTL runs out. A tag invalidation that silently
               misses one copy is worse than one that was never offered — so the chain
               refuses to be built rather than degrade at the moment nobody is looking.
+            exit: CONFIG
             name: CacheChainMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/data/cache: NewChain received fewer than two tiers, a nil tier, or a tier that does not implement EntryFetcher and Tagger; the fields name the position and the missing capability"
             public: The cache chain cannot be built from the given tiers
             reason: CACHE_CHAIN_MISCONFIGURED

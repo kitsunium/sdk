@@ -510,9 +510,8 @@ packages:
 
               The Public names no value. "Subject" is safe to say; the string an
               attacker put in it is not.
+            exit: NOPERM
             name: HeaderInjection
-            options:
-              - errs.WithExitCode(exitNoPerm)
             private: "core/app/mail: header name or value contains CR, LF or NUL — RFC 5322 §2.2 ends a field at CRLF, so the remainder would become headers the caller never wrote; refused, never sanitised"
             public: A message header contains a line break and was refused
             reason: HEADER_INJECTION
@@ -521,17 +520,15 @@ packages:
               InvalidAddress is returned for an addr-spec outside the dot-atom subset
               of RFC 5322 §3.4.1 this domain accepts, or outside the RFC 5321 §4.5.3.1
               octet limits (64 for the local part, 255 for the domain).
+            exit: DATAERR
             name: InvalidAddress
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/mail: addr-spec is empty, has no single @, carries a space, angle bracket or control byte, or exceeds the RFC 5321 §4.5.3.1 length limits"
             public: A mail address in that message is not usable
             reason: INVALID_ADDRESS
           - code: CodeMissingSender
             doc: MissingSender is returned for a Message whose From carries no address.
+            exit: DATAERR
             name: MissingSender
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/mail: Message.From is the zero Address; RFC 5322 §3.6 makes the originator field mandatory and there is no defensible default"
             public: A message must name the mailbox it is from
             reason: MISSING_SENDER
@@ -542,9 +539,8 @@ packages:
               The refusal happens before any socket is opened. An SMTP session with no
               RCPT TO cannot succeed, so the only thing dialling first would buy is a
               slower, less specific failure.
+            exit: DATAERR
             name: NoRecipients
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/mail: To, Cc and Bcc are all empty, so the SMTP session would have no RCPT TO to issue"
             public: A message must name at least one recipient
             reason: NO_RECIPIENTS
@@ -552,9 +548,8 @@ packages:
             doc: |-
               EmptyBody is returned for a Message with no text, no HTML and no
               attachment — ADR 0031's refusing half, applied to content.
+            exit: DATAERR
             name: EmptyBody
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/mail: Text, HTML and Attachments are all empty; a zero body is an unfilled struct rather than a decision to send nothing"
             public: A message must carry text, HTML or an attachment
             reason: EMPTY_BODY
@@ -568,9 +563,8 @@ packages:
               leaves every receiver free to pick a different one. And spelling "Bcc"
               by hand is the injection this domain exists to stop, arriving through the
               front door instead.
+            exit: DATAERR
             name: ReservedHeader
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/mail: Headers names a composer-owned field (From, To, Cc, Bcc, Reply-To, Subject, Date, Message-ID, MIME-Version or a Content-* field)"
             public: That header is set by the mail composer and cannot be overridden
             reason: RESERVED_HEADER
@@ -580,9 +574,8 @@ packages:
               render: no filename, an unparseable media type, a malformed Content-ID,
               or an inline part in a message with no body for its cid: to be
               referenced from.
+            exit: DATAERR
             name: InvalidAttachment
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/mail: attachment has no filename, an unparseable media type, a Content-ID outside the RFC 2392 §2 grammar, or is inline in a message with no text or HTML body to reference it"
             public: An attachment on that message is not usable
             reason: INVALID_ATTACHMENT
@@ -595,9 +588,8 @@ packages:
               removes the CRLF and keeps the whitespace, so the value survives exactly.
               A token with no whitespace in it has no legal fold point, and truncating
               it would deliver a different value while reporting success.
+            exit: DATAERR
             name: HeaderTooLong
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/mail: a header line exceeds the RFC 5322 §2.1.1 limit of 998 octets and contains no whitespace to fold at; refused rather than truncated"
             public: A message header is too long to fold and was refused
             reason: HEADER_TOO_LONG
@@ -611,9 +603,8 @@ packages:
               not negotiate it, and the alternative to refusing is punycoding a domain
               or dropping accents from a local part — which delivers, silently, to a
               different mailbox.
+            exit: UNAVAILABLE
             name: UnsupportedAddress
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "core/app/mail: non-ASCII addr-spec (RFC 6531 SMTPUTF8) or quoted local-part; refused by name rather than transliterated into a deliverable but different address"
             public: That address form is not supported by this mail transport
             reason: UNSUPPORTED_ADDRESS
@@ -626,6 +617,7 @@ packages:
               an encoder or a media-type parser refused something those guards
               accepted — which is a defect in the composer, not in the caller's
               message.
+            exit: DATAERR
             name: ComposeFailed
             note: |-
               The outcomes of composition and of the SMTP session, raised by
@@ -634,8 +626,6 @@ packages:
               (ADR 0160). A server's reply text is third-party data of unbounded length
               that this SDK did not write; it travels as a log-only field and never into
               a message a caller might render.
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "service/app/mail: a MIME encoder, a multipart writer or mime.ParseMediaType refused input the core/app/mail guards accepted — the cause travels as a field"
             public: The message could not be assembled into a MIME body
             reason: COMPOSE_FAILED
@@ -650,9 +640,8 @@ packages:
               a private network, and choosing none silently ships credentials in the
               clear for everyone else. ADR 0031's refusing half, applied where the
               SDK genuinely cannot know.
+            exit: CONFIG
             name: InvalidConfig
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/mail: empty Host, Port outside 1-65535, or TLS left at its zero value — the zero is refused because neither 'encrypt' nor 'do not' is a safe guess (ADR 0031)"
             public: The SMTP transport configuration is not usable as written
             reason: INVALID_CONFIG
@@ -660,9 +649,8 @@ packages:
             doc: |-
               DialFailed is returned when the TCP connection was never established, or
               was severed by the caller's context before the greeting.
+            exit: 68
             name: DialFailed
-            options:
-              - errs.WithExitCode(exitNoHost)
             private: "service/app/mail: TCP dial failed, timed out, or the context was cancelled before the SMTP greeting; the dial error travels as a field"
             public: The mail server could not be reached
             reason: DIAL_FAILED
@@ -671,9 +659,8 @@ packages:
               GreetingFailed is returned when the connection opened and the SMTP
               conversation did not: a refused greeting, a refused EHLO, a QUIT the
               server never acknowledged.
+            exit: TEMPFAIL
             name: GreetingFailed
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "service/app/mail: the 220 greeting, the EHLO/HELO exchange or the closing QUIT was refused or malformed; the server reply travels as a field"
             public: The mail server did not accept the SMTP conversation
             reason: GREETING_FAILED
@@ -688,9 +675,8 @@ packages:
               advertisement and reads everything, including the credentials, while the
               caller's logs show a successful send. There is no configuration here
               that produces that behaviour, and adding one is not a feature request.
+            exit: NOPERM
             name: TLSRequired
-            options:
-              - errs.WithExitCode(exitNoPerm)
             private: "service/app/mail: TLSStartTLS was configured and the EHLO response advertised no STARTTLS extension; refused, never downgraded to cleartext"
             public: The mail server did not offer the encryption this transport requires
             reason: TLS_REQUIRED
@@ -699,9 +685,8 @@ packages:
               TLSFailed is returned when STARTTLS or the implicit handshake was
               attempted and did not complete: a refused command, an untrusted chain, a
               name that does not match.
+            exit: NOPERM
             name: TLSFailed
-            options:
-              - errs.WithExitCode(exitNoPerm)
             private: "service/app/mail: the STARTTLS command was refused, or the TLS handshake failed on trust, name or version; the handshake error travels as a field"
             public: The connection to the mail server could not be encrypted
             reason: TLS_FAILED
@@ -718,9 +703,8 @@ packages:
               That is defensible for the stdlib's audience and indefensible for a
               transport in a container, where the relay one hop away IS 127.0.0.1 and
               the network between them is a bridge somebody else can join.
+            exit: NOPERM
             name: AuthInsecure
-            options:
-              - errs.WithExitCode(exitNoPerm)
             private: "service/app/mail: Username is set on a session that is not encrypted; refused before the AUTH command is written, including for a localhost relay where net/smtp.PlainAuth would have sent it"
             public: Credentials cannot be sent over an unencrypted mail session
             reason: AUTH_INSECURE
@@ -728,9 +712,8 @@ packages:
             doc: |-
               AuthFailed is returned when the server rejected the credentials, or
               advertised no AUTH mechanism to offer them through.
+            exit: NOPERM
             name: AuthFailed
-            options:
-              - errs.WithExitCode(exitNoPerm)
             private: "service/app/mail: the AUTH exchange was refused, or the EHLO response advertised no AUTH extension; the server reply travels as a field and the credential never leaves this process's memory"
             public: The mail server rejected the credentials
             reason: AUTH_FAILED
@@ -742,9 +725,8 @@ packages:
               It carries the SMTP reply as a log-only field, never as Public: a reply
               is third-party text of unbounded length that may name a recipient, and
               Public is the half that travels to strangers.
+            exit: TEMPFAIL
             name: SendRefused
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "service/app/mail: MAIL FROM, RCPT TO or DATA was answered with a failure reply; the command and the server's reply travel as log-only fields"
             public: The mail server refused the message
             reason: SEND_REFUSED
@@ -755,9 +737,8 @@ packages:
               in its userinfo, and every part of it — the host, the port, a parameter
               name — is quoted by no refusal, because a URL that failed to parse is
               exactly the one whose parts are not where they should be.
+            exit: CONFIG
             name: InvalidURL
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/mail: ParseURL refused the URL; the problem field names the clause, and the URL itself is never repeated because it carries the password"
             public: The SMTP URL is not usable as written
             reason: INVALID_URL

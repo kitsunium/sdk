@@ -2,8 +2,9 @@ package console
 
 import "testing"
 
-// Test_exitIOErr pins the EX_IOERR sentinel used by WriteFailed so future
-// refactors do not silently switch the documented exit code.
+// Test_exitIOErr pins the EX_IOERR exit status WriteFailed carries — the
+// design's `exit: IOERR` (ADR 0176) — so a design edit cannot silently switch
+// the documented exit code.
 func Test_exitIOErr(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -15,8 +16,8 @@ func Test_exitIOErr(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if exitIOErr != tc.want {
-				t.Errorf("exitIOErr = %d, want %d", exitIOErr, tc.want)
+			if got := WriteFailed.ExitCode(); got != tc.want {
+				t.Errorf("WriteFailed.ExitCode() = %d, want %d", got, tc.want)
 			}
 		})
 	}

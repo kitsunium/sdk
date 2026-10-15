@@ -456,9 +456,8 @@ packages:
             doc: |-
               NotFound is returned by Load, and by Regenerate, for an identifier that
               names no live session.
+            http: 401
             name: NotFound
-            options:
-              - errs.WithHTTPStatus(httpUnauthorized)
             private: "core/security/session: no live record under the presented identifier's digest — never minted, destroyed, or swept"
             public: No session matches that identifier
             reason: NOT_FOUND
@@ -470,9 +469,8 @@ packages:
               NotFound is a store that is losing records. Telling them apart leaks
               nothing usable: an identifier is 256 random bits, so an attacker cannot
               reach either answer by guessing.
+            http: 401
             name: Expired
-            options:
-              - errs.WithHTTPStatus(httpUnauthorized)
             private: "core/security/session: the record's effective deadline — the earlier of the idle and absolute deadlines — is in the past; the record is dropped as this is reported"
             public: That session has expired
             reason: EXPIRED
@@ -480,9 +478,8 @@ packages:
             doc: |-
               InvalidID is returned by ParseID and NewID for a malformed identifier,
               and by any Store method handed the zero ID.
+            http: 401
             name: InvalidID
-            options:
-              - errs.WithHTTPStatus(httpUnauthorized)
             private: "core/security/session: identifier must be exactly IDLen bytes in unpadded base64url; the decoder's own message is dropped because it can echo attacker input"
             public: That is not a valid session identifier
             reason: INVALID_ID
@@ -493,9 +490,8 @@ packages:
               never accepted as "expires immediately" — a store where every session is
               already dead is the inert-policy failure, and it would present as a
               login loop nobody can debug.
+            exit: CONFIG
             name: InvalidConfig
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/security/session: a timeout is non-positive, the idle window is not shorter than the absolute ceiling, or a required directory or key is missing; the fields name which"
             public: The session store configuration is not usable
             reason: INVALID_CONFIG
@@ -521,10 +517,9 @@ packages:
               StoreUnavailable is returned when the backend itself failed. It carries
               EX_TEMPFAIL and 503 because retrying is meaningful, which is exactly what
               separates it from InvalidConfig.
+            exit: TEMPFAIL
+            http: 503
             name: StoreUnavailable
-            options:
-              - errs.WithExitCode(exitTempFail)
-              - errs.WithHTTPStatus(httpUnavailable)
             private: "core/security/session: the backend could not be read or written; the fields name the operation, never the path or the identifier"
             public: The session store is unavailable
             reason: STORE_UNAVAILABLE
@@ -534,9 +529,8 @@ packages:
               distinguishing them. One verdict for tampering, truncation, a wrong key
               and a wrong purpose is what keeps Open from becoming an oracle — the same
               posture crypto.DecryptionFailed takes for the AEAD it is built on.
+            http: 401
             name: SealInvalid
-            options:
-              - errs.WithHTTPStatus(httpUnauthorized)
             private: "core/security/session: sealed value failed to open — tampered, truncated, wrong key or wrong purpose, deliberately not distinguished"
             public: That session value could not be opened
             reason: SEAL_INVALID
@@ -561,6 +555,8 @@ packages:
 
               It maps to 401, not 500: whatever happened to the file, the caller's
               session is not usable, and that is what the request needs to know.
+            exit: DATAERR
+            http: 401
             name: RecordCorrupt
             note: |-
               The engines' own refusals (0.3.46.*). They are raised by
@@ -569,9 +565,6 @@ packages:
               the domain is in one place. As above, no Public string names a path, an
               identifier, a subject or a data key: everything a session store handles
               is either a secret or somebody's personal data.
-            options:
-              - errs.WithExitCode(exitDataErr)
-              - errs.WithHTTPStatus(httpUnauthorized)
             private: "service/security/session: record failed to open or decode — tampered, truncated, wrong key, or filed under another digest; deliberately not distinguished"
             public: That session could not be read
             reason: RECORD_CORRUPT
@@ -585,9 +578,8 @@ packages:
               were exposed, and on the filesystems this check exists to catch it would
               report success while changing nothing — a repair that cannot be verified
               is not a repair.
+            exit: CONFIG
             name: DirectoryUnsafe
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/security/session: the directory or a record carries a group or world permission bit; refused rather than chmod'ed, and the fields carry the mode that was required"
             public: The session store location is not private enough to use
             reason: DIRECTORY_UNSAFE
@@ -597,9 +589,8 @@ packages:
               taken. The operation is refused rather than run unserialised: without the
               lock the store cannot promise that a read-modify-write is indivisible,
               and quietly dropping that promise is worse than failing the request.
+            exit: TEMPFAIL
             name: LockFailed
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "service/security/session: flock on the store-wide lock descriptor failed; the operation was refused rather than run without serialisation"
             public: The session store is busy
             reason: LOCK_FAILED
@@ -613,9 +604,8 @@ packages:
               very cheap trigger, so the bound is a refusal rather than a truncation —
               silently dropping keys would report success for a write that did not
               happen, and a truncated subject would name a different principal.
+            http: 413
             name: PayloadTooLarge
-            options:
-              - errs.WithHTTPStatus(httpPayloadTooLarge)
             private: "service/security/session: payload or subject exceeds the key-count or per-string cap; the offending key or subject is NOT named because it is caller data"
             public: That session holds more data than the store accepts
             reason: PAYLOAD_TOO_LARGE
@@ -626,9 +616,8 @@ packages:
               "" as "no separation needed" would be an inert policy in ADR 0031's exact
               sense, and there is no default the SDK could invent that would mean
               anything.
+            exit: CONFIG
             name: InvalidPurpose
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/security/session: NewSealer needs a purpose string to bind as additional authenticated data; an empty one would drop domain separation silently"
             public: A sealer needs a non-empty purpose
             reason: INVALID_PURPOSE
@@ -649,9 +638,8 @@ packages:
               A link at a RECORD's name is not this: that one is RecordCorrupt, the
               single verdict for every record the store did not write, so a planted
               link reads exactly like any other tampering.
+            exit: CONFIG
             name: PathRedirected
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/security/session: an indirection the store refuses — a link at the lock file, a link at a component of Dir planted where any account could, or Dir swapped while opening; the fields name the component, the kind and the target"
             public: The session store location is reached through a link
             reason: PATH_REDIRECTED

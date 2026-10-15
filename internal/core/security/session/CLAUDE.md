@@ -32,7 +32,6 @@ nothing but their package comment, are gone (rule 5); the package comment is `do
 | `session_value.go` | `SessionValue` + `NewSessionValue` (its only producer) — accessors, copy-on-write `Set` / `Delete`, `ExpiresAt` / `LiveAt`, shape-only `String` |
 | `state_value.go` | `StateValue` — the exported description a third-party `Store` hands to `NewSessionValue` |
 | `codes_gen.go` | `Code*` constants — ranges 0.2.14.* (verdicts) and 0.3.46.* (the engines' refusals); the verdicts `NotFound` / `Expired` / `InvalidID` / `InvalidConfig` / `IdentifierCollision` / `EntropyFailed` / `StoreUnavailable` / `SealInvalid` / `FixationRefused`, and the engines' refusals `RecordCorrupt` / `DirectoryUnsafe` / `LockFailed` / `PayloadTooLarge` / `InvalidPurpose` / `PathRedirected` — raised only by `internal/service/security/session`, whose `Private` names it — written by kit gen from `design/security/session.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `exitConfig`, `exitTempFail`, `httpUnauthorized`, `httpUnavailable`, `exitDataErr`, `httpPayloadTooLarge` |
 
 ## A session is not a token — say it before anything else
 

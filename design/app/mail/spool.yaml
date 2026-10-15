@@ -68,17 +68,15 @@ packages:
       - var:
           - code: CodeSpoolMisconfigured
             doc: SpoolMisconfigured refuses a spool that could never deliver.
+            exit: CONFIG
             name: SpoolMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/mail/spool: New refused its Config, or Send got an identifier from Config.NewID that is empty, longer than MaxIDBytes or not an RFC 5322 dot-atom; the fields name the setting and the problem"
             public: The mail spool cannot run as configured
             reason: SPOOL_MISCONFIGURED
           - code: CodeSpoolClosed
             doc: SpoolClosed refuses a Send or a SendWithID after Close.
+            http: 503
             name: SpoolClosed
-            options:
-              - errs.WithHTTPStatus(httpUnavailable)
             private: "service/app/mail/spool: Send or SendWithID was called after Close"
             public: The mail spool is closed
             reason: SPOOL_CLOSED
@@ -95,9 +93,8 @@ packages:
             doc: |-
               MessageUnencodable refuses a mail Send could not write into the spool.
               Nothing was queued.
+            http: 400
             name: MessageUnencodable
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
             private: "service/app/mail/spool: encoding/json refused the spooled record; a Date outside the years 0 to 9999 is the one way to get here"
             public: The mail could not be written to the spool
             reason: MESSAGE_UNENCODABLE
@@ -118,9 +115,8 @@ packages:
               can keep, because it becomes the left half of the mail's Message-ID.
               Nothing was queued. The fields name the rule it broke and its length,
               never the identifier, which may carry the very bytes it was refused for.
+            http: 400
             name: InvalidMailID
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
             private: "service/app/mail/spool: SendWithID was given an identifier that is empty, longer than MaxIDBytes or not an RFC 5322 dot-atom; the fields name the problem and the length, never the identifier"
             public: The mail identifier is malformed
             reason: INVALID_MAIL_ID

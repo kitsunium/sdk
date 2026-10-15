@@ -292,9 +292,8 @@ packages:
               underlying code and reason. errs.HasCode(err, CodePermissionDenied)
               therefore answers true for every refusal, which is what a framework
               routes on.
+            http: 403
             name: PermissionDenied
-            options:
-              - errs.WithHTTPStatus(httpForbidden)
             private: "core/security/authz: the request was refused; the fields carry the outcome, the subject, the action, the resource and — when the evaluation failed — the underlying code"
             public: Access to the requested resource is denied
             reason: PERMISSION_DENIED
@@ -310,9 +309,8 @@ packages:
               carries NO attributes at all walk past every rule of that shape. Every
               combinator treats it as absorbing, so it cannot be laundered into a
               grant by a Not, an AnyOf, or a rule whose effect happens to be Deny.
+            http: 403
             name: AttributeMissing
-            options:
-              - errs.WithHTTPStatus(httpForbidden)
             private: "core/security/authz: a rule named an attribute the request does not carry; the fields name the attribute and the rule"
             public: Access to the requested resource is denied
             reason: ATTRIBUTE_MISSING
@@ -328,9 +326,8 @@ packages:
               would make "42" and 42 the same attribute in one direction and not the
               other, which is how a rule starts matching requests it was never
               written for.
+            http: 403
             name: AttributeKindMismatch
-            options:
-              - errs.WithHTTPStatus(httpForbidden)
             private: "core/security/authz: an attribute is present but not the kind the rule compares; the fields name the attribute, the wanted kind and the kind found"
             public: Access to the requested resource is denied
             reason: ATTRIBUTE_KIND_MISMATCH
@@ -344,10 +341,9 @@ packages:
               policy would silently shrink the policy set — the one edit an attacker
               would most like to make — and treating an out-of-contract Decision as
               anything but a refusal would let a numeric conversion authorize.
+            exit: CONFIG
+            http: 403
             name: PolicyMisconfigured
-            options:
-              - errs.WithHTTPStatus(httpForbidden)
-              - errs.WithExitCode(exitConfig)
             private: "core/security/authz: a policy could not be evaluated as assembled — a nil member, or a decision outside allow/deny/abstain; the fields carry the position and the value"
             public: Access to the requested resource is denied
             reason: POLICY_MISCONFIGURED
@@ -355,6 +351,7 @@ packages:
             doc: |-
               GrantInvalid is returned by NewRBAC for a grant table that could never
               grant correctly. The fields name the offending row and role.
+            exit: CONFIG
             name: GrantInvalid
             note: |-
               The engine's construction refusals (0.3.56.*). They are raised by
@@ -370,8 +367,6 @@ packages:
               specific. Every one is a permanent wiring fault — the same arguments are
               refused forever, and the fix is a code change at the call site — so all
               three carry EX_CONFIG.
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/security/authz: NewRBAC received a grant table it cannot honour; the fields carry the detail, the row index and the role"
             public: The role grant table is not usable and was refused
             reason: GRANT_INVALID
@@ -379,9 +374,8 @@ packages:
             doc: |-
               RuleInvalid is returned by NewABAC for a rule set that could never
               decide correctly. The fields name the offending rule and its position.
+            exit: CONFIG
             name: RuleInvalid
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/security/authz: NewABAC received a rule it cannot honour; the fields carry the detail, the rule index and the rule name"
             public: The attribute rule set is not usable and was refused
             reason: RULE_INVALID
@@ -392,9 +386,8 @@ packages:
               is absent or of the wrong kind is AttributeMissing or
               AttributeKindMismatch, and both of those are refusals of a REQUEST,
               while this is a refusal of the RULE.
+            exit: CONFIG
             name: ConditionInvalid
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/security/authz: a condition constructor received an empty key, an empty member, a nil condition or an empty set; the fields carry the detail"
             public: The condition cannot be built from the given arguments
             reason: CONDITION_INVALID

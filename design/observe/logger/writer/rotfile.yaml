@@ -54,9 +54,8 @@ packages:
             doc: |-
               RotFileOpenFailed wraps an os.OpenFile failure (or a refused symlink)
               at construction time and on every reopen after a rotation.
+            exit: IOERR
             name: RotFileOpenFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "service/observe/logger/writer/rotfile: os.OpenFile failed or the path is a symlink"
             public: Rotating file sink could not open the destination file
             reason: ROT_FILE_OPEN_FAILED
@@ -64,9 +63,8 @@ packages:
             doc: |-
               RotFileRotateFailed wraps a failure during the rename shift, the gzip
               compaction, or the 0600 chmod of a rotated sibling.
+            exit: IOERR
             name: RotFileRotateFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "service/observe/logger/writer/rotfile: a rename, gzip, or chmod step in the rotation cycle failed"
             public: Rotating file sink failed to rotate the destination file
             reason: ROT_FILE_ROTATE_FAILED
@@ -74,9 +72,8 @@ packages:
             doc: |-
               RotFileWriteFailed wraps the underlying *os.File.Write error at Write
               time.
+            exit: IOERR
             name: RotFileWriteFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "service/observe/logger/writer/rotfile: underlying *os.File returned an error"
             public: Rotating file write failed
             reason: ROT_FILE_WRITE_FAILED
@@ -85,9 +82,8 @@ packages:
               RotFileDecodeFailed flags a config-map value of an unexpected shape while
               decoding a "rotfile" writer entry from a config file. It is redacted —
               the offending value is never echoed (secret gate).
+            exit: CONFIG
             name: RotFileDecodeFailed
-            options:
-              - errs.WithExitCode(exitConfigErr)
             private: "service/observe/logger/writer/rotfile: a config map value had an unexpected shape"
             public: Rotating file sink could not decode its configuration
             reason: ROT_FILE_DECODE_FAILED

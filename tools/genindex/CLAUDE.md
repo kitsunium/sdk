@@ -165,8 +165,8 @@ fixture repository. The `tools/` conventions are in `tools/CLAUDE.md`.
   caller exported would change which files a cell compiles. `make api` twice
   writes identical bytes.
 - **Codes are read from the code.** An `errs.Code` constant records its value
-  as a dotted quad; a variable initialised with `errs.Define` — under any import
-  name — records the sentinel's code, reason and public text; a variable
+  as a dotted quad; a variable initialised with `errs.Define` or its static
+  sibling `errs.Static` (ADR 0176) — under any import name — records the sentinel's code, reason and public text; a variable
   initialised with a sentinel inherits its code through any chain of
   re-exports, and names it in `init`. `docs/error-codes.yaml` is written from
   these records (`-write-error-codes`): every constant with a code, no `init`

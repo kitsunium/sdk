@@ -29,7 +29,6 @@ package comment, are gone (rule 5); the package comment is `doc.go`'s alone, wri
 | `value.go` | `Value` discriminated union + typed constructors (`StringValue` / `Int64Value` / `IntValue` / `Uint64Value` / `Float64Value` / `BoolValue` / `DurationValue` / `TimeValue` / `GroupValue` / `AnyValue`, and `NewValue`, an alias of `AnyValue`) and accessors |
 | `kind.go` | `Kind int8` + `KindAny`/`KindBool`/`KindDuration`/`KindFloat64`/`KindInt64`/`KindString`/`KindTime`/`KindUint64`/`KindGroup` + `String()` |
 | `codes_gen.go` | `Code*` constants — range `0.3.1.*`, the engine's (`CodeWriterNil`, `CodeHandlerNil`, `CodeEncoderNil`, `CodeSinkRequired`, `CodeCtxCancelled`, `CodeWriteFailed`); the sentinels `internal/service/observe/logger` returns — `WriterNil`, `HandlerNil`, `EncoderNil`, `SinkRequired`, `CtxCancelled`, `WriteFailed` (exit 74, EX_IOERR) — written by kit gen from `design/observe/logger.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `exitIOErr` |
 
 Sub-packages, beneath this one because they are the logger's own (ADR 0155):
 
