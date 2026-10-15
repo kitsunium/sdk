@@ -377,6 +377,85 @@ func (b *memoryBroker) PutDeadLetter(ctx context.Context, dead corequeue.DeadLet
 	return dead.Message.ID, nil
 }
 
+// Messages lists up to max live messages — queued and leased — whose
+// identifier sorts after after, in the byte order of their identifiers
+// (core/data/queue.MessageReader), each payload a copy. It is a read: it
+// leases nothing and reclaims no lapsed lease.
+func (b *memoryBroker) Messages(ctx context.Context, after string, max int) ([]corequeue.LiveMessageValue, error) {
+	//: the same refusal Receive makes.
+	if invalid := checkBatch(max); invalid != nil {
+		//: InvalidBatchSize.
+		return nil, invalid
+	}
+	//: a cancelled caller.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return nil, ctx.Err()
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	var live []corequeue.LiveMessageValue
+	//: the queued ones, visible at their instant.
+	for _, record := range b.ready {
+		//: before where the listing resumes.
+		if record.id > after {
+			live = append(live, liveOf(record, record.visibleAt, false))
+		}
+	}
+	//: the leased ones, back at their lease's deadline.
+	for _, record := range b.inflight {
+		//: before where the listing resumes.
+		if record.id > after {
+			live = append(live, liveOf(record, record.expiresAt, true))
+		}
+	}
+	slices.SortFunc(live, func(x, y corequeue.LiveMessageValue) int {
+		//: byte order of the identifiers, as the durable brokers list them.
+		return strings.Compare(x.Message.ID, y.Message.ID)
+	})
+	//: a bounded batch.
+	return live[:min(max, len(live))], nil
+}
+
+// liveOf is record as MessageReader lists it, visible at visibleAt, its
+// payload a copy the caller owns.
+func liveOf(record *memRecord, visibleAt time.Time, leased bool) corequeue.LiveMessageValue {
+	//: what the broker records of it.
+	return corequeue.LiveMessageValue{
+		VisibleAt:  visibleAt,
+		Message:    corequeue.MessageValue{ID: record.id, Payload: slices.Clone(record.payload), EnqueuedAt: record.enqueuedAt},
+		Deliveries: record.deliveries, Leased: leased,
+	}
+}
+
+// PutMessage queues live as it is given, under an identifier minted from its
+// enqueue instant and this broker's sequence (core/data/queue.MessageWriter):
+// visible at its instant, with its count, its payload copied. An idle
+// consumer is woken.
+func (b *memoryBroker) PutMessage(ctx context.Context, live corequeue.LiveMessageValue) (string, error) {
+	//: a cancelled caller.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return "", ctx.Err()
+	}
+	//: the refusals every broker makes, through the same guard.
+	if invalid := checkLiveMessage(live, b.policy.MaxMessageBytes); invalid != nil {
+		//: InvalidMessage or MessageTooLarge.
+		return "", invalid
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.seq++
+	record := &memRecord{
+		payload: slices.Clone(live.Message.Payload), id: memID(live.Message.EnqueuedAt, b.seq),
+		enqueuedAt: live.Message.EnqueuedAt, visibleAt: live.VisibleAt, seq: b.seq, deliveries: live.Deliveries,
+	}
+	b.insertReady(record)
+	b.wake.fire()
+	//: queued, as it was given, under its new identifier.
+	return record.id, nil
+}
+
 // takeDead removes and returns the dead letter id. The caller holds the write
 // lock.
 func (b *memoryBroker) takeDead(id string) (dead corequeue.DeadLetterValue, found bool) {

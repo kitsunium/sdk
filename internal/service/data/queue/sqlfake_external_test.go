@@ -308,7 +308,7 @@ func (c *fakeSQLConn) run(ctx context.Context, query string, args []driver.Value
 // writes reports whether an autocommit statement of role takes the writer.
 func writes(role string) bool {
 	switch role {
-	case "probe", "next", "pick", "deadList":
+	case "probe", "next", "pick", "deadList", "liveList":
 		return false
 	default:
 		return true
@@ -400,6 +400,15 @@ func (e *sqlEngine) execute(role, query string, args []driver.Value, work queueT
 		return pick(work, args[0].(int64), int(args[1].(int64))), nil
 	case "deadList":
 		return deadList(work, int(args[0].(int64))), nil
+	case "liveList":
+		return liveList(work, str(args[0]), int(args[1].(int64))), nil
+	case "putLive":
+		id := str(args[0])
+		if _, taken := work[id]; taken {
+			return answer{}, errDuplicate{key: id}
+		}
+		work[id] = queueRow{id: id, due: args[1].(int64), enqueued: args[2].(int64), count: args[3].(int64), payload: blob(args[4])}
+		return answer{affected: 1}, nil
 	}
 	return e.write(role, query, args, work)
 }
@@ -547,6 +556,23 @@ func deadList(work queueTable, limit int) answer {
 		})
 	}
 	return answer{cols: []string{"id", "enqueued_at", "deliveries", "due", "reason", "cause", "code", "payload"}, rows: rows}
+}
+
+// liveList answers the live rows whose identifier sorts after after, in
+// identifier order, at most limit.
+func liveList(work queueTable, after string, limit int) answer {
+	var live []queueRow
+	for _, row := range work {
+		if row.dead == 0 && row.id > after {
+			live = append(live, row)
+		}
+	}
+	slices.SortFunc(live, func(a, b queueRow) int { return cmp.Compare(a.id, b.id) })
+	rows := make([][]driver.Value, 0, min(limit, len(live)))
+	for _, row := range live[:min(limit, len(live))] {
+		rows = append(rows, []driver.Value{[]byte(row.id), row.enqueued, row.count, row.due, nullable(row.lease), nullable(row.payload)})
+	}
+	return answer{cols: []string{"id", "enqueued_at", "deliveries", "due", "lease", "payload"}, rows: rows}
 }
 
 // str reads a bound []byte as a string.

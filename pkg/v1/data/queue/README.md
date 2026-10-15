@@ -92,7 +92,7 @@ if manager, ok := broker.(queue.DeadLetterManager); ok {
 }
 ```
 
-A dead letter moves between brokers with [DeadLetterWriter](#DeadLetterWriter): PutDeadLetter writes one into the store as another broker recorded it — its payload, its count, its instants, its reason, cause and code — under an identifier the target mints. It is what a copy of a queue from a directory into a database needs, and nothing else does; a value no store keeps as given is [InvalidDeadLetter](#InvalidDeadLetter).
+A dead letter moves between brokers with [DeadLetterWriter](#DeadLetterWriter): PutDeadLetter writes one into the store as another broker recorded it — its payload, its count, its instants, its reason, cause and code — under an identifier the target mints. It is what a copy of a queue from a directory into a database needs, and nothing else does; a value no store keeps as given is [InvalidDeadLetter](#InvalidDeadLetter). The live messages move the same way: [MessageReader](#MessageReader) lists them — waiting and leased — without leasing one, and [MessageWriter](#MessageWriter) writes one as another broker recorded it, its delivery count and its instants kept; a value no broker keeps as given is [InvalidMessage](#InvalidMessage).
 
 ### A failure no retry can fix is dead-lettered at once
 
@@ -201,8 +201,13 @@ Idle consumers are woken once the publication's transaction commits, never for o
 - [type Lease](<#Lease>)
 - [type LeaseExtender](<#LeaseExtender>)
   - [func \(LeaseExtender\) Extend\(ctx context.Context, receipt ReceiptValue, by time.Duration\) \(LeaseValue, error\)](<#LeaseExtender.Extend>)
+- [type LiveMessage](<#LiveMessage>)
 - [type MemoryConfig](<#MemoryConfig>)
 - [type Message](<#Message>)
+- [type MessageReader](<#MessageReader>)
+  - [func \(MessageReader\) Messages\(ctx context.Context, after string, max int\) \(\[\]LiveMessageValue, error\)](<#MessageReader.Messages>)
+- [type MessageWriter](<#MessageWriter>)
+  - [func \(MessageWriter\) PutMessage\(ctx context.Context, live LiveMessageValue\) \(string, error\)](<#MessageWriter.PutMessage>)
 - [type Nack](<#Nack>)
 - [type Policy](<#Policy>)
   - [func \(Policy\) Normalized\(\) PolicyValue](<#Policy.Normalized>)
@@ -238,6 +243,17 @@ CodeInvalidDeadLetter is [InvalidDeadLetter](#InvalidDeadLetter)'s code, the one
 Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.CodeInvalidDeadLetter`.
 
 Code `0.2.23.8`
+
+<a name="CodeInvalidMessage"></a>
+```go
+const CodeInvalidMessage errs.Code = 136969
+```
+
+CodeInvalidMessage is [InvalidMessage](#InvalidMessage)'s code, for errs.HasCode.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.CodeInvalidMessage`.
+
+Code `0.2.23.9`
 
 <a name="CodeNotRetryable"></a>
 ```go
@@ -355,6 +371,17 @@ InvalidDeadLetter refuses a dead letter [DeadLetterWriter](#DeadLetterWriter) ca
 Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.InvalidDeadLetter`.
 
 Code `0.2.23.8` · reason `INVALID_DEAD_LETTER` · public "The dead letter cannot be written as it was given"
+
+<a name="InvalidMessage"></a>
+```go
+var InvalidMessage *errs.Error
+```
+
+InvalidMessage refuses a live message [MessageWriter](#MessageWriter) cannot write as it was given; the "field" field names which value.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.InvalidMessage`.
+
+Code `0.2.23.9` · reason `INVALID_MESSAGE` · public "The message cannot be written as it was given"
 
 <a name="LeaseExpired"></a>
 ```go
@@ -519,7 +546,7 @@ SQLMigration returns the migration that creates the one table an SQL queue named
 <a name="Broker"></a>
 ## type [Broker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
 
-Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings ([DeadLetterReader](#DeadLetterReader), [LeaseExtender](#LeaseExtender), [Waker](#Waker), [Rejecter](#Rejecter), [DeadLetterManager](#DeadLetterManager), [DeadLetterWriter](#DeadLetterWriter)) reached by type assertion.
+Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings ([DeadLetterReader](#DeadLetterReader), [LeaseExtender](#LeaseExtender), [Waker](#Waker), [Rejecter](#Rejecter), [DeadLetterManager](#DeadLetterManager), [DeadLetterWriter](#DeadLetterWriter), [MessageReader](#MessageReader), [MessageWriter](#MessageWriter)) reached by type assertion.
 
 ```go
 type Broker = corequeue.Broker
@@ -1091,6 +1118,36 @@ A lapsed lease is [LeaseExpired](#LeaseExpired) and is NOT renewed, even when no
 
 A non-positive by is [QueueMisconfigured](#QueueMisconfigured): the two readings of zero — "lapse now" and "never lapse" — are opposites and both harmful. So is a by whose deadline reaches past what a durable implementation can record (2262, Unix nanoseconds): it is refused before anything moves, and the lease the caller holds stays valid. Validate never sees this duration, so [MaxDeadlineOffset](#MaxDeadlineOffset) cannot bound it; the instant itself is checked.
 
+<a name="LiveMessage"></a>
+## type [LiveMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+
+LiveMessage is the public alias for one live message as a broker records it.
+
+```go
+type LiveMessage = corequeue.LiveMessageValue
+```
+
+LiveMessage is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.LiveMessageValue`, declared as:
+
+```go
+type LiveMessage struct {
+	// VisibleAt is when the message may next be delivered: its visibility
+	// for a waiting one — now, or later after a retry delay —, the deadline
+	// of its lease for a leased one. An instant already past means
+	// receivable now.
+	VisibleAt  time.Time
+	// Message is the work, with the identifier it was published under.
+	Message    MessageValue
+	// Deliveries is how many times the message has been delivered: 0 for
+	// one never leased, the count a retry or a lapsed lease left.
+	Deliveries int
+	// Leased reports that a consumer holds the message's lease. Such a
+	// message is still alive: it comes back at VisibleAt unless it is
+	// acknowledged.
+	Leased     bool
+}
+```
+
 <a name="MemoryConfig"></a>
 ## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
 
@@ -1152,6 +1209,95 @@ type Message struct {
 	Payload    []byte
 }
 ```
+
+<a name="MessageReader"></a>
+## type [MessageReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+
+MessageReader is the public alias for the capability of listing the live messages — waiting and leased — without leasing one. Every broker here implements it.
+
+```go
+type MessageReader = corequeue.MessageReader
+```
+
+MessageReader is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.MessageReader`, declared as:
+
+```go
+type MessageReader interface {
+	// Messages returns up to max live messages whose identifier sorts after
+	// after — from the first when after is empty —, in the byte order of
+	// their identifiers, each with its payload, its enqueue instant, its
+	// delivery count, whether a consumer leases it and when it may next be
+	// delivered. It leases nothing, counts no delivery and reclaims no lapsed
+	// lease: what it reads is what the broker records, and the last
+	// identifier it returns is where a later call resumes. A message
+	// published, acknowledged or dead-lettered meanwhile may be listed or
+	// not.
+	//
+	// max must be positive ([InvalidBatchSize]).
+	Messages(ctx context.Context, after string, max int) ([]LiveMessageValue, error)
+}
+```
+
+<a name="MessageReader.Messages"></a>
+### func \(MessageReader\) [Messages](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+
+```go
+func (MessageReader) Messages(ctx context.Context, after string, max int) ([]LiveMessageValue, error)
+```
+
+Messages returns up to max live messages whose identifier sorts after after — from the first when after is empty —, in the byte order of their identifiers, each with its payload, its enqueue instant, its delivery count, whether a consumer leases it and when it may next be delivered. It leases nothing, counts no delivery and reclaims no lapsed lease: what it reads is what the broker records, and the last identifier it returns is where a later call resumes. A message published, acknowledged or dead-lettered meanwhile may be listed or not.
+
+max must be positive ([InvalidBatchSize](#InvalidBatchSize)).
+
+<a name="MessageWriter"></a>
+## type [MessageWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+
+MessageWriter is the public alias for the capability of writing a live message as another broker recorded it — its count, its instants. Every broker here implements it.
+
+```go
+type MessageWriter = corequeue.MessageWriter
+```
+
+MessageWriter is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.MessageWriter`, declared as:
+
+```go
+type MessageWriter interface {
+	// PutMessage writes live into the queue as a waiting message and returns
+	// the identifier the broker minted for it. Everything else is kept as
+	// given: the payload, the enqueue instant, the delivery count — 0
+	// included — and the instant it becomes visible, before which it is
+	// never delivered. What [MessageReader.Messages] then returns of it
+	// equals live but for the identifier, and its next delivery counts one
+	// more than live.Deliveries.
+	//
+	// live.Message.ID must be empty: the identifier is the broker's to mint,
+	// as [Broker.Publish] mints it. live.Leased must be false: a lease is
+	// the broker's that granted it, and a written message is waiting. live is
+	// refused with [InvalidMessage] — the "field" field naming which — for
+	// either, for a delivery count below 0 or above 2147483647, and for an
+	// instant outside what a durable broker records (1970 to 2262); a
+	// payload above [PolicyValue.MaxMessageBytes] is [MessageTooLarge]. A
+	// refused message writes nothing.
+	//
+	// A broker that joins the transaction ctx carries (ADR 0151) writes it in
+	// that transaction, so it exists if and only if the transaction commits,
+	// and wakes its consumers after the commit, as a publication does.
+	PutMessage(ctx context.Context, live LiveMessageValue) (string, error)
+}
+```
+
+<a name="MessageWriter.PutMessage"></a>
+### func \(MessageWriter\) [PutMessage](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+
+```go
+func (MessageWriter) PutMessage(ctx context.Context, live LiveMessageValue) (string, error)
+```
+
+PutMessage writes live into the queue as a waiting message and returns the identifier the broker minted for it. Everything else is kept as given: the payload, the enqueue instant, the delivery count — 0 included — and the instant it becomes visible, before which it is never delivered. What [MessageReader.Messages](#MessageReader.Messages) then returns of it equals live but for the identifier, and its next delivery counts one more than live.Deliveries.
+
+live.Message.ID must be empty: the identifier is the broker's to mint, as [Broker.Publish](#Broker.Publish) mints it. live.Leased must be false: a lease is the broker's that granted it, and a written message is waiting. live is refused with [InvalidMessage](#InvalidMessage) — the "field" field naming which — for either, for a delivery count below 0 or above 2147483647, and for an instant outside what a durable broker records (1970 to 2262); a payload above \[PolicyValue.MaxMessageBytes] is [MessageTooLarge](#MessageTooLarge). A refused message writes nothing.
+
+A broker that joins the transaction ctx carries (ADR 0151) writes it in that transaction, so it exists if and only if the transaction commits, and wakes its consumers after the commit, as a publication does.
 
 <a name="Nack"></a>
 ## type [Nack](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)

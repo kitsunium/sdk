@@ -63,6 +63,12 @@ type sqlStatements struct {
 	// putDead writes a dead letter as it is given: dead, its failure instant
 	// as its due, its count and its cause.
 	putDead string
+	// liveList reads the live messages after an identifier, in identifier
+	// order, without a lock: a copy's listing, not a lease.
+	liveList string
+	// putLive writes a live message as it is given: queued, visible at its
+	// due, with its count.
+	putLive string
 	// table is the table's quoted name.
 	table string
 	// dialect selects the placeholder grammar of the per-call ones.
@@ -99,6 +105,10 @@ func renderSQLStatements(dialect coresql.Dialect, table string) sqlStatements {
 		dialect:    dialect,
 		putDead: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload, reason, cause, code) VALUES (" +
 			p(1) + ", 1, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ", " + p(6) + ", " + p(7) + ", " + p(8) + ")",
+		liveList: "SELECT id, enqueued_at, deliveries, due, lease, payload FROM " + q + " WHERE dead = 0 AND id > " + p(1) +
+			" ORDER BY id LIMIT " + p(2),
+		putLive: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
+			p(1) + ", 0, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ")",
 	}
 	//: SQLite's lock is the database's, taken by a transaction's first
 	//: WRITE: a lease that read first could be refused busy at its update,

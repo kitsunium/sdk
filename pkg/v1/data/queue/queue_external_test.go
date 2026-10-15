@@ -246,3 +246,34 @@ func TestTheFacadeWritesADeadLetterAsItLies(t *testing.T) {
 		})
 	}
 }
+
+// TestTheFacadeMovesALiveMessage spells ADR 0178's live-message names through
+// the public surface alone: a message written with its count is listed by
+// MessageReader as it was given, and InvalidMessage refuses one marked leased.
+func TestTheFacadeMovesALiveMessage(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"memory", "file"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			broker := facadeBroker(t, name)
+			writer, ok := broker.(queue.MessageWriter)
+			if !ok {
+				t.Fatalf("%T does not implement queue.MessageWriter", broker)
+			}
+			enqueued := time.Date(2026, time.October, 1, 9, 0, 0, 0, time.UTC)
+			live := queue.LiveMessage{Message: queue.Message{Payload: []byte("moved"), EnqueuedAt: enqueued}, VisibleAt: enqueued, Deliveries: 2}
+			id, err := writer.PutMessage(t.Context(), live)
+			if err != nil {
+				t.Fatalf("PutMessage() = %v, want nil", err)
+			}
+			listed, err := broker.(queue.MessageReader).Messages(t.Context(), "", 10)
+			if err != nil || len(listed) != 1 || listed[0].Message.ID != id || listed[0].Deliveries != 2 || listed[0].Leased {
+				t.Fatalf("Messages() = %+v, %v; want the one written under %q", listed, err, id)
+			}
+			live.Leased = true
+			if _, err := writer.PutMessage(t.Context(), live); !errs.HasCode(err, queue.CodeInvalidMessage) || !errors.Is(err, queue.InvalidMessage) {
+				t.Fatalf("PutMessage of a leased message = %v, want InvalidMessage", err)
+			}
+		})
+	}
+}

@@ -183,6 +183,97 @@ func (b *sqlBroker) PutDeadLetter(ctx context.Context, dead corequeue.DeadLetter
 	return id, nil
 }
 
+// Messages lists up to max live messages — queued and leased — whose
+// identifier sorts after after, in identifier order
+// (core/data/queue.MessageReader): one read, which locks nothing and changes
+// nothing. Inside a transaction its context carries, it reads what that
+// transaction sees.
+func (b *sqlBroker) Messages(ctx context.Context, after string, max int) (live []corequeue.LiveMessageValue, err error) {
+	//: the same refusal Receive makes.
+	if invalid := checkBatch(max); invalid != nil {
+		//: InvalidBatchSize.
+		return nil, invalid
+	}
+	//: a cancelled caller.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return nil, ctx.Err()
+	}
+	ex, _ := b.tx.join.Join(ctx)
+	rows, err := ex.QueryContext(ctx, b.stmts.liveList, []byte(after), int64(max))
+	//: the read did not start.
+	if err != nil {
+		//: QueueBackendFailed.
+		return nil, b.failed("read the messages", err)
+	}
+	//: rows are this call's, so this call closes them.
+	defer func() { err = b.finishRows(rows, "read the messages", err) }()
+	//: one message per row; nil until one is found.
+	for rows.Next() {
+		var id string
+		var lease, payload []byte
+		var enqueuedAt, deliveries, due int64
+		//: a row the driver cannot hand over fails the read.
+		if scanErr := rows.Scan(&id, &enqueuedAt, &deliveries, &due, &lease, &payload); scanErr != nil {
+			//: QueueBackendFailed.
+			return nil, b.failed("read the messages", scanErr)
+		}
+		live = append(live, corequeue.LiveMessageValue{
+			VisibleAt:  time.Unix(0, due),
+			Message:    corequeue.MessageValue{ID: id, Payload: payload, EnqueuedAt: time.Unix(0, enqueuedAt)},
+			Deliveries: int(deliveries), Leased: lease != nil,
+		})
+	}
+	//: the table's live messages, still where they were.
+	return live, nil
+}
+
+// PutMessage writes live into the table as a queued message, under an
+// identifier minted from its enqueue instant (core/data/queue.MessageWriter):
+// one INSERT of a live row, due at its visibility instant, with its count.
+// Inside a transaction its context carries, it is a savepoint of that
+// transaction, and the consumers are woken after its commit, as a
+// publication's are.
+func (b *sqlBroker) PutMessage(ctx context.Context, live corequeue.LiveMessageValue) (string, error) {
+	//: a cancelled caller must not write what nobody asked for any more.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return "", ctx.Err()
+	}
+	//: the refusals every broker makes, before a statement is sent.
+	if invalid := checkLiveMessage(live, b.policy.MaxMessageBytes); invalid != nil {
+		//: InvalidMessage or MessageTooLarge.
+		return "", invalid
+	}
+	entropy, entropyErr := randomHex(idEntropyBytes)
+	//: the identifier's random half, as Publish mints it.
+	if entropyErr != nil {
+		//: QueueBackendFailed — nothing was sent.
+		return "", backendFailed("rand", "", entropyErr)
+	}
+	enqueuedAt := live.Message.EnqueuedAt.UnixNano()
+	id := messageID(enqueuedAt, entropy)
+	err := b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+		_, execErr := ex.ExecContext(txCtx, b.stmts.putLive,
+			[]byte(id), live.VisibleAt.UnixNano(), enqueuedAt, int64(live.Deliveries), live.Message.Payload)
+		//: the insertion did not complete.
+		if execErr != nil {
+			//: QueueBackendFailed, the driver's text withheld.
+			return b.failed("write a message", execErr)
+		}
+		//: written.
+		return nil
+	})
+	//: nothing was written.
+	if err != nil {
+		//: QueueBackendFailed, or the transactor's own verdict.
+		return "", err
+	}
+	b.announce(ctx)
+	//: queued, as it was given, under its new identifier.
+	return id, nil
+}
+
 // deadLetterMoved turns a statement on one dead letter into the call's
 // verdict: one row is the dead letter acted on, none is one the store does not
 // hold.

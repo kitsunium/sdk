@@ -124,7 +124,10 @@
 // count, its instants, its reason, cause and code — under an identifier the
 // target mints. It is what a copy of a queue from a directory into a database
 // needs, and nothing else does; a value no store keeps as given is
-// [InvalidDeadLetter].
+// [InvalidDeadLetter]. The live messages move the same way: [MessageReader]
+// lists them — waiting and leased — without leasing one, and [MessageWriter]
+// writes one as another broker recorded it, its delivery count and its
+// instants kept; a value no broker keeps as given is [InvalidMessage].
 //
 // # A failure no retry can fix is dead-lettered at once
 //

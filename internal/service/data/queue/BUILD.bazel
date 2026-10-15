@@ -77,6 +77,7 @@ go_test(
         "file_layout_external_test.go",
         "file_layout_windows_test.go",
         "harness_external_test.go",
+        "message_copy_external_test.go",
         "order_external_test.go",
         "queue_bench_test.go",
         "sql_export_test.go",
