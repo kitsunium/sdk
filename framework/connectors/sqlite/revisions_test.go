@@ -81,19 +81,26 @@ func TestRevisionsOnTheFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	formers := 0
+	formers, weighs := 0, int64(0)
 	for rows.Next() {
 		var doc []byte
 		if err := rows.Scan(&doc); err != nil {
 			t.Fatal(err)
 		}
 		formers++
+		weighs += int64(len(doc))
 		if !bytes.Contains(doc, []byte(`"sealed:v1:`)) || bytes.Contains(doc, []byte("Annabel")) || bytes.Contains(doc, []byte("ann@wiki.test")) {
 			t.Errorf("a version rests in clear: %s", doc)
 		}
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil || formers != 2 {
 		t.Errorf("the former versions' rows: %d %v", formers, err)
+	}
+	// The model says what they weigh, sealed as they rest, from one
+	// aggregate statement on the file (ADR 0007 §5).
+	if h := app.Graph().Node("wiki/store/editors").Store.History; h.Versions == nil || *h.Versions != 2 ||
+		h.Trashed == nil || *h.Trashed != 0 || h.VersionBytes == nil || *h.VersionBytes != weighs {
+		t.Errorf("the versions weigh %v, %v, %v; want 2 former versions of %d bytes", h.Versions, h.Trashed, h.VersionBytes, weighs)
 	}
 
 	// A rollback leaves the versions as they were: they are rows of the

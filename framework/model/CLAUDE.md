@@ -75,7 +75,7 @@ Two packages, one API:
   strings — `TestParseIDRefusesWithoutQuotingTheInput` checks both on every
   case. A new kind a service holds joins `serviceKinds` and therefore both.
 - `Revision` hashes structure only — counters, counts, dead letters, a
-  store's privacy counters and history weight are stripped first
+  store's privacy counters, history weight and versions' weight are stripped first
   (`structuralNode`).
 - `Normalize` gives a graph without edges an empty list, never null.
 - `Merge` trusts the base (runtime) for which nodes exist, which modules it

@@ -726,6 +726,24 @@ func versionStatement(d *fakeData, query, name string, args []driver.NamedValue)
 		}
 		return out, 0, nil
 	}
+	// What the versions weigh: the former rows, the trash rows and the
+	// length of every document a row holds, in one row — the other
+	// statement that names no key.
+	if strings.HasPrefix(query, "SELECT COUNT(CASE WHEN num > 0 AND doc IS NOT NULL") {
+		var former, trashed, size int64
+		for _, rows := range table {
+			for num, v := range rows {
+				switch {
+				case num == 0:
+					trashed++
+				case v.doc != nil:
+					former++
+				}
+				size += int64(len(v.doc))
+			}
+		}
+		return &fakeRows{cols: []string{"former", "trashed", "bytes"}, rows: [][]driver.Value{{former, trashed, size}}}, 0, nil
+	}
 	key := string(bound(args[0].Value))
 	rows := table[key]
 	nums := slices.Sorted(maps.Keys(rows))

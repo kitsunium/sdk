@@ -15,7 +15,7 @@ import (
 
 // StoreHistoryMessage is what a store remembers of its records.
 // Fields names the fields it keeps former values of; Kept and Bytes weigh
-// them.
+// them, and Versions, Trashed and VersionBytes weigh its records' versions.
 type StoreHistoryMessage struct {
 	// Revisions is how many former versions each record keeps
 	// (kit.Revisions, ADR 0007 §3); zero when it keeps none.
@@ -30,6 +30,14 @@ type StoreHistoryMessage struct {
 	// histories weigh, on a runtime graph.
 	Kept  *int   `json:"kept,omitempty"`
 	Bytes *int64 `json:"bytes,omitempty"`
+	// Versions is how many former versions the store's records keep,
+	// Trashed how many records are in its trash, and VersionBytes what both
+	// weigh — the JSON they hold —, on a runtime graph of a store that keeps
+	// revisions (ADR 0007 §5), as the SDK's document store counts them. A
+	// record's current version is the record, and counts in none of them.
+	Versions     *int   `json:"versions,omitempty"`
+	Trashed      *int   `json:"trashed,omitempty"`
+	VersionBytes *int64 `json:"versionBytes,omitempty"`
 }
 
 // PasswordPolicyMessage is the policy of one secret field that holds a password's
@@ -132,12 +140,14 @@ func (h *StoreHistoryMessage) sources() []*SourceMessage {
 }
 
 // structure is what a store's history says of the product's structure, for
-// the revision: without what a run counts — kept, bytes.
+// the revision: without what a run counts — kept, bytes, and what the
+// versions weigh.
 func (h *StoreHistoryMessage) structure() *StoreHistoryMessage {
 	if h == nil {
 		return nil
 	}
 	cp := *h
 	cp.Kept, cp.Bytes = nil, nil
+	cp.Versions, cp.Trashed, cp.VersionBytes = nil, nil, nil
 	return &cp
 }

@@ -18129,7 +18129,7 @@
       "spelled": "core.StoreHistoryMessage",
       "canonical": "github.com/kitsunium/sdk/framework/model/internal/core.StoreHistoryMessage",
       "owner": "go:github.com/kitsunium/sdk/framework/model/internal/core.StoreHistoryMessage",
-      "doc": "StoreHistory is what a store remembers of its records.\nFields names the fields it keeps former values of; Kept and Bytes weigh\nthem.\n",
+      "doc": "StoreHistory is what a store remembers of its records.\nFields names the fields it keeps former values of; Kept and Bytes weigh\nthem, and Versions, Trashed and VersionBytes weigh its records' versions.\n",
       "file": "framework/model/history.go",
       "layer": "framework"
     },
@@ -26516,8 +26516,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
       "name": "StoreHistoryMessage",
-      "spelled": "struct{Revisions int \"json:\\\"revisions,omitempty\\\"\"; Fields []string \"json:\\\"fields,omitempty\\\"\"; Passwords []PasswordPolicyMessage \"json:\\\"passwords,omitempty\\\"\"; Kept *int \"json:\\\"kept,omitempty\\\"\"; Bytes *int64 \"json:\\\"bytes,omitempty\\\"\"}",
-      "canonical": "struct{Revisions int \"json:\\\"revisions,omitempty\\\"\"; Fields []string \"json:\\\"fields,omitempty\\\"\"; Passwords []github.com/kitsunium/sdk/framework/model/internal/core.PasswordPolicyMessage \"json:\\\"passwords,omitempty\\\"\"; Kept *int \"json:\\\"kept,omitempty\\\"\"; Bytes *int64 \"json:\\\"bytes,omitempty\\\"\"}",
+      "spelled": "struct{Revisions int \"json:\\\"revisions,omitempty\\\"\"; Fields []string \"json:\\\"fields,omitempty\\\"\"; Passwords []PasswordPolicyMessage \"json:\\\"passwords,omitempty\\\"\"; Kept *int \"json:\\\"kept,omitempty\\\"\"; Bytes *int64 \"json:\\\"bytes,omitempty\\\"\"; Versions *int \"json:\\\"versions,omitempty\\\"\"; Trashed *int \"json:\\\"trashed,omitempty\\\"\"; VersionBytes *int64 \"json:\\\"versionBytes,omitempty\\\"\"}",
+      "canonical": "struct{Revisions int \"json:\\\"revisions,omitempty\\\"\"; Fields []string \"json:\\\"fields,omitempty\\\"\"; Passwords []github.com/kitsunium/sdk/framework/model/internal/core.PasswordPolicyMessage \"json:\\\"passwords,omitempty\\\"\"; Kept *int \"json:\\\"kept,omitempty\\\"\"; Bytes *int64 \"json:\\\"bytes,omitempty\\\"\"; Versions *int \"json:\\\"versions,omitempty\\\"\"; Trashed *int \"json:\\\"trashed,omitempty\\\"\"; VersionBytes *int64 \"json:\\\"versionBytes,omitempty\\\"\"}",
       "fields": [
         {
           "name": "Revisions",
@@ -26547,9 +26547,25 @@
           "name": "Bytes",
           "type": "*int64",
           "tag": "json:\"bytes,omitempty\""
+        },
+        {
+          "name": "Versions",
+          "type": "*int",
+          "tag": "json:\"versions,omitempty\"",
+          "doc": "Versions is how many former versions the store's records keep,\nTrashed how many records are in its trash, and VersionBytes what both\nweigh — the JSON they hold —, on a runtime graph of a store that keeps\nrevisions (ADR 0007 §5), as the SDK's document store counts them. A\nrecord's current version is the record, and counts in none of them.\n"
+        },
+        {
+          "name": "Trashed",
+          "type": "*int",
+          "tag": "json:\"trashed,omitempty\""
+        },
+        {
+          "name": "VersionBytes",
+          "type": "*int64",
+          "tag": "json:\"versionBytes,omitempty\""
         }
       ],
-      "doc": "StoreHistoryMessage is what a store remembers of its records.\nFields names the fields it keeps former values of; Kept and Bytes weigh\nthem.\n",
+      "doc": "StoreHistoryMessage is what a store remembers of its records.\nFields names the fields it keeps former values of; Kept and Bytes weigh\nthem, and Versions, Trashed and VersionBytes weigh its records' versions.\n",
       "file": "framework/model/internal/core/history.go",
       "layer": "framework"
     },

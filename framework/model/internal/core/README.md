@@ -4613,23 +4613,31 @@ type StoreErasureMessage struct {
 <a name="StoreHistoryMessage"></a>
 ## type [StoreHistoryMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
 
-StoreHistoryMessage is what a store remembers of its records. Fields names the fields it keeps former values of; Kept and Bytes weigh them.
+StoreHistoryMessage is what a store remembers of its records. Fields names the fields it keeps former values of; Kept and Bytes weigh them, and Versions, Trashed and VersionBytes weigh its records' versions.
 
 ```go
 type StoreHistoryMessage struct {
 	// Revisions is how many former versions each record keeps
 	// (kit.Revisions, ADR 0007 §3); zero when it keeps none.
-	Revisions int                     `json:"revisions,omitempty"`
+	Revisions    int                     `json:"revisions,omitempty"`
 	// Fields are the JSON pointers of the fields that keep their former
 	// values: tagged history=N — the schema's Field.History says how many —
 	// or read by a password policy that refuses former passwords.
-	Fields    []string                `json:"fields,omitempty"`
+	Fields       []string                `json:"fields,omitempty"`
 	// Passwords are the store's password policies.
-	Passwords []PasswordPolicyMessage `json:"passwords,omitempty"`
+	Passwords    []PasswordPolicyMessage `json:"passwords,omitempty"`
 	// Kept is how many former values the store keeps, and Bytes what its
 	// histories weigh, on a runtime graph.
-	Kept      *int                    `json:"kept,omitempty"`
-	Bytes     *int64                  `json:"bytes,omitempty"`
+	Kept         *int                    `json:"kept,omitempty"`
+	Bytes        *int64                  `json:"bytes,omitempty"`
+	// Versions is how many former versions the store's records keep,
+	// Trashed how many records are in its trash, and VersionBytes what both
+	// weigh — the JSON they hold —, on a runtime graph of a store that keeps
+	// revisions (ADR 0007 §5), as the SDK's document store counts them. A
+	// record's current version is the record, and counts in none of them.
+	Versions     *int                    `json:"versions,omitempty"`
+	Trashed      *int                    `json:"trashed,omitempty"`
+	VersionBytes *int64                  `json:"versionBytes,omitempty"`
 }
 ```
 
