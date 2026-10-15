@@ -245,23 +245,39 @@ func TestARefusalAfterTheCommitLeavesTheCommitStanding(t *testing.T) {
 func TestAFileQueueLeftBehindIsSaid(t *testing.T) {
 	needsFileStore(t)
 	dir := t.TempDir()
+	// The file broker's state directories, kept once empty: only the message
+	// waiting in ready/ is something left behind.
 	left := filepath.Join(dir, "bureau", "queues", "heard")
-	if err := os.MkdirAll(left, 0o700); err != nil {
+	for _, state := range []string{"ready", "inflight", "dead"} {
+		if err := os.MkdirAll(filepath.Join(left, state), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(left, "ready", "waiting.msg"), []byte("a message"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(left, "waiting"), []byte("a message"), 0o600); err != nil {
-		t.Fatal(err)
+	// A file queue that holds nothing, its directories kept: nothing to say.
+	for _, state := range []string{"ready", "inflight", "dead"} {
+		if err := os.MkdirAll(filepath.Join(dir, "bureau", "commands", "file", state), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	d := newBureau(t, dir, onSQLite())
 	run(t, d.app)
-	var said []string
+	var said, empty []string
 	for _, p := range d.app.Graph().Diagnostics {
-		if p.Node == "bureau/subscription/heard" && strings.Contains(p.Message, `database "main"`) {
+		switch {
+		case p.Node == "bureau/subscription/heard" && strings.Contains(p.Message, `database "main"`):
 			said = append(said, p.Message)
+		case p.Node == "bureau/command/file" && strings.Contains(p.Message, `database "main"`):
+			empty = append(empty, p.Message)
 		}
 	}
 	if len(said) != 1 {
 		t.Errorf("the file queue left behind: %v", said)
+	}
+	if len(empty) != 0 {
+		t.Errorf("an empty file queue was said to be left behind: %v", empty)
 	}
 }
 

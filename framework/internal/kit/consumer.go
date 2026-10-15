@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
@@ -35,18 +36,24 @@ const defaultMaxDeliveries int = 5
 const consumerBatch int = 8
 
 // What a consumer's queue is kept under, beside its consumer's name: a
-// subscription's and a watch's, and a queued command's.
+// subscription's and a watch's, a queued command's, and a mailer's outbox
+// (mailer_outbox.go).
 const (
 	underQueues   string = "queues"
 	underCommands string = "commands"
+	underOutbox   string = "outbox"
 )
 
 // queueTableService is what a queue's table is named under, in place of a
 // service: kit_queue__<service>__<consumer>.
 const queueTableService string = "kit_queue"
 
-// consumerHow is how a consumer loop is said to wake, in the Studio.
-var consumerHow string = "on publish · poll " + pollInterval.String()
+var (
+	// consumerHow is how a consumer loop is said to wake, in the Studio.
+	consumerHow string = "on publish · poll " + pollInterval.String()
+	// fileQueueStates are the state directories of the SDK's file broker.
+	fileQueueStates = []string{"ready", "inflight", "dead"}
+)
 
 // queueOwner is a consumer, whatever its message type, as a database's
 // tables see it: its node, and what its queue is kept under — "" for a
@@ -58,12 +65,18 @@ type queueOwner interface {
 
 // queueTable is the table of the queue of the consumer b, kept under under,
 // on the database that keeps it (ADR 0178 C1): kit_queue__<service>__<name>,
-// a queued command's ending __command, so that a subscription and a command
-// of one name keep two queues as their directories do.
+// a queued command's ending __command and a mailer's outbox __outbox, so
+// that a subscription, a command and a mailer of one name keep three queues
+// as their directories do.
 func queueTable(b *nodeBase, under string) string {
 	suffix := "__" + b.name
-	if under == underCommands {
+	switch under {
+	case underCommands:
 		suffix += "__command"
+	case underOutbox:
+		suffix += "__outbox"
+	default:
+		// A subscription's or a watch's: the consumer's name alone.
 	}
 	return tableName(queueTableService, b.svc.name, suffix)
 }
@@ -90,27 +103,57 @@ func (a *App) openConsumerQueue(b *nodeBase, under string, maxDeliveries int) (q
 		broker, err := a.openQueue(filepath.Join(b.svc.name, under, b.name), maxDeliveries)
 		return broker, nil, err
 	}
-	broker, err := queue.NewSQL(queue.SQLConfig{
-		Transactor: r.transactor(), Dialect: r.d.dialect(), Table: queueTable(b, under),
-		Policy: consumerPolicy(maxDeliveries), Clock: a.clock,
-	})
+	broker, err := a.openSQLQueue(b, under, r, consumerPolicy(maxDeliveries))
 	if err != nil {
 		return nil, nil, err
 	}
-	a.warnFileQueueLeft(b, under, r)
 	return a.wrapped(broker), r, nil
+}
+
+// openSQLQueue opens the queue of the consumer b, kept under under, on the
+// open database r under policy — one table of the SDK's SQL broker, which
+// joins the transaction its context carries —, and says when b's queue left
+// messages in the data directory it moved from.
+func (a *App) openSQLQueue(b *nodeBase, under string, r *databaseRun, policy queue.Policy) (queue.Broker, error) {
+	broker, err := queue.NewSQL(queue.SQLConfig{
+		Transactor: r.transactor(), Dialect: r.d.dialect(), Table: queueTable(b, under),
+		Policy: policy, Clock: a.clock,
+	})
+	if err != nil {
+		return nil, err
+	}
+	a.warnFileQueueLeft(b, under, r)
+	return broker, nil
 }
 
 // warnFileQueueLeft says, at its start, that a consumer's queue moved from
 // the data directory to a database and left messages behind: they wait in
 // the file queue, which nothing consumes now, until a copy moves them.
 func (a *App) warnFileQueueLeft(b *nodeBase, under string, r *databaseRun) {
-	dir := filepath.Join(a.dataDir, b.svc.name, under, b.name)
-	entries, err := os.ReadDir(dir)
-	if err != nil || len(entries) == 0 {
+	if !fileQueueHolds(filepath.Join(a.dataDir, b.svc.name, under, b.name)) {
 		return
 	}
 	a.problem(b.id, say("consumer.file-queue-left", "node", b.id, "database", r.d.name))
+}
+
+// fileQueueHolds reports whether the file queue at dir holds a message —
+// waiting, leased or dead: a ".msg" or ".dead" file of the SDK's file
+// broker in one of its state directories, which it keeps once empty, a
+// mailer's outbox among them since its first run. A file another tool left
+// there counts too: a copy is what decides what it is.
+func fileQueueHolds(dir string) bool {
+	for _, state := range fileQueueStates {
+		entries, err := os.ReadDir(filepath.Join(dir, state))
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() && (strings.HasSuffix(e.Name(), ".msg") || strings.HasSuffix(e.Name(), ".dead")) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // openQueue opens a consumer's queue that no open database keeps: a file

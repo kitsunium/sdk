@@ -4360,7 +4360,8 @@ type MailerInfo struct {
 	// MaxAttempts is how many deliveries a message gets before it is
 	// dead-lettered.
 	MaxAttempts int    `json:"maxAttempts"`
-	// Outbox is "memory" or "file": where queued messages wait.
+	// Outbox is "memory", "file" or "sql": where queued messages wait — "sql"
+	// on the database that keeps the mailer's service, each message sealed.
 	Outbox      string `json:"outbox,omitempty"`
 	// Queued is how many messages wait in the outbox, on a runtime graph.
 	Queued      *int   `json:"queued,omitempty"`

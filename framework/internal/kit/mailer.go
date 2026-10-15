@@ -63,7 +63,9 @@ const defaultMailAttempts int = 6
 var mailRetry = resilience.Backoff{BaseDelay: mailBackoffFirst, MaxDelay: mailBackoffMax}
 
 // Outbound mail: Send validates and queues. The outbox is the SDK's mail
-// spool — on disk when the app has a data directory — which keeps the message
+// spool — on the database that keeps the mailer's service, sealed
+// (mailer_outbox.go, ADR 0178), else on disk when the app has a data
+// directory, else in memory — which keeps the message
 // until it hands it to the transport, retries a failure with a backoff, drops
 // a redelivery of a mail already sent, and dead-letters a message after its
 // last attempt. kit wraps the transport: each attempt is a span continuing
@@ -104,10 +106,14 @@ type Mailer struct {
 	relay   smtpRelay
 	problem string
 	spool   *mailspool.Spool
-	cancel  context.CancelFunc
-	done    chan struct{}
-	loop    *loopState
-	ring    mailRing
+	// outboxDB is the database the outbox lives on (mailer_outbox.go), nil
+	// for the spool's own file or memory queue: a mail sent in a
+	// transaction on it is written in that transaction.
+	outboxDB *databaseRun
+	cancel   context.CancelFunc
+	done     chan struct{}
+	loop     *loopState
+	ring     mailRing
 	// composed holds what the capture transport composed for a mail, from
 	// the attempt that sent it to the spool's report that it was sent.
 	composed map[string][]byte
@@ -128,6 +134,11 @@ type mailerOption func(o *mailerOptions)
 // mailSender keys the node that sent a mail in the context handed to the
 // spool.
 type mailSender struct{}
+
+// mailMeta keys, in the context a mail is written in within its
+// transaction, what annotate read where Send was called: the transaction's
+// context carries neither the trace nor the node of the Send.
+type mailMeta struct{}
 
 // mailbox is what the Studio's mailbox reads from a mailer. The capture
 // transport keeps whole messages; SMTP keeps summaries only.
@@ -215,7 +226,12 @@ func (s *Service) Mailer(name string, opts ...MailerConfigurer) *Mailer {
 // delivery — and puts it in the outbox. It returns the message's outbox ID.
 // Inside a transaction ([Transact], a command's) the mail waits for the
 // commit — a rollback drops it —, and the ID returned at once is the one
-// the mail keeps.
+// the mail keeps. When the outbox lives on the transaction's database —
+// the one that keeps the mailer's service, by a store's rules — the mail
+// is written in the transaction, sealed, just before it commits: it
+// exists if and only if the transaction commits, the mailbox hears of it
+// after the commit, and an outbox that refuses it fails the transaction.
+// Elsewhere it is put in the outbox after the commit.
 //
 // A message without a sender gets the mailer's ([From]); without a date, the
 // app's time; without a Message-ID, one made of its outbox ID, which every
@@ -236,9 +252,19 @@ func (m *Mailer) Send(ctx context.Context, msg mail.Message) (string, error) {
 }
 
 // enqueue hands msg to the spool, which stamps it and says it was queued
-// (observe) before it returns. A mail the SDK refuses is refused here, by
-// the same verdict the spool would give, so that a mistake of the caller is
-// an [Invalid] error and nothing else is.
+// (observe) before it returns — or, for a mail written in a transaction on
+// the outbox's database, once that commits. A mail the SDK refuses is
+// refused here, by the same verdict the spool would give, so that a mistake
+// of the caller is an [Invalid] error and nothing else is.
+//
+// Inside a transaction the mail is held (hold) under an ID minted now. When
+// the outbox lives on a database, the held mail names it: on a transaction
+// of that database, txn.join writes it in the transaction just before the
+// commit — joined, with the context of the transaction's scope, which the
+// SQL broker and the spool's Deferrer read the transaction from, and what
+// annotate read at the Send —, and a refusal there is the transaction's
+// outcome. Anywhere else it is released after the commit, as a mail to an
+// outbox on disk is.
 func (m *Mailer) enqueue(ctx context.Context, msg mail.Message) (string, error) {
 	if msg.From.IsZero() {
 		msg.From = m.opts.from
@@ -247,7 +273,7 @@ func (m *Mailer) enqueue(ctx context.Context, msg mail.Message) (string, error) 
 		return "", Invalid(errs.PublicOf(err)).Wrap(err)
 	}
 	m.mu.Lock()
-	spool := m.spool
+	spool, db := m.spool, m.outboxDB
 	m.mu.Unlock()
 	if spool == nil {
 		return "", Unavailable(fmt.Sprintf("mailer %q is not running", m.name))
@@ -256,15 +282,16 @@ func (m *Mailer) enqueue(ctx context.Context, msg mail.Message) (string, error) 
 		// Minted now, kept by the mail once the transaction commits.
 		id := NewID("mail")
 		release := func(rctx context.Context) error {
-			m.mu.Lock()
-			spool := m.spool
-			m.mu.Unlock()
-			if spool == nil {
-				return Unavailable(fmt.Sprintf("mailer %q is not running", m.name))
-			}
-			return m.spooled(spool.SendWithID(context.WithoutCancel(rctx), id, msg))
+			return m.sendHeld(context.WithoutCancel(rctx), id, msg)
 		}
-		if hold(ctx, heldEffect{node: m.id, release: release}) {
+		var joined func(context.Context) error
+		if db != nil {
+			meta := annotate(ctx)
+			joined = func(tctx context.Context) error {
+				return m.sendHeld(context.WithValue(tctx, mailMeta{}, meta), id, msg)
+			}
+		}
+		if hold(ctx, heldEffect{node: m.id, release: release, joined: joined, queue: db}) {
 			markSpan(ctx, m.id, "held", "commit")
 			return id, nil
 		}
@@ -274,6 +301,18 @@ func (m *Mailer) enqueue(ctx context.Context, msg mail.Message) (string, error) 
 		return "", m.spooled(err)
 	}
 	return id, nil
+}
+
+// sendHeld puts a mail a transaction held in the outbox under its ID, with
+// ctx: after the commit, or — joined — in the transaction ctx carries.
+func (m *Mailer) sendHeld(ctx context.Context, id string, msg mail.Message) error {
+	m.mu.Lock()
+	spool := m.spool
+	m.mu.Unlock()
+	if spool == nil {
+		return Unavailable(fmt.Sprintf("mailer %q is not running", m.name))
+	}
+	return m.spooled(spool.SendWithID(ctx, id, msg))
 }
 
 // spooled is the spool's refusal of a mail in kit's words: a mail the
@@ -293,8 +332,12 @@ func (m *Mailer) spooled(err error) error {
 }
 
 // annotate is what the spool keeps of a Send for its deliveries: the trace
-// to continue and the node that sent the mail.
+// to continue and the node that sent the mail — what was read at the Send,
+// for a mail written in its transaction (mailMeta).
 func annotate(ctx context.Context) map[string]string {
+	if kept, ok := ctx.Value(mailMeta{}).(map[string]string); ok {
+		return maps.Clone(kept)
+	}
 	meta := map[string]string{}
 	if header, _ := trace.FormatTraceParent(trace.SpanContextFromContext(ctx)); header != "" {
 		meta[metaTrace] = header
@@ -331,9 +374,7 @@ func (m *Mailer) describe(a *App, out *model.Node) []model.Edge {
 		info.From = renderAddress(m.opts.from)
 	}
 	if a != nil {
-		if a.dataDir != "" {
-			info.Outbox = "file"
-		}
+		info.Outbox = queueWhere(a, &m.nodeBase)
 		m.describeTransport(a, info)
 		if a.running() {
 			m.describeCounts(info)
@@ -433,24 +474,33 @@ func (m *Mailer) start(ctx context.Context, a *App) error {
 	if err != nil {
 		return err
 	}
-	dir := ""
-	if a.dataDir != "" {
-		dir = filepath.Join(a.dataDir, m.svc.name, "outbox", m.name)
+	cfg := mailspool.Config{
+		Transport:    outboxTransport{m: m, a: a},
+		Clock:        a.clock,
+		Observe:      func(e mailspool.Event) { m.observe(a, &e) },
+		Annotate:     annotate,
+		NewID:        func() (string, error) { return NewID("mail"), nil },
+		From:         m.opts.from,
+		Backoff:      mailRetry,
+		MaxAttempts:  m.opts.maxAttempts,
+		SendTimeout:  mailSendTimeout,
+		PollInterval: pollInterval,
 	}
-	spool, err := mailspool.New(mailspool.Config{
-		Transport:       outboxTransport{m: m, a: a},
-		Clock:           a.clock,
-		Observe:         func(e mailspool.Event) { m.observe(a, &e) },
-		Annotate:        annotate,
-		NewID:           func() (string, error) { return NewID("mail"), nil },
-		Dir:             dir,
-		From:            m.opts.from,
-		Backoff:         mailRetry,
-		MaxAttempts:     m.opts.maxAttempts,
-		SendTimeout:     mailSendTimeout,
-		MaxMessageBytes: maxMailBytes,
-		PollInterval:    pollInterval,
-	})
+	db, broker, deferrer, err := m.openOutbox(ctx, a)
+	switch {
+	case err != nil:
+		return failure(CodeMailQueue, "OUTBOX_OPEN", "a mailer's outbox cannot be opened", err, errs.String("mailer", m.id))
+	case broker != nil:
+		// On the database that keeps the mailer's service, sealed: the
+		// broker's policy bounds a mail.
+		cfg.Broker, cfg.Deferrer = broker, deferrer
+	default:
+		cfg.MaxMessageBytes = maxMailBytes
+		if a.dataDir != "" {
+			cfg.Dir = filepath.Join(a.dataDir, m.svc.name, underOutbox, m.name)
+		}
+	}
+	spool, err := mailspool.New(cfg)
 	if err != nil {
 		return failure(CodeMailQueue, "OUTBOX_OPEN", "a mailer's outbox cannot be opened", err, errs.String("mailer", m.id))
 	}
@@ -460,7 +510,7 @@ func (m *Mailer) start(ctx context.Context, a *App) error {
 	done := make(chan struct{})
 	m.mu.Lock()
 	m.transport, m.capture, m.spool, m.cancel, m.done, m.loop = transport, capture, spool, cancel, done, loop
-	m.relay, m.problem, m.composed = relay, "", map[string][]byte{}
+	m.relay, m.problem, m.composed, m.outboxDB = relay, "", map[string][]byte{}, db
 	m.ring.reset(capture != nil)
 	m.ring.dead, m.ring.deadKnown = len(dead), deadErr == nil
 	m.mu.Unlock()
@@ -489,8 +539,10 @@ func (m *Mailer) stop(ctx context.Context, a *App) error {
 		return ctx.Err()
 	}
 	m.mu.Lock()
-	m.transport, m.spool, m.cancel = nil, nil, nil
+	m.transport, m.spool, m.cancel, m.outboxDB = nil, nil, nil, nil
 	m.mu.Unlock()
+	// A broker on a database stays the mailer's after the spool closes; the
+	// SQL broker holds nothing to release.
 	err := spool.Close()
 	loop.setState(a, model.LoopStopped)
 	return err
