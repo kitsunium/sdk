@@ -37,7 +37,10 @@ Rules:
 - `Records.Keys` and the watches' catch-up (ADR 0178 C6): `catchup_test.go`
   lists the keys a watch hears through the SDK's document store over SQL,
   hears after a stop that was not clean the memo whose notice was lost, and
-  after a clean stop nothing again.
+  after a clean stop nothing again; `replay_test.go` runs `watch replay`
+  through `Main` with the product stopped — the memos no watch heard queued
+  in the watch's table and heard at the next start, a name that is no watch
+  refused with 1.
 - Migrations run — kit's own set, which makes the tables of the stores the
   database keeps, then the modules' and the product's — under the database
   file's own write lock, one transaction per run (the SDK's ADR 0140). A
