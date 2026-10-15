@@ -164,8 +164,9 @@ packages:
           the file engine is; [CollectionContext] is the same calls, each taking
           a context first, which the SQL engine is. [Versioned] and
           [VersionedContext] are their siblings for a document's versions,
-          [Trashable] and [TrashableContext] for its trash, and [Announcer] is
-          the pair of hooks both engines answer exactly as they are;
+          [Trashable] and [TrashableContext] for its trash, [KeyLister] and
+          [KeyListerContext] for the keys alone, and [Announcer] is the pair of
+          hooks both engines answer exactly as they are;
         - the values both engines read and return — [EntryValue], [VersionValue],
           [StampValue], [TombstoneValue] — and [IndexSpec], the declaration both
           take, with its two constructors [Unique] and [Index];
@@ -184,8 +185,8 @@ packages:
       statement live in internal/service/data/docstore.
 
       Package docstore — the siblings of Collection (ADR 0039): a document's
-      versions, its trash, and the same ports with a context on every call, which
-      the SQL engine implements.
+      versions, its trash, the keys alone (ADR 0178), and the same ports with a
+      context on every call, which the SQL engine implements.
 
       Package docstore — declares the sentinel *errs.Error outcomes both engines
       answer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
@@ -816,6 +817,45 @@ packages:
               - type: "[]TombstoneValue"
               - type: error
         name: TrashableContext
+      - doc: |-
+          KeyLister is the keys of a store's documents and nothing else, on a store
+          whose calls take no context: the sibling of [Collection] the file engine
+          implements beside it (ADR 0178). It reads no document, so what it costs
+          does not grow with what the documents weigh. A document the store no
+          longer holds — deleted, or in the trash ([Trashable]) — is not listed:
+          Keys lists what Get finds.
+        methods:
+          - doc: |-
+              Keys yields the key of every document the store holds that sorts after
+              after — every key when after is empty — in key order, byte order as Go
+              compares strings, and no document. Stopping early is allowed, and
+              after is where a later call resumes. A failure is yielded once, with
+              an empty key, and ends the listing; a closed store yields
+              STORE_CLOSED.
+            in:
+              - name: after
+                type: string
+            name: Keys
+            out:
+              - type: iter.Seq2[string, error]
+        name: KeyLister
+      - doc: |-
+          KeyListerContext is [KeyLister] with a context on every call: the sibling
+          of [CollectionContext] the SQL engine implements beside it.
+        methods:
+          - doc: |-
+              Keys is KeyLister.Keys under ctx: each step that reads runs on the
+              transaction ctx carries for the store's database, and on the pool
+              otherwise.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: after
+                type: string
+            name: Keys
+            out:
+              - type: iter.Seq2[string, error]
+        name: KeyListerContext
     sentinels:
       - var:
           - code: CodeDocumentNotFound
@@ -1538,6 +1578,20 @@ packages:
               - type: error
             recv: pointer
           - doc: |-
+              Keys yields the key of every document the store holds that sorts after
+              after — every key when after is empty — in key order, and no document.
+              The keys are taken once, under the read lock, when the range starts:
+              a write made during the range is not seen by it. What it costs is the
+              keys' sort, never a document's copy. A closed store yields
+              StoreClosed once.
+            in:
+              - name: after
+                type: string
+            name: Keys
+            out:
+              - type: iter.Seq2[string, error]
+            recv: pointer
+          - doc: |-
               Lookup returns the document holding key in the unique index named index,
               DocumentNotFound when none does, IndexUnknown for an undeclared index and
               IndexNotUnique for an index that may hold several: read that one with Find.
@@ -2009,6 +2063,24 @@ packages:
               - name: err
                 type: error
             recv: pointer
+          - doc: |-
+              Keys yields the key of every document the store holds that sorts after
+              after — every key when after is empty — in key order, byte order, and
+              no document. It reads them in pages of a few hundred, each page one
+              statement on the primary key that resumes after the last key yielded,
+              on the transaction ctx carries, else on the pool: a document written
+              during the range after the last key read is seen, one written before
+              it is not. A failed statement is yielded once, as StatementFailed,
+              and ends the listing.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: after
+                type: string
+            name: Keys
+            out:
+              - type: iter.Seq2[string, error]
+            recv: pointer
           - doc: Count returns how many documents the store holds.
             in:
               - name: ctx
@@ -2452,13 +2524,14 @@ packages:
       # The ports, for a double
 
       [Store] and [SQLStore] are engines. A caller that must stand a double in for
-      one depends instead on the port it implements: [Collection], [Versioned] and
-      [Trashable] for a [Store], whose calls take no context, [CollectionContext],
-      [VersionedContext] and [TrashableContext] for a [SQLStore], whose every call
-      takes one, and [Announcer] — OnWrite and OnDelete — for either. Each pair
-      carries the same methods, the same documents and the same refusals; there is
-      no single port over both, because the file engine waits on nothing a context
-      could abandon while the SQL engine waits on a database (ADR 0160).
+      one depends instead on the port it implements: [Collection], [Versioned],
+      [Trashable] and [KeyLister] for a [Store], whose calls take no context,
+      [CollectionContext], [VersionedContext], [TrashableContext] and
+      [KeyListerContext] for a [SQLStore], whose every call takes one, and
+      [Announcer] — OnWrite and OnDelete — for either. Each pair carries the same
+      methods, the same documents and the same refusals; there is no single port
+      over both, because the file engine waits on nothing a context could abandon
+      while the SQL engine waits on a database (ADR 0160).
 
       # Versions
 
@@ -2513,6 +2586,25 @@ packages:
       once, which is what an erasure needs, and finds no trashed document. How
       long a document stays in the trash is the caller's to decide; the store
       empties nothing by itself.
+
+      # Keys
+
+      Keys lists the keys of the documents a store holds, in key order, and
+      reads no document — for a caller that must visit every record, a re-scan
+      after a crash, without paying for what the records weigh (ADR 0178):
+
+      	for key, err := range pages.Keys("") {
+      		if err != nil {
+      			return err
+      		}
+      		…
+      	}
+
+      [Store] sorts the keys it holds once, when the range starts; [SQLStore]
+      reads them in pages on the primary key, each resuming after the last key
+      read. Both resume after the key a caller names, so a listing stopped early
+      continues where it stopped. A document in the trash is not listed: Keys
+      lists what Get finds.
     facade:
       - const:
           - doc: |-
@@ -2772,7 +2864,7 @@ packages:
       - alias:
           - doc: |-
               Store is the public alias for the document store: Get, List, Filter,
-              Entries, Lookup, Find and Stats read; Put, Insert, Replace, Update and
+              Entries, Keys, Lookup, Find and Stats read; Put, Insert, Replace, Update and
               Delete write, and their Stamped forms say what the version they make
               records; Versions and Version read a document's versions, RewriteVersions
               rewrites its former ones; Trash, Restore, Purge and Tombstones keep its
@@ -2833,7 +2925,7 @@ packages:
       - alias:
           - doc: |-
               SQLStore is the public alias for the document store over SQL: Get, List,
-              Filter, Entries, Count, Lookup and Find read; Put, Insert, Replace, Update
+              Filter, Entries, Keys, Count, Lookup and Find read; Put, Insert, Replace, Update
               and Delete write, and their Stamped forms say what the version they make
               records; Versions, Version and RewriteVersions, Trash, Restore, Purge and
               Tombstones as for [Store]; OnWrite and OnDelete announce once the write's
@@ -2908,6 +3000,19 @@ packages:
               every call, which [SQLStore] implements.
             name: TrashableContext
             target: coredocstore.TrashableContext
+      - alias:
+          - doc: |-
+              KeyLister is the public alias for the sibling of [Collection] that lists
+              the documents' keys alone, in key order and without a context, which
+              [Store] implements: Keys.
+            name: KeyLister
+            target: coredocstore.KeyLister
+      - alias:
+          - doc: |-
+              KeyListerContext is the public alias for [KeyLister] with a context on
+              every call, which [SQLStore] implements.
+            name: KeyListerContext
+            target: coredocstore.KeyListerContext
       - alias:
           - doc: |-
               Announcer is the public alias for the pair of hooks both engines answer

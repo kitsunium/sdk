@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"maps"
 	"slices"
 	"strconv"
@@ -152,6 +153,67 @@ func (s *Store[T]) Entries(limit int) ([]coredocstore.EntryValue, error) {
 	}
 	//: the first limit documents.
 	return entries, nil
+}
+
+// Keys yields the key of every document the store holds that sorts after
+// after — every key when after is empty — in key order, and no document.
+// The keys are taken once, under the read lock, when the range starts:
+// a write made during the range is not seen by it. What it costs is the
+// keys' sort, never a document's copy. A closed store yields
+// StoreClosed once.
+func (s *Store[T]) Keys(after string) iter.Seq2[string, error] {
+	//: nothing is read until the range starts.
+	return func(yield func(string, error) bool) {
+		keys, err := s.keysAfter(after)
+		yieldKeys(yield, keys, err)
+	}
+}
+
+// keysAfter is the sorted keys above after, taken under the read lock: the
+// map's own strings, so no key and no document is copied. A closed store
+// has none, and says StoreClosed.
+func (s *Store[T]) keysAfter(after string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	//: a closed store has nothing to hand out.
+	if s.closed {
+		//: StoreClosed.
+		return nil, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
+	}
+	keys := make([]string, 0, len(s.docs))
+	//: every key above after — the empty after is below every key, since a
+	//: key is never empty.
+	for key := range s.docs {
+		//: past the resume point.
+		if key > after {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+	//: open.
+	return keys, nil
+}
+
+// yieldKeys yields keys in order, then failure when there is one, and reports
+// whether the caller wants more: false once it stopped, and after a failure
+// whatever it answered to it — the failure is a listing's last yield. Both
+// engines' Keys yield through it.
+func yieldKeys(yield func(string, error) bool, keys []string, failure error) bool {
+	//: in key order, until the caller stops.
+	for _, key := range keys {
+		//: the caller stopped.
+		if !yield(key, nil) {
+			//: no more.
+			return false
+		}
+	}
+	//: no failure: the caller may want the next page.
+	if failure == nil {
+		//: more.
+		return true
+	}
+	//: the failure, once, with an empty key; the caller's answer is moot.
+	return yield("", failure) && failure == nil
 }
 
 // Lookup returns the document holding key in the unique index named index,

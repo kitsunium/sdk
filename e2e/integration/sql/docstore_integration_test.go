@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -186,6 +187,41 @@ func TestKeysAreComparedAsBytes(t *testing.T) {
 		}
 		if want := slices.Sorted(slices.Values(keys)); !slices.Equal(got, want) {
 			t.Fatalf("List() order = %q, want Go's %q", got, want)
+		}
+	})
+}
+
+// TestKeysListOnlyTheKeysOnEveryEngine pins Keys (ADR 0178) where the SQL is
+// parsed: more than two pages of keys, the byte-order pairs among them, in
+// Go's order; a resume after a deleted key; and nothing of a deleted document.
+func TestKeysListOnlyTheKeysOnEveryEngine(t *testing.T) {
+	t.Parallel()
+	eachEngine(t, func(t *testing.T, e *engine) {
+		ctx, store := t.Context(), openMembers(t, e).store
+		keys := []string{"a", "A", "a ", "é", "e", "b"}
+		for i := range 600 {
+			keys = append(keys, "m"+strconv.Itoa(1000+i))
+		}
+		for _, key := range keys {
+			must(t, store.Insert(ctx, member{ID: key, Name: "of " + key}))
+		}
+		must(t, store.Delete(ctx, "m1300"))
+		want := slices.Sorted(slices.Values(slices.DeleteFunc(slices.Clone(keys), func(k string) bool { return k == "m1300" })))
+		var got []string
+		for key, err := range store.Keys(ctx, "") {
+			must(t, err)
+			got = append(got, key)
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("Keys() = %d keys, want %d in Go's order", len(got), len(want))
+		}
+		var resumed []string
+		for key, err := range store.Keys(ctx, "m1300") {
+			must(t, err)
+			resumed = append(resumed, key)
+		}
+		if !slices.Equal(resumed, want[slices.Index(want, "m1301"):]) {
+			t.Fatalf("Keys(after a deleted key) resumed at %q", resumed[:min(len(resumed), 3)])
 		}
 	})
 }
