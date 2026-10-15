@@ -196,7 +196,9 @@ lint-check:
 # Gate on the gating phases (1-7) only — phase 8 (tests) is advisory, matching
 # the MCP daemon's active set and the PostToolUse hook. `--phases=all` pulled in
 # style-only test rules (TEST-TABLE/TEST-CONTEXT) that block no CI lane.
-# `run` is the command the vendor documents; `lint` is its alias in 1.45.4.
+# `run` is the command the vendor documents; `lint` is a hidden alias of it in
+# 1.46.0. Since 1.46.0 an unreadable .ktn-linter.yaml exits 11 instead of being
+# ignored, and the linter keeps the caller's GOTOOLCHAIN.
 # A gate of scripts/ci-gates-check.sh, run by the required `bazel` job (#236).
 lint-ktn-check:
 	ktn-linter run --skip-phases=tests ./...
@@ -213,8 +215,9 @@ lint-ktn-check:
 # anchor empty, which upstream documents as the maintainers' mode ("repository
 # access IS the entitlement", cmd/ktn-linter/cmd/vendor_key.go), so its licence
 # gate is inert by construction. The commit is pinned, not the tag: a tag can be
-# moved, a commit cannot (#223). KTN_LINTER_COMMIT is the commit tag v1.45.4
-# points at; KTN_LINTER_VERSION is stamped into `main.Version` (for a main
+# moved, a commit cannot (#223). KTN_LINTER_COMMIT is the commit tag v1.46.0
+# points at (the first release whose KTN-FUNC-MAXPARAM honours
+# exclude_functions, kodflow/ktn-linter#735); KTN_LINTER_VERSION is stamped into `main.Version` (for a main
 # package `-X` takes `main.`, not the import path — measured, the import path
 # leaves `--version` at `dev`). The release CI installs is the vendor's latest
 # and cannot be pinned (one release is kept, and the signed roster's minimum
@@ -230,8 +233,8 @@ lint-ktn-check:
 #
 # It refuses a checkout at any other commit, or with any local change, because
 # either would install a different linter under the pinned version string.
-KTN_LINTER_VERSION := 1.45.4
-KTN_LINTER_COMMIT := 59856d30900ceb3b5976d6713b052313b522185b
+KTN_LINTER_VERSION := 1.46.0
+KTN_LINTER_COMMIT := 55a540a1ad5e2e8479a5fd53038ff960769ea1fb
 
 lint-ktn-install:
 	@test -n "$(KTN_LINTER_SRC)" || { echo "lint-ktn-install: set KTN_LINTER_SRC to a kodflow/ktn-linter checkout at $(KTN_LINTER_COMMIT)"; exit 2; }
