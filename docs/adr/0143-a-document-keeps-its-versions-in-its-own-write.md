@@ -4,6 +4,7 @@
 - **Date**: 2026-09-28
 - **Deciders**: SDK maintainers
 - **Amended**: 2026-10-15 — the trash this record deferred, for [ADR 0178](0178-kits-effects-join-the-transaction-on-the-database-that-keeps-their-queue.md) C4 (see the dated section at the end)
+- **Amended**: 2026-10-15 — a document written with its versions and its trash as they are given, `VersionWriter.PutDocument`, and `VERSIONS_INVALID` `0.3.80.22`, for ADR 0178's `data copy` (see the second dated section at the end)
 - **Closes**: [ADR 0139](0139-a-document-store-over-sql-joins-the-transaction-its-context-carries.md) §D10 and §Deferred, for versions (side values stay deferred)
 - **Related**: [ADR 0110](0110-a-document-store-writes-one-entry-and-rests-as-one-file.md) (the overlay entry a write publishes, the order-free replay), [ADR 0056](0056-sdk-vfs-domain.md) (the atomic publication), [ADR 0055](0055-sdk-sql-domain.md) (the transactions and savepoints), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (no port, so the values are the engines'), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (the refused settings), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the fields added to two published configurations), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port the versions are stamped with, public); kitsunium/platform ADR 0007 §3 and "Implementation, in order", step 3
 
@@ -648,3 +649,74 @@ the two doubles and the code. `pkg/v1/data/docstore`: `TestFacadeTrash`.
 **Breaking changes.** None in the API: two ports, eight methods, a value, a
 code and its sentinel, all new. In behaviour, a store's files or tables never
 held a trash before, so nothing stored changes meaning.
+
+## Amendment (2026-10-15): a document written with its versions as they are given
+
+**Why.** ADR 0178 has kit copy a product's stores from the data directory into
+a database (`data copy`) and declares the copy done only when each version's
+fingerprint matches — `SHA-256(store ‖ key ‖ number ‖ instant ‖ metadata ‖
+bytes)`, "a renumbered or re-stamped version differs" — and the trash follows.
+Neither engine could write that: a write numbers the version it makes after the
+current one (`nextVersions`, `keepVersions`: `head + 1`) and stamps it with the
+store's clock; `RewriteVersions` may change a version's document and metadata
+and nothing else (D5); `Trash` stamps the trash with the clock; and the version
+1 at an unknown instant of a document stored before its store kept versions
+(D7) cannot be made at all. Replaying the history through a clock the copy
+drives and writes it throws away to shift the numbers was set aside, as the
+same re-enactment was for the queue's dead letters (ADR 0151, amended the same
+day).
+
+**Decision.** `core/data/docstore` gains two ADR 0039 siblings of `Collection`
+and `CollectionContext`, one method each, frozen like the others, published by
+`pkg/v1/data/docstore` as the aliases `VersionWriter` and
+`VersionWriterContext`. No port is widened. Not generic: no call names a `T`.
+
+```go
+type VersionWriter interface {
+	PutDocument(key string, versions []VersionValue, trashedAt time.Time) error
+}
+type VersionWriterContext interface {
+	PutDocument(ctx context.Context, key string, versions []VersionValue, trashedAt time.Time) error
+}
+```
+
+- **What is kept.** `versions` are newest first, as `Versions` returns them:
+  the current version — the document — then the former ones, each with its
+  number, its instant (zero for a version 1 made before its store kept
+  versions, D7), its metadata and its JSON, compacted and HTML-escaped as
+  `json.Marshal` writes a document, which is the form both engines keep. With
+  `trashedAt` zero the document is stored and filed; set, it is in the trash at
+  that instant, filed nowhere, its unique keys free (the amendment above). Read
+  back, `Versions` and `Tombstones` answer what was given, and the next write
+  continues the numbering and prunes as every write does.
+- **What is refused**, by one shared check on both engines, nothing written:
+  `DOCUMENT_EXISTS` when anything is under the key — a document, the trash, or
+  version rows; `VERSIONS_INVALID` (`0.3.80.22`, HTTP 400), its `problem` field
+  naming which, for no version, a number 0, numbers that do not strictly
+  decrease — gaps are allowed, since pruning, a hold and a rewrite leave them —,
+  an unknown instant on a version other than 1, a version that is not JSON, and
+  a current document whose own key is another; `DOCUMENT_UNDECODABLE`,
+  `DOCUMENT_KEY_EMPTY`, `KEY_TOO_LONG` and `UNIQUE_KEY_TAKEN` as a write
+  answers them. It asks `Held` nothing and prunes nothing: the versions are
+  written as given.
+- **Each engine.** The file engine publishes one entry — the document and its
+  versions record, or, trashed, the deletion entry that keeps versions `Trash`
+  publishes — under the writers' lock, and calls `OnWrite` for a stored
+  document. The SQL engine runs one transaction, a savepoint of the caller's
+  when the context carries one: the key's lowest version row and its document's
+  row read locked, then the document's row and index rows unless it is
+  trashed, and one version row per version — the current one's document being
+  the documents' table's, or the trash row's, numbered 0 —, with the statements
+  `Restore` and `Trash` already send; `OnWrite` after the commit.
+
+**Verification.** `putdocument_external_test.go` runs one contract on every
+engine — memory, file, and SQL on each dialect's statements over the fake
+engine: a history with gaps, an unknown instant, metadata and a document with a
+field the type does not have read back as given, filed, announced, continued at
+the next number and pruned; the same history written into the trash, listed at
+its instant, its e-mail free, restored; every refusal naming its problem,
+nothing written; `VERSIONS_NOT_KEPT` on a store keeping none; and the file
+store reopened before and after a fold. The facade builds the four new names
+without an internal import. kit's `data copy` (ADR 0178, C7), built on it
+next, is to run it on a real SQLite through `framework/connectors/sqlite`.
+

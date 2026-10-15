@@ -2509,6 +2509,10 @@ codes:
     const: CodeDocumentNotTrashed
     hex: "0x00_03_50_15"
     package: internal/core/data/docstore
+  - code: "0.3.80.22"
+    const: CodeVersionsInvalid
+    hex: "0x00_03_50_16"
+    package: internal/core/data/docstore
   - code: "0.3.81.1"
     const: CodeSpoolMisconfigured
     hex: "0x00_03_51_01"

@@ -5155,6 +5155,23 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.CodeVersionsInvalid",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "CodeVersionsInvalid",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "217110",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/docstore.CodeVersionsInvalid",
+      "code": {
+        "value": "0.3.80.22"
+      },
+      "doc": "CodeVersionsInvalid: versions PutDocument cannot write as they are given.\n",
+      "file": "docstore/facade_gen.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.CodeVersionsNotKept",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
@@ -5866,6 +5883,32 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.VersionWriter",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "VersionWriter",
+      "spelled": "coredocstore.VersionWriter",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.VersionWriter",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionWriter",
+      "doc": "VersionWriter is the public alias for the sibling of [Collection] that\nwrites a document with its versions — numbers, instants, metadata — and\nits trash as they are given, which [Store] implements: PutDocument. A\ncopy from one engine to another needs it.\n",
+      "file": "docstore/facade_gen.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.VersionWriterContext",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "VersionWriterContext",
+      "spelled": "coredocstore.VersionWriterContext",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/docstore.VersionWriterContext",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionWriterContext",
+      "doc": "VersionWriterContext is the public alias for [VersionWriter] with a\ncontext on every call, which [SQLStore] implements.\n",
+      "file": "docstore/facade_gen.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.Versioned",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
@@ -5887,6 +5930,24 @@
       "canonical": "[T any] github.com/kitsunium/sdk/internal/core/data/docstore.VersionedContext[T]",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionedContext",
       "doc": "VersionedContext is the public alias for [Versioned] with a context on every\ncall, which [SQLStore] implements beside [CollectionContext].\n",
+      "file": "docstore/facade_gen.go",
+      "layer": "public",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/data/docstore.VersionsInvalid",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+      "name": "VersionsInvalid",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "init": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionsInvalid",
+      "code": {
+        "value": "0.3.80.22",
+        "reason": "VERSIONS_INVALID",
+        "public": "The document's versions cannot be written as they were given"
+      },
+      "doc": "VersionsInvalid refuses versions PutDocument cannot write as they are given.\n",
       "file": "docstore/facade_gen.go",
       "layer": "public",
       "family": "data"

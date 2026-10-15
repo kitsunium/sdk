@@ -1,6 +1,6 @@
 # ADR 0178 — kit's effects join the transaction on the database that keeps their queue
 
-- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4, and C6's assumption about the file engine's key order, refuted after acceptance by a measurement, with its remedy inserted as item 8. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key); the SDK's items 4 and 5 in #325 (`sql.Aborter`, `mailspool.Config.Broker` and `Config.Deferrer`); C1 and C2 for topics, queued commands and watches in #327 (item 6); C1 for the mailer in item 7 — the outbox on the database that keeps the mailer's service, sealed under data-key, its mail written in the transaction; the SDK's tombstone, item 10 of C7's order, in #329 (ADR 0143 amended on 2026-10-15: `Trash`, `Restore`, `Purge`, `Tombstones`), which C4 — kit's item 11 — builds on. The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
+- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4, and C6's assumption about the file engine's key order, refuted after acceptance by a measurement, with its remedy inserted as item 8, and C7's two assumptions about what `data copy` writes — a dead letter into the SQL broker, and a version under its own number and instant —, refuted after acceptance by reading the SDK, with their remedies inserted as items 12 and 13. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key); the SDK's items 4 and 5 in #325 (`sql.Aborter`, `mailspool.Config.Broker` and `Config.Deferrer`); C1 and C2 for topics, queued commands and watches in #327 (item 6); C1 for the mailer in item 7 — the outbox on the database that keeps the mailer's service, sealed under data-key, its mail written in the transaction; the SDK's tombstone, item 10 of C7's order, in #329 (ADR 0143 amended on 2026-10-15: `Trash`, `Restore`, `Purge`, `Tombstones`), which C4 — kit's item 11 — builds on; the SDK's `DeadLetterWriter` (item 12, ADR 0151 amended) and `VersionWriter` (item 13, ADR 0143 amended), which `data copy` — item 14 — writes with. The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
 - **Date**: 2026-10-14
 - **Accepted**: 2026-10-14
 - **Deciders**: SDK maintainers (issue #274); arbitrated by the owner
@@ -518,7 +518,22 @@ copy` reads source and target back through the engines and compares:
   written (ADR 0139 §D3), so a faithful copy has the same bytes.
 - **Each version**: `SHA-256(store ‖ key ‖ number ‖ instant ‖ metadata ‖
   bytes)`, the metadata in sorted-key JSON — a renumbered or re-stamped
-  version differs.
+  version differs. **(implied, and refuted as the SDK stood — checked after
+  acceptance, on `8af43a95`.)** The fingerprint takes for granted that a copy
+  can write a version under its own number and instant, and a trashed
+  document at its own instant. No write of either engine could: a write
+  numbers the version it makes after the current one and stamps it with the
+  store's clock (`nextVersions`, `keepVersions`), `RewriteVersions` changes a
+  version's document and metadata and nothing else, `Trash` stamps the trash
+  with the clock, and the version 1 at an unknown instant of a document stored
+  before its store kept versions (ADR 0143 D7) cannot be made at all.
+  Replaying each history through a clock the copy drives was set aside, as for
+  the dead letters. **The remedy (C7, item 13)**, the owner's choice: the
+  SDK's docstore grows two siblings (ADR 0039), `VersionWriter.PutDocument(key,
+  versions, trashedAt)` and `VersionWriterContext.PutDocument(ctx, …)`, in both
+  engines — the document, its versions and its trash written as given;
+  `VERSIONS_INVALID` (`0.3.80.22`) for versions no store keeps as given;
+  amending ADR 0143.
 - **Each store**: a running SHA-256 over its records' digests in key order,
   which both engines read in that order. Equal store digests end the check
   for that store; unequal ones make `data copy` walk both sides again to
@@ -567,14 +582,24 @@ not insert — to check before PR 12, and an SDK addition if not.)**
 9. C6 — `Records.Keys` and the watches' catch-up, after 8.
 10. SDK — docstore's tombstone (design first).
 11. C4 — the trash, after 10.
-12. `data copy`, last.
+12. SDK — `DeadLetterWriter`, a dead letter written as it lies, in the three
+    brokers of `queue` (design first; inserted after acceptance, C7's refuted
+    assumption about the dead letters; amends ADR 0151).
+13. SDK — `VersionWriter` and `VersionWriterContext`, a document written with
+    its versions and its trash as they are given, in both engines of docstore
+    (design first; inserted after acceptance, C7's refuted assumption about
+    the versions; amends ADR 0143).
+14. `data copy`, last, after 12 and 13.
 
 **Decision.** A — small pull requests, in this order, `data copy` verified
 by fingerprints — by the owner's decision, 2026-10-14. Item 4 was inserted
 after acceptance, when C1's assumption about the spool was refuted (C1);
 the items after it moved down by one. Item 8 was inserted the same way,
 when C6's assumption about the file engine was refuted by a measurement
-(C6); the items after it moved down by one again.
+(C6); the items after it moved down by one again. Items 12 and 13 were
+inserted the same way, when C7's assumptions about writing a dead letter into
+the SQL broker and a version under its own number were refuted (C7);
+`data copy` became item 14.
 
 **Sealing the mail outbox (item 7).** kit seals the spool's payload in a
 broker that wraps the one C1 gives the spool — the way `wrapQueue` already
@@ -633,7 +658,11 @@ the keys without the documents, and the remedy is the SDK's `KeyLister`
 (C7, item 8). A fifth, the spool's deferred
 announcement, was **refuted** after acceptance (C1): a rolled-back `Send`
 holds its registration open for ever, and the remedy is a cancellation
-signal beside `Deferrer` (C7, item 4). Corrected by #323: a read is
+signal beside `Deferrer` (C7, item 4). A sixth, implied by C7's fingerprint
+of a version — that a copy can write a version under its own number and
+instant —, was **refuted** after acceptance: no write of either engine of
+docstore can, and the remedy is the SDK's `VersionWriter` (C7, item 13).
+Corrected by #323: a read is
 journaled without a reason and files no key (Context), and C3's month is
 the UTC month on the app's clock.
 
@@ -668,6 +697,7 @@ refused. The pull requests still to come change:
 | Accepted | the owner's decision, 2026-10-14 | The recommendation of each choice retained as written; a *Decision* line per choice. C5 implemented in the same pull request. Two facts #323 established written in: a read is journaled without a reason and files no key (the Context's growth claim corrected), and C3's month is the UTC month of the entry's instant on the app's injected clock. C1's assumption about the spool's deferred `EventQueued` refuted (a rolled-back `Send` keeps its registration open): the remedy, a cancellation signal in `core/data/sql` beside `Deferrer` (amends ADR 0139) reached through `mailspool.Config.Deferrer`, inserted as item 4 of C7's order; ways B and C set aside |
 | Accepted, item 7 | 2026-10-15 | C1 for the mailer implemented (C7 item 7): the outbox on the database that keeps the mailer's service, `kit_queue__<service>__<mailer>__outbox`, each mail sealed under data-key bound to the mailer by a broker in front of the SQL one; a mail sent in a transaction on that database written in it before the commit, the database's transaction manager handed to the spool as `Config.Deferrer`; the Status line names the items implemented so far |
 | Amended | 2026-10-15 | C6's assumption about the file engine's key order refuted by a measurement (every exported listing copied the documents, paging was quadratic, and the SQL engine exported no keyed page): the remedy, a read of the keys alone in both engines of docstore (`KeyLister`, `KeyListerContext`), inserted as item 8 of C7's order; the items after it renumbered |
+| Amended | 2026-10-15 | C7's fingerprint of a version took for granted that a copy can write a version under its own number and instant, and a trashed document at its own instant; refuted by reading both engines on `8af43a95` (a write numbers after the current version and stamps with the clock, `RewriteVersions` keeps numbers and instants, `Trash` stamps with the clock, a version 1 at an unknown instant cannot be made): the remedy, the owner's choice, the SDK's `VersionWriter.PutDocument` and `VersionWriterContext.PutDocument` in both engines, with `VERSIONS_INVALID` `0.3.80.22` (ADR 0143 amended), inserted as item 13 of C7's order after item 12, the SDK's `DeadLetterWriter` (#336); `data copy` is item 14 |
 
 ## Alternatives considered
 

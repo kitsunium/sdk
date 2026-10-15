@@ -145,9 +145,19 @@ packages:
             name: CodeDocumentNotTrashed
             value: "0x00_03_50_15"
         type: errs.Code
+      - const:
+          - doc: |-
+              CodeVersionsInvalid identifies a document whose versions a store refuses
+              to write as they are given: none, a number 0, numbers not strictly
+              decreasing, an unknown instant on a version other than 1, a version that
+              is not JSON, or a document whose own key is another (ADR 0178).
+            name: CodeVersionsInvalid
+            value: "0x00_03_50_16"
+        type: errs.Code
     doc: |-
       Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;
-      ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21). Both
+      ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21, and
+      ADR 0178 22, for a document written with its versions). Both
       engines answer every one of them alike, and the range keeps the LL = 3 its
       engine allocated it under now that it is declared here (ADR 0160).
 
@@ -165,8 +175,10 @@ packages:
           a context first, which the SQL engine is. [Versioned] and
           [VersionedContext] are their siblings for a document's versions,
           [Trashable] and [TrashableContext] for its trash, [KeyLister] and
-          [KeyListerContext] for the keys alone, and [Announcer] is the pair of
-          hooks both engines answer exactly as they are;
+          [KeyListerContext] for the keys alone, [VersionWriter] and
+          [VersionWriterContext] for a document written with its versions as they
+          are, and [Announcer] is the pair of hooks both engines answer exactly as
+          they are;
         - the values both engines read and return — [EntryValue], [VersionValue],
           [StampValue], [TombstoneValue] — and [IndexSpec], the declaration both
           take, with its two constructors [Unique] and [Index];
@@ -185,8 +197,9 @@ packages:
       statement live in internal/service/data/docstore.
 
       Package docstore — the siblings of Collection (ADR 0039): a document's
-      versions, its trash, the keys alone (ADR 0178), and the same ports with a
-      context on every call, which the SQL engine implements.
+      versions, its trash, the keys alone (ADR 0178), a document written with its
+      versions as they are (ADR 0178), and the same ports with a context on every
+      call, which the SQL engine implements.
 
       Package docstore — declares the sentinel *errs.Error outcomes both engines
       answer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
@@ -856,6 +869,72 @@ packages:
             out:
               - type: iter.Seq2[string, error]
         name: KeyListerContext
+      - doc: |-
+          VersionWriter writes a document with its versions as they are given, on a
+          store whose calls take no context: the sibling of [Collection],
+          [Versioned] and [Trashable] the file engine implements beside them (ADR
+          0178). It exists for a copy — a store moved from one engine to another —
+          that must keep each version's number, instant and metadata, and the
+          trash's instant: no other write can, since a write numbers the version it
+          makes after the current one and stamps it with the store's clock. Only a
+          store that keeps versions has it; one that keeps none answers
+          VERSIONS_NOT_KEPT.
+        methods:
+          - doc: |-
+              PutDocument writes the document key with versions, newest first as
+              [Versioned].Versions returns them: the current version — the document
+              itself — then the former ones, each kept as given, its number, its
+              instant (zero for a version 1 made before its store kept versions),
+              its metadata and its JSON, compacted and HTML-escaped as json.Marshal
+              writes a document. With trashedAt zero the document is stored and
+              filed in every index, and OnWrite is told; with trashedAt set, the
+              document is put in the trash at that instant, filed nowhere, and no
+              hook is told. Read back, Versions and Tombstones answer what was
+              given.
+
+              Nothing may be under key: a document, a trashed one, or versions —
+              DOCUMENT_EXISTS otherwise. VERSIONS_INVALID, its "problem" field
+              naming which, refuses no version, a number 0, numbers that do not
+              strictly decrease, an unknown instant on a version other than 1, a
+              version that is not JSON, and a current document whose own key is not
+              key; DOCUMENT_UNDECODABLE one the store's type does not decode, and
+              UNIQUE_KEY_TAKEN a stored document whose unique key another holds. It
+              asks Held nothing and prunes nothing: the versions are written as
+              given, and the next write prunes as every write does. A refusal
+              writes nothing.
+            in:
+              - name: key
+                type: string
+              - name: versions
+                type: "[]VersionValue"
+              - name: trashedAt
+                type: time.Time
+            name: PutDocument
+            out:
+              - type: error
+        name: VersionWriter
+      - doc: |-
+          VersionWriterContext is [VersionWriter] with a context on every call: the
+          sibling of [CollectionContext] the SQL engine implements beside it.
+        methods:
+          - doc: |-
+              PutDocument is VersionWriter.PutDocument under ctx, in one transaction
+              — a savepoint of the one ctx carries for the store's database — so the
+              document, its index rows and its versions exist if and only if that
+              transaction commits; OnWrite is told once it has.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: versions
+                type: "[]VersionValue"
+              - name: trashedAt
+                type: time.Time
+            name: PutDocument
+            out:
+              - type: error
+        name: VersionWriterContext
     sentinels:
       - var:
           - code: CodeDocumentNotFound
@@ -1089,6 +1168,22 @@ packages:
             private: "service/data/docstore: Restore or Purge named a key the store holds no trashed document under; the fields name the store, never the key"
             public: No document with this key is in the trash
             reason: DOCUMENT_NOT_TRASHED
+          - code: CodeVersionsInvalid
+            doc: |-
+              VersionsInvalid refuses a document PutDocument cannot write with its
+              versions as they are given: no version, a number 0, numbers that do
+              not strictly decrease from the newest, an unknown instant on a version
+              other than 1, a version that is not JSON, or a current document whose
+              own key is another. The "problem" field names which. Nothing changed.
+
+              It refuses rather than corrects: a copy that renumbered, re-stamped or
+              re-keyed what it copied would no longer be a copy.
+            name: VersionsInvalid
+            options:
+              - errs.WithHTTPStatus(httpBadRequest)
+            private: "service/data/docstore: PutDocument was given versions no store keeps as given; the fields name the store and the problem, never a key or a version"
+            public: The document's versions cannot be written as they were given
+            reason: VERSIONS_INVALID
     types:
       - doc: |-
           IndexSpec declares one secondary index: a name to read it by, whether it is
@@ -1876,6 +1971,27 @@ packages:
               - type: "[]coredocstore.TombstoneValue"
               - type: error
             recv: pointer
+          - doc: |-
+              PutDocument writes the document key with its versions as they are
+              given, in one durable write under the writers' lock, as
+              core/data/docstore.VersionWriter says: the current version and the
+              former ones with their numbers, instants and metadata, and — when
+              trashedAt is set — the document in the trash at that instant. Stored,
+              it is filed and OnWrite is told; trashed, it is neither. DocumentExists
+              when anything is under key, VersionsInvalid, DocumentUndecodable or
+              UniqueKeyTaken for what cannot be written as given, VersionsNotKept on
+              a store that keeps none; nothing changes on a refusal.
+            in:
+              - name: key
+                type: string
+              - name: versions
+                type: "[]coredocstore.VersionValue"
+              - name: trashedAt
+                type: time.Time
+            name: PutDocument
+            out:
+              - type: error
+            recv: pointer
         name: Store
         struct:
           unexported: true
@@ -2393,6 +2509,30 @@ packages:
               - name: err
                 type: error
             recv: pointer
+          - doc: |-
+              PutDocument writes the document key with its versions as they are
+              given, in one transaction — a savepoint of the caller's when ctx carries
+              one —, as core/data/docstore.VersionWriterContext says: the document's
+              row and its index rows unless it is trashed, and a version row for each
+              version — the trash's row, numbered 0, at trashedAt when it is set. It
+              calls OnWrite once that transaction commits, for a stored document.
+              DocumentExists when anything is under key — a document, the trash, or
+              version rows —, VersionsInvalid, DocumentUndecodable, KeyTooLong or
+              UniqueKeyTaken for what cannot be written as given, VersionsNotKept on
+              a store that keeps none; nothing changes on a refusal.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: versions
+                type: "[]coredocstore.VersionValue"
+              - name: trashedAt
+                type: time.Time
+            name: PutDocument
+            out:
+              - type: error
+            recv: pointer
         name: SQLStore
         struct:
           unexported: true
@@ -2770,6 +2910,12 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_03_50_15"
+          - doc: "CodeVersionsInvalid: versions PutDocument cannot write as they are given."
+            name: CodeVersionsInvalid
+            reexport: coredocstore.CodeVersionsInvalid
+            type: errs.Code
+            typed: true
+            value: "0x00_03_50_16"
         doc: The codes of the store's refusals (0.3.80.*), for errs.HasCode.
       - doc: The store's sentinels, for errors.Is.
         var:
@@ -2860,6 +3006,10 @@ packages:
           - doc: "DocumentNotTrashed is a miss on the trash: no document is trashed under the key."
             name: DocumentNotTrashed
             reexport: coredocstore.DocumentNotTrashed
+            type: "*errs.Error"
+          - doc: VersionsInvalid refuses versions PutDocument cannot write as they are given.
+            name: VersionsInvalid
+            reexport: coredocstore.VersionsInvalid
             type: "*errs.Error"
       - alias:
           - doc: |-
@@ -3013,6 +3163,20 @@ packages:
               every call, which [SQLStore] implements.
             name: KeyListerContext
             target: coredocstore.KeyListerContext
+      - alias:
+          - doc: |-
+              VersionWriter is the public alias for the sibling of [Collection] that
+              writes a document with its versions — numbers, instants, metadata — and
+              its trash as they are given, which [Store] implements: PutDocument. A
+              copy from one engine to another needs it.
+            name: VersionWriter
+            target: coredocstore.VersionWriter
+      - alias:
+          - doc: |-
+              VersionWriterContext is the public alias for [VersionWriter] with a
+              context on every call, which [SQLStore] implements.
+            name: VersionWriterContext
+            target: coredocstore.VersionWriterContext
       - alias:
           - doc: |-
               Announcer is the public alias for the pair of hooks both engines answer

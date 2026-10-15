@@ -12,6 +12,22 @@ import (
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// The problems VersionsInvalid names, the same on both engines.
+const (
+	// problemNoVersion: a document is at least its current version.
+	problemNoVersion string = "no version"
+	// problemNumberZero: versions are numbered from 1.
+	problemNumberZero string = "a version numbered 0"
+	// problemNotDecreasing: newest first, no number twice.
+	problemNotDecreasing string = "numbers that do not strictly decrease from the newest"
+	// problemUnknownInstant: only version 1 may predate its store's versions.
+	problemUnknownInstant string = "an unknown instant on a version other than 1"
+	// problemNotJSON: a version holds a JSON document.
+	problemNotJSON string = "a version that is not JSON"
+	// problemOtherKey: a document sits under the key its own Key gives.
+	problemOtherKey string = "a current document whose own key is another"
+)
+
 // versionsRecord is one document's versions as the file store keeps them in
 // memory and in its files: the current version without its document — the
 // document is the document itself — and the former versions, newest first.
@@ -425,4 +441,237 @@ func versionsNotKept(store string) error {
 func rewriteRefused(store, problem string) error {
 	//: the problem, never a version.
 	return kerrs.Wrap(coredocstore.VersionsRewriteRefused, kerrs.WrapParams{}, kerrs.String("store", store), kerrs.String("problem", problem))
+}
+
+// PutDocument writes the document key with its versions as they are
+// given, in one durable write under the writers' lock, as
+// core/data/docstore.VersionWriter says: the current version and the
+// former ones with their numbers, instants and metadata, and — when
+// trashedAt is set — the document in the trash at that instant. Stored,
+// it is filed and OnWrite is told; trashed, it is neither. DocumentExists
+// when anything is under key, VersionsInvalid, DocumentUndecodable or
+// UniqueKeyTaken for what cannot be written as given, VersionsNotKept on
+// a store that keeps none; nothing changes on a refusal.
+func (s *Store[T]) PutDocument(key string, versions []coredocstore.VersionValue, trashedAt time.Time) error {
+	applied, err := s.putDocument(key, versions, trashedAt)
+	//: a stored document is announced, WriteUnconfirmed included; a trashed
+	//: one left no read to announce.
+	if applied && trashedAt.IsZero() {
+		s.onWrite.call(key)
+	}
+	//: nil, WriteUnconfirmed, or why nothing changed.
+	return err
+}
+
+// putDocument runs PutDocument, and reports whether it took effect.
+func (s *Store[T]) putDocument(key string, versions []coredocstore.VersionValue, trashedAt time.Time) (applied bool, err error) {
+	//: a store that keeps none has no versions to write.
+	if s.keep == 0 {
+		//: VersionsNotKept, naming the store.
+		return false, versionsNotKept(s.path)
+	}
+	doc, err := s.preparedDocument(key, versions)
+	//: what cannot be written as given: nothing was locked.
+	if err != nil {
+		//: VersionsInvalid, DocumentKeyEmpty or DocumentUndecodable.
+		return false, err
+	}
+	s.writing.Lock()
+	defer s.writing.Unlock()
+	//: a closed store takes nothing.
+	if s.closed {
+		//: StoreClosed.
+		return false, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
+	}
+	_, stored := s.docs[key]
+	//: a document, a trashed one, or versions: the key is taken.
+	if stored || s.versions[key] != nil {
+		//: DocumentExists, naming no key.
+		return false, kerrs.Wrap(coredocstore.DocumentExists, kerrs.WrapParams{}, kerrs.String("store", s.path))
+	}
+	record := recordOf(doc.given)
+	trashed := !trashedAt.IsZero()
+	//: in the trash at its instant, filed nowhere, the store holding no
+	//: document under its key.
+	if trashed {
+		record.Trashed = &trashedDocument{At: trashedAt.UTC(), Document: doc.raw}
+	}
+	//: a stored document's unique keys must be free.
+	if name, taken := s.uniqueTaken(key, doc.keys); !trashed && taken {
+		//: UniqueKeyTaken, naming the index and never the key.
+		return false, kerrs.Wrap(coredocstore.UniqueKeyTaken, kerrs.WrapParams{}, kerrs.String("store", s.path), kerrs.String("index", name))
+	}
+	persistErr := s.persistDocument(key, doc.raw, trashed, record)
+	//: the filesystem refused: nothing changed anywhere.
+	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {
+		//: PersistFailed.
+		return false, persistErr
+	}
+	s.mu.Lock()
+	//: stored and filed, or only kept in the trash.
+	if !trashed {
+		s.docs[key] = doc.raw
+		s.file(key, doc.keys)
+	}
+	s.setVersions(key, record)
+	s.markPending(key)
+	s.mu.Unlock()
+	s.maybeFold()
+	//: written, and nil or WriteUnconfirmed.
+	return true, persistErr
+}
+
+// givenDocument is what PutDocument writes, computed outside every lock: the
+// versions as the store keeps them, the current document's JSON, and its
+// keys in every index.
+type givenDocument struct {
+	// raw is the current document's JSON.
+	raw json.RawMessage
+	// given are the versions, newest first, as the store keeps them.
+	given []coredocstore.VersionValue
+	// keys are the current document's keys in every index.
+	keys [][]string
+}
+
+// preparedDocument checks what PutDocument is given and computes what it
+// writes. It runs the caller's key and index functions, before any lock.
+func (s *Store[T]) preparedDocument(key string, versions []coredocstore.VersionValue) (givenDocument, error) {
+	//: a document the store could never find again.
+	if key == "" {
+		//: DocumentKeyEmpty.
+		return givenDocument{}, kerrs.Wrap(coredocstore.DocumentKeyEmpty, kerrs.WrapParams{}, kerrs.String("store", s.path))
+	}
+	given, err := checkDocument(s.path, versions)
+	//: VersionsInvalid.
+	if err != nil {
+		//: nothing to write.
+		return givenDocument{}, err
+	}
+	raw := given[0].JSON
+	v, err := s.decode(raw)
+	//: a document the store's type does not decode.
+	if err != nil {
+		//: DocumentUndecodable.
+		return givenDocument{}, err
+	}
+	//: a document filed under another key than its own would be served under
+	//: one identity and refused by Update as a rename.
+	if s.key(v) != key {
+		//: VersionsInvalid, naming the problem.
+		return givenDocument{}, versionsInvalid(s.path, problemOtherKey)
+	}
+	//: ready to be checked against the store and written.
+	return givenDocument{raw: raw, given: given, keys: s.indexKeys(v)}, nil
+}
+
+// persistDocument makes PutDocument's write durable: the document and its
+// versions in one entry, or — for a trashed document — a deletion entry that
+// keeps its versions, as Trash publishes one.
+func (s *Store[T]) persistDocument(key string, raw json.RawMessage, trashed bool, record *versionsRecord) error {
+	//: the trash holds the document; the store holds none under its key.
+	if trashed {
+		//: nil, PersistFailed or WriteUnconfirmed.
+		return s.persist(key, nil, true, record)
+	}
+	//: nil, PersistFailed or WriteUnconfirmed.
+	return s.persist(key, raw, false, record)
+}
+
+// recordOf is the versions record of checked versions, newest first: the
+// first one's head as the current version, the others as the former ones.
+func recordOf(given []coredocstore.VersionValue) *versionsRecord {
+	head := given[0]
+	var former []formerVersion
+	//: newest first, each with the document it holds.
+	for _, v := range given[1:] {
+		former = append(former, formerVersion{At: v.At, Meta: v.Meta, Document: v.JSON, Number: v.Number})
+	}
+	//: the current version without its document, which is the document.
+	return &versionsRecord{Current: versionHead{At: head.At, Meta: head.Meta, Number: head.Number}, Former: former}
+}
+
+// checkDocument checks the versions PutDocument is given, newest first, and
+// returns copies as both engines keep them: each JSON compacted and
+// HTML-escaped as json.Marshal writes a document, each instant in UTC, and
+// no metadata as nil. Both engines check through it, so they refuse identical
+// inputs identically.
+func checkDocument(store string, versions []coredocstore.VersionValue) ([]coredocstore.VersionValue, error) {
+	//: a document is at least its current version.
+	if len(versions) == 0 {
+		//: VersionsInvalid, naming the problem.
+		return nil, versionsInvalid(store, problemNoVersion)
+	}
+	out := make([]coredocstore.VersionValue, len(versions))
+	//: newest first.
+	for i, v := range versions {
+		//: the version's own problem, or the order it breaks.
+		if problem, wrong := versionProblem(versions, i); wrong {
+			//: VersionsInvalid, naming the problem and never a version.
+			return nil, versionsInvalid(store, problem)
+		}
+		doc, ok := documentJSON(v.JSON)
+		//: a version holds a JSON document.
+		if !ok {
+			//: VersionsInvalid, naming the problem and never the JSON.
+			return nil, versionsInvalid(store, problemNotJSON)
+		}
+		out[i] = coredocstore.VersionValue{At: v.At.UTC(), Meta: metaOrNil(v.Meta), JSON: doc, Number: v.Number}
+	}
+	//: as the store keeps them.
+	return out, nil
+}
+
+// versionProblem says what is wrong with the i-th of versions, newest first,
+// by itself or against the newer one, and whether anything is.
+func versionProblem(versions []coredocstore.VersionValue, i int) (problem string, wrong bool) {
+	v := versions[i]
+	switch {
+	//: versions are numbered from 1.
+	case v.Number == 0:
+		//: the problem.
+		return problemNumberZero, true
+	//: newest first, no number twice.
+	case i > 0 && v.Number >= versions[i-1].Number:
+		//: the problem.
+		return problemNotDecreasing, true
+	//: only a version 1 made before its store kept versions has no instant.
+	case v.At.IsZero() && v.Number != 1:
+		//: the problem.
+		return problemUnknownInstant, true
+	default:
+		//: nothing wrong.
+		return "", false
+	}
+}
+
+// documentJSON returns raw compacted and HTML-escaped as json.Marshal writes
+// a document, and whether raw is JSON at all.
+func documentJSON(raw json.RawMessage) (json.RawMessage, bool) {
+	var compact, escaped bytes.Buffer
+	//: a version holds a JSON document.
+	if len(raw) == 0 || json.Compact(&compact, raw) != nil {
+		//: not JSON.
+		return nil, false
+	}
+	json.HTMLEscape(&escaped, compact.Bytes())
+	//: as the store keeps it.
+	return escaped.Bytes(), true
+}
+
+// metaOrNil is a copy of meta, nil when it says nothing: both engines read
+// an empty metadata back as nil.
+func metaOrNil(meta map[string]string) map[string]string {
+	//: nothing said.
+	if len(meta) == 0 {
+		//: nil.
+		return nil
+	}
+	//: a copy the store owns.
+	return maps.Clone(meta)
+}
+
+// versionsInvalid is VersionsInvalid naming store and the problem.
+func versionsInvalid(store, problem string) error {
+	//: the problem, never a key or a version.
+	return kerrs.Wrap(coredocstore.VersionsInvalid, kerrs.WrapParams{}, kerrs.String("store", store), kerrs.String("problem", problem))
 }

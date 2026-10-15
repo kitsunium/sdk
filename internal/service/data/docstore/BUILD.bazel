@@ -60,6 +60,7 @@ go_test(
         "index_external_test.go",
         "keys_external_test.go",
         "persist_external_test.go",
+        "putdocument_external_test.go",
         "sql_export_test.go",
         "sql_reindex_external_test.go",
         "sql_statements_external_test.go",
