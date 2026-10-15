@@ -155,3 +155,49 @@ step() {
   cut_line="$(grep -n 'name: Cut and push tags' "$WF" | cut -d: -f1)"
   [ "$floor_line" -lt "$cut_line" ]
 }
+
+# v0.18.0 to v0.28.0: every release listed each pull request since #130, with a
+# "Full Changelog" to commits/<tag>. A tag names a release commit made off main,
+# so the last release's tag is never its ancestor and GitHub, left to choose,
+# chose no start. The start is the manifest's `previous` of the primary module.
+@test "the workflow starts the generated notes at the primary module's previous tag" {
+  body="$(step "Create the GitHub release")"
+  [[ "$body" == *'start="$(bash scripts/release/release-notes.sh start-tag /tmp/release-manifest.json)"'* ]]
+  [[ "$body" == *'from=(--notes-start-tag "$start")'* ]]
+  [[ "$body" == *'--generate-notes ${from[@]+"${from[@]}"}'* ]]
+}
+
+@test "release-notes start-tag: the previous tag of the module the release is" {
+  M="$BATS_TEST_TMPDIR/manifest.json"
+  cat >"$M" <<'JSON'
+{"release":"v0.28.0","modules":[
+ {"dir":".","tag":"v0.28.0","previous":"v0.27.0"},
+ {"dir":"pkg/v1/data","tag":"pkg/v1/data/v0.4.0","previous":"pkg/v1/data/v0.3.1"}],"tombstones":[]}
+JSON
+  run bash "$NOTES" start-tag "$M"
+  [ "$status" -eq 0 ]
+  [ "$output" = "v0.27.0" ]
+  # A release of one family alone starts at that family's previous tag.
+  cat >"$M" <<'JSON'
+{"release":"pkg/v1/data/v0.4.0","modules":[{"dir":"pkg/v1/data","tag":"pkg/v1/data/v0.4.0","previous":"pkg/v1/data/v0.3.1"}],"tombstones":[]}
+JSON
+  run bash "$NOTES" start-tag "$M"
+  [ "$status" -eq 0 ]
+  [ "$output" = "pkg/v1/data/v0.3.1" ]
+}
+
+@test "release-notes start-tag: nothing for a first tag, a refusal for a release no module is" {
+  M="$BATS_TEST_TMPDIR/manifest.json"
+  printf '{"release":"internal/v0.1.0","modules":[{"dir":"internal","tag":"internal/v0.1.0","previous":""}],"tombstones":[]}' >"$M"
+  run bash "$NOTES" start-tag "$M"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  printf '{"release":"v0.28.0","modules":[{"dir":"internal","tag":"internal/v0.2.0","previous":"internal/v0.1.0"}],"tombstones":[]}' >"$M"
+  run bash "$NOTES" start-tag "$M"
+  [ "$status" -eq 1 ]
+  printf '{"release":"v0.28.0","modules":[{"dir":".","tag":"v0.28.0","previous":"--draft"}],"tombstones":[]}' >"$M"
+  run bash "$NOTES" start-tag "$M"
+  [ "$status" -eq 1 ]
+  run bash "$NOTES" start-tag "$BATS_TEST_TMPDIR/absent.json"
+  [ "$status" -eq 1 ]
+}

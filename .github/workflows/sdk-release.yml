@@ -458,7 +458,9 @@ jobs:
         # ONE release per run (ADR 0162, ADR 0171) — not one per module, which
         # made eighteen for a lockstep release. Every tag the run cut is listed
         # in its notes, ahead of the notes GitHub generates, and the manifest is
-        # attached; the tombstones of the first release are listed apart. The notes are
+        # attached; the tombstones of the first release are listed apart. GitHub's
+        # notes start at the primary module's previous tag (--notes-start-tag,
+        # release-notes.sh start-tag). The notes are
         # scripts/release/release-notes.sh's, which classifies each tag by the
         # anchored shapes of lib/tag-format.sh and refuses one it does not know.
         if: steps.compute.outputs.majors != '' && steps.cut.outputs.held != 'true' && env.DRY_RUN != 'true'
@@ -471,8 +473,18 @@ jobs:
           # manifest attached, so the release names every module and version.
           primary="$(jq -r '.release' /tmp/release-manifest.json)"
           bash scripts/release/release-notes.sh notes /tmp/cut.log > /tmp/release-notes.md
+          # The generated notes start at the primary module's own last tag, the
+          # manifest's `previous`: every tag names a release commit made off
+          # main, so the last one is never an ancestor and GitHub, left to pick,
+          # picked none — v0.18.0 to v0.28.0 listed every pull request since
+          # #130. Omitted only when the module was never tagged before.
+          start="$(bash scripts/release/release-notes.sh start-tag /tmp/release-manifest.json)"
+          from=()
+          if [ -n "$start" ]; then
+            from=(--notes-start-tag "$start")
+          fi
           # --notes, which gh documents as PREPENDED to the generated notes.
-          gh release create "$primary" /tmp/release-manifest.json --generate-notes --verify-tag --title "$primary" --notes "$(cat /tmp/release-notes.md)"
+          gh release create "$primary" /tmp/release-manifest.json --generate-notes ${from[@]+"${from[@]}"} --verify-tag --title "$primary" --notes "$(cat /tmp/release-notes.md)"
 
       - name: Check the release on the module proxy
         # A tag on origin is not yet a version a consumer resolves: the proxy
