@@ -209,12 +209,16 @@ Single job `release` on `ubuntu-latest`, gated by `workflow_run` on `SDK CI (Baz
 
 **When a size is refused** (exit 65): label the pull request the refusal names — `release:minor` to grant the request, `release:patch` to decline it — and re-run the failed job, or dispatch this workflow with `bump` = patch/minor/major. `release_base()` advances only when a release is cut, so the refused merge stays in every later range until one of those happens. Never cut tags by hand: a range chosen to step over one merge steps over every size in it.
 
-**When the tags were pushed and the GitHub release was not** (step 6 failed after step 4 succeeded): a re-run will not repair it — the range now starts at the new tag, finds nothing, and goes green as "Nothing was published" — and `docs-deploy.yml` lists versions through `gh release list`, so the version is missing from the docs site too. Create the release by hand from the tags already on the release commit, then dispatch Docs Deploy:
+**When the tags were pushed and the GitHub release was not** (step 6 failed after step 4 succeeded): a re-run will not repair it — the range now starts at the new tag, finds nothing, and goes green as "Nothing was published" — and `docs-deploy.yml` lists versions through `gh release list`, so the version is missing from the docs site too. Create the release by hand from the tags already on the release commit, then dispatch Docs Deploy. The release is on the run's primary tag — the manifest's `release`, which is the SDK's `vX.Y.Z` only when the root was cut, and otherwise a family's `pkg/v1/<family>/vX.Y.Z`, `internal/vX.Y.Z` or a vendor's tag —, and its generated notes start where the workflow's would, at `release-notes.sh start-tag` over that run's `release-manifest.json` (the run's summary prints it), with `--notes-start-tag` added only when that tag is not empty (a module's first tag has none):
 
 ```sh
-tag=vX.Y.Z    # the SDK tag that has no GitHub release
-prev=vX.Y.W   # the SDK tag before it — without it the notes list the whole history
-gh release create "$tag" --verify-tag --generate-notes --notes-start-tag "$prev" --title "$tag" \
+tag="$(jq -r '.release' release-manifest.json)"   # the primary tag that has no GitHub release
+prev="$(bash scripts/release/release-notes.sh start-tag release-manifest.json)"
+from=()
+if [ -n "$prev" ]; then
+  from=(--notes-start-tag "$prev")   # without it the notes list the whole history
+fi
+gh release create "$tag" release-manifest.json --verify-tag --generate-notes ${from[@]+"${from[@]}"} --title "$tag" \
   --notes "$(git tag --points-at "$tag^{commit}" | grep -vx "$tag" | sed 's/^/- `/; s/$/`/')"
 ```
 
