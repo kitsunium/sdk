@@ -328,6 +328,7 @@ go_test(
         "transact_seal_test.go",
         "transact_test.go",
         "transact_warn_internal_test.go",
+        "trash_internal_test.go",
         "trash_test.go",
         "trash_versions_test.go",
         "watch_graph_test.go",

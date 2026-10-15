@@ -188,8 +188,9 @@ func (s *StoreService[T]) untrash(ctx context.Context, key string) (T, error) {
 	if err := s.trashSaid(tr.untrash(ctx, key), key); err != nil {
 		return zero, err
 	}
+	// The agenda keeps its entry: a rollback puts the record back in the
+	// trash, and a record no longer there passes its instant doing nothing.
 	s.notify(ctx, key, false)
-	s.trashDone(key)
 	return s.read(ctx, key)
 }
 
@@ -242,10 +243,11 @@ func (s *StoreService[T]) discard(ctx context.Context, key string) error {
 }
 
 // purgeTrashed empties the trash of the record under key, under the data's
-// writer turn: it reports false, with no error, when no record is trashed
-// there any more. The record's person's data key goes once nothing kit
-// keeps needs it (shredIfLast).
-func (s *StoreService[T]) purgeTrashed(ctx context.Context, a *App, key string) (bool, error) {
+// writer turn — when scheduled is set, only a tombstone trashed no later
+// than scheduled, the one the agenda named —: it reports false, with no
+// error, when no such record is trashed there any more. The record's
+// person's data key goes once nothing kit keeps needs it (shredIfLast).
+func (s *StoreService[T]) purgeTrashed(ctx context.Context, a *App, key string, scheduled time.Time) (bool, error) {
 	tr, err := s.trashKeeper()
 	if err != nil {
 		return false, err
@@ -263,15 +265,13 @@ func (s *StoreService[T]) purgeTrashed(ctx context.Context, a *App, key string) 
 		logger.Warn(ctx, a.log, "the person of a record leaving the trash could not be read",
 			logger.String("store", s.id), logger.String("error", describeText(serr)))
 	}
-	err = tr.purge(ctx, key)
+	err = s.purgeScheduled(ctx, a, tr, key, scheduled)
 	switch {
 	case errors.Is(err, docstore.DocumentNotTrashed):
-		s.trashDone(key)
 		return false, nil
 	case err != nil && !errors.Is(err, docstore.WriteUnconfirmed):
 		return false, s.trashFailure(err)
 	}
-	s.trashDone(key)
 	if subject != "" {
 		if err := a.shredIfLast(ctx, subject); err != nil {
 			logger.Warn(ctx, a.log, "the data key of a person whose last record left the trash could not be destroyed",
@@ -279,6 +279,31 @@ func (s *StoreService[T]) purgeTrashed(ctx context.Context, a *App, key string) 
 		}
 	}
 	return true, nil
+}
+
+// purgeScheduled purges the record trashed under key — when scheduled is
+// set, only if its tombstone was trashed no later than scheduled, read and
+// purged in one transaction on a database, under the writer turn elsewhere:
+// a restoration and a new deletion since make a tombstone the agenda did not
+// name, which waits for its own instant. DocumentNotTrashed when none is.
+func (s *StoreService[T]) purgeScheduled(ctx context.Context, a *App, tr trasher, key string, scheduled time.Time) error {
+	purge := func(ctx context.Context) error {
+		if !scheduled.IsZero() {
+			stones, err := tr.tombstones(ctx)
+			if err != nil {
+				return err
+			}
+			i := slices.IndexFunc(stones, func(st docstore.Tombstone) bool { return st.Key == key })
+			if i < 0 || stones[i].At.After(scheduled) {
+				return docstore.DocumentNotTrashed
+			}
+		}
+		return tr.purge(ctx, key)
+	}
+	if scheduled.IsZero() || s.local() || unitOf(ctx) != nil {
+		return purge(ctx)
+	}
+	return transact(ctx, a, purge)
 }
 
 // eraseTrashed purges from the trash every record whose subject is one of
@@ -315,7 +340,7 @@ func (s *StoreService[T]) eraseOneTrashed(ctx context.Context, a *App, key strin
 	if err != nil || subject == "" || !slices.Contains(ids, subject) {
 		return false, err
 	}
-	done, err := s.purgeTrashed(ctx, a, key)
+	done, err := s.purgeTrashed(ctx, a, key, time.Time{})
 	if err != nil || !done {
 		return false, err
 	}

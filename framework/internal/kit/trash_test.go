@@ -1,6 +1,8 @@
 package kit_test
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -179,4 +181,31 @@ func expectCode(t *testing.T, what string, err error, want string) {
 	if !errorsAs(err, &ke) || ke.Code != want {
 		t.Errorf("%s: %v, want %s", what, err, want)
 	}
+}
+
+// errUntrashUndone rolls an untrash back.
+var errUntrashUndone = errors.New("the untrash is rolled back")
+
+// An untrash a transaction rolls back leaves the record in the trash with
+// its instant: kit still purges it 30 days after its deletion.
+func TestAnUntrashRolledBackKeepsItsPurge(t *testing.T) {
+	eachFolk(t, func(t *testing.T, _ *kit.App, _ string, clk *clock.ManualClock) {
+		ctx := t.Context()
+		must(t, Folks.Insert(ctx, Member{ID: "m1", Email: "ann@folk.test", Name: "Annabel Quist"}))
+		must(t, Folks.Delete(ctx, "m1"))
+		err := kit.Transact(ctx, func(ctx context.Context) error {
+			if _, err := Folks.Untrash(ctx, "m1"); err != nil {
+				return err
+			}
+			return errUntrashUndone
+		})
+		if !errors.Is(err, errUntrashUndone) {
+			t.Fatalf("the rolled back untrash: %v", err)
+		}
+		if got := trashedKeys(t); !slices.Equal(got, []string{"m1"}) {
+			t.Fatalf("the trash after the rollback: %q", got)
+		}
+		clk.Advance(trashDays)
+		eventually(t, "the purge at the deletion's instant", func() bool { return len(trashedKeys(t)) == 0 })
+	})
 }

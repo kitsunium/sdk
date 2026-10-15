@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -20,7 +21,11 @@ import (
 // deletions — and a loop that sleeps on the earliest; nothing sweeps the
 // trash while nothing is due. A record another process trashed joins the
 // agenda at the next start; one written or restored meanwhile is not in the
-// trash any more, and its instant passes doing nothing.
+// trash any more, and its instant passes doing nothing. Each entry names the
+// tombstone it scheduled by the instant it was trashed: a purge empties only
+// a tombstone trashed no later than that — never one a restoration and a
+// new deletion made since — and leaves the agenda only when the entry is
+// still the one it read.
 
 // armSlack is how far the app's clock may move while a timer is armed
 // before the timer is armed again: a timer takes a duration, which the clock
@@ -35,11 +40,17 @@ type trashRun[T any] struct {
 	state *loopState
 
 	mu     sync.Mutex
-	agenda map[string]time.Time
+	agenda map[string]trashEntry
 	// wake is signalled when the agenda moves.
 	wake   chan struct{}
 	cancel context.CancelFunc
 	done   chan struct{}
+}
+
+// trashEntry is a record on the trash's agenda: when it is due, and the
+// instant its tombstone was trashed at the latest, which names it.
+type trashEntry struct {
+	due, trashed time.Time
 }
 
 // trashRunner is a store's trash, whatever its entity type.
@@ -94,16 +105,20 @@ func (s *StoreService[T]) startTrash(ctx context.Context, a *App) error {
 	if err != nil {
 		return err
 	}
-	r := &trashRun[T]{s: s, a: a, agenda: map[string]time.Time{}, wake: make(chan struct{}, 1), done: make(chan struct{})}
+	r := &trashRun[T]{s: s, a: a, agenda: map[string]trashEntry{}, wake: make(chan struct{}, 1), done: make(chan struct{})}
 	stones, err := tr.tombstones(s.outside(ctx))
 	if err != nil {
 		return s.trashFailure(err)
 	}
 	for _, st := range stones {
-		r.agenda[st.Key] = s.purgeAt(ctx, a, st)
+		r.agenda[st.Key] = trashEntry{due: s.purgeAt(ctx, a, st), trashed: st.At}
 	}
 	if err := r.purgeDue(withActor(ctx, actorRetention), a.clock.Now()); err != nil {
-		return err
+		// What could not be purged stays in the trash and on the agenda: the
+		// loop tries again after its backoff, or the next start does when no
+		// loop runs (CodeTrash). The app starts.
+		logger.Warn(ctx, a.log, "a store's trash could not be emptied at start; kit tries again",
+			logger.String("node", s.id), logger.String("error", describeText(err)))
 	}
 	if s.trashLength() == 0 {
 		return nil
@@ -138,21 +153,21 @@ func (s *StoreService[T]) trashPlanned(ctx context.Context, a *App, st docstore.
 	if r == nil {
 		return
 	}
-	at := s.purgeAt(ctx, a, st)
+	e := trashEntry{due: s.purgeAt(ctx, a, st), trashed: st.At}
 	r.mu.Lock()
-	r.agenda[st.Key] = at
+	r.agenda[st.Key] = e
 	r.mu.Unlock()
 	r.signal()
 }
 
-// trashDone takes a record out of the trash's agenda: restored, written
-// again, or purged.
-func (s *StoreService[T]) trashDone(key string) {
-	if r := s.bin.Load(); r != nil {
-		r.mu.Lock()
+// forget takes key off the agenda, unless a deletion since put another
+// tombstone of it there.
+func (r *trashRun[T]) forget(key string, e trashEntry) {
+	r.mu.Lock()
+	if r.agenda[key] == e {
 		delete(r.agenda, key)
-		r.mu.Unlock()
 	}
+	r.mu.Unlock()
 }
 
 // signal wakes the loop: a burst of deletions is one wake.
@@ -168,32 +183,32 @@ func (r *trashRun[T]) earliest() time.Time {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var first time.Time
-	for _, at := range r.agenda {
-		if first.IsZero() || at.Before(first) {
-			first = at
+	for _, e := range r.agenda {
+		if first.IsZero() || e.due.Before(first) {
+			first = e.due
 		}
 	}
 	return first
 }
 
-// dueKeys are the keys due at now, in key order.
-func (r *trashRun[T]) dueKeys(now time.Time) []string {
+// dueKeys are the keys due at now, in key order, with their entries.
+func (r *trashRun[T]) dueKeys(now time.Time) ([]string, map[string]trashEntry) {
+	entries := map[string]trashEntry{}
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	var keys []string
-	for k, at := range r.agenda {
-		if !at.After(now) {
-			keys = append(keys, k)
+	for k, e := range r.agenda {
+		if !e.due.After(now) {
+			entries[k] = e
 		}
 	}
-	slices.Sort(keys)
-	return keys
+	r.mu.Unlock()
+	keys := slices.Sorted(maps.Keys(entries))
+	return keys, entries
 }
 
 // purgeDue purges every record due at now: a record no longer in the trash
 // leaves the agenda, one whose purge failed stays on it.
 func (r *trashRun[T]) purgeDue(ctx context.Context, now time.Time) error {
-	keys := r.dueKeys(now)
+	keys, entries := r.dueKeys(now)
 	if len(keys) == 0 {
 		return nil
 	}
@@ -201,13 +216,12 @@ func (r *trashRun[T]) purgeDue(ctx context.Context, now time.Time) error {
 	ctx, sp := a.begin(ctx, &spanStart{node: s.id, op: model.OpRun, name: "Trash"})
 	var failed []error
 	for _, key := range keys {
-		if _, err := s.purgeTrashed(ctx, a, key); err != nil {
+		e := entries[key]
+		if _, err := s.purgeTrashed(ctx, a, key, e.trashed); err != nil {
 			failed = append(failed, err)
 			continue
 		}
-		r.mu.Lock()
-		delete(r.agenda, key)
-		r.mu.Unlock()
+		r.forget(key, e)
 	}
 	err := errors.Join(failed...)
 	sp.attr("records", fmt.Sprint(len(keys)))
