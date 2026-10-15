@@ -88,7 +88,7 @@ Declaring never fails: a mistake is recorded with its position and [App](#App).S
 
 ### Modules
 
-A module ([NewModule](#NewModule)) is a Go module's services, which a product mounts as one — [App](#App).With at its defaults, [Mount](#Mount) with a [Prefix](#Prefix) or a [Bind](#Bind). What it declares is qualified with its name: its services are "\<module>.\<service>", its settings and secrets "\<module>.\<name>", its routes served under its prefix; a module it [Requires](#Requires) is mounted with it, and the modules start first.
+A module ([NewModule](#NewModule)) is a Go module's services, which a product mounts as one — [App](#App).With at its defaults, [Mount](#Mount) with a [Prefix](#Prefix) or a [Bind](#Bind). What it declares is qualified with its name: its services are "\<module>.\<service>", its settings and secrets "\<module>.\<name>", its routes served under its prefix; a module it [Requires](#Requires) is mounted with it, and the modules start first. A mount given [Only](#Only) holds in the environments it names alone — kit.Mount(m, kit.Only("dev", "staging")).
 
 ### Processes
 
@@ -246,6 +246,7 @@ Package kit — workflows: a state machine over the entities of one store.
 - [func NotFound\(message string\) \*Error](<#NotFound>)
 - [func NotReused\(n int\) PasswordOption](<#NotReused>)
 - [func Now\(ctx context.Context\) time.Time](<#Now>)
+- [func Only\(envs ...string\) MountOption](<#Only>)
 - [func Optional\(\) SecretOption](<#Optional>)
 - [func OwnStores\(\) SubscriptionOption](<#OwnStores>)
 - [func Parallelism\(n int\) DeliveryOption](<#Parallelism>)
@@ -579,6 +580,28 @@ Commands and queries.
 Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeCommandReentrant`.
 
 Code `0.4.2.43`
+
+<a name="CodeDataCopy"></a>
+```go
+const CodeDataCopy errs.Code = 262735
+```
+
+CodeDataCopy refuses a data copy: a database the product does not declare or cannot open, data kept in memory, a product that answers on its address, a table of the database that already holds a row.
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeDataCopy`.
+
+Code `0.4.2.79`
+
+<a name="CodeDataCopyDiverged"></a>
+```go
+const CodeDataCopyDiverged errs.Code = 262736
+```
+
+CodeDataCopyDiverged reports a data copy whose fingerprints differ: the copy is rolled back, and the first key that differs is named.
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeDataCopyDiverged`.
+
+Code `0.4.2.80`
 
 <a name="CodeDatabaseConfig"></a>
 ```go
@@ -1283,6 +1306,17 @@ Watches (ADR 0008).
 Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeWatchQueue`.
 
 Code `0.4.2.47`
+
+<a name="CodeWatchReplay"></a>
+```go
+const CodeWatchReplay errs.Code = 262737
+```
+
+CodeWatchReplay refuses \`\<product> watch replay WATCH\` when WATCH names no watch of the product: the command replays a watch the product declares, and nothing else (ADR 0178 C6).
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeWatchReplay`.
+
+Code `0.4.2.81`
 
 <a name="CodeWorkflowHookChange"></a>
 ```go
@@ -2213,6 +2247,22 @@ func Now(ctx context.Context) time.Time
 
 Now returns the app's time: the system clock, or the clock a test gave with [Clock](#Clock). Product code that compares with a deadline reads it rather than time.Now, so that a test's manual clock reaches it.
 
+<a name="Only"></a>
+## func [Only](<https://github.com/kitsunium/sdk/blob/main/framework/kit/mount.go>)
+
+```go
+func Only(envs ...string) MountOption
+```
+
+Only makes a mount hold in the environments envs names alone — the name KIT\_ENV or [Env](#Env) gives, lower-cased, "production" when neither does:
+
+```
+app := kit.NewApp("vigie", identity.Service).
+	With(kit.Mount(debugbar.Module, kit.Only("dev", "staging")))
+```
+
+Elsewhere the mount is as if it had not been given, its [Prefix](#Prefix) and its [Bind](#Bind) with it; another mount of the module without Only still mounts it. Several Only on one mount add up. The start refuses an Only that names no environment, a name that cannot be one — lower-case letters, digits and dashes inside, 63 at most —, and a module a mounted module requires ([Requires](#Requires)) that its mount leaves out, rather than mounting it at its defaults behind the product's back.
+
 <a name="Optional"></a>
 ## func [Optional](<https://github.com/kitsunium/sdk/blob/main/framework/kit/secret.go>)
 
@@ -2763,7 +2813,7 @@ Main is the whole main function of a product:
 func main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }
 ```
 
-It understands eight commands, so every kit binary can describe itself, be probed, say its configuration, manage its secrets, migrate its databases and answer for the personal data it keeps without a shell or another tool in its image:
+It understands ten commands, so every kit binary can describe itself, be probed, say its configuration, manage its secrets, migrate its databases, answer for the personal data it keeps, replay what its watches hear and copy its data directory into a database without a shell or another tool in its image:
 
 ```
 serve        run the product (the default)
@@ -2775,6 +2825,9 @@ migrate      the databases' migrations: status, up, down SET VERSION
 privacy      the register of processing, a person's export and erasure,
              the legal holds, the privacy journal, the retention
 revisions    a record's version restored
+watch        replay WATCH: one notice per record of each store that feeds it
+data         the data directory copied into a database: data copy --to NAME,
+             verified by fingerprints
 ```
 
 A product's CLI command runs when the first argument names it. A command declared with DefaultCommand runs when the first argument names no command at all — with every argument —, and when there is none, in serve's place: Main then never answers a usage error.
@@ -3800,7 +3853,7 @@ type ModulePart interface {
 <a name="MountOption"></a>
 ## type [MountOption](<https://github.com/kitsunium/sdk/blob/main/framework/kit/mount.go>)
 
-MountOption configures the mount of a module: [Prefix](#Prefix), [Bind](#Bind).
+MountOption configures the mount of a module: [Prefix](#Prefix), [Bind](#Bind), [Only](#Only).
 
 ```go
 type MountOption = ikit.MountConfigurer

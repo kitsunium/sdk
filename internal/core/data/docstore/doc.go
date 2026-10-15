@@ -20,11 +20,13 @@
 //     [Trashable] and [TrashableContext] for its trash, [KeyLister] and
 //     [KeyListerContext] for the keys alone, [VersionWriter] and
 //     [VersionWriterContext] for a document written with its versions as they
-//     are, and [Announcer] is the pair of hooks both engines answer exactly as
-//     they are;
+//     are, [VersionWeigher] and [VersionWeigherContext] for what the versions
+//     weigh, and [Announcer] is the pair of hooks both engines answer exactly
+//     as they are;
 //   - the values both engines read and return — [EntryValue], [VersionValue],
-//     [StampValue], [TombstoneValue] — and [IndexSpec], the declaration both
-//     take, with its two constructors [Unique] and [Index];
+//     [StampValue], [TombstoneValue], [VersionWeightValue] — and [IndexSpec],
+//     the declaration both take, with its two constructors [Unique] and
+//     [Index];
 //   - the codes of the 0.3.80.* range and their sentinels: both engines answer
 //     the same refusals under the same codes (ADR 0160).
 //
@@ -41,8 +43,8 @@
 //
 // Package docstore — the siblings of Collection (ADR 0039): a document's
 // versions, its trash, the keys alone (ADR 0178), a document written with its
-// versions as they are (ADR 0178), and the same ports with a context on every
-// call, which the SQL engine implements.
+// versions as they are (ADR 0178), what the versions weigh, and the same ports
+// with a context on every call, which the SQL engine implements.
 //
 // Package docstore — declares the sentinel *errs.Error outcomes both engines
 // answer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
@@ -62,5 +64,5 @@
 //
 // Package docstore — the values both engines read and return: a stored
 // document as JSON, one version of a document, what a write says about the
-// version it makes, and a document in the trash.
+// version it makes, a document in the trash, and what the versions weigh.
 package docstore

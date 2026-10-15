@@ -79,6 +79,22 @@ var (
 	_ queue.DeadLetterReader  = (*sealedOutbox)(nil)
 	_ queue.Rejecter          = (*sealedOutbox)(nil)
 	_ queue.DeadLetterManager = (*sealedOutbox)(nil)
+	_ queue.MessageReader     = (*sealedOutbox)(nil)
+	_ queue.MessageWriter     = (*sealedOutbox)(nil)
+	_ queue.DeadLetterWriter  = (*sealedOutbox)(nil)
+	_ queueReader             = (*sealedOutbox)(nil)
+	_ queueWriter             = (*sealedOutbox)(nil)
+
+	_ documenter = (*historied[struct{}])(nil)
+	_ documenter = (*sealedEngine[struct{}])(nil)
+	_ documenter = (*docEngine[struct{}])(nil)
+	_ documenter = (*sqlEngine[struct{}])(nil)
+	_ copyDocs   = (*docEngine[struct{}])(nil)
+	_ copySink   = (*sqlEngine[struct{}])(nil)
+	_ copyDocs   = (*jsonDocs)(nil)
+
+	_ copyPartser   = (*StoreService[struct{}])(nil)
+	_ journalParter = (*WorkflowService[struct{}, string])(nil)
 
 	_ settingDecl = (*SettingService[string])(nil)
 
@@ -125,6 +141,11 @@ var (
 	_ trasher = (*historied[struct{}])(nil)
 	_ trasher = (*sealedEngine[struct{}])(nil)
 	_ trasher = (*sqlEngine[struct{}])(nil)
+
+	_ versionWeighter = (*docEngine[struct{}])(nil)
+	_ versionWeighter = (*historied[struct{}])(nil)
+	_ versionWeighter = (*sealedEngine[struct{}])(nil)
+	_ versionWeighter = (*sqlEngine[struct{}])(nil)
 
 	_ sealingSource = (*TopicService[struct{}])(nil)
 	_ topicWaker    = (*TopicService[struct{}])(nil)

@@ -137,7 +137,7 @@ packages:
       - doc: |-
           StoreHistory is what a store remembers of its records.
           Fields names the fields it keeps former values of; Kept and Bytes weigh
-          them.
+          them, and Versions, Trashed and VersionBytes weigh its records' versions.
         name: StoreHistory
         target: core.StoreHistoryMessage
       - doc: |-
@@ -4473,7 +4473,7 @@ packages:
       - doc: |-
           StoreHistoryMessage is what a store remembers of its records.
           Fields names the fields it keeps former values of; Kept and Bytes weigh
-          them.
+          them, and Versions, Trashed and VersionBytes weigh its records' versions.
         name: StoreHistoryMessage
         struct:
           fields:
@@ -4502,6 +4502,21 @@ packages:
               type: "*int"
             - name: Bytes
               tag: json:"bytes,omitempty"
+              type: "*int64"
+            - doc: |-
+                Versions is how many former versions the store's records keep,
+                Trashed how many records are in its trash, and VersionBytes what both
+                weigh — the JSON they hold —, on a runtime graph of a store that keeps
+                revisions (ADR 0007 §5), as the SDK's document store counts them. A
+                record's current version is the record, and counts in none of them.
+              name: Versions
+              tag: json:"versions,omitempty"
+              type: "*int"
+            - name: Trashed
+              tag: json:"trashed,omitempty"
+              type: "*int"
+            - name: VersionBytes
+              tag: json:"versionBytes,omitempty"
               type: "*int64"
       - doc: |-
           PasswordPolicyMessage is the policy of one secret field that holds a password's

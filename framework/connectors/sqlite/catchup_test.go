@@ -48,14 +48,28 @@ func newWatcher(t *testing.T, dir string, watching bool) *watcher {
 }
 
 // screen keeps the key a notice names; told of "list", it lists the store's
-// keys through the records port.
+// keys through the records port first, and keeps the key once the listing is
+// done: settle returns when the key is kept, and the app stops after it, so a
+// key kept before its listing ended let the stop cancel the listing.
 func (d *watcher) screen(ctx context.Context, w kit.Written) error {
-	d.mu.Lock()
-	d.noticed = append(d.noticed, w.Key)
-	d.mu.Unlock()
-	if w.Key != "list" {
-		return nil
+	if w.Key == "list" {
+		defer d.notice(w.Key)
+		return d.list(ctx, w)
 	}
+	d.notice(w.Key)
+	return nil
+}
+
+// notice keeps the key a notice named.
+func (d *watcher) notice(key string) {
+	d.mu.Lock()
+	d.noticed = append(d.noticed, key)
+	d.mu.Unlock()
+}
+
+// list lists the store's keys through the records port, and keeps them or
+// the error that ended the listing.
+func (d *watcher) list(ctx context.Context, w kit.Written) error {
 	recs, err := kit.RecordsOf(ctx, w.Store)
 	if err != nil {
 		return err

@@ -32,3 +32,23 @@ func TestTheFacadeKeepsDeclarationPositions(t *testing.T) {
 		t.Fatalf("the store is at %+v, want line %d", st, line+2)
 	}
 }
+
+// kit.Only through the facade: a mount for another environment leaves its
+// module out, and a refusal points at the product's line.
+func TestTheFacadesOnlyMountsPerEnvironment(t *testing.T) {
+	desk := kit.NewService("desk", "A module's service.")
+	board := kit.NewModule("board", "A module.", desk)
+	app := kit.NewApp("facade").With(kit.InMemory(), kit.Logs(io.Discard), kit.Env("staging"),
+		kit.Mount(board, kit.Only("dev")))
+	if app.Graph().ModuleOf("board") != nil {
+		t.Error("a mount for dev holds in staging")
+	}
+	_, file, line, _ := runtime.Caller(0)
+	app = kit.NewApp("facade").With(kit.InMemory(), kit.Logs(io.Discard), kit.Mount(board, kit.Only())) // the line after Caller's
+	for _, d := range app.Graph().Diagnostics {
+		if d.Source != nil && filepath.Base(d.Source.File) == filepath.Base(file) && d.Source.Line == line+1 {
+			return
+		}
+	}
+	t.Errorf("no problem is said at %s:%d: %+v", filepath.Base(file), line+1, app.Graph().Diagnostics)
+}

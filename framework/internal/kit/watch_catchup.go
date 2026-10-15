@@ -57,20 +57,33 @@ func (w *Watch) catchUp(ctx context.Context, a *App, r *watchRun, feeders []feed
 func (w *Watch) replay(ctx context.Context, r *watchRun, feeders []feeder) (int, error) {
 	queued := 0
 	for _, st := range feeders {
-		store := st.base().id
-		for key, err := range st.keys(ctx) {
-			if err != nil {
-				return queued, err
-			}
-			payload, err := noticeOf(ctx, store, key, false)
-			if err != nil {
-				return queued, err
-			}
-			if err := w.post(ctx, r, store, payload); err != nil {
-				return queued, err
-			}
-			queued++
+		n, err := w.replayStore(ctx, r, st)
+		queued += n
+		if err != nil {
+			return queued, err
 		}
+	}
+	return queued, nil
+}
+
+// replayStore queues a notice, as of a write, for every record of st — the
+// catch-up's and the replay command's one loop —, and returns how many it
+// queued before it ended.
+func (w *Watch) replayStore(ctx context.Context, r *watchRun, st feeder) (int, error) {
+	queued := 0
+	store := st.base().id
+	for key, err := range st.keys(ctx) {
+		if err != nil {
+			return queued, err
+		}
+		payload, err := noticeOf(ctx, store, key, false)
+		if err != nil {
+			return queued, err
+		}
+		if err := w.post(ctx, r, store, payload); err != nil {
+			return queued, err
+		}
+		queued++
 	}
 	return queued, nil
 }

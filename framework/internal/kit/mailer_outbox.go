@@ -84,11 +84,7 @@ func newSealedOutbox(inner queue.Broker, z *sealer, node string) (*sealedOutbox,
 // maxMailBytes is the queue's MessageTooLarge, as the spool's own queue
 // would say it, and nothing is published.
 func (o *sealedOutbox) Publish(ctx context.Context, payload []byte) (queue.Message, error) {
-	if len(payload) > maxMailBytes {
-		return queue.Message{}, errs.Wrap(queue.MessageTooLarge, errs.WrapParams{},
-			errs.String("mailer", o.node), errs.Int("bytes", len(payload)), errs.Int("max", maxMailBytes))
-	}
-	box, err := o.z.seal(ctx, "", payload, o.node, outboxBind)
+	box, err := o.sealMail(ctx, payload)
 	if err != nil {
 		return queue.Message{}, err
 	}
@@ -141,6 +137,68 @@ func (o *sealedOutbox) DeadLetters(ctx context.Context, maxLetters int) ([]queue
 		dead[i].Message.Payload = o.open(ctx, dead[i].Message.Payload)
 	}
 	return dead, err
+}
+
+// Messages lists up to maxMessages live mails after an identifier, each
+// opened as a delivery is (queue.MessageReader): what a data copy
+// fingerprints, the mail and not its box.
+func (o *sealedOutbox) Messages(ctx context.Context, after string, maxMessages int) ([]queue.LiveMessage, error) {
+	reader, ok := o.Broker.(queue.MessageReader)
+	if !ok {
+		return nil, o.lacks("MessageReader")
+	}
+	live, err := reader.Messages(ctx, after, maxMessages)
+	for i := range live {
+		live[i].Message.Payload = o.open(ctx, live[i].Message.Payload)
+	}
+	return live, err
+}
+
+// PutMessage seals a mail, as it waits in a file outbox, and writes the box
+// into the table with its count and its instants (queue.MessageWriter):
+// what a data copy moves a mailer's outbox with.
+func (o *sealedOutbox) PutMessage(ctx context.Context, live queue.LiveMessage) (string, error) {
+	writer, ok := o.Broker.(queue.MessageWriter)
+	if !ok {
+		return "", o.lacks("MessageWriter")
+	}
+	box, err := o.sealMail(ctx, live.Message.Payload)
+	if err != nil {
+		return "", err
+	}
+	live.Message.Payload = box
+	return writer.PutMessage(ctx, live)
+}
+
+// PutDeadLetter seals a dead mail and writes the box into the table's dead
+// letters with its cause (queue.DeadLetterWriter).
+func (o *sealedOutbox) PutDeadLetter(ctx context.Context, dead queue.DeadLetter) (string, error) {
+	writer, ok := o.Broker.(queue.DeadLetterWriter)
+	if !ok {
+		return "", o.lacks("DeadLetterWriter")
+	}
+	box, err := o.sealMail(ctx, dead.Message.Payload)
+	if err != nil {
+		return "", err
+	}
+	dead.Message.Payload = box
+	return writer.PutDeadLetter(ctx, dead)
+}
+
+// sealMail seals a mail as Publish does, refusing one above maxMailBytes.
+func (o *sealedOutbox) sealMail(ctx context.Context, payload []byte) ([]byte, error) {
+	if len(payload) > maxMailBytes {
+		return nil, errs.Wrap(queue.MessageTooLarge, errs.WrapParams{},
+			errs.String("mailer", o.node), errs.Int("bytes", len(payload)), errs.Int("max", maxMailBytes))
+	}
+	return o.z.seal(ctx, "", payload, o.node, outboxBind)
+}
+
+// lacks is the refusal of a capability the broker behind the sealing does
+// not have.
+func (o *sealedOutbox) lacks(capability string) error {
+	return failure(CodeMailQueue, "OUTBOX_BROKER", "a mailer's outbox broker lacks a capability the copy needs", nil,
+		errs.String("mailer", o.node), errs.String("capability", capability))
 }
 
 // ReplayDeadLetter is the SQL broker's: the box goes back as it lies.

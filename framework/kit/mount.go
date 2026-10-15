@@ -4,7 +4,7 @@ import (
 	ikit "github.com/kitsunium/sdk/framework/internal/kit"
 )
 
-// MountOption configures the mount of a module: [Prefix], [Bind].
+// MountOption configures the mount of a module: [Prefix], [Bind], [Only].
 type MountOption = ikit.MountConfigurer
 
 // Mount mounts module m with options: [Prefix] serves its routes elsewhere
@@ -31,4 +31,24 @@ func Mount(m *Module, opts ...MountOption) AppOption {
 func Prefix(prefix string) MountOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Prefix(prefix)
+}
+
+// Only makes a mount hold in the environments envs names alone — the name
+// KIT_ENV or [Env] gives, lower-cased, "production" when neither does:
+//
+//	app := kit.NewApp("vigie", identity.Service).
+//		With(kit.Mount(debugbar.Module, kit.Only("dev", "staging")))
+//
+// Elsewhere the mount is as if it had not been given, its [Prefix] and its
+// [Bind] with it; another mount of the module without Only still mounts it.
+// Several Only on one mount add up. The start refuses an Only that names no
+// environment, a name that cannot be one — lower-case letters, digits and
+// dashes inside, 63 at most —, and a module a mounted module requires
+// ([Requires]) that its mount leaves out, rather than mounting it at its
+// defaults behind the product's back.
+//
+//go:noinline
+func Only(envs ...string) MountOption {
+	//: the implementation is framework/internal/kit's; this facade only forwards.
+	return ikit.Only(envs...)
 }

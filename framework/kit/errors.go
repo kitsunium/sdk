@@ -200,6 +200,11 @@ const (
 	// keys (ADR 0178 C6).
 	CodeRecordsKeys errs.Code = ikit.CodeRecordsKeys
 
+	// CodeWatchReplay refuses `<product> watch replay WATCH` when WATCH names no
+	// watch of the product: the command replays a watch the product declares,
+	// and nothing else (ADR 0178 C6).
+	CodeWatchReplay errs.Code = ikit.CodeWatchReplay
+
 	// Sealing at rest (ADR 0006, step 3).
 	CodeSealKey errs.Code = ikit.CodeSealKey
 
@@ -255,6 +260,15 @@ const (
 
 	// CodeRetentionPanic is CodeRetentionPanic.
 	CodeRetentionPanic errs.Code = ikit.CodeRetentionPanic
+
+	// CodeDataCopy refuses a data copy: a database the product does not declare
+	// or cannot open, data kept in memory, a product that answers on its
+	// address, a table of the database that already holds a row.
+	CodeDataCopy errs.Code = ikit.CodeDataCopy
+
+	// CodeDataCopyDiverged reports a data copy whose fingerprints differ: the
+	// copy is rolled back, and the first key that differs is named.
+	CodeDataCopyDiverged errs.Code = ikit.CodeDataCopyDiverged
 
 	// The signals kit ends one of its own steps with and catches itself — a
 	// caller never receives one —, typed when the SDK made rule 2 a gate.

@@ -404,7 +404,7 @@ func writes(role string) bool {
 	switch role {
 	case "getDoc", "listDocs", "entries", "entriesLimit", "count", "exists", "lookup", "find",
 		"pageAfter", "uniqueTaken", "sharedKeys", "readVersions", "versionHead", "pruneCut", "lockFormers",
-		"firstVersion", "readTrashed", "tombstones":
+		"firstVersion", "readTrashed", "tombstones", "versionWeight":
 		return false
 	default:
 		return true
@@ -559,6 +559,20 @@ func (e *sqlEngine) read(role, query string, args []driver.Value, work, latest *
 		}
 		slices.SortFunc(rows, func(a, b []driver.Value) int { return bytes.Compare(a[0].([]byte), b[0].([]byte)) })
 		return rowsOf([]string{"doc_key", "made_at", "made_ns"}, rows), true
+	// What the versions weigh: the former rows, the trash rows, and the
+	// length of every document a row holds — one row, as the aggregate.
+	case "versionWeight":
+		var former, trashed, size int64
+		for k, row := range work.vs {
+			switch {
+			case k.num == 0:
+				trashed++
+			case row.doc != nil:
+				former++
+			}
+			size += int64(len(row.doc))
+		}
+		return rowsOf([]string{"former", "trashed", "bytes"}, [][]driver.Value{{former, trashed, size}}), true
 	// A document's former versions, newest first, for a rewrite.
 	case "lockFormers":
 		var rows [][]driver.Value

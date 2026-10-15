@@ -665,3 +665,27 @@ func (s *SQLStore[T]) keyTaken(ctx context.Context, ex coresql.Executor, key str
 	//: free.
 	return nil
 }
+
+// VersionWeight reports what the store keeps beyond its documents, as
+// core/data/docstore.VersionWeigherContext says: one aggregate statement
+// over the versions table — its former rows, its trash rows numbered 0,
+// and the length of the documents they hold —, on the transaction ctx
+// carries, else on the pool. The database scans the table and sends one
+// row. VersionsNotKept on a store that keeps none, StatementFailed when
+// the database does not answer.
+func (s *SQLStore[T]) VersionWeight(ctx context.Context) (coredocstore.VersionWeightValue, error) {
+	//: a store that keeps none weighs no history, and has no table to ask.
+	if s.keep == 0 {
+		//: VersionsNotKept, naming the store.
+		return coredocstore.VersionWeightValue{}, versionsNotKept(s.table)
+	}
+	ex, _ := s.tx.join.Join(ctx)
+	var former, trashed, size int64
+	//: one aggregate row.
+	if err := ex.QueryRowContext(ctx, s.stmts.versionWeight).Scan(&former, &trashed, &size); err != nil {
+		//: StatementFailed.
+		return coredocstore.VersionWeightValue{}, s.failed("weigh the versions", err)
+	}
+	//: the counts, as the value says them.
+	return coredocstore.VersionWeightValue{Former: int(former), Trashed: int(trashed), Bytes: size}, nil
+}

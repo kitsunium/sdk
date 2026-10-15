@@ -292,6 +292,36 @@ func TestFacadePutDocument(t *testing.T) {
 	var _ docstore.VersionWriterContext = (*docstore.SQLStore[member])(nil)
 }
 
+// TestFacadeVersionWeight weighs a store's versions through public names
+// only — VersionWeigher, VersionWeight, Stats and the refusal of a store that
+// keeps none.
+func TestFacadeVersionWeight(t *testing.T) {
+	t.Parallel()
+	store, err := docstore.Open(docstore.Config[member]{Key: func(m member) string { return m.ID }, Versions: 2})
+	if err != nil {
+		t.Fatalf("Open() = %v", err)
+	}
+	for _, email := range []string{"a@example.com", "b@example.com"} {
+		if err := store.Put(member{ID: "m1", Email: email}); err != nil {
+			t.Fatalf("Put() = %v", err)
+		}
+	}
+	var weigher docstore.VersionWeigher = store
+	former := len(`{"id":"m1","email":"a@example.com"}`)
+	want := docstore.VersionWeight{Former: 1, Bytes: int64(former)}
+	if got, err := weigher.VersionWeight(); err != nil || got != want || store.Stats().Versions != want {
+		t.Fatalf("VersionWeight() = %+v, %v, Stats().Versions = %+v; want %+v", got, err, store.Stats().Versions, want)
+	}
+	plain, err := docstore.Open(docstore.Config[member]{Key: func(m member) string { return m.ID }})
+	if err != nil {
+		t.Fatalf("Open() = %v", err)
+	}
+	if _, err := plain.VersionWeight(); !errs.HasCode(err, docstore.CodeVersionsNotKept) || !errors.Is(err, docstore.VersionsNotKept) {
+		t.Fatalf("VersionWeight() without versions = %v, want VersionsNotKept", err)
+	}
+	var _ docstore.VersionWeigherContext = (*docstore.SQLStore[member])(nil)
+}
+
 func TestAStoreServesThroughItsPort(t *testing.T) {
 	t.Parallel()
 	store := open(t, vfs.NewMem())

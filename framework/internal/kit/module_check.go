@@ -39,7 +39,57 @@ func (a *App) moduleProblems() []model.Diagnostic {
 		out = append(out, a.secretNameProblems(m)...)
 	}
 	out = append(out, a.moduleMigrationProblems()...)
+	out = append(out, a.onlyProblems()...)
 	return append(out, a.ownProblems(names)...)
+}
+
+// onlyProblems judges every kit.Only, in every environment: one that names
+// none, a name that cannot be an environment's, and — in the environment the
+// mounts were resolved for — a module its mount leaves out that a mounted
+// module requires, which the start refuses rather than mount at its defaults.
+func (a *App) onlyProblems() []model.Diagnostic {
+	var out []model.Diagnostic
+	refused := map[*Module]bool{}
+	for _, d := range a.opts.mounts {
+		if !d.limited || d.module == nil {
+			continue
+		}
+		if len(d.only) == 0 {
+			out = append(out, diagnosticOf("error", "", a.source(&d.onlyAt), say("mount.only-none", "module", d.module.name)))
+			continue
+		}
+		for _, env := range d.only {
+			if !envNameGrammar().MatchString(env) {
+				out = append(out, diagnosticOf("error", "", a.source(&d.onlyAt), say("mount.only-name", "module", d.module.name, "env", env)))
+			}
+		}
+		if p, ok := a.requiredOutside(&d, refused); ok {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// requiredOutside is the problem of a mount that leaves its module out of
+// the environment the mounts were resolved for while a mounted module
+// requires it — said once per module, refused records which.
+func (a *App) requiredOutside(d *mountDecl, refused map[*Module]bool) (model.Diagnostic, bool) {
+	mm := a.moduleOf(d.module)
+	// Held, not mounted at all, mounted by another mount, or said already.
+	if holdsIn(d.limited, d.only, a.mountEnv) || mm == nil || mm.at != nil || refused[d.module] {
+		return model.Diagnostic{}, false
+	}
+	refused[d.module] = true
+	envs := make([]phrase, 0, len(d.only))
+	for _, env := range d.only {
+		envs = append(envs, plain(env))
+	}
+	by := make([]phrase, 0, len(mm.requiredBy))
+	for _, r := range mm.requiredBy {
+		by = append(by, plain(r.name))
+	}
+	return diagnosticOf("error", "", a.source(&d.onlyAt), say("mount.only-required",
+		"module", d.module.name, "envs", listOf(envs), "by", listOf(by), "env", a.mountEnv)), true
 }
 
 // where says a position in a sentence: its file and line.

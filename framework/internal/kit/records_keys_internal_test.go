@@ -36,6 +36,9 @@ type keysWorld struct {
 	posts *StoreService[keysPost]
 	shelf *StoreService[forumDraft]
 	watch *Watch
+	// app declares the forum's app on its place, every queue behind wrap
+	// when it is set, and does not start it; start starts one.
+	app   func(wrap func(queue.Broker) queue.Broker) *App
 	start func(t *testing.T, wrap func(queue.Broker) queue.Broker) *App
 
 	mu    sync.Mutex
@@ -88,11 +91,15 @@ func newKeysWorld(t *testing.T, place keysPlace) *keysWorld {
 	archive := NewService("archive", "Keeps drafts, and watches nothing.")
 	w.shelf = archive.Store("shelf", func(d forumDraft) string { return d.ID })
 	archiving := NewModule("archiving", "A module that watches nothing.", archive)
-	w.start = func(t *testing.T, wrap func(queue.Broker) queue.Broker) *App {
-		t.Helper()
+	w.app = func(wrap func(queue.Broker) queue.Broker) *App {
 		opts := append([]AppConfigurer{moderation, archiving, Listen("127.0.0.1:0"), Env(EnvDev), Analyze(false), Logs(io.Discard)}, place.opts...)
 		app := NewApp("forum", forum).With(opts...)
 		app.wrapQueue = wrap
+		return app
+	}
+	w.start = func(t *testing.T, wrap func(queue.Broker) queue.Broker) *App {
+		t.Helper()
+		app := w.app(wrap)
 		must(t, app.Start(t.Context()))
 		return app
 	}

@@ -88,6 +88,12 @@ type sqlStatements struct {
 	readTrashed string
 	// tombstones reads every trash row's key and instant, in key order.
 	tombstones string
+	// versionWeight reads, in one row, what the versions weigh: how many
+	// former rows — a version row holding a document —, how many trash rows,
+	// and the length of every document a row holds. A current version's row
+	// holds NULL, which none of them counts, and the documents are binary on
+	// every engine, so LENGTH counts bytes.
+	versionWeight string
 	// docTable, ixTable and vsTable are the three tables' quoted names.
 	docTable, ixTable, vsTable string
 	// shareLock ends a read that must see the latest committed rows inside a
@@ -135,6 +141,8 @@ func renderStatements(dialect coresql.Dialect, table string) sqlStatements {
 			" v ON v.doc_key = d.doc_key WHERE d.doc_key = " + p1 + " ORDER BY v.num DESC",
 		lockFormers: "SELECT num, made_at, made_ns, meta, doc FROM " + vs + " WHERE doc_key = " + p1 + " AND doc IS NOT NULL" +
 			" ORDER BY num DESC" + lock,
+		versionWeight: "SELECT COUNT(CASE WHEN num > 0 AND doc IS NOT NULL THEN 1 END), COUNT(CASE WHEN num = 0 THEN 1 END), " +
+			"COALESCE(SUM(LENGTH(doc)), 0) FROM " + vs,
 		claim:     claimStatement(dialect, docs),
 		docTable:  docs,
 		ixTable:   ix,
