@@ -198,8 +198,17 @@ func TestWithCompanionsReplacesTheSetFromOneVerifiedArchive(t *testing.T) {
 				tc.mutate(t, &fixture)
 			}
 			var fsys FileSystem = setFS{exe: exe}
+			//: The set renames over the companion's REAL path, so the failure
+			//: is injected there: a temporary directory reached through a
+			//: symlink (/var -> /private/var on macOS, an 8.3 short name on
+			//: Windows) would otherwise never match and the rename would pass.
 			if tc.failSecond {
-				fsys = setFS{exe: exe, failRename: companion}
+				realCompanion, err := filepath.EvalSymlinks(companion)
+				//: The companion was just written; resolving it cannot miss.
+				if err != nil {
+					t.Fatal(err)
+				}
+				fsys = setFS{exe: exe, failRename: realCompanion}
 			}
 			if tc.noLink {
 				real := newRealBackedFS(exe)
