@@ -81,9 +81,8 @@ packages:
             reason: CLIENT_INIT_FAILED
           - code: CodeCWPutFailed
             doc: PutFailed wraps a failed PutLogEvents delivery of a batch.
+            exit: IOERR
             name: PutFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "third-party/aws/writer/cloudwatch: PutLogEvents returned an error while flushing a batch"
             public: CloudWatch writer failed to deliver a log batch
             reason: PUT_FAILED
@@ -175,9 +174,8 @@ packages:
             reason: CLIENT_INIT_FAILED
           - code: CodeS3PutFailed
             doc: PutFailed wraps a failed PutObject upload of a batched log object.
+            exit: IOERR
             name: PutFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "third-party/aws/writer/s3: PutObject returned an error while flushing a batch"
             public: S3 writer failed to upload a log batch
             reason: PUT_FAILED

@@ -8,7 +8,6 @@ go_library(
         "codes_gen.go",
         "design_gen.go",
         "doc.go",
-        "errors.go",
         "events.go",
         "events_dispatch.go",
         "events_subscription.go",

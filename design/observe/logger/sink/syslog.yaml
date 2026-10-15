@@ -70,25 +70,22 @@ packages:
             reason: SYSLOG_PROTO_INVALID
           - code: CodeSyslogDialFailed
             doc: DialFailed wraps a net.Dial failure at construction time.
+            exit: IOERR
             name: DialFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "service/observe/logger/sink/syslog.New: net.Dial returned an error"
             public: Syslog sink could not dial the destination
             reason: SYSLOG_DIAL_FAILED
           - code: CodeSyslogWriteFailed
             doc: WriteFailed wraps the underlying net.Conn.Write error at Write time.
+            exit: IOERR
             name: WriteFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: service/observe/logger/sink/syslog.Write underlying net.Conn returned an error
             public: Syslog write failed
             reason: SYSLOG_WRITE_FAILED
           - code: CodeSyslogCloseFailed
             doc: CloseFailed wraps the underlying net.Conn.Close error at Close time.
+            exit: IOERR
             name: CloseFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: service/observe/logger/sink/syslog.Close underlying net.Conn.Close returned an error
             public: Syslog close failed
             reason: SYSLOG_CLOSE_FAILED

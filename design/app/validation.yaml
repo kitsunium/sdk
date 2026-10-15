@@ -186,9 +186,8 @@ packages:
               Its fields carry the violation count, the first rule, and the list of
               paths — never a message and never a value. The full report stays the
               ReportValue; this error is the shape an error-typed contract can hold.
+            http: 422
             name: ValidationFailed
-            options:
-              - errs.WithHTTPStatus(httpUnprocessable)
             private: "core/app/validation: a ReportValue was converted to an error; the fields carry the violation count and the offending paths"
             public: One or more values did not satisfy their constraints
             reason: VALIDATION_FAILED
@@ -202,9 +201,8 @@ packages:
               validator with NO constraint is legitimate and passes, while a
               constraint that could never be satisfied — or never be evaluated — is
               refused before it can quietly reject, or quietly accept, everything.
+            exit: CONFIG
             name: ConstraintMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/validation: a constraint constructor received bounds or arguments it cannot honour; the fields name the rule and the clause that failed"
             public: The constraint cannot be built from the given configuration
             reason: CONSTRAINT_MISCONFIGURED
@@ -215,13 +213,12 @@ packages:
               failed; the message never guesses at what was meant, it names what was
               refused — an unsupported dialect construct is refused BY NAME so the fix
               is one word, not an investigation.
+            exit: CONFIG
             name: InvalidRule
             note: |-
               The struct-tag compiler's refusals, raised by internal/service/app/validation.
               They are declared here, with the port's, so that the domain's codes and
               sentinels are in one place (ADR 0160).
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/validation: a validate tag names an unknown rule, a malformed argument, or a rule the field's kind cannot answer; the fields carry the field name, the rule and the clause"
             public: The validate struct tag could not be compiled
             reason: INVALID_RULE
@@ -231,9 +228,8 @@ packages:
               The tag engine walks fields; there is nothing to walk on a scalar, a
               slice or a pointer, and inventing a meaning for those would be a
               different feature wearing this one's name.
+            exit: CONFIG
             name: UnsupportedTarget
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/validation: Struct[T] was instantiated with a non-struct T; the field carries the kind that was seen"
             public: Struct tag validation requires a struct type
             reason: UNSUPPORTED_TARGET

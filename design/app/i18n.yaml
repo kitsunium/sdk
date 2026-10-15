@@ -543,9 +543,8 @@ packages:
               internal/service/app/i18n's negotiation skips the element and never
               surfaces an error. Failing a request because a browser sent a peculiar
               header is the mistake ADR 0051 already refused for `traceparent`.
+            exit: CONFIG
             name: InvalidTag
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/i18n: ParseTag refused a tag outside the language[-Script][-REGION] subset; the fields carry the tag and the reason"
             public: The language tag is not one this SDK resolves
             reason: INVALID_TAG
@@ -553,9 +552,8 @@ packages:
             doc: |-
               InvalidKey is returned when a message key is empty or carries a control
               character.
+            exit: CONFIG
             name: InvalidKey
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/i18n: a message key must be non-empty and free of control characters — it is compared by byte equality and is shown on screen when a translation is missing"
             public: The message key is empty or contains a control character
             reason: INVALID_KEY
@@ -564,9 +562,8 @@ packages:
               InvalidPattern is returned for a pattern the placeholder parser refuses
               — by the compiler behind internal/service/app/i18n's NewMessage and
               NewPluralMessage — and by [NewPattern] for spans that are not a pattern.
+            exit: CONFIG
             name: InvalidPattern
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/i18n: the pattern carries an unclosed brace, an unmatched closing brace, an empty placeholder or a placeholder name outside [A-Za-z_][A-Za-z0-9_]*"
             public: The message pattern is malformed and was refused
             reason: INVALID_PATTERN
@@ -609,9 +606,8 @@ packages:
             doc: |-
               InvalidCount is returned by [Decimal] for a quantity whose CLDR
               operands cannot be derived.
+            exit: CONFIG
             name: InvalidCount
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/i18n: Decimal received a NaN, an infinity, or a fraction-digit count outside 0..maxFractionDigits"
             public: The quantity cannot be described by CLDR plural operands
             reason: INVALID_COUNT
@@ -619,9 +615,8 @@ packages:
             doc: |-
               InvalidForm is returned by [ParseForm] for a category name outside the
               six CLDR defines.
+            exit: CONFIG
             name: InvalidForm
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/i18n: ParseForm accepts exactly zero, one, two, few, many and other — an unknown name is refused rather than ignored, since a typo of other leaves no fallback form"
             public: The plural category name is not one of the six CLDR defines
             reason: INVALID_FORM
@@ -642,16 +637,15 @@ packages:
               program does not start. Adding a language is a rule plus its CLDR
               citation plus its table test, in one change — see
               internal/service/app/i18n/CLAUDE.md §Adding a language.
+            exit: CONFIG
             name: UnsupportedLanguage
             note: |-
               The outcomes a CONCRETE catalogue can produce and an abstract one cannot,
               raised by internal/service/app/i18n while a store is being BUILT. Every one
-              carries exitConfig: the same files will be refused forever, and the fix is
+              carries EX_CONFIG: the same files will be refused forever, and the fix is
               an edit to a catalogue or to the rule table, never a retry. They are
               declared here, with the port's verdicts, so that the domain's codes and
               sentinels are in one place (ADR 0160).
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/i18n: the language has no entry in the hand-written CLDR rule table; the fields carry the tag and the supported set — a silent fall back to English rules would render a wrong sentence in every language with few or many"
             public: No reviewed plural rule exists for this language
             reason: UNSUPPORTED_LANGUAGE
@@ -659,9 +653,8 @@ packages:
             doc: |-
               CatalogInvalid is returned by NewStore for a catalogue it cannot
               compile. The fields name the tag, the key and what was wrong.
+            exit: CONFIG
             name: CatalogInvalid
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/i18n: NewStore received a catalogue with a duplicate tag, an entry of the wrong shape, an unknown CLDR category, or a fallback language it does not itself hold"
             public: The message catalogue is not usable and was refused
             reason: CATALOG_INVALID
@@ -673,9 +666,8 @@ packages:
               The cause is wrapped rather than replaced, so errors.Is against
               fs.ErrNotExist and fs.ErrPermission keeps answering — the same
               discipline internal/service/data/vfs applies to its read failures.
+            exit: CONFIG
             name: CatalogLoadFailed
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/i18n: LoadFS could not list the directory, read a file, resolve the codec format, or decode a catalogue file; the fields carry the path and the cause"
             public: The message catalogue could not be read or decoded
             reason: CATALOG_LOAD_FAILED
@@ -690,9 +682,8 @@ packages:
               render time would mean discovering it on the request that first needed
               `few` — in production, in a language the on-call engineer does not
               read — and the only repair available there is to show something wrong.
+            exit: CONFIG
             name: TranslationIncomplete
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/i18n: the message does not carry every CLDR category the registered language's rules can produce; the fields carry the tag, the key and the missing form"
             public: A plural message is missing a form its language requires
             reason: TRANSLATION_INCOMPLETE
@@ -704,9 +695,8 @@ packages:
               ADR 0031's refuse half: an empty set is not "accept anything" and it is
               not "always the default" — it is an unfinished wiring, and both
               readings would hide it behind a working-looking program.
+            exit: CONFIG
             name: NegotiationEmpty
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/i18n: the supported set was empty, so every negotiation could only return the default — a wiring fault, refused rather than honoured"
             public: Language negotiation was set up with no supported languages
             reason: NEGOTIATION_EMPTY

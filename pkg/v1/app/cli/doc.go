@@ -55,8 +55,9 @@
 // # The exit status
 //
 // The status is carried by the SDK's existing error model and NOT by a second
-// convention: a sentinel declares it with errs.WithExitCode and a caller reads
-// it with errs.ExitCodeOf. [Status] is the single guard on top of that, and it
+// convention: a sentinel declares it (its design's exit: field, or
+// errs.WithExitCode) and a caller reads it with errs.ExitCodeOf. [Status] is
+// the single guard on top of that, and it
 // exists for one sharp reason: errs.ExitCodeOf(nil) is 70, because it answers
 // "what status does this error map to" and nil is not an error. Passing a
 // successful Execute straight into it would exit 70 on every success.

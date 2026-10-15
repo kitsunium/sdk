@@ -48,6 +48,14 @@ func sdkRoot(tb testing.TB) (root string) {
 	return ""
 }
 
+// isSentinelCtor reports whether name is a constructor of a package-level
+// sentinel: Define, or its static sibling Static (ADR 0176). An audit that knew
+// only Define would not see a Static sentinel at all — the gap ADR 0020 records.
+func isSentinelCtor(name string) bool {
+	//: the two spellings of a sentinel; every audit below reads both alike.
+	return name == "Define" || name == "Static"
+}
+
 // collectDefineCalls walks every non-test.go file under root/internal,
 // root/pkg, root/third-party and root/framework, returning each (file:line,
 // call) pair whose callee resolves to errs.Define. third-party is included so
@@ -82,7 +90,7 @@ func collectDefineCalls(tb testing.TB, root string) (out []defineCall) {
 						continue
 					}
 					sel, ok := call.Fun.(*ast.SelectorExpr)
-					if !ok || sel.Sel.Name != "Define" {
+					if !ok || !isSentinelCtor(sel.Sel.Name) {
 						continue
 					}
 					ident, ok := sel.X.(*ast.Ident)
@@ -452,7 +460,7 @@ func appendDefineCalls(file *ast.File, fset *token.FileSet, path string, out *[]
 			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
 			//: match errs.Define specifically, ignoring other constructors.
-			if !ok || sel.Sel.Name != "Define" {
+			if !ok || !isSentinelCtor(sel.Sel.Name) {
 				continue
 			}
 			ident, ok := sel.X.(*ast.Ident)
@@ -504,7 +512,7 @@ const base errs.Code = 0x00020300
 const CodeD errs.Code = base | 0x01 // expression -> 0x00020301
 
 var (
-	A = errs.Define(CodeA, "FIX_A", "fixture a", "fixture a private")
+	A = errs.Static(CodeA, "FIX_A", "fixture a", "fixture a private", 0, 0)
 	B = errs.Define(CodeB, "FIX_B", "fixture b", "fixture b private")
 	C = errs.Define(CodeC, "FIX_C", "fixture c", "fixture c private")
 	D = errs.Define(CodeD, "FIX_D", "fixture d", "fixture d private")

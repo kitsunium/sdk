@@ -15,7 +15,6 @@ go_library(
         "discover.go",
         "doc.go",
         "enroll.go",
-        "errors.go",
         "key.go",
         "key_unix.go",
         "key_windows.go",

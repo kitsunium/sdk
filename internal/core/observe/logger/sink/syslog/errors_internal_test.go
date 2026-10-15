@@ -1,20 +1,29 @@
 package syslog
 
-import "testing"
+import (
+	"testing"
 
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
+
+// Test_exitIOErr pins the EX_IOERR exit status the I/O sentinels carry — the
+// design's `exit: IOERR` (ADR 0176).
 func Test_exitIOErr(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		want int
+		name     string
+		sentinel *errs.Error
+		want     int
 	}{
-		{"sysexits EX_IOERR is 74", 74},
+		{"DialFailed is sysexits EX_IOERR 74", DialFailed, 74},
+		{"WriteFailed is sysexits EX_IOERR 74", WriteFailed, 74},
+		{"CloseFailed is sysexits EX_IOERR 74", CloseFailed, 74},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if exitIOErr != tc.want {
-				t.Errorf("exitIOErr = %d, want %d", exitIOErr, tc.want)
+			if got := tc.sentinel.ExitCode(); got != tc.want {
+				t.Errorf("%s: ExitCode() = %d, want %d", tc.name, got, tc.want)
 			}
 		})
 	}

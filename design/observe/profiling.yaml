@@ -103,9 +103,8 @@ packages:
             doc: |-
               WindowInvalid refuses a CPU window that is not positive — a profile
               of no time is empty by construction — or that exceeds MaxCPUWindow.
+            http: 400
             name: WindowInvalid
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
             private: "service/observe/profiling: CaptureCPU was given a window outside (0, MaxCPUWindow]; the window field says what"
             public: A CPU profile needs a window longer than zero and at most five minutes
             reason: WINDOW_INVALID
@@ -115,9 +114,8 @@ packages:
               is running — started by another capture, or by anyone's
               pprof.StartCPUProfile. It is not queued: the caller decides whether to
               wait.
+            http: 409
             name: ProfilerBusy
-            options:
-              - errs.WithHTTPStatus(httpConflict)
             private: "service/observe/profiling: pprof.StartCPUProfile refused: the runtime's CPU profiler is in use; the runtime's own error is joined"
             public: A CPU profile is already being recorded
             reason: PROFILER_BUSY
@@ -126,9 +124,8 @@ packages:
               CaptureCanceled is a CPU capture whose context ended before the window
               did. The profiler is stopped and nothing is returned: a partial window
               would read as the whole one. The context's error is joined.
+            http: 503
             name: CaptureCanceled
-            options:
-              - errs.WithHTTPStatus(httpUnavailable)
             private: "service/observe/profiling: the context ended during CaptureCPU's window; the profiler was stopped and the samples dropped"
             public: The profile was abandoned before its window ended
             reason: CAPTURE_CANCELED

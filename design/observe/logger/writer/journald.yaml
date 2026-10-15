@@ -35,17 +35,15 @@ packages:
       - var:
           - code: CodeJournaldOpenFailed
             doc: JournaldOpenFailed wraps a failure to connect the unix-datagram socket.
+            exit: IOERR
             name: JournaldOpenFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "service/observe/logger/writer/journald: connecting the unix-datagram socket failed"
             public: Journald sink could not connect the journal socket
             reason: JOURNALD_OPEN_FAILED
           - code: CodeJournaldWriteFailed
             doc: JournaldWriteFailed wraps a datagram send failure on the journald socket.
+            exit: IOERR
             name: JournaldWriteFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "service/observe/logger/writer/journald: the unix-datagram socket returned an error"
             public: Journald sink write failed
             reason: JOURNALD_WRITE_FAILED

@@ -23,7 +23,7 @@ driver type.
 | `redissink.go` | `redisSink` wrapper that calls the client `closeFn` after the chain drains |
 | `client.go` | the ONLY driver-importing file: `newClient` + `resolveCreds` + `buildValues` |
 | `codes_gen.go` | sentinels — range 0.3.34.\* (service slot 0x22) — written by kit gen from `design/third-party/db/writer/redis.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `exitIOErr`, `wrapClientInit`, `wrapAdd` |
+| `errors.go` | hand-written beside them: `wrapClientInit`, `wrapAdd` |
 
 ## Behaviour
 

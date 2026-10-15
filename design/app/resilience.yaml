@@ -93,36 +93,32 @@ packages:
       - var:
           - code: CodeRetryExhausted
             doc: RetryExhausted wraps the final attempt's error after the retry budget ran out.
+            exit: TEMPFAIL
             name: RetryExhausted
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "service/app/resilience: retry budget exhausted; the wrap cause is the last attempt's error"
             public: The operation failed after exhausting all retries
             reason: RETRY_EXHAUSTED
           - code: CodeCircuitOpen
             doc: CircuitOpen is returned when the breaker is Open and the call is rejected fast.
+            exit: TEMPFAIL
+            http: 503
             name: CircuitOpen
-            options:
-              - errs.WithExitCode(exitUnavailable)
-              - errs.WithHTTPStatus(httpUnavailable)
             private: "service/app/resilience: breaker in Open state — downstream presumed unhealthy"
             public: The circuit breaker is open; the call was rejected
             reason: CIRCUIT_OPEN
           - code: CodeRateLimited
             doc: RateLimited is returned when no token was available (or the wait was cancelled).
+            exit: TEMPFAIL
+            http: 429
             name: RateLimited
-            options:
-              - errs.WithExitCode(exitUnavailable)
-              - errs.WithHTTPStatus(httpTooManyRequests)
             private: "service/app/resilience: no rate-limit token available"
             public: The call was rejected by the rate limiter
             reason: RATE_LIMITED
           - code: CodeBulkheadFull
             doc: BulkheadFull is returned when every concurrency slot is occupied.
+            exit: TEMPFAIL
+            http: 503
             name: BulkheadFull
-            options:
-              - errs.WithExitCode(exitUnavailable)
-              - errs.WithHTTPStatus(httpUnavailable)
             private: "service/app/resilience: all bulkhead concurrency slots occupied"
             public: The call was rejected because the bulkhead is full
             reason: BULKHEAD_FULL
@@ -132,18 +128,16 @@ packages:
               with a configuration it cannot honour, in place of running the operation.
               Unlike its siblings it is permanent, not transient (ADR 0031): the fix is
               a code change at the construction site, never a retry.
+            exit: CONFIG
             name: PolicyMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/resilience: policy built with a configuration it cannot honour; the fields name the policy and the knob"
             public: The reliability policy was misconfigured and refused the call
             reason: POLICY_MISCONFIGURED
           - code: CodeTimeoutExceeded
             doc: TimeoutExceeded is returned when the operation outran the timeout deadline.
+            exit: TEMPFAIL
+            http: 504
             name: TimeoutExceeded
-            options:
-              - errs.WithExitCode(exitUnavailable)
-              - errs.WithHTTPStatus(httpGatewayTimeout)
             private: "service/app/resilience: operation did not complete before the deadline"
             public: The operation exceeded its timeout
             reason: TIMEOUT_EXCEEDED
@@ -153,9 +147,8 @@ packages:
               both failed. It is the policy's own outcome rather than either half's
               error, so that neither can be dropped and neither can hijack the code:
               both messages travel as the "primary" and "fallback" fields.
+            exit: TEMPFAIL
             name: FallbackFailed
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "service/app/resilience: primary and fallback both failed; the fields carry both messages"
             public: The operation and its fallback both failed
             reason: FALLBACK_FAILED

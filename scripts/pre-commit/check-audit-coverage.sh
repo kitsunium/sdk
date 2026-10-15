@@ -59,7 +59,7 @@ fi
 # (registry_ownership_external_test.go, classifyCodeSpec) counts as an
 # allocation, so no package can be judged there and missed here:
 #
-#   - an errs.Define call;
+#   - an errs.Define or errs.Static call (ADR 0176);
 #   - a Code-named constant typed as the Code type, whatever its right side —
 #     `CodeX errs.Code = 0x…`, `= iota + 0x…`, a decimal, another constant —
 #     spelled `errs.Code`, through any import name, or `Code` inside kernel/errs;
@@ -71,7 +71,7 @@ fi
 # group, a decimal and a constant expression invisible to the guard while the
 # audit, once reached, would have judged them — so a package declaring its codes
 # only that way stayed out of //:audit_sources and out of both audits.
-define='errs\.Define'
+define='errs\.(Define|Static)'
 typed='(^|[[:space:](])Code[[:alnum:]_]*[[:space:]]+([[:alpha:]_][[:alnum:]_]*\.)?Code[[:space:]]*='
 converted='(^|[[:space:](])Code[[:alnum:]_]*[[:space:]]*=[[:space:]]*([[:alpha:]_][[:alnum:]_]*\.)?Code\('
 reexport='=[[:space:]]*[[:alpha:]_][[:alnum:]_]*\.[[:alpha:]_][[:alnum:]_]*[[:space:]]*(//.*)?$'

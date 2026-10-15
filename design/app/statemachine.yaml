@@ -417,13 +417,12 @@ packages:
               that exists but leaves another state, and a timer or guard transition,
               which only the machine's own loop fires. The entity is returned beside
               it, so the caller can read the state that refused.
+            http: 409
             name: TransitionRefused
             note: |-
               The engine's outcomes, raised by internal/service/app/statemachine. They
               are declared here, with the contract's refusal, so that the domain's
               codes and sentinels are in one place (ADR 0160).
-            options:
-              - errs.WithHTTPStatus(httpConflict)
             private: "service/app/statemachine: no event transition by that name leaves the entity's state; the fields name the event and the state"
             public: That transition is not possible from the current state
             reason: TRANSITION_REFUSED
@@ -433,9 +432,8 @@ packages:
               by Fire for a key never stored, and by any transition whose entity was
               deleted while it ran — the store's Replace reported it gone, and the
               transition stored nothing rather than bring it back.
+            http: 404
             name: EntityMissing
-            options:
-              - errs.WithHTTPStatus(httpNotFound)
             private: "service/app/statemachine: the store holds no entity under the key, or it was deleted while the transition ran; the key field names it"
             public: No such entity
             reason: ENTITY_MISSING
@@ -444,9 +442,8 @@ packages:
               EntityExists is returned by Start when the store already holds an
               entity under the new one's key. Nothing was stored and no hook ran
               after the refusal.
+            http: 409
             name: EntityExists
-            options:
-              - errs.WithHTTPStatus(httpConflict)
             private: "service/app/statemachine: the store's Insert reported the key taken; the key field names it"
             public: An entity with that key already exists
             reason: ENTITY_EXISTS
@@ -614,9 +611,8 @@ packages:
               WaitAbandoned is returned when the caller's context ended while it
               waited for another transition of the same entity to finish. Nothing was
               read or stored.
+            http: 503
             name: WaitAbandoned
-            options:
-              - errs.WithHTTPStatus(httpUnavailable)
             private: "service/app/statemachine: the context ended before the entity's lock was free; the cause is the context's error"
             public: The request ended while the entity was busy
             reason: WAIT_ABANDONED

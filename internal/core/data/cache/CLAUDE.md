@@ -43,7 +43,6 @@ tier chaining.
 | `cache_interface.go` | the `Fill[V]` func port |
 | `entry.go` | `EntryValue[V]` (Value / TTL / Tags) + `NoExpiry` |
 | `codes_gen.go` | `0.2.18.*` — CACHE_MISCONFIGURED, CACHE_BACKEND_FAILED, CACHE_FILL_FAILED, CACHE_ENTRY_REJECTED; `0.3.48.*` — CACHE_CHAIN_MISCONFIGURED, CACHE_TIER_FAILED — written by kit gen from `design/data/cache.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `exitConfig`, `exitDataErr` |
 
 ## Conventions
 

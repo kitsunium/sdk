@@ -8,7 +8,6 @@ go_library(
         "codes_gen.go",
         "design_gen.go",
         "doc.go",
-        "errors.go",
         "scheduler.go",
         "scheduler_entry.go",
         "scheduler_result.go",

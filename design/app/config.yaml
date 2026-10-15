@@ -183,33 +183,29 @@ packages:
       - var:
           - code: CodeConfigSourceFailed
             doc: ConfigSourceFailed wraps a Source.Load read failure.
+            exit: CONFIG
             name: ConfigSourceFailed
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/config: a Source.Load failed to read its backing store"
             public: A configuration source could not be read
             reason: CONFIG_SOURCE_FAILED
           - code: CodeConfigDecodeFailed
             doc: ConfigDecodeFailed wraps a merged-map → struct decode failure.
+            exit: CONFIG
             name: ConfigDecodeFailed
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/config: merged map did not decode into the target struct"
             public: The configuration could not be decoded into the target
             reason: CONFIG_DECODE_FAILED
           - code: CodeConfigValidationFailed
             doc: ConfigValidationFailed wraps a decoded config's Validate() error.
+            exit: CONFIG
             name: ConfigValidationFailed
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/config: the decoded config's Validate() returned an error"
             public: The configuration failed validation
             reason: CONFIG_VALIDATION_FAILED
           - code: CodeConfigWatchFailed
             doc: ConfigWatchFailed wraps a Watcher observation failure.
+            exit: CONFIG
             name: ConfigWatchFailed
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/config: the poll watcher failed to stat its target"
             public: The configuration watcher could not observe its source
             reason: CONFIG_WATCH_FAILED
@@ -225,9 +221,8 @@ packages:
               declares a default outside the bounds it also declares would silently
               produce an invalid configuration whenever the operator omitted the key —
               a failure that appears only on the deployment where nobody set it.
+            exit: CONFIG
             name: ConfigSchemaInvalid
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/config: a Schema was refused at construction; the fields name the key and the clause that failed"
             public: The configuration schema cannot be built as declared
             reason: CONFIG_SCHEMA_INVALID
@@ -244,9 +239,8 @@ packages:
               is still a key; validation's `required` answers "is the VALUE non-zero?",
               decided after the decode, where an absent key and an explicit zero are
               the same bytes. `port = 0` satisfies this one and fails that one.
+            exit: CONFIG
             name: ConfigKeyMissing
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/config: a schema declared keys required and no source supplied them"
             public: The configuration is missing required keys
             reason: CONFIG_KEY_MISSING
@@ -261,9 +255,8 @@ packages:
               absence of an effect. A schema is the statement "these are the keys I
               read", so a key outside it is either a mistake or a deliberate one the
               author opts into by name.
+            exit: CONFIG
             name: ConfigUnknownKey
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/config: a source supplied keys no field of the target addresses"
             public: The configuration carries keys the target does not define
             reason: CONFIG_UNKNOWN_KEY

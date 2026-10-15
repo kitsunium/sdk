@@ -149,17 +149,15 @@ packages:
       - var:
           - code: CodeInvalidEntry
             doc: InvalidEntry is returned by Add for an entry that could never run.
+            exit: CONFIG
             name: InvalidEntry
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/scheduler: entry has an empty name, a nil Job or a nil Schedule; the field names which"
             public: The scheduler entry is not runnable and was refused
             reason: INVALID_ENTRY
           - code: CodeDuplicateJob
             doc: DuplicateJob is returned by Add when the entry's name is already taken.
+            exit: CONFIG
             name: DuplicateJob
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/scheduler: entry names are unique per Scheduler; the field carries the name"
             public: A job is already registered under that name
             reason: DUPLICATE_JOB
@@ -169,9 +167,8 @@ packages:
               Scheduler is running. The entry set is fixed for the duration of a Run
               so the loop needs no wake-up channel and no lock on its hot path; adding
               between runs is allowed.
+            exit: CONFIG
             name: SchedulerRunning
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/scheduler: the entry set is frozen for the duration of a Run; add before Run, or after it returns"
             public: The scheduler is already running
             reason: SCHEDULER_RUNNING
@@ -190,14 +187,13 @@ packages:
             doc: |-
               InvalidExpression is returned by Parse for a malformed or out-of-range
               cron field.
+            exit: CONFIG
             name: InvalidExpression
             note: |-
               The parser's refusals of a schedule the caller wrote down, raised by
               internal/service/app/scheduler. They are declared here, with the
               registration refusals, so that the domain's codes and sentinels are in one
               place (ADR 0160).
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/scheduler: cron field malformed or out of range; the fields name the field, the item and the accepted range"
             public: The cron expression is not valid
             reason: INVALID_EXPRESSION
@@ -207,9 +203,8 @@ packages:
               refuses by name instead of interpreting. Refusing loudly is the whole
               point: a parser that silently ignores a Quartz "L" would run a job on
               the wrong day and report success.
+            exit: CONFIG
             name: UnsupportedSyntax
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/scheduler: five-field POSIX cron plus @yearly/@monthly/@weekly/@daily/@hourly only; the fields name what was rejected"
             public: That cron syntax is outside the accepted subset
             reason: UNSUPPORTED_SYNTAX
@@ -217,25 +212,22 @@ packages:
             doc: |-
               UnreachableSchedule is returned by Parse for a valid expression that
               matches no instant within the search horizon.
+            exit: CONFIG
             name: UnreachableSchedule
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/scheduler: expression parsed but no instant matches within the horizon — e.g. day 31 of a 30-day month"
             public: The cron expression matches no date on the calendar
             reason: UNREACHABLE_SCHEDULE
           - code: CodeInvalidLocation
             doc: InvalidLocation is returned by ParseInLocation for a nil location.
+            exit: CONFIG
             name: InvalidLocation
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/scheduler: ParseInLocation needs a non-nil *time.Location; use Parse for UTC"
             public: A time zone is required and none was given
             reason: INVALID_LOCATION
           - code: CodeInvalidInterval
             doc: InvalidInterval is returned by Every for a non-positive duration.
+            exit: CONFIG
             name: InvalidInterval
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/scheduler: Every needs a positive period; a non-positive one is due infinitely often"
             public: The interval must be greater than zero
             reason: INVALID_INTERVAL

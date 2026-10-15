@@ -31,7 +31,6 @@ comment alone, is gone (rule 5); the package comment is `doc.go`'s alone, writte
 | `record.go` | `CreateEvent`, `RecordValue[S]`, `StepValue[S]` (JSON-tagged, so a file journal can store them as they are) |
 | `trigger.go` | `Trigger` + its five values, `String`, `ParseTrigger` |
 | `codes_gen.go` | `CodeTriggerUnknown` (0.2.56.1) and the engine's `CodeTransitionRefused` … `CodeLoopPanicked` (0.3.88.1 – 0.3.88.21); `TriggerUnknown` and the engine's twenty-one sentinels (`errs.Define`); the HTTP statuses three of them carry are integer literals (404, 409, 503) — written by kit gen from `design/app/statemachine.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `httpNotFound`, `httpConflict`, `httpUnavailable` |
 
 ## Why this shape
 

@@ -34,7 +34,6 @@ semver that ADR 0158 §2 routes every version through.
 | `replace_platform.go` | `canReplace` — the Windows refusal of the replacement step, before anything is downloaded |
 | `candidate.go` | the release-candidate channel |
 | `codes_gen.go` | this package's own range `0.3.66.*` and its sentinels — written by kit gen from `design/framework/selfupdate.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `exitUsage`, `exitCantCreate` |
 | `wrap.go` | `refuse` and `classify` — the only two ways an error is built here |
 | `diagnose.go` | the half of an error `Error()` never renders, for the reader entitled to it |
 | `release_info.go` | `releaseInfo` / `releaseAsset` — the release host's JSON shape |

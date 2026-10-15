@@ -55,9 +55,9 @@
 // usually exactly the value a caller must not learn back from a refusal: the
 // fields name the index and the operation, never what was looked up.
 //
-// The HTTP statuses are spelled as the integers errs.WithHTTPStatus takes,
-// each named after its status: the core imports no net/http to read five
-// numbers (ADR 0160).
+// The HTTP statuses are the sentinels' http: fields in the design, plain
+// integers: the core imports no net/http to read five numbers (ADR 0160,
+// ADR 0176).
 //
 // Package docstore — the declaration of a secondary index, which both engines
 // take at construction and file by the same rule.

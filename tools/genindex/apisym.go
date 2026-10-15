@@ -26,11 +26,12 @@ const (
 	kindConst string = "const"
 	// kindVar is a package-level variable.
 	kindVar string = "var"
-	// errsPath is the package whose Define makes a sentinel and whose Code a
-	// constant is a dotted-quad error code of (ADR 0005).
+	// errsPath is the package whose Define and Static make a sentinel and
+	// whose Code a constant is a dotted-quad error code of (ADR 0005,
+	// ADR 0176).
 	errsPath string = "github.com/kitsunium/sdk/internal/kernel/errs"
-	// defineArgs is how many leading arguments of errs.Define a code reads:
-	// the code, the reason and the public text.
+	// defineArgs is how many leading arguments of errs.Define or errs.Static
+	// a code reads: the code, the reason and the public text.
 	defineArgs int = 3
 	// quadShift is the width of one element of a dotted quad, in bits.
 	quadShift int = 8
@@ -386,11 +387,11 @@ func (r *pkgReader) resolveCodes() {
 }
 
 // defineCode reads the code, the reason and the public text of a call to
-// errs.Define, or nil when the initializer is no such call or an argument is
-// no constant.
+// errs.Define or errs.Static, or nil when the initializer is no such call or
+// an argument is no constant.
 func (r *pkgReader) defineCode(init ast.Expr) *apiCode {
 	call, ok := ast.Unparen(init).(*ast.CallExpr)
-	//: only a call to errs.Define defines a sentinel.
+	//: only a call to errs.Define or errs.Static defines a sentinel.
 	if !ok || len(call.Args) < defineArgs || !isDefine(r.calledObject(call)) {
 		//: no code.
 		return nil
@@ -432,11 +433,13 @@ func (r *pkgReader) calledObject(call *ast.CallExpr) types.Object {
 	}
 }
 
-// isDefine reports whether obj is errs.Define.
+// isDefine reports whether obj is errs.Define or its static sibling
+// errs.Static (ADR 0176): both lead with the code, the reason and the public
+// text.
 func isDefine(obj types.Object) bool {
 	fn, ok := obj.(*types.Func)
 	//: the function, by package and name.
-	return ok && fn.Pkg() != nil && fn.Pkg().Path() == errsPath && fn.Name() == "Define"
+	return ok && fn.Pkg() != nil && fn.Pkg().Path() == errsPath && (fn.Name() == "Define" || fn.Name() == "Static")
 }
 
 // isErrsCode reports whether t is errs.Code, through any alias of it.

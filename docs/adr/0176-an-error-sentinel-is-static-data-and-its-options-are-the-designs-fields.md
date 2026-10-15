@@ -59,7 +59,7 @@ arbitrary expression, kit cannot write a sentinel as a constant.
    `errs.Static` is a sibling of `Define` (ADR 0039), not a change of it: it takes
    constants only, its body is one composite literal, and it has no panic, no
    variadic and no closure, so it inlines and the variable initialises at link
-   time. The final name is fixed in PR 1.
+   time. The name is fixed in PR 1: `Static`. Six parameters exceed KTN-FUNC-MAXPARAM (max 5), whose analyzer reads `IsFileExcluded` only and ignores `exclude_functions` (kodflow/ktn-linter#734). Measured with Go 1.27.2: passing the statuses as a struct (`errs.Statuses{HTTP: 401, Exit: 78}`) keeps the call inlined but leaves a package `init` that stores the two fields, and a packed integer allocates at init; only six scalar parameters are fully static.
 
 3. **Validation moves to `kit gen`.** Today `Define` validates at init and
    panics. For `Static` kit checks, when it generates: the reason's pattern, the
@@ -126,9 +126,43 @@ files, the 95 blocks, the 364 and 92 option uses, the 22 `exit*` declarations of
 from ADR 0172, not re-measured here: the 0.1 to 0.2 ms ceiling, and the shape of
 kit's code in Decision 5.
 
-To be proved in PR 1: that `errs.Static` is initialised statically by the
-toolchain pinned in `MODULE.bazel`, and that `docs/api` is byte-identical for
-every sentinel after the rewrite.
+Proved in PR 1, with the toolchain pinned in `MODULE.bazel` (Go 1.27.2), on a
+probe package declaring `var P = errs.Static(code, "PROBE_STATIC", "public",
+"private", 401, 78)` and, as a control, `var D = errs.Define(code, ..., 
+errs.WithExitCode(78))`: `go build -gcflags=-m` prints `can inline Static` in
+`internal/kernel/errs` and `inlining call to errs.Static` at the probe; `go tool
+nm` puts `P` in the data section (`D`, 8 bytes) and `D` in the bss (`B`); a
+probe holding only `Static` has no `main.init` and `GODEBUG=inittrace=1` prints
+no `init main` line, where the control's line shows one allocation. The result
+is the same under `-race`, `GOARCH=386 CGO_ENABLED=0` and `-gcflags=all=-N`.
+`Define` does not inline, as expected. `Static`'s behaviour is
+pinned by `TestStaticMatchesDefine` (same error, texts and statuses as
+`Define`).
+
+Proved in PR 3 (kit `v0.1.0-rc.9`, `codes.static` set in `design/sdk.yaml`):
+`kit design import -type library -codes` rewrote the 399 `options:` lists of
+the design (364 `errs.WithExitCode`, 92 `errs.WithHTTPStatus`) as `exit:` and
+`http:` fields, leaving no `options:`; `kit gen` then wrote all 679 sentinels
+with `errs.Static` and none with `errs.Define`. Cut again from a `main` that
+had gained four sentinels since (docstore `0.3.80.21`–`22`, queue
+`0.2.23.8`–`9`, whose options were constants too), PR 3 converts them the same
+way: 683 sentinels written with `errs.Static`, none with `errs.Define`. Every sentinel record of `docs/api`
+and `docs/error-codes.yaml` is byte-identical to the tree before the rewrite
+(the two package comments PR 3 edits, cli's and docstore's, are the only
+difference). The `exit*` / `http*` constants (and token's `statusUnauthorized`)
+nothing read any more are deleted, 39 `errors.go` files with them — four
+internal tests that pinned a constant now pin the sentinel's `ExitCode()`; those a hand-written body
+still reads (a `WrapParams`, `StopReasonValue.ExitCode`) stay. Decision 4 had
+two more readers of `Define` than it listed: `tools/genindex`, which records a
+sentinel's code in `docs/api` (without it every converted sentinel lost its
+`code` record), and `check-core-symmetry.sh`, which refuses a code declared in
+`internal/service`; both read `Static` as `Define` since PR 3. Measured on
+`framework/kit/testdata/cliprobe` (Go 1.27.2, `-trimpath`, 50 runs of
+`GODEBUG=inittrace=1`): 183 package inits before, 149 after (34 fewer); the
+smallest total init 0.768 ms before, 0.666 ms after, the median 1.089 ms and
+0.846 ms; init's allocations 1022 and 143 KB before, 645 and 89 KB after; the
+binary 65 KB smaller. The remaining SDK inits are other variables, chiefly
+`pkg/v1` re-exports of a sentinel (`X = core.X`), which copy a pointer at init.
 
 ## Alternatives considered
 

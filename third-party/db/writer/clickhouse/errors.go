@@ -2,9 +2,6 @@ package clickhouse
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
 
-// exitIOErr matches sysexits EX_IOERR — a database failure is an I/O problem.
-const exitIOErr int = 74
-
 // wrapClientInit wraps cause under the client-init sentinel. The credentials are
 // never attached.
 func wrapClientInit(cause error) error {

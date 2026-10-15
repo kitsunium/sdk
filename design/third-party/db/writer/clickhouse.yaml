@@ -64,17 +64,15 @@ packages:
             doc: |-
               ClientInitFailed wraps a failure to build the sql handle: an invalid table
               or an unresolvable credential provider.
+            exit: IOERR
             name: ClientInitFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "third-party/db/writer/clickhouse: invalid table or credentials unresolvable"
             public: ClickHouse writer could not initialise its client
             reason: CLIENT_INIT_FAILED
           - code: CodeCHInsertFailed
             doc: InsertFailed wraps a failed batch INSERT.
+            exit: IOERR
             name: InsertFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "third-party/db/writer/clickhouse: the multi-row INSERT returned an error"
             public: ClickHouse writer failed to insert a log batch
             reason: INSERT_FAILED
