@@ -60,6 +60,9 @@ type sqlStatements struct {
 	deadList string
 	// replay and deleteDead act on one dead letter.
 	replay, deleteDead string
+	// putDead writes a dead letter as it is given: dead, its failure instant
+	// as its due, its count and its cause.
+	putDead string
 	// table is the table's quoted name.
 	table string
 	// dialect selects the placeholder grammar of the per-call ones.
@@ -94,6 +97,8 @@ func renderSQLStatements(dialect coresql.Dialect, table string) sqlStatements {
 		deleteDead: "DELETE FROM " + q + " WHERE id = " + p(1) + " AND dead = 1",
 		table:      q,
 		dialect:    dialect,
+		putDead: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload, reason, cause, code) VALUES (" +
+			p(1) + ", 1, " + p(2) + ", " + p(3) + ", " + p(4) + ", " + p(5) + ", " + p(6) + ", " + p(7) + ", " + p(8) + ")",
 	}
 	//: SQLite's lock is the database's, taken by a transaction's first
 	//: WRITE: a lease that read first could be refused busy at its update,

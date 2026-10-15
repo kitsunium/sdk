@@ -10,8 +10,8 @@ own database, every call on the transaction its context carries — ADR 0151),
 on goroutines it owns).
 
 All three implement every capability sibling: `DeadLetterReader`,
-`LeaseExtender`, `Waker`, and since ADR 0151 `Rejecter` and
-`DeadLetterManager`; and all three wait the same growing retry delay when the
+`LeaseExtender`, `Waker`, since ADR 0151 `Rejecter` and
+`DeadLetterManager`, and since ADR 0178 `DeadLetterWriter`; and all three wait the same growing retry delay when the
 policy's `MaxRetryDelay` asks for one (`retry.go`).
 
 Code range: `0.3.53.*` (ADR 0054) — `QUEUE_BACKEND_FAILED`,
@@ -25,9 +25,9 @@ package declares no code.
 | File | Holds |
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
-| `queue.go` | the dead-letter `causeValue` reduction, `randomHex`, the two shared guards (`checkBatch`, `checkSize`), `deadLetterNotFound` |
+| `queue.go` | the dead-letter `causeValue` reduction, `randomHex`, the shared guards (`checkBatch`, `checkSize`, and `checkDeadLetter` — the refusals of `PutDeadLetter`, identical on the three brokers, ADR 0178), `deadLetterNotFound` |
 | `retry.go` | `retryDelay`: RetryDelay, or the `kernel/backoff` curve from it to `MaxRetryDelay` — one function the three brokers call (ADR 0151) |
-| `memory.go` | `NewMemory` and the in-heap broker: the heap-ordered lease expiry, the ready list ordered at insertion; `Reject`, `ReplayDeadLetter`, `DeleteDeadLetter` |
+| `memory.go` | `NewMemory` and the in-heap broker: the heap-ordered lease expiry, the ready list ordered at insertion; `Reject`, `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter` |
 | `memory_config.go` / `mem_record.go` / `lease_expiry.go` | `MemoryConfig` and the two values the memory broker keeps |
 | `file.go` | `NewFile`, `Publish`, `Ack`, receipt resolution, `entriesOf` |
 | `file_config.go` | `FileConfig`, the directory preparation, and the refusals it runs on the queue directory AND each state directory — the shape half (a link, a reparse point, a non-directory), shared by every platform |
@@ -35,10 +35,10 @@ package declares no code.
 | `file_name.go` | the NAME grammar — the durable broker's entire state machine — and `nameable`, the range of instants a name can carry. Every field is held to the exact width and spelling the renderers write (entropy and lease as wide as `randomHex` makes them, the count as `padCount` spells it), so a stray file of the right shape is skipped rather than delivered |
 | `file_receive.go` | `Receive`, the reclaim scan, the rename that IS the exclusion |
 | `file_dead.go` | `Nack`, `Reject`, `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
-| `file_replay.go` | `ReplayDeadLetter`, `DeleteDeadLetter`, `deadRecordsOf` — every record of one message by its ID |
+| `file_replay.go` | `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter` (a burial's record, published atomically and durably), `deadRecordsOf` — every record of one message by its ID |
 | `sql.go` | `NewSQL`, the SQL broker, `Publish`, `Ack`, `Nack`, `Extend`, `Wake`; `run` (a savepoint of the caller's transaction, a transaction of the broker's own, or one statement on the pool), `announce` (the wake through `Deferrer`), the receipt grammar, `failed` (QUEUE_BACKEND_FAILED + the driver's error through `service/data/sql`'s `Withheld`, its text out of every rendering), the process-wide `sqlWakes` table |
 | `sql_receive.go` | `Receive`: the probe, then — only when something is due — the lease transaction: `pickDue`, `buryLapsed`, `leaseRows`, `minDue` |
-| `sql_dead.go` | `Reject`, `DeadLetters`, `ReplayDeadLetter`, `DeleteDeadLetter` on the table |
+| `sql_dead.go` | `Reject`, `DeadLetters`, `ReplayDeadLetter`, `DeleteDeadLetter`, `PutDeadLetter` (one INSERT of a dead row, in the caller's transaction when its context carries one) on the table |
 | `sql_config.go` | `SQLConfig`, `MaxSQLTableLen`, the table-name rule, the refusals (`SQL_QUEUE_MISCONFIGURED`) |
 | `sql_dialect.go` | **the only place the SQL broker renders SQL**: every statement per dialect, `leaseRows` / `buryRows` rendered per call, the DDL; every marker, quoted name and the lease's `FOR UPDATE SKIP LOCKED` is `core/data/sql.Dialect`'s (`Placeholder`, `QuoteIdent`, `ForUpdateSkipLocked`) |
 | `sql_migration.go` | `SQLMigration`: the one table as an idempotent `core/data/sql` migration the caller numbers |
@@ -289,7 +289,7 @@ database fails transiently where a directory rarely does, while `Consume` still
 returns on a storage failure: a consumer over the SQL broker runs under
 `lifecycle`'s supervisor (ADR 0112), and SQLite is opened with a busy timeout.
 
-## Failures no retry can fix, and the dead letters' two decisions (ADR 0151)
+## Failures no retry can fix, the dead letters' two decisions (ADR 0151), and a dead letter written as it lies (ADR 0178)
 
 - **`Consume` rejects a `DoNotRetry` failure.** `settle` asks for the
   `Rejecter` sibling and `errs.HasCode(failure, CodeNotRetryable)`; both true,
@@ -308,6 +308,20 @@ returns on a storage failure: a consumer over the SQL broker runs under
   queued. The SQL
   broker's replay is one UPDATE of the row's state, so the second of two racing
   replays is refused `DEAD_LETTER_NOT_FOUND`.
+- **`PutDeadLetter` writes a dead letter as it lies (ADR 0178)**, on all three
+  brokers, for a copy of a queue from one broker to another: payload, both
+  instants, count, reason, cause and code — 0 included — kept, under an
+  identifier the broker mints from the enqueue instant (the memory broker
+  from it and its sequence). `checkDeadLetter` refuses first, identically
+  everywhere: an identifier set, a count below 1 or above 2³¹−1 (MySQL's
+  `INT`), an instant `nameable` refuses, a reason or cause `oneLine` would
+  rewrite — `INVALID_DEAD_LETTER`, naming the field — then a payload over the
+  bound, `MESSAGE_TOO_LARGE`. The file broker writes the record a burial
+  writes, through the same `WriteAtomic`; the SQL broker one INSERT with
+  `dead = 1` and the failure instant as `due`, a savepoint of the caller's
+  transaction when there is one. A dead letter is never receivable, so none
+  wakes a consumer. `deadletter_write_external_test.go` holds it on every
+  broker, and the SQL one in and out of a rolled-back transaction.
 - **The growing retry delay is `retry.go`'s one function**, so the double waits
   exactly what the durable brokers wait. The curve's jitter stays at zero: the
   retry instant is what `Wake` reports and what a test asserts.
@@ -485,6 +499,7 @@ delivery count incremented. That is a contract now: a broker that answered
 - ADR 0104 — the `Waker` an idle consumer sleeps on
 - ADR 0139 — docstore over SQL, whose transaction rules the SQL broker follows
 - ADR 0151 — the SQL broker, the growing retry delay, `Rejecter`, `DeadLetterManager`
+- ADR 0178 — `DeadLetterWriter`, for kit's `data copy`
 - `internal/core/data/queue/CLAUDE.md` — the port and the five decisions
 - `e2e/integration/sql/CLAUDE.md` — the SQL broker on the three real engines
 - `BENCH.md` — the cost of durability, and the two defects the numbers found

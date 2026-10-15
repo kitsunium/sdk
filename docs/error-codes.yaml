@@ -777,6 +777,10 @@ codes:
     const: CodeDeadLetterNotFound
     hex: "0x00_02_17_07"
     package: internal/core/data/queue
+  - code: "0.2.23.8"
+    const: CodeInvalidDeadLetter
+    hex: "0x00_02_17_08"
+    package: internal/core/data/queue
   - code: "0.2.24.1"
     const: CodeUnknownDialect
     hex: "0x00_02_18_01"

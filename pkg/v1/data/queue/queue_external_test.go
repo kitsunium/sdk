@@ -206,3 +206,43 @@ func facadeBroker(t *testing.T, kind string) queue.Broker {
 	}
 	return broker
 }
+
+// TestTheFacadeWritesADeadLetterAsItLies spells ADR 0178's names through the
+// public surface alone: DeadLetterWriter by type assertion, a dead letter with
+// no code written and read back as it was given, and InvalidDeadLetter, by its
+// code, for one naming its own identifier.
+func TestTheFacadeWritesADeadLetterAsItLies(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"memory", "file"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			broker := facadeBroker(t, name)
+			writer, ok := broker.(queue.DeadLetterWriter)
+			if !ok {
+				t.Fatalf("%T does not implement queue.DeadLetterWriter", broker)
+			}
+			enqueued := time.Date(2026, time.October, 1, 9, 0, 0, 0, time.UTC)
+			dead := queue.DeadLetter{
+				Message:  queue.Message{Payload: []byte("moved"), EnqueuedAt: enqueued},
+				FailedAt: enqueued.Add(time.Minute), Deliveries: 3, Reason: "LEASE_EXPIRED",
+			}
+			id, err := writer.PutDeadLetter(t.Context(), dead)
+			if err != nil {
+				t.Fatalf("PutDeadLetter() = %v, want nil", err)
+			}
+			read, readErr := broker.(queue.DeadLetterReader).DeadLetters(t.Context(), 10)
+			if readErr != nil || len(read) != 1 {
+				t.Fatalf("DeadLetters() = %d, %v; want the one written", len(read), readErr)
+			}
+			got := read[0]
+			if got.Message.ID != id || string(got.Message.Payload) != "moved" || got.Deliveries != 3 ||
+				got.Reason != "LEASE_EXPIRED" || got.Code != 0 || !got.FailedAt.Equal(dead.FailedAt) {
+				t.Fatalf("read back %+v, want %+v under %q", got, dead, id)
+			}
+			dead.Message.ID = id
+			if _, err := writer.PutDeadLetter(t.Context(), dead); !errs.HasCode(err, queue.CodeInvalidDeadLetter) {
+				t.Fatalf("PutDeadLetter with an identifier = %v, want InvalidDeadLetter", err)
+			}
+		})
+	}
+}

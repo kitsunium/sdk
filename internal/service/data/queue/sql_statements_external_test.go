@@ -59,6 +59,10 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 		{dialect: coresql.DialectPostgres, role: "replay", text: `UPDATE "app__jobs" SET dead = 0, due = $1, deliveries = 0, reason = NULL, cause = NULL, code = NULL` +
 			` WHERE id = $2 AND dead = 1`},
 		{dialect: coresql.DialectPostgres, role: "deleteDead", text: `DELETE FROM "app__jobs" WHERE id = $1 AND dead = 1`},
+		{dialect: coresql.DialectPostgres, role: "putDead", text: `INSERT INTO "app__jobs" (id, dead, due, enqueued_at, deliveries, payload, reason, cause, code)` +
+			` VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8)`},
+		{dialect: coresql.DialectMySQL, role: "putDead", text: "INSERT INTO `app__jobs` (id, dead, due, enqueued_at, deliveries, payload, reason, cause, code)" +
+			" VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)"},
 		{dialect: coresql.DialectMySQL, role: "insert", text: "INSERT INTO `app__jobs` (id, dead, due, enqueued_at, deliveries, payload) VALUES (?, 0, ?, ?, 0, ?)"},
 		{dialect: coresql.DialectMySQL, role: "pick", text: "SELECT id, enqueued_at, deliveries, lease, payload FROM `app__jobs` WHERE dead = 0 AND due <= ?" +
 			" ORDER BY due, id LIMIT ? FOR UPDATE SKIP LOCKED"},

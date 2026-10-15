@@ -1,6 +1,7 @@
 # ADR 0151 — a message published in a transaction exists if and only if it commits
 
 - **Status**: Accepted
+- **Amended**: 2026-10-15 — a sixth capability sibling, `DeadLetterWriter`, and `INVALID_DEAD_LETTER` `0.2.23.8` (see the dated section at the end), for ADR 0178's `data copy`
 - **Date**: 2026-09-30
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) §Consequences — §D6: the driver's withheld text is one `Withheld` in `service/data/sql`, shared by the queue's and the document store's SQL engines, not a copy per package
@@ -404,6 +405,74 @@ behaviour; `Broker` and `Handler` are unchanged. Two things read differently:
   full conformance table cannot run there: its cases are `internal/service/queue`
   tests, and that module imports no driver (ADR 0055 §D2) — the fake engine
   runs them on each dialect's statements instead, as docstore's does.
+
+## Amendment (2026-10-15): a sixth sibling, `DeadLetterWriter`, for a dead letter that moves
+
+**Why.** ADR 0178 has kit copy a product's file queues into tables of its
+database (`data copy`), dead letters included, and declares the copy done only
+when each queue's messages — `SHA-256(payload ‖ dead ‖ deliveries ‖ reason ‖
+code)` — match as a multiset. It assumed a dead letter could be written into
+the SQL broker as dead, with its reason and count, and said to check it. It
+cannot, as the brokers stood on `8af43a95`: D9's `DeadLetterManager` replays
+or deletes and never inserts; `Publish`'s one `INSERT` writes `dead = 0` and
+`deliveries = 0`; the only way to the dead state is `Reject` or a last `Nack`
+on a message this broker leased, so the count is the number of deliveries
+made here, and the cause must be an `*errs.Error`, whose `Define` refuses code
+0 — while a death by expired leases (`LEASE_EXPIRED`, code 0) is the commonest
+dead letter a file queue holds. Re-enacting each death through a broker of the
+copy's own on a manual clock was possible and was set aside: N round trips per
+message, the instants re-stamped, a clock driven in production code. The owner
+chose an addition to the SDK, the way ADR 0178 named.
+
+**Decision.** `core/data/queue` gains a sixth ADR 0039 sibling of `Broker`, one
+method, frozen like the others, published by `pkg/v1/data/queue` as the alias
+`DeadLetterWriter`. No port is widened.
+
+```go
+type DeadLetterWriter interface {
+	PutDeadLetter(ctx context.Context, dead DeadLetterValue) (string, error)
+}
+```
+
+- **What is kept.** Everything a `DeadLetterValue` carries but its
+  identifier: the payload, the enqueue instant, the failure instant, the
+  delivery count, the reason, the cause and the code — 0 included. What
+  `DeadLetters` returns of it equals what was given, the identifier aside, and
+  `DeadLetterManager` acts on it as on any dead letter. It is never delivered
+  and wakes no consumer.
+- **The identifier is the target's.** `Message.ID` must be empty; the broker
+  mints one from the enqueue instant, as `Publish` does from its clock (the
+  memory broker from it and its sequence), and returns it. A copy that kept a
+  source's identifier would have two brokers minting in one namespace.
+- **What is refused, identically on the three brokers.** `INVALID_DEAD_LETTER`
+  (`0.2.23.8`, `EX_DATAERR`), its `field` field naming which value, nothing
+  written: an identifier set; a count below 1, or above 2³¹−1, which MySQL's
+  `INT` column holds; an enqueue or failure instant outside the int64 Unix
+  nanoseconds a name and a column carry (1970 to 2262, the zero `time.Time`
+  included); a reason or cause longer than 120 runes or holding a line break —
+  what every store's `oneLine` would otherwise cut, refused rather than cut,
+  because a copy must not change what it copies. A payload above the policy's
+  bound is `MESSAGE_TOO_LARGE`, as for `Publish`.
+- **Each broker.** **memory** appends the record, its payload copied; **file**
+  writes the record a burial writes — the same header, the payload verbatim —
+  through the same atomic, durable `WriteAtomic`, under the dead name its
+  instant, entropy and count spell; **SQL** sends one `INSERT … VALUES (…, 1,
+  …)` with the failure instant as `due`, through D2's `run`: a savepoint of the
+  transaction its context carries, so a dead letter written inside one exists
+  if and only if it commits.
+
+**Verification.** `internal/service/data/queue`'s
+`deadletter_write_external_test.go` runs over `everyBroker` — memory, file,
+and SQL on each dialect's statements: five dead letters recorded elsewhere
+(code 0 with `LEASE_EXPIRED`, a stdlib cause's empty reason, an SDK error's
+three halves, an empty payload, bytes that are no text) read back as given
+under distinct minted identifiers; one replayed and one deleted like any
+other; every refusal naming its field, nothing written; the SQL broker's in a
+rolled-back transaction, then a committed one.
+`sql_statements_external_test.go` pins the statement's text on PostgreSQL and
+MySQL; `pkg/v1/data/queue` builds the three new names without an internal
+import. Kit's `data copy` (ADR 0178, C7 item 13), built on it next, is to
+run it on a real SQLite through `framework/connectors/sqlite`.
 
 ## References
 

@@ -119,6 +119,13 @@
 //		err := manager.ReplayDeadLetter(ctx, dead[0].Message.ID)
 //	}
 //
+// A dead letter moves between brokers with [DeadLetterWriter]: PutDeadLetter
+// writes one into the store as another broker recorded it — its payload, its
+// count, its instants, its reason, cause and code — under an identifier the
+// target mints. It is what a copy of a queue from a directory into a database
+// needs, and nothing else does; a value no store keeps as given is
+// [InvalidDeadLetter].
+//
 // # A failure no retry can fix is dead-lettered at once
 //
 // A payload that does not decode will not decode on the fifth attempt either.

@@ -71,6 +71,7 @@ go_test(
         "conformance_external_test.go",
         "consume_external_test.go",
         "deadletter_external_test.go",
+        "deadletter_write_external_test.go",
         "death_external_test.go",
         "dirtrust_internal_windows_test.go",
         "file_layout_external_test.go",

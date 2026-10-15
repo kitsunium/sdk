@@ -92,6 +92,8 @@ if manager, ok := broker.(queue.DeadLetterManager); ok {
 }
 ```
 
+A dead letter moves between brokers with [DeadLetterWriter](#DeadLetterWriter): PutDeadLetter writes one into the store as another broker recorded it — its payload, its count, its instants, its reason, cause and code — under an identifier the target mints. It is what a copy of a queue from a directory into a database needs, and nothing else does; a value no store keeps as given is [InvalidDeadLetter](#InvalidDeadLetter).
+
 ### A failure no retry can fix is dead-lettered at once
 
 A payload that does not decode will not decode on the fifth attempt either. Return [DoNotRetry](#DoNotRetry) around the error and [Consume](#Consume) dead-letters the message on its FIRST failure, through the broker's [Rejecter](#Rejecter), with your error as the cause the dead letter records:
@@ -191,6 +193,8 @@ Idle consumers are woken once the publication's transaction commits, never for o
   - [func \(DeadLetterManager\) ReplayDeadLetter\(ctx context.Context, id string\) error](<#DeadLetterManager.ReplayDeadLetter>)
 - [type DeadLetterReader](<#DeadLetterReader>)
   - [func \(DeadLetterReader\) DeadLetters\(ctx context.Context, max int\) \(\[\]DeadLetterValue, error\)](<#DeadLetterReader.DeadLetters>)
+- [type DeadLetterWriter](<#DeadLetterWriter>)
+  - [func \(DeadLetterWriter\) PutDeadLetter\(ctx context.Context, dead DeadLetterValue\) \(string, error\)](<#DeadLetterWriter.PutDeadLetter>)
 - [type Delivery](<#Delivery>)
 - [type FileConfig](<#FileConfig>)
 - [type Handler](<#Handler>)
@@ -223,6 +227,17 @@ CodeDeadLetterNotFound is [DeadLetterNotFound](#DeadLetterNotFound)'s code.
 Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.CodeDeadLetterNotFound`.
 
 Code `0.2.23.7`
+
+<a name="CodeInvalidDeadLetter"></a>
+```go
+const CodeInvalidDeadLetter errs.Code = 136968
+```
+
+CodeInvalidDeadLetter is [InvalidDeadLetter](#InvalidDeadLetter)'s code, the one sentinel ADR 0178 added, for errs.HasCode.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.CodeInvalidDeadLetter`.
+
+Code `0.2.23.8`
 
 <a name="CodeNotRetryable"></a>
 ```go
@@ -329,6 +344,17 @@ InvalidBatchSize refuses a non-positive batch size.
 Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.InvalidBatchSize`.
 
 Code `0.2.23.5` · reason `INVALID_BATCH_SIZE` · public "A batch size must be positive"
+
+<a name="InvalidDeadLetter"></a>
+```go
+var InvalidDeadLetter *errs.Error
+```
+
+InvalidDeadLetter refuses a dead letter [DeadLetterWriter](#DeadLetterWriter) cannot write as it was given; the "field" field names which value.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/queue.InvalidDeadLetter`.
+
+Code `0.2.23.8` · reason `INVALID_DEAD_LETTER` · public "The dead letter cannot be written as it was given"
 
 <a name="LeaseExpired"></a>
 ```go
@@ -493,7 +519,7 @@ SQLMigration returns the migration that creates the one table an SQL queue named
 <a name="Broker"></a>
 ## type [Broker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
 
-Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings ([DeadLetterReader](#DeadLetterReader), [LeaseExtender](#LeaseExtender), [Waker](#Waker), [Rejecter](#Rejecter), [DeadLetterManager](#DeadLetterManager)) reached by type assertion.
+Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings ([DeadLetterReader](#DeadLetterReader), [LeaseExtender](#LeaseExtender), [Waker](#Waker), [Rejecter](#Rejecter), [DeadLetterManager](#DeadLetterManager), [DeadLetterWriter](#DeadLetterWriter)) reached by type assertion.
 
 ```go
 type Broker = corequeue.Broker
@@ -837,6 +863,56 @@ func (DeadLetterReader) DeadLetters(ctx context.Context, max int) ([]DeadLetterV
 DeadLetters returns up to max dead letters, oldest first. It does NOT remove them: a dead letter is evidence, and a read that consumed it would make the second investigator's job impossible. Removing one is a decision, and [DeadLetterManager](#DeadLetterManager) is where it is made.
 
 max must be positive ([InvalidBatchSize](#InvalidBatchSize)).
+
+<a name="DeadLetterWriter"></a>
+## type [DeadLetterWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
+
+DeadLetterWriter is the public alias for the capability of writing a dead letter into the store as it was recorded elsewhere — what a copy of a queue from one broker to another needs. Every broker here implements it.
+
+```go
+type DeadLetterWriter = corequeue.DeadLetterWriter
+```
+
+DeadLetterWriter is an alias of `github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterWriter`, declared as:
+
+```go
+type DeadLetterWriter interface {
+	// PutDeadLetter writes dead into the dead-letter store and returns the
+	// identifier the broker minted for it. Everything else is kept as given:
+	// the payload, the enqueue instant, the failure instant, the delivery
+	// count, the reason, the cause and the code — 0 included, the code of a
+	// failure that carried none. What [DeadLetterReader.DeadLetters] then
+	// returns of it equals dead but for the identifier, and
+	// [DeadLetterManager] acts on it as on any other dead letter.
+	//
+	// dead.Message.ID must be empty: the identifier is the broker's to mint,
+	// as [Broker.Publish] mints it, and one a caller set would not be kept.
+	// dead is refused with [InvalidDeadLetter] — the "field" field naming
+	// which — when its Deliveries is below one or above 2147483647, when an
+	// instant lies outside what a durable broker records (1970 to 2262), or
+	// when its Reason or Cause is longer than 120 runes or holds a line
+	// break; a payload above [PolicyValue.MaxMessageBytes] is
+	// [MessageTooLarge]. A refused dead letter writes nothing.
+	//
+	// It is never delivered and wakes no consumer. A broker that joins the
+	// transaction ctx carries (ADR 0151) writes it in that transaction, so
+	// it exists if and only if the transaction commits.
+	PutDeadLetter(ctx context.Context, dead DeadLetterValue) (string, error)
+}
+```
+
+<a name="DeadLetterWriter.PutDeadLetter"></a>
+### func \(DeadLetterWriter\) [PutDeadLetter](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/queue/design_gen.go>)
+
+```go
+func (DeadLetterWriter) PutDeadLetter(ctx context.Context, dead DeadLetterValue) (string, error)
+```
+
+PutDeadLetter writes dead into the dead-letter store and returns the identifier the broker minted for it. Everything else is kept as given: the payload, the enqueue instant, the failure instant, the delivery count, the reason, the cause and the code — 0 included, the code of a failure that carried none. What [DeadLetterReader.DeadLetters](#DeadLetterReader.DeadLetters) then returns of it equals dead but for the identifier, and [DeadLetterManager](#DeadLetterManager) acts on it as on any other dead letter.
+
+dead.Message.ID must be empty: the identifier is the broker's to mint, as [Broker.Publish](#Broker.Publish) mints it, and one a caller set would not be kept. dead is refused with [InvalidDeadLetter](#InvalidDeadLetter) — the "field" field naming which — when its Deliveries is below one or above 2147483647, when an instant lies outside what a durable broker records (1970 to 2262), or when its Reason or Cause is longer than 120 runes or holds a line break; a payload above \[PolicyValue.MaxMessageBytes] is [MessageTooLarge](#MessageTooLarge). A refused dead letter writes nothing.
+
+It is never delivered and wakes no consumer. A broker that joins the transaction ctx carries (ADR 0151) writes it in that transaction, so it exists if and only if the transaction commits.
 
 <a name="Delivery"></a>
 ## type [Delivery](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)

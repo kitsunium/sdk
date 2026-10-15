@@ -1,6 +1,6 @@
 # ADR 0178 — kit's effects join the transaction on the database that keeps their queue
 
-- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4, and C6's assumption about the file engine's key order, refuted after acceptance by a measurement, with its remedy inserted as item 8. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key); the SDK's items 4 and 5 in #325 (`sql.Aborter`, `mailspool.Config.Broker` and `Config.Deferrer`); C1 and C2 for topics, queued commands and watches in #327 (item 6); C1 for the mailer in item 7 — the outbox on the database that keeps the mailer's service, sealed under data-key, its mail written in the transaction; the SDK's tombstone, item 10 of C7's order, in #329 (ADR 0143 amended on 2026-10-15: `Trash`, `Restore`, `Purge`, `Tombstones`), which C4 — kit's item 11 — builds on. The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
+- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4, and C6's assumption about the file engine's key order, refuted after acceptance by a measurement, with its remedy inserted as item 8, and C7's assumption about writing a dead letter into the SQL broker, refuted after acceptance by reading the brokers, with its remedy inserted as item 12. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key); the SDK's items 4 and 5 in #325 (`sql.Aborter`, `mailspool.Config.Broker` and `Config.Deferrer`); C1 and C2 for topics, queued commands and watches in #327 (item 6); C1 for the mailer in item 7 — the outbox on the database that keeps the mailer's service, sealed under data-key, its mail written in the transaction; the SDK's tombstone, item 10 of C7's order, in #329 (ADR 0143 amended on 2026-10-15: `Trash`, `Restore`, `Purge`, `Tombstones`), which C4 — kit's item 11 — builds on; the SDK's `DeadLetterWriter`, item 12, which `data copy` — item 13 — writes the dead letters with (ADR 0151 amended on 2026-10-15). The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
 - **Date**: 2026-10-14
 - **Accepted**: 2026-10-14
 - **Deciders**: SDK maintainers (issue #274); arbitrated by the owner
@@ -538,6 +538,22 @@ and a sample of records is read through kit, opened, as the last step.
 **(assumed: that a dead letter can be written into the SQL broker as dead,
 with its reason and count; `DeadLetterManager` replays or deletes, it does
 not insert — to check before PR 12, and an SDK addition if not.)**
+**(refuted, as the SDK stood — checked after acceptance, on `8af43a95`.)** No
+verb of any broker writes a dead letter: `DeadLetterManager` replays or
+deletes; the SQL broker's one `INSERT` (`sql_dialect.go`, `Publish`) writes
+`dead = 0` and `deliveries = 0`; the dead state is reached only by `Reject` or
+a last `Nack` on a message the broker leased (`buryHeld`), at the count of the
+deliveries it made, with a cause that must be an `*errs.Error` — and
+`errs.Define` refuses code 0, the code of a death by expired leases
+(`LEASE_EXPIRED`), the commonest dead letter a file queue holds. Re-enacting
+every death through a broker of the copy's own on a manual clock was possible
+and was set aside (N round trips per message, instants re-stamped, a clock
+driven in production code). **The remedy (C7, item 12)**, the owner's choice:
+the SDK grows a sixth sibling of `Broker` (ADR 0039), `DeadLetterWriter.
+PutDeadLetter(ctx, DeadLetterValue) (string, error)`, in the three brokers —
+the dead letter written as given, its code 0 included, under an identifier
+the target mints; `INVALID_DEAD_LETTER` (`0.2.23.8`) for a value no store keeps
+as given; amending ADR 0151.
 
 **Options for the split.**
 
@@ -567,14 +583,19 @@ not insert — to check before PR 12, and an SDK addition if not.)**
 9. C6 — `Records.Keys` and the watches' catch-up, after 8.
 10. SDK — docstore's tombstone (design first).
 11. C4 — the trash, after 10.
-12. `data copy`, last.
+12. SDK — `DeadLetterWriter`, a dead letter written as it lies, in the three
+    brokers of `queue` (design first; inserted after acceptance, C7's refuted
+    assumption about the dead letters; amends ADR 0151).
+13. `data copy`, last, after 12.
 
 **Decision.** A — small pull requests, in this order, `data copy` verified
 by fingerprints — by the owner's decision, 2026-10-14. Item 4 was inserted
 after acceptance, when C1's assumption about the spool was refuted (C1);
 the items after it moved down by one. Item 8 was inserted the same way,
 when C6's assumption about the file engine was refuted by a measurement
-(C6); the items after it moved down by one again.
+(C6); the items after it moved down by one again. Item 12 was inserted the
+same way, when C7's assumption about writing a dead letter into the SQL broker
+was refuted (C7); `data copy` became item 13.
 
 **Sealing the mail outbox (item 7).** kit seals the spool's payload in a
 broker that wraps the one C1 gives the spool — the way `wrapQueue` already
@@ -626,8 +647,10 @@ not follow that person's erasure) and sealing hooks in the spool's `Config`
 Verified by reading the code at `55c542da`: every **(verified)** line of the
 Context, with its file and line. Not proved, and owned by the PR that needs
 it: three **(assumed)** lines — the data directory always present with a
-database, WordPress's 30 days, a dead letter written as dead by `data
-copy`. A fourth, the file engine's key order, was **refuted** after
+database, WordPress's 30 days, and a dead letter written as dead by `data
+copy`, the last of which was **refuted** after acceptance (C7): no broker
+could write a dead letter, and the remedy is the SDK's `DeadLetterWriter`
+(C7, item 12). A fourth, the file engine's key order, was **refuted** after
 acceptance by a measurement (C6): no exported read of either engine listed
 the keys without the documents, and the remedy is the SDK's `KeyLister`
 (C7, item 8). A fifth, the spool's deferred
@@ -668,6 +691,7 @@ refused. The pull requests still to come change:
 | Accepted | the owner's decision, 2026-10-14 | The recommendation of each choice retained as written; a *Decision* line per choice. C5 implemented in the same pull request. Two facts #323 established written in: a read is journaled without a reason and files no key (the Context's growth claim corrected), and C3's month is the UTC month of the entry's instant on the app's injected clock. C1's assumption about the spool's deferred `EventQueued` refuted (a rolled-back `Send` keeps its registration open): the remedy, a cancellation signal in `core/data/sql` beside `Deferrer` (amends ADR 0139) reached through `mailspool.Config.Deferrer`, inserted as item 4 of C7's order; ways B and C set aside |
 | Accepted, item 7 | 2026-10-15 | C1 for the mailer implemented (C7 item 7): the outbox on the database that keeps the mailer's service, `kit_queue__<service>__<mailer>__outbox`, each mail sealed under data-key bound to the mailer by a broker in front of the SQL one; a mail sent in a transaction on that database written in it before the commit, the database's transaction manager handed to the spool as `Config.Deferrer`; the Status line names the items implemented so far |
 | Amended | 2026-10-15 | C6's assumption about the file engine's key order refuted by a measurement (every exported listing copied the documents, paging was quadratic, and the SQL engine exported no keyed page): the remedy, a read of the keys alone in both engines of docstore (`KeyLister`, `KeyListerContext`), inserted as item 8 of C7's order; the items after it renumbered |
+| Amended | 2026-10-15 | C7's assumption that a dead letter can be written into the SQL broker as dead refuted by reading the brokers on `8af43a95` (`DeadLetterManager` only replays or deletes, `Publish`'s INSERT writes a live row, the dead state is reached only through a lease, and `errs.Define` refuses the code 0 of a death by expired leases): the remedy, the owner's choice, the SDK's `DeadLetterWriter.PutDeadLetter` in the three brokers with `INVALID_DEAD_LETTER` `0.2.23.8` (ADR 0151 amended), inserted as item 12 of C7's order; `data copy` is item 13 |
 
 ## Alternatives considered
 

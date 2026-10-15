@@ -352,6 +352,31 @@ func (b *memoryBroker) DeleteDeadLetter(ctx context.Context, id string) error {
 	return nil
 }
 
+// PutDeadLetter appends dead to the dead-letter store as it is given, under an
+// identifier minted from its enqueue instant and this broker's sequence
+// (core/data/queue.DeadLetterWriter). The payload is copied, so a caller that
+// reuses its buffer cannot rewrite the record.
+func (b *memoryBroker) PutDeadLetter(ctx context.Context, dead corequeue.DeadLetterValue) (string, error) {
+	//: a cancelled caller.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return "", ctx.Err()
+	}
+	//: the refusals every broker makes, through the same guard.
+	if invalid := checkDeadLetter(dead, b.policy.MaxMessageBytes); invalid != nil {
+		//: InvalidDeadLetter or MessageTooLarge.
+		return "", invalid
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.seq++
+	dead.Message.ID = memID(dead.Message.EnqueuedAt, b.seq)
+	dead.Message.Payload = slices.Clone(dead.Message.Payload)
+	b.dead = append(b.dead, dead)
+	//: dead, as it was given, after every record the store already holds.
+	return dead.Message.ID, nil
+}
+
 // takeDead removes and returns the dead letter id. The caller holds the write
 // lock.
 func (b *memoryBroker) takeDead(id string) (dead corequeue.DeadLetterValue, found bool) {
