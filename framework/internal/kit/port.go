@@ -188,6 +188,10 @@ type bindDecl struct {
 	// scope is the module whose kit.Mount was given it: the port must be
 	// one of that module's.
 	scope *Module
+	// limited and only are that mount's kit.Only: outside them the binding
+	// is not given.
+	limited bool
+	only    []string
 }
 
 // bindOption is kit.Bind's AppOption, and its MountOption.
@@ -317,10 +321,23 @@ func (a *App) portRule() *portRule {
 		}
 	}
 	r.replaced, _ = a.replacements()
-	for _, b := range a.opts.binds {
+	for _, b := range a.heldBinds() {
 		r.readBind(&b)
 	}
 	return r
+}
+
+// heldBinds are the app's bindings that hold in the environment its mounts
+// were resolved for: a binding given to a mount kit.Only leaves out is not
+// given.
+func (a *App) heldBinds() []bindDecl {
+	out := make([]bindDecl, 0, len(a.opts.binds))
+	for _, b := range a.opts.binds {
+		if holdsIn(b.limited, b.only, a.mountEnv) {
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 // refuse records a problem of node n, said where at is.

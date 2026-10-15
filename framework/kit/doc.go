@@ -125,7 +125,8 @@
 // it declares is qualified with its name: its services are
 // "<module>.<service>", its settings and secrets "<module>.<name>", its
 // routes served under its prefix; a module it [Requires] is mounted with it,
-// and the modules start first.
+// and the modules start first. A mount given [Only] holds in the
+// environments it names alone — kit.Mount(m, kit.Only("dev", "staging")).
 //
 // # Processes
 //

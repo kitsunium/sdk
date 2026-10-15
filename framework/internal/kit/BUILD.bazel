@@ -274,6 +274,7 @@ go_test(
         "module_database_test.go",
         "module_internal_test.go",
         "module_mount_test.go",
+        "module_only_test.go",
         "module_test.go",
         "nocommand_test.go",
         "passwords_internal_test.go",

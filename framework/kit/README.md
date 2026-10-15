@@ -88,7 +88,7 @@ Declaring never fails: a mistake is recorded with its position and [App](#App).S
 
 ### Modules
 
-A module ([NewModule](#NewModule)) is a Go module's services, which a product mounts as one — [App](#App).With at its defaults, [Mount](#Mount) with a [Prefix](#Prefix) or a [Bind](#Bind). What it declares is qualified with its name: its services are "\<module>.\<service>", its settings and secrets "\<module>.\<name>", its routes served under its prefix; a module it [Requires](#Requires) is mounted with it, and the modules start first.
+A module ([NewModule](#NewModule)) is a Go module's services, which a product mounts as one — [App](#App).With at its defaults, [Mount](#Mount) with a [Prefix](#Prefix) or a [Bind](#Bind). What it declares is qualified with its name: its services are "\<module>.\<service>", its settings and secrets "\<module>.\<name>", its routes served under its prefix; a module it [Requires](#Requires) is mounted with it, and the modules start first. A mount given [Only](#Only) holds in the environments it names alone — kit.Mount(m, kit.Only("dev", "staging")).
 
 ### Processes
 
@@ -246,6 +246,7 @@ Package kit — workflows: a state machine over the entities of one store.
 - [func NotFound\(message string\) \*Error](<#NotFound>)
 - [func NotReused\(n int\) PasswordOption](<#NotReused>)
 - [func Now\(ctx context.Context\) time.Time](<#Now>)
+- [func Only\(envs ...string\) MountOption](<#Only>)
 - [func Optional\(\) SecretOption](<#Optional>)
 - [func OwnStores\(\) SubscriptionOption](<#OwnStores>)
 - [func Parallelism\(n int\) DeliveryOption](<#Parallelism>)
@@ -2199,6 +2200,22 @@ func Now(ctx context.Context) time.Time
 
 Now returns the app's time: the system clock, or the clock a test gave with [Clock](#Clock). Product code that compares with a deadline reads it rather than time.Now, so that a test's manual clock reaches it.
 
+<a name="Only"></a>
+## func [Only](<https://github.com/kitsunium/sdk/blob/main/framework/kit/mount.go>)
+
+```go
+func Only(envs ...string) MountOption
+```
+
+Only makes a mount hold in the environments envs names alone — the name KIT\_ENV or [Env](#Env) gives, lower-cased, "production" when neither does:
+
+```
+app := kit.NewApp("vigie", identity.Service).
+	With(kit.Mount(debugbar.Module, kit.Only("dev", "staging")))
+```
+
+Elsewhere the mount is as if it had not been given, its [Prefix](#Prefix) and its [Bind](#Bind) with it; another mount of the module without Only still mounts it. Several Only on one mount add up. The start refuses an Only that names no environment, a name that cannot be one — lower-case letters, digits and dashes inside, 63 at most —, and a module a mounted module requires ([Requires](#Requires)) that its mount leaves out, rather than mounting it at its defaults behind the product's back.
+
 <a name="Optional"></a>
 ## func [Optional](<https://github.com/kitsunium/sdk/blob/main/framework/kit/secret.go>)
 
@@ -3786,7 +3803,7 @@ type ModulePart interface {
 <a name="MountOption"></a>
 ## type [MountOption](<https://github.com/kitsunium/sdk/blob/main/framework/kit/mount.go>)
 
-MountOption configures the mount of a module: [Prefix](#Prefix), [Bind](#Bind).
+MountOption configures the mount of a module: [Prefix](#Prefix), [Bind](#Bind), [Only](#Only).
 
 ```go
 type MountOption = ikit.MountConfigurer

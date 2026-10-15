@@ -362,6 +362,7 @@ Package kit — the ports the workflow engine reaches a store through.
 - [func NotFound\(message string\) \*Error](<#NotFound>)
 - [func NotReused\(n int\) PasswordConfigurer](<#NotReused>)
 - [func Now\(ctx context.Context\) time.Time](<#Now>)
+- [func Only\(envs ...string\) MountConfigurer](<#Only>)
 - [func Optional\(\) SecretConfigurer](<#Optional>)
 - [func OwnStores\(\) SubscriptionConfigurer](<#OwnStores>)
 - [func Parallelism\(n int\) DeliveryOption](<#Parallelism>)
@@ -2264,6 +2265,22 @@ func Now(ctx context.Context) time.Time
 
 Now returns the app's time: the system clock, or the clock a test gave with [Clock](#Clock). Product code that compares with a deadline reads it rather than time.Now, so that a test's manual clock reaches it.
 
+<a name="Only"></a>
+## func [Only](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mount.go>)
+
+```go
+func Only(envs ...string) MountConfigurer
+```
+
+Only makes a mount hold in the environments envs names alone — the name KIT\_ENV or [Env](#Env) gives, lower-cased, "production" when neither does:
+
+```
+app := kit.NewApp("vigie", identity.Service).
+	With(kit.Mount(debugbar.Module, kit.Only("dev", "staging")))
+```
+
+Elsewhere the mount is as if it had not been given, its [Prefix](#Prefix) and its [Bind](#Bind) with it; another mount of the module without Only still mounts it. Several Only on one mount add up. The start refuses an Only that names no environment, a name that cannot be one — lower-case letters, digits and dashes inside, 63 at most —, and a module a mounted module requires ([Requires](#Requires)) that its mount leaves out, rather than mounting it at its defaults behind the product's back.
+
 <a name="Optional"></a>
 ## func [Optional](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/secret.go>)
 
@@ -3660,7 +3677,7 @@ type ModuleConfigurer interface {
 <a name="MountConfigurer"></a>
 ## type [MountConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mount.go>)
 
-MountConfigurer configures the mount of a module: [Prefix](#Prefix), [Bind](#Bind).
+MountConfigurer configures the mount of a module: [Prefix](#Prefix), [Bind](#Bind), [Only](#Only).
 
 ```go
 type MountConfigurer interface {
