@@ -164,6 +164,13 @@ members. Rules, each pinned in `companions_internal_test.go`:
 - **Installed only.** A companion is replaced at its real path (symlinks
   resolved, as the binary is) when it exists beside the binary; one that does
   not is never created — installing it is the product's installer's job.
+- **One entry per real file.** `installedCompanions` keeps a set of resolved
+  paths seeded with the (already resolved) `execPath`. A companion that links
+  to the binary IS the binary and is skipped — it used to be renamed over it
+  with the companion's bytes; a name declared twice, or two names reaching one
+  file, used to put two entries in the set, and the second restore failed on
+  the `.prev` the first had consumed, reporting `rolled_back=false` for a set
+  that was back.
 - **All or none.** Every file is staged (temp in its own directory, closed,
   `chmod 0755`) before any rename; every installed file is then hard-linked to
   `<file>.prev`; the renames run binary first; a failed rename, or a failed
