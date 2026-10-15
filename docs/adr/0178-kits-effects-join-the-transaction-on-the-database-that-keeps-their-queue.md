@@ -1,6 +1,6 @@
 # ADR 0178 — kit's effects join the transaction on the database that keeps their queue
 
-- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4, and C6's assumption about the file engine's key order, refuted after acceptance by a measurement, with its remedy inserted as item 8, and C7's assumption about writing a dead letter into the SQL broker, refuted after acceptance by reading the brokers, with its remedy inserted as item 12, and the assumption C7's fingerprint of a version implies — a version written under its own number and instant —, refuted the same way, with its remedy inserted as item 13, and C7's assumption that the live messages of a file queue can be copied with their delivery counts, refuted the same way, with its remedy inserted as item 14. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key); the SDK's items 4 and 5 in #325 (`sql.Aborter`, `mailspool.Config.Broker` and `Config.Deferrer`); C1 and C2 for topics, queued commands and watches in #327 (item 6); C1 for the mailer in item 7 — the outbox on the database that keeps the mailer's service, sealed under data-key, its mail written in the transaction; the SDK's read of the keys alone, item 8, in #334 (`KeyLister`, `KeyListerContext`); C6, item 9 — `Records.Keys` and the watches' catch-up after a stop that was not clean —, its command `<product> watch replay <watch>` not built yet; the SDK's tombstone, item 10 of C7's order, in #329 (ADR 0143 amended on 2026-10-15: `Trash`, `Restore`, `Purge`, `Tombstones`), which C4 — kit's item 11 — builds on; the SDK's `DeadLetterWriter`, item 12, which `data copy` — item 15 — writes the dead letters with (ADR 0151 amended on 2026-10-15), its `VersionWriter`, item 13, which it writes the stores' versions and trash with (ADR 0143 amended on 2026-10-15), and its `MessageReader` and `MessageWriter`, item 14, which it reads and writes the live messages with (ADR 0151 amended again on 2026-10-15). The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
+- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4, and C6's assumption about the file engine's key order, refuted after acceptance by a measurement, with its remedy inserted as item 8, and C7's assumption about writing a dead letter into the SQL broker, refuted after acceptance by reading the brokers, with its remedy inserted as item 12, and the assumption C7's fingerprint of a version implies — a version written under its own number and instant —, refuted the same way, with its remedy inserted as item 13, and C7's assumption that the live messages of a file queue can be copied with their delivery counts, refuted the same way, with its remedy inserted as item 14. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key); the SDK's items 4 and 5 in #325 (`sql.Aborter`, `mailspool.Config.Broker` and `Config.Deferrer`); C1 and C2 for topics, queued commands and watches in #327 (item 6); C1 for the mailer in item 7 — the outbox on the database that keeps the mailer's service, sealed under data-key, its mail written in the transaction; the SDK's read of the keys alone, item 8, in #334 (`KeyLister`, `KeyListerContext`); C6, item 9 — `Records.Keys` and the watches' catch-up after a stop that was not clean —, its command `<product> watch replay <watch>` not built yet; the SDK's tombstone, item 10 of C7's order, in #329 (ADR 0143 amended on 2026-10-15: `Trash`, `Restore`, `Purge`, `Tombstones`), which C4 — kit's item 11 — builds on; C4 itself, the trash, in item 11 (`StoreService.Untrash` and `Trashed`, the setting `<store>-trash`, `CodeTrash` 0.4.2.78); the SDK's `DeadLetterWriter`, item 12, which `data copy` — item 15 — writes the dead letters with (ADR 0151 amended on 2026-10-15), its `VersionWriter`, item 13, which it writes the stores' versions and trash with (ADR 0143 amended on 2026-10-15), and its `MessageReader` and `MessageWriter`, item 14, which it reads and writes the live messages with (ADR 0151 amended again on 2026-10-15). The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
 - **Date**: 2026-10-14
 - **Accepted**: 2026-10-14
 - **Deciders**: SDK maintainers (issue #274); arbitrated by the owner
@@ -356,12 +356,60 @@ pruning needs a sweep or an agenda per store.
 revisions.** A store that asked for history is the one whose owner expects
 to undo; 30 days is WordPress's trash, the model `Revisions` already
 follows, and the privacy bypass keeps retention and erasure exactly as
-strict as today. **(assumed: WordPress's `EMPTY_TRASH_DAYS` default is 30;
-to be cited from its documentation in the PR.)**
+strict as today. **(verified in item 11: WordPress's documentation of
+`wp-config.php`, "Empty Trash" — `EMPTY_TRASH_DAYS` "controls the number of
+days before WordPress permanently deletes posts, pages, attachments, and
+comments"; "The default is 30 days".)**
 
 **Decision.** A — a 30-day trash, `<store>-trash`, for stores with
 `Revisions(n)` only, privacy's deletions bypassing it — by the owner's
 decision, 2026-10-14.
+
+**Implemented (item 11).** What the product sees:
+
+- `Store.Delete` on a store with `Revisions(n)` moves the record to the
+  SDK's trash (`docstore.Trashable` / `TrashableContext`); on any other
+  store, or with `<store>-trash` at `0`, it deletes at once, as before.
+- `StoreService.Untrash(ctx, key) (T, error)` brings it back as it was —
+  versions kept, no version made; `NotFound` when nothing is trashed under
+  the key, `Conflict` when another record took one of its unique keys
+  (the SDK frees them), `Invalid` on a store without revisions. The name is
+  WordPress's (`wp_untrash_post`): `Restore` already writes a version back.
+  `StoreService.Trashed(ctx) ([]TombstoneEvent, error)` — `kit.Tombstone`:
+  `Key`, `At`, `PurgeAt` — lists the trash in key order.
+- The length is a setting kit declares with the store's revisions,
+  `<store>-trash` (the store's name lower-cased, `_` and `.` as dashes; a
+  duration, 30 days by default; negative refused at start; a name no setting
+  may take refused at start). No code option: the length is the operator's.
+- **No sweep.** What is past due is purged when the app starts, the rest at
+  its own instant on the app's injected clock: an agenda per store, filled
+  from `Tombstones` at start and from each deletion, a loop of kind
+  `retention` named `<store> trash` that sleeps on the earliest instant —
+  the retention loop's shape (ADR 0006 §5). A record another process
+  trashed joins the agenda at the next start; one written again or restored
+  meanwhile passes its instant doing nothing.
+- **Privacy.** A retention's deletion, `Records.Delete`,
+  `DeleteOnErasure` and an erasure call the engine's `Delete`, never `Trash`.
+  `kit.Erase` first purges from the trash every record whose subject is
+  being erased — opened to read it — and reports each in the store's
+  `Deleted`, journaled as a deletion with the erasure's reason; then the
+  person's key goes, as before. A trashed record past its retention's
+  instant is purged then, before its 30 days (`PurgeAt` says which).
+  While a record is in the trash its person's data key stays — a
+  restoration must open it (`versionsSealUnder` reads the trash) —, and its
+  own key too; the purge destroys both once nothing else needs them,
+  journaled as `shred`. The product's deletion and the purge are not
+  journaled, as a product's deletion never was.
+- **A unique key** is freed by the SDK at the trash: another record may take
+  it, and `Untrash` then answers `Conflict`, the record staying in the trash.
+- In a transaction on the data directory or in memory, a rollback of a
+  trash restores the record with its versions — where a rolled-back
+  deletion used to bring it back without them —, a rollback of an untrash
+  trashes it again; on a database the transaction does both.
+- A store that also keeps former values (`history=N`, a password policy)
+  keeps them while the record is in the trash, and drops them at the purge.
+- `CodeTrash` (0.4.2.78, `TRASH`): the trash could not be read or emptied;
+  the record stays in it and the loop tries again after a backoff.
 
 ### C5 — a `subject` in a list
 
@@ -705,9 +753,9 @@ not follow that person's erasure) and sealing hooks in the spool's `Config`
 
 Verified by reading the code at `55c542da`: every **(verified)** line of the
 Context, with its file and line. Not proved, and owned by the PR that needs
-it: three **(assumed)** lines — the data directory always present with a
-database, WordPress's 30 days, and a dead letter written as dead by `data
-copy`, the last of which was **refuted** after acceptance (C7): no broker
+it: two **(assumed)** lines — the data directory always present with a
+database, and a dead letter written as dead by `data copy` (WordPress's 30
+days was verified in item 11, C4), the last of which was **refuted** after acceptance (C7): no broker
 could write a dead letter, and the remedy is the SDK's `DeadLetterWriter`
 (C7, item 12). A fourth, the file engine's key order, was **refuted** after
 acceptance by a measurement (C6): no exported read of either engine listed
@@ -744,8 +792,16 @@ refused. The pull requests still to come change:
 - **Start refusals** (PR 6): a MySQL older than 8.0.1, a MariaDB older than
   10.6, a SQLite `<name>-timeout` under 500 ms, and a SQLite URL whose busy
   timeout reaches `<name>-timeout` no longer start.
-- **Deletion** (PR 11): on a store with `Revisions(n)`, a product's deletion
-  keeps the record restorable 30 days unless `<store>-trash` is 0.
+- **Deletion** (PR 11, implemented): on a store with `Revisions(n)`, a
+  product's deletion keeps the record restorable 30 days unless
+  `<store>-trash` is 0. Its versions stay readable through `Revisions`
+  meanwhile; a record inserted again under its key continues their
+  numbering instead of starting at 1; its person's data key is destroyed at
+  the purge, not at the deletion; the app declares one more setting per
+  such store, `<store>-trash`, so a product setting of that name, or two
+  services' stores with revisions and the same name, now refuse the start
+  (`setting.twice`); and the running app has one more component, `trash`,
+  and one more loop per such store.
 - C3 and C5 break nothing: entries sealed under their own keys keep
   opening, and C5 only accepts types that were refused.
 
@@ -761,6 +817,7 @@ refused. The pull requests still to come change:
 | Amended | 2026-10-15 | C7's fingerprint of a version took for granted that a copy can write a version under its own number and instant, and a trashed document at its own instant; refuted by reading both engines on `8af43a95` (a write numbers after the current version and stamps with the clock, `RewriteVersions` keeps numbers and instants, `Trash` stamps with the clock, a version 1 at an unknown instant cannot be made): the remedy, the owner's choice, the SDK's `VersionWriter.PutDocument` and `VersionWriterContext.PutDocument` in both engines, with `VERSIONS_INVALID` `0.3.80.22` (ADR 0143 amended), inserted as item 13 of C7's order; `data copy` is item 14 |
 | Amended | 2026-10-15 | C7's digest of a queue took for granted that a copy can read a live message without changing its count and write it with that count; refuted by reading the brokers on `660c9615` (`Receive` leases and counts, and reads no leased message; `Publish` counts none and stamps its own instant; `DeadLetterWriter` writes only the dead): the remedy, the owner's choice, the SDK's `MessageReader.Messages` and `MessageWriter.PutMessage` in the three brokers, with `INVALID_MESSAGE` `0.2.23.9` (ADR 0151 amended again), inserted as item 14 of C7's order; `data copy` is item 15 |
 | Accepted, item 9 | 2026-10-15 | C6 implemented (C7 item 9), on the SDK's `KeyLister` (item 8, #334): `Records.Keys` offered to a module one of whose watches the store feeds — any other caller refused, `Forbidden`, `CodeRecordsKeys` (0.4.2.77) —, one `list` entry in the journal per listing; a watch's running mark in the data directory, and a start that finds it queues a notice for every key of every store that feeds the watch; the command `<product> watch replay <watch>` not built yet |
+| Accepted, item 11 | 2026-10-15 | C4 implemented: the trash of a store with `Revisions(n)` — `Store.Delete` trashes, `Untrash` and `Trashed` (`kit.Tombstone`), the setting `<store>-trash` (30 days, 0 off), purged at start and at each record's instant on the app's clock, privacy's deletions and erasures bypassing it, an erasure purging the person's trashed records, `CodeTrash` 0.4.2.78; WordPress's 30 days cited; the Status line says so |
 
 ## Alternatives considered
 
@@ -783,6 +840,10 @@ preferred. Two more were set aside before the choices:
 - **`Records.Changed(since)`** (C6 option C), an exact catch-up, which needs
   a store-wide change sequence in both engines.
 - **An age limit on versions** (C4), deferred again as ADR 0143 deferred it.
+- **The trash in an export and in the Studio** (C4): `kit.Export` reads a
+  person's records through the subject index, which a trashed record has
+  left, so it does not carry their trashed records yet; the Studio shows no
+  trash. Both read `Trashed` and `trashedValue` when they come.
 - **A retention for the journal**, which C3's monthly key makes one
   destruction per month once the owner sets its length.
 - **Cross-process deduplication of a queued command's key**: the `pending`

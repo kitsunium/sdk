@@ -90,6 +90,7 @@ var (
 	_ marking         = (*StoreService[struct{}])(nil)
 	_ privacyStore    = (*StoreService[struct{}])(nil)
 	_ retentionRunner = (*StoreService[struct{}])(nil)
+	_ trashRunner     = (*StoreService[struct{}])(nil)
 	_ starter         = (*StoreService[struct{}])(nil)
 	_ typeSource      = (*StoreService[struct{}])(nil)
 	_ feeder          = (*StoreService[struct{}])(nil)
@@ -118,6 +119,12 @@ var (
 	_ versionKeeper = (*historied[struct{}])(nil)
 	_ versionKeeper = (*sealedEngine[struct{}])(nil)
 	_ versionKeeper = (*sqlEngine[struct{}])(nil)
+
+	// The engines that keep a trash, and those that hand it on (trash.go).
+	_ trasher = (*docEngine[struct{}])(nil)
+	_ trasher = (*historied[struct{}])(nil)
+	_ trasher = (*sealedEngine[struct{}])(nil)
+	_ trasher = (*sqlEngine[struct{}])(nil)
 
 	_ sealingSource = (*TopicService[struct{}])(nil)
 	_ topicWaker    = (*TopicService[struct{}])(nil)

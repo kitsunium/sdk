@@ -240,6 +240,8 @@
   "static.unservable": "frontend \"{name}\" cannot be served: {detail}",
   "store.nil-key": "store \"{name}\" has a nil key function",
   "store.revisions": "store \"{store}\": kit.Revisions({n}) keeps from 1 to {max} former versions of each record",
+  "store.trash-name": "store \"{store}\": its trash setting \"{setting}\" is not a setting's name: 1 to {max} lower-case letters, digits and dashes",
+  "store.trash-negative": "it must be a duration of zero or more: 0 turns the trash off",
   "store.unconfirmed": "a write to {store} stands, but the data directory did not confirm it: it may not survive a power loss",
   "subscription.limits": "subscription \"{name}\" needs MaxDeliveries ≥ 1 and Parallelism ≥ 1",
   "subscription.nil-handler": "subscription \"{name}\" has a nil handler",
