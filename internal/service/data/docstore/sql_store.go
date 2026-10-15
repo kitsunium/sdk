@@ -4,6 +4,7 @@ import (
 	"context"
 	stdsql "database/sql"
 	"errors"
+	"iter"
 
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
@@ -15,6 +16,11 @@ import (
 // rowsHint is the capacity a read starts its answer with: a guess, grown by
 // append past it, and small enough that an empty answer costs little.
 const rowsHint int = 16
+
+// keysPageLen is how many keys one statement of Keys reads: enough that a
+// listing of a large table is few round trips, few enough that a page is a
+// few kilobytes of keys and never holds the table's rows long.
+const keysPageLen int = 256
 
 // rowSet is what finishing a read needs of *sql.Rows: the failure that ended
 // the iteration early, and the close.
@@ -208,6 +214,56 @@ func (s *SQLStore[T]) Entries(ctx context.Context, limit int) (entries []coredoc
 	}
 	//: the finisher reports a failure that ended the rows early.
 	return entries, nil
+}
+
+// Keys yields the key of every document the store holds that sorts after
+// after — every key when after is empty — in key order, byte order, and
+// no document. It reads them in pages of a few hundred, each page one
+// statement on the primary key that resumes after the last key yielded,
+// on the transaction ctx carries, else on the pool: a document written
+// during the range after the last key read is seen, one written before
+// it is not. A failed statement is yielded once, as StatementFailed,
+// and ends the listing.
+func (s *SQLStore[T]) Keys(ctx context.Context, after string) iter.Seq2[string, error] {
+	//: nothing is read until the range starts.
+	return func(yield func(string, error) bool) {
+		//: one page after another, each resuming after the last key read.
+		for {
+			page, err := s.keysPage(ctx, after)
+			//: a stop, a failed page or a short one ends the listing.
+			if !yieldKeys(yield, page, err) || len(page) < keysPageLen {
+				//: nothing more.
+				return
+			}
+			after = page[len(page)-1]
+		}
+	}
+}
+
+// keysPage reads at most keysPageLen keys above after, in key order.
+func (s *SQLStore[T]) keysPage(ctx context.Context, after string) (keys []string, err error) {
+	ex, _ := s.tx.join.Join(ctx)
+	rows, err := ex.QueryContext(ctx, s.stmts.keysAfter, []byte(after), int64(keysPageLen))
+	//: the read did not start.
+	if err != nil {
+		//: StatementFailed.
+		return nil, s.failed("list the keys", err)
+	}
+	//: rows are this call's, so this call closes them.
+	defer func() { err = s.finishRows(rows, "list the keys", err) }()
+	keys = make([]string, 0, keysPageLen)
+	//: one key per row, in key order.
+	for rows.Next() {
+		var key string
+		//: a row the driver cannot hand over fails the read.
+		if scanErr := rows.Scan(&key); scanErr != nil {
+			//: StatementFailed.
+			return nil, s.failed("list the keys", scanErr)
+		}
+		keys = append(keys, key)
+	}
+	//: the finisher reports a failure that ended the rows early.
+	return keys, nil
 }
 
 // Count returns how many documents the store holds.

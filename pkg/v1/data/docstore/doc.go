@@ -122,13 +122,14 @@
 // # The ports, for a double
 //
 // [Store] and [SQLStore] are engines. A caller that must stand a double in for
-// one depends instead on the port it implements: [Collection], [Versioned] and
-// [Trashable] for a [Store], whose calls take no context, [CollectionContext],
-// [VersionedContext] and [TrashableContext] for a [SQLStore], whose every call
-// takes one, and [Announcer] — OnWrite and OnDelete — for either. Each pair
-// carries the same methods, the same documents and the same refusals; there is
-// no single port over both, because the file engine waits on nothing a context
-// could abandon while the SQL engine waits on a database (ADR 0160).
+// one depends instead on the port it implements: [Collection], [Versioned],
+// [Trashable] and [KeyLister] for a [Store], whose calls take no context,
+// [CollectionContext], [VersionedContext], [TrashableContext] and
+// [KeyListerContext] for a [SQLStore], whose every call takes one, and
+// [Announcer] — OnWrite and OnDelete — for either. Each pair carries the same
+// methods, the same documents and the same refusals; there is no single port
+// over both, because the file engine waits on nothing a context could abandon
+// while the SQL engine waits on a database (ADR 0160).
 //
 // # Versions
 //
@@ -183,4 +184,23 @@
 // once, which is what an erasure needs, and finds no trashed document. How
 // long a document stays in the trash is the caller's to decide; the store
 // empties nothing by itself.
+//
+// # Keys
+//
+// Keys lists the keys of the documents a store holds, in key order, and
+// reads no document — for a caller that must visit every record, a re-scan
+// after a crash, without paying for what the records weigh (ADR 0178):
+//
+//	for key, err := range pages.Keys("") {
+//		if err != nil {
+//			return err
+//		}
+//		…
+//	}
+//
+// [Store] sorts the keys it holds once, when the range starts; [SQLStore]
+// reads them in pages on the primary key, each resuming after the last key
+// read. Both resume after the key a caller names, so a listing stopped early
+// continues where it stopped. A document in the trash is not listed: Keys
+// lists what Get finds.
 package docstore
