@@ -2,6 +2,26 @@ package queue
 
 import "time"
 
+// LiveMessageValue is one message a broker holds alive, as it records it:
+// what [MessageReader.Messages] lists and [MessageWriter.PutMessage]
+// writes.
+type LiveMessageValue struct {
+	// VisibleAt is when the message may next be delivered: its visibility
+	// for a waiting one — now, or later after a retry delay —, the deadline
+	// of its lease for a leased one. An instant already past means
+	// receivable now.
+	VisibleAt time.Time
+	// Message is the work, with the identifier it was published under.
+	Message MessageValue
+	// Deliveries is how many times the message has been delivered: 0 for
+	// one never leased, the count a retry or a lapsed lease left.
+	Deliveries int
+	// Leased reports that a consumer holds the message's lease. Such a
+	// message is still alive: it comes back at VisibleAt unless it is
+	// acknowledged.
+	Leased bool
+}
+
 // MessageValue is one unit of work as the broker minted it. Every field is
 // assigned by [Broker.Publish]; a caller never fills one in, which is why
 // Publish takes a payload rather than one of these.

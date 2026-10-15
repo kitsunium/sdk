@@ -64,6 +64,15 @@ packages:
         type: errs.Code
       - const:
           - doc: |-
+              CodeInvalidMessage identifies a live message a broker refuses to write:
+              one naming an identifier, marked leased, with a delivery count below zero
+              or above what a durable broker records, or an instant a durable broker
+              cannot record (ADR 0178).
+            name: CodeInvalidMessage
+            value: "0x00_02_17_09"
+        type: errs.Code
+      - const:
+          - doc: |-
               CodeQueueBackendFailed identifies an operation a durable broker depends on
               that its storage refused: a filesystem call the operating system refused,
               or a statement the SQL broker's database did not complete.
@@ -157,7 +166,8 @@ packages:
 
       Package queue — the three ADR 0039 siblings that act on the dead-letter
       store: sending a message there at once, deciding what becomes of one there,
-      and writing one there as it lies.
+      and writing one there as it lies; and the two that read the live messages
+      and write one, as they lie, for a copy (ADR 0178).
 
       Package queue — declares the sentinel *errs.Error port outcomes, and the
       implementation outcomes of the brokers and the consumer engine in
@@ -521,6 +531,93 @@ packages:
               - type: error
         name: DeadLetterWriter
       - doc: |-
+          MessageReader lists the messages a broker holds alive — waiting, and leased
+          — without leasing one or changing what it records of any.
+
+          It exists for a copy: a queue moved from one broker to another (ADR 0178)
+          must carry each live message with what the broker records of it, and
+          [Broker.Receive] cannot read one without leasing it and counting a
+          delivery, nor read one another consumer leases. The dead ones are
+          [DeadLetterReader]'s. A sibling of [Broker] for the reason
+          [DeadLetterReader] is. The three brokers in internal/service/data/queue
+          implement it.
+
+          	if reader, ok := source.(queue.MessageReader); ok {
+          		live, err := reader.Messages(ctx, "", 100)
+          	}
+        methods:
+          - doc: |-
+              Messages returns up to max live messages whose identifier sorts after
+              after — from the first when after is empty —, in the byte order of
+              their identifiers, each with its payload, its enqueue instant, its
+              delivery count, whether a consumer leases it and when it may next be
+              delivered. It leases nothing, counts no delivery and reclaims no lapsed
+              lease: what it reads is what the broker records, and the last
+              identifier it returns is where a later call resumes. A message
+              published, acknowledged or dead-lettered meanwhile may be listed or
+              not.
+
+              max must be positive ([InvalidBatchSize]).
+            in:
+              - name: ctx
+                type: context.Context
+              - name: after
+                type: string
+              - name: max
+                type: int
+            name: Messages
+            out:
+              - type: "[]LiveMessageValue"
+              - type: error
+        name: MessageReader
+      - doc: |-
+          MessageWriter writes a live message into a queue as it is given, without
+          the message ever being published there.
+
+          It is [DeadLetterWriter]'s sibling for a message that has not died, and
+          exists for the same copy: [Broker.Publish] counts no delivery and stamps
+          its own enqueue instant, so a message a copy moves would come back as if
+          it had never been tried. A sibling of [Broker] for the reason
+          [DeadLetterReader] is. The three brokers in internal/service/data/queue
+          implement it.
+
+          	if writer, ok := target.(queue.MessageWriter); ok {
+          		live.Message.ID, live.Leased = "", false // the target mints its own; a lease stays the source's
+          		id, err := writer.PutMessage(ctx, live)
+          	}
+        methods:
+          - doc: |-
+              PutMessage writes live into the queue as a waiting message and returns
+              the identifier the broker minted for it. Everything else is kept as
+              given: the payload, the enqueue instant, the delivery count — 0
+              included — and the instant it becomes visible, before which it is
+              never delivered. What [MessageReader.Messages] then returns of it
+              equals live but for the identifier, and its next delivery counts one
+              more than live.Deliveries.
+
+              live.Message.ID must be empty: the identifier is the broker's to mint,
+              as [Broker.Publish] mints it. live.Leased must be false: a lease is
+              the broker's that granted it, and a written message is waiting. live is
+              refused with [InvalidMessage] — the "field" field naming which — for
+              either, for a delivery count below 0 or above 2147483647, and for an
+              instant outside what a durable broker records (1970 to 2262); a
+              payload above [PolicyValue.MaxMessageBytes] is [MessageTooLarge]. A
+              refused message writes nothing.
+
+              A broker that joins the transaction ctx carries (ADR 0151) writes it in
+              that transaction, so it exists if and only if the transaction commits,
+              and wakes its consumers after the commit, as a publication does.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: live
+                type: LiveMessageValue
+            name: PutMessage
+            out:
+              - type: string
+              - type: error
+        name: MessageWriter
+      - doc: |-
           Broker is one named queue: producers publish into it, consumers lease from
           it, and it — not the consumer — owns the delivery count and the decision to
           dead-letter. Implementations MUST be safe for concurrent use by multiple
@@ -534,7 +631,8 @@ packages:
           implementation at compile time with no deprecation window (ADR 0039). A new
           capability arrives as a sibling interface reached by type assertion —
           [DeadLetterReader], [LeaseExtender], [Waker], [Rejecter],
-          [DeadLetterManager] and [DeadLetterWriter] are the ones that ship.
+          [DeadLetterManager], [DeadLetterWriter], [MessageReader] and
+          [MessageWriter] are the ones that ship.
 
           # Why the BROKER owns the delivery count
 
@@ -810,6 +908,22 @@ packages:
             private: "core/data/queue: a dead letter to write carries a value no broker keeps as given; the field names which, never the payload"
             public: The dead letter cannot be written as it was given
             reason: INVALID_DEAD_LETTER
+          - code: CodeInvalidMessage
+            doc: |-
+              InvalidMessage refuses a live message [MessageWriter.PutMessage] cannot
+              write as it was given: an identifier set by the caller, which the broker
+              mints; a message marked leased, whose lease is another broker's; a
+              delivery count below zero or above what a durable broker records; an
+              enqueue or visibility instant outside 1970 to 2262. The "field" field
+              names which value. Nothing was written.
+
+              It refuses rather than corrects, as [InvalidDeadLetter] does.
+            name: InvalidMessage
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/data/queue: a live message to write carries a value no broker keeps as given; the field names which, never the payload"
+            public: The message cannot be written as it was given
+            reason: INVALID_MESSAGE
           - code: CodeQueueBackendFailed
             doc: |-
               QueueBackendFailed reports a refusal from a durable broker's storage:
@@ -960,6 +1074,34 @@ packages:
                 the message had for one a handler rejected ([Rejecter]).
               name: Deliveries
               type: int
+      - doc: |-
+          LiveMessageValue is one message a broker holds alive, as it records it:
+          what [MessageReader.Messages] lists and [MessageWriter.PutMessage]
+          writes.
+        name: LiveMessageValue
+        struct:
+          fields:
+            - doc: |-
+                VisibleAt is when the message may next be delivered: its visibility
+                for a waiting one — now, or later after a retry delay —, the deadline
+                of its lease for a leased one. An instant already past means
+                receivable now.
+              name: VisibleAt
+              type: time.Time
+            - doc: Message is the work, with the identifier it was published under.
+              name: Message
+              type: MessageValue
+            - doc: |-
+                Deliveries is how many times the message has been delivered: 0 for
+                one never leased, the count a retry or a lapsed lease left.
+              name: Deliveries
+              type: int
+            - doc: |-
+                Leased reports that a consumer holds the message's lease. Such a
+                message is still alive: it comes back at VisibleAt unless it is
+                acknowledged.
+              name: Leased
+              type: bool
       - doc: |-
           MessageValue is one unit of work as the broker minted it. Every field is
           assigned by [Broker.Publish]; a caller never fills one in, which is why
@@ -1371,7 +1513,7 @@ packages:
 
       Package queue — the durable broker's dead-letter decisions: putting a dead
       letter back into the queue, or deleting it — and writing one there as it
-      lies.
+      lies; and its live messages read and written as they lie, for a copy.
 
       Package queue — one entry in the in-memory broker's lease-deadline heap.
 
@@ -1449,7 +1591,8 @@ packages:
 
       Package queue — the SQL broker's dead letters: burying one a handler
       rejected, reading them back, the two decisions an operator takes, and
-      writing one as it lies.
+      writing one as it lies; and its live messages read and written as they
+      lie, for a copy.
 
       Package queue — the only place the SQL broker renders SQL. Every statement
       it sends is built here, once, at NewSQL, for its dialect and its table; the
@@ -1921,7 +2064,10 @@ packages:
       count, its instants, its reason, cause and code — under an identifier the
       target mints. It is what a copy of a queue from a directory into a database
       needs, and nothing else does; a value no store keeps as given is
-      [InvalidDeadLetter].
+      [InvalidDeadLetter]. The live messages move the same way: [MessageReader]
+      lists them — waiting and leased — without leasing one, and [MessageWriter]
+      writes one as another broker recorded it, its delivery count and its
+      instants kept; a value no broker keeps as given is [InvalidMessage].
 
       # A failure no retry can fix is dead-lettered at once
 
@@ -2120,6 +2266,14 @@ packages:
             type: errs.Code
             typed: true
             value: "0x00_02_17_08"
+      - const:
+          - doc: |-
+              CodeInvalidMessage is [InvalidMessage]'s code, for errs.HasCode.
+            name: CodeInvalidMessage
+            reexport: corequeue.CodeInvalidMessage
+            type: errs.Code
+            typed: true
+            value: "0x00_02_17_09"
       - alias:
           - doc: |-
               Broker is the public alias for the queue contract. It is FROZEN at four
@@ -2216,6 +2370,24 @@ packages:
             target: corequeue.DeadLetterWriter
       - alias:
           - doc: |-
+              MessageReader is the public alias for the capability of listing the live
+              messages — waiting and leased — without leasing one. Every broker here
+              implements it.
+            name: MessageReader
+            target: corequeue.MessageReader
+      - alias:
+          - doc: |-
+              MessageWriter is the public alias for the capability of writing a live
+              message as another broker recorded it — its count, its instants. Every
+              broker here implements it.
+            name: MessageWriter
+            target: corequeue.MessageWriter
+      - alias:
+          - doc: LiveMessage is the public alias for one live message as a broker records it.
+            name: LiveMessage
+            target: corequeue.LiveMessageValue
+      - alias:
+          - doc: |-
               SQLConfig is the public alias for [NewSQL]'s configuration: Transactor,
               Dialect and Table (required), Policy, and Clock.
             name: SQLConfig
@@ -2277,6 +2449,12 @@ packages:
               as it was given; the "field" field names which value.
             name: InvalidDeadLetter
             reexport: corequeue.InvalidDeadLetter
+            type: "*errs.Error"
+          - doc: |-
+              InvalidMessage refuses a live message [MessageWriter] cannot write as it
+              was given; the "field" field names which value.
+            name: InvalidMessage
+            reexport: corequeue.InvalidMessage
             type: "*errs.Error"
           - doc: |-
               SQLQueueMisconfigured refuses an SQLConfig no SQL broker could run: no
