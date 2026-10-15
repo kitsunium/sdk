@@ -4314,6 +4314,21 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeRecordsKeys",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "CodeRecordsKeys",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262733",
+      "code": {
+        "value": "0.4.2.77"
+      },
+      "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
+      "file": "framework/internal/kit/codes_gen.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeResealInPlace",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/internal/kit",
@@ -6709,7 +6724,7 @@
       "name": "RecordsService",
       "spelled": "struct{}",
       "canonical": "struct{}",
-      "doc": "RecordsService is one store's records without their type. Get returns a record\nwithout its secret members; EraseFields and Delete take a reason and are\nrefused on a held record. Each call is a span on the store's node and an\nentry in the privacy journal.\n",
+      "doc": "RecordsService is one store's records without their type. Get returns a record\nwithout its secret members; Keys lists the records' keys, to a module that\nwatches the store; EraseFields and Delete take a reason and are refused on a\nheld record. Each call is a span on the store's node and an entry in the\nprivacy journal.\n",
       "file": "framework/internal/kit/records.go",
       "layer": "framework"
     },
@@ -6746,6 +6761,18 @@
       "spelled": "func(ctx context.Context, key string) (json.RawMessage, error)",
       "canonical": "func(ctx context.Context, key string) (encoding/json.RawMessage, error)",
       "doc": "Get returns the record under key as JSON, its secret members left out.\n",
+      "file": "framework/internal/kit/records.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.RecordsService.Keys",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "Keys",
+      "recv": "RecordsService",
+      "spelled": "func(ctx context.Context) iter.Seq2[string, error]",
+      "canonical": "func(ctx context.Context) iter.Seq2[string, error]",
+      "doc": "Keys yields the key of every record the store holds, in key order, and\nnothing of a record: what a watch reads to catch up on the writes it\nmay have missed. It is offered only to a module one of whose watches\nthe store feeds — any other caller, code outside a module's node\nincluded, is refused with a [Forbidden] error ([CodeRecordsKeys]) —,\nand each listing is one entry in the privacy journal, however many\nkeys it yields. A record in the store's trash is not listed. A\nfailure is yielded once, with an empty key, and ends the listing.\n",
       "file": "framework/internal/kit/records.go",
       "layer": "framework"
     },
@@ -7279,7 +7306,7 @@
       "recv": "Service",
       "spelled": "func(name string, mark Mark, handler func(context.Context, WrittenEvent) error, opts ...SubscriptionConfigurer) *Watch",
       "canonical": "func(name string, mark github.com/kitsunium/sdk/framework/internal/kit.Mark, handler func(context.Context, github.com/kitsunium/sdk/framework/internal/kit.WrittenEvent) error, opts ...github.com/kitsunium/sdk/framework/internal/kit.SubscriptionConfigurer) *github.com/kitsunium/sdk/framework/internal/kit.Watch",
-      "doc": "Watch declares a watch of the service: handler is told of every write kit\nconfirms on a store whose entity holds a field that carries mark — the\nproduct's stores and the other modules', never those of the module the\nservice belongs to (for a service of the product's, never the product's\nown) unless [OwnStores] says so. The notice says which store, which\nrecord and whether it was deleted; the handler reads the record itself\n([RecordsOf]). Delivery is at least once and in no set order, retried and\ndead-lettered after [MaxDeliveries] attempts: handler must be idempotent,\nand it hears the writes it makes itself on another's store — with\nOwnStores, never a write its own handler makes.\n\n\tvar Content = Service.Watch(\"content\", kit.Moderated, Screen)\n\tvar Posts = Service.Watch(\"posts\", kit.Moderated, Stamp, kit.OwnStores())\n",
+      "doc": "Watch declares a watch of the service: handler is told of every write kit\nconfirms on a store whose entity holds a field that carries mark — the\nproduct's stores and the other modules', never those of the module the\nservice belongs to (for a service of the product's, never the product's\nown) unless [OwnStores] says so. The notice says which store, which\nrecord and whether it was deleted; the handler reads the record itself\n([RecordsOf]). Delivery is at least once and in no set order, retried and\ndead-lettered after [MaxDeliveries] attempts: handler must be idempotent,\nand it hears the writes it makes itself on another's store — with\nOwnStores, never a write its own handler makes. After a stop that was\nnot clean — the process died with the watch running —, its next start\nqueues a notice for every record of every store that feeds it, so that\nno write a crash took the notice of goes unheard; a deletion whose\nnotice was lost is not among them. The mark that says a watch runs is\nkept in the data directory: an app without one does not catch up (ADR\n0178 C6).\n\n\tvar Content = Service.Watch(\"content\", kit.Moderated, Screen)\n\tvar Posts = Service.Watch(\"posts\", kit.Moderated, Stamp, kit.OwnStores())\n",
       "file": "framework/internal/kit/watch.go",
       "layer": "framework"
     },
@@ -11096,6 +11123,22 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.CodeRecordsKeys",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "CodeRecordsKeys",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262733",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeRecordsKeys",
+      "code": {
+        "value": "0.4.2.77"
+      },
+      "doc": "CodeRecordsKeys refuses [Records].Keys to a caller none of whose module's\nwatches the store feeds: only a module that watches a store lists its\nkeys (ADR 0178 C6).\n",
+      "file": "framework/kit/errors.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/kit.CodeResealInPlace",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/kit",
@@ -12929,7 +12972,7 @@
       "spelled": "ikit.RecordsService",
       "canonical": "github.com/kitsunium/sdk/framework/internal/kit.RecordsService",
       "owner": "go:github.com/kitsunium/sdk/framework/internal/kit.RecordsService",
-      "doc": "Records is one store's records without their type. Get returns a record\nwithout its secret members; EraseFields and Delete take a reason and are\nrefused on a held record. Each call is a span on the store's node and an\nentry in the privacy journal.\n",
+      "doc": "Records is one store's records without their type. Get returns a record\nwithout its secret members; Keys lists the records' keys, to a module that\nwatches the store; EraseFields and Delete take a reason and are refused on a\nheld record. Each call is a span on the store's node and an entry in the\nprivacy journal.\n",
       "file": "framework/kit/records.go",
       "layer": "framework"
     },
@@ -15704,6 +15747,19 @@
       "canonical": "string",
       "value": "\"hold\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.JournalHold",
+      "doc": "The operations of the privacy journal.\n",
+      "file": "framework/model/privacy.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model.JournalList",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model",
+      "name": "JournalList",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"list\"",
+      "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.JournalList",
       "doc": "The operations of the privacy journal.\n",
       "file": "framework/model/privacy.go",
       "layer": "framework"
@@ -22088,6 +22144,18 @@
       "spelled": "untyped string",
       "canonical": "untyped string",
       "value": "\"hold\"",
+      "doc": "The operations of the privacy journal.\n",
+      "file": "framework/model/internal/core/privacy.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.JournalList",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model/internal/core",
+      "name": "JournalList",
+      "spelled": "untyped string",
+      "canonical": "untyped string",
+      "value": "\"list\"",
       "doc": "The operations of the privacy journal.\n",
       "file": "framework/model/internal/core/privacy.go",
       "layer": "framework"

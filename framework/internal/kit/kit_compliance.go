@@ -105,6 +105,11 @@ var (
 	_ entriesSource = (*docEngine[struct{}])(nil)
 	_ entriesSource = (*sqlEngine[struct{}])(nil)
 
+	_ keyser = (*docEngine[struct{}])(nil)
+	_ keyser = (*sqlEngine[struct{}])(nil)
+	_ keyser = (*sealedEngine[struct{}])(nil)
+	_ keyser = (*historied[struct{}])(nil)
+
 	_ databaseSource = (*historied[struct{}])(nil)
 	_ databaseSource = (*sealedEngine[struct{}])(nil)
 	_ databaseSource = (*sqlEngine[struct{}])(nil)

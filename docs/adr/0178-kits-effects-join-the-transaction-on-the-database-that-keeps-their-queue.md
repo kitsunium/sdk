@@ -1,6 +1,6 @@
 # ADR 0178 — kit's effects join the transaction on the database that keeps their queue
 
-- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4, and C6's assumption about the file engine's key order, refuted after acceptance by a measurement, with its remedy inserted as item 8. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key); the SDK's items 4 and 5 in #325 (`sql.Aborter`, `mailspool.Config.Broker` and `Config.Deferrer`); C1 and C2 for topics, queued commands and watches in #327 (item 6); C1 for the mailer in item 7 — the outbox on the database that keeps the mailer's service, sealed under data-key, its mail written in the transaction; the SDK's tombstone, item 10 of C7's order, in #329 (ADR 0143 amended on 2026-10-15: `Trash`, `Restore`, `Purge`, `Tombstones`), which C4 — kit's item 11 — builds on. The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
+- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4, and C6's assumption about the file engine's key order, refuted after acceptance by a measurement, with its remedy inserted as item 8. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key); the SDK's items 4 and 5 in #325 (`sql.Aborter`, `mailspool.Config.Broker` and `Config.Deferrer`); C1 and C2 for topics, queued commands and watches in #327 (item 6); C1 for the mailer in item 7 — the outbox on the database that keeps the mailer's service, sealed under data-key, its mail written in the transaction; the SDK's read of the keys alone, item 8, in #334 (`KeyLister`, `KeyListerContext`); C6, item 9 — `Records.Keys` and the watches' catch-up after a stop that was not clean —, its command `<product> watch replay <watch>` not built yet; the SDK's tombstone, item 10 of C7's order, in #329 (ADR 0143 amended on 2026-10-15: `Trash`, `Restore`, `Purge`, `Tombstones`), which C4 — kit's item 11 — builds on. The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
 - **Date**: 2026-10-14
 - **Accepted**: 2026-10-14
 - **Deciders**: SDK maintainers (issue #274); arbitrated by the owner
@@ -496,6 +496,23 @@ anyway.
 watching modules only, one journal entry per call, and the catch-up on an
 unclean stop — by the owner's decision, 2026-10-14.
 
+**Implemented** (item 9), on the SDK's `KeyLister` and `KeyListerContext`
+(item 8). `Records.Keys` asks the node its context runs inside: a caller
+whose module has no watch the store feeds — code inside no node included —
+is refused, `Forbidden`, with `CodeRecordsKeys` (0.4.2.77), and journals
+nothing; a listing journals one `list` entry (`model.JournalList`), however
+many keys it yields. On a database the keys are read in chunks of 256, each
+one call under `<name>-timeout`. The mark is a file of the data directory,
+`<data>/<service>/watches/<watch>.running`, written at the watch's start and
+removed when its consumer stopped; a start that finds it queues a notice for
+every key of every store that feeds the watch — every one, not only those
+whose notices could not join a transaction: a write outside a transaction is
+not atomic with its notice on any of them. A deletion whose notice was lost
+is not caught up (the keys say what is), a catch-up that fails keeps the
+mark for the next start, and an app without a data directory keeps no mark
+and does not catch up. The command `<product> watch replay <watch>` is not
+built yet.
+
 ### C7 — `data copy`, the pull requests, and their order
 
 `data copy --to <database>` copies a product's data directory into a
@@ -668,6 +685,7 @@ refused. The pull requests still to come change:
 | Accepted | the owner's decision, 2026-10-14 | The recommendation of each choice retained as written; a *Decision* line per choice. C5 implemented in the same pull request. Two facts #323 established written in: a read is journaled without a reason and files no key (the Context's growth claim corrected), and C3's month is the UTC month of the entry's instant on the app's injected clock. C1's assumption about the spool's deferred `EventQueued` refuted (a rolled-back `Send` keeps its registration open): the remedy, a cancellation signal in `core/data/sql` beside `Deferrer` (amends ADR 0139) reached through `mailspool.Config.Deferrer`, inserted as item 4 of C7's order; ways B and C set aside |
 | Accepted, item 7 | 2026-10-15 | C1 for the mailer implemented (C7 item 7): the outbox on the database that keeps the mailer's service, `kit_queue__<service>__<mailer>__outbox`, each mail sealed under data-key bound to the mailer by a broker in front of the SQL one; a mail sent in a transaction on that database written in it before the commit, the database's transaction manager handed to the spool as `Config.Deferrer`; the Status line names the items implemented so far |
 | Amended | 2026-10-15 | C6's assumption about the file engine's key order refuted by a measurement (every exported listing copied the documents, paging was quadratic, and the SQL engine exported no keyed page): the remedy, a read of the keys alone in both engines of docstore (`KeyLister`, `KeyListerContext`), inserted as item 8 of C7's order; the items after it renumbered |
+| Accepted, item 9 | 2026-10-15 | C6 implemented (C7 item 9), on the SDK's `KeyLister` (item 8, #334): `Records.Keys` offered to a module one of whose watches the store feeds — any other caller refused, `Forbidden`, `CodeRecordsKeys` (0.4.2.77) —, one `list` entry in the journal per listing; a watch's running mark in the data directory, and a start that finds it queues a notice for every key of every store that feeds the watch; the command `<product> watch replay <watch>` not built yet |
 
 ## Alternatives considered
 

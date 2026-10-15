@@ -202,6 +202,9 @@ packages:
             doc: Watches (ADR 0008).
             name: CodeWatchQueue
             value: "0x00_04_02_2F"
+          - comment: "0.4.2.77 — Records.Keys asked by a caller none of whose module's watches the store feeds: refused, Forbidden"
+            name: CodeRecordsKeys
+            value: "0x00_04_02_4D"
           - comment: "0.4.2.61 — kit's data keys cannot be reached: data-key, or kit's own store of data keys"
             doc: Sealing at rest (ADR 0006, step 3).
             name: CodeSealKey
@@ -3429,9 +3432,10 @@ packages:
         name: QueryConfigurer
       - doc: |-
           RecordsService is one store's records without their type. Get returns a record
-          without its secret members; EraseFields and Delete take a reason and are
-          refused on a held record. Each call is a span on the store's node and an
-          entry in the privacy journal.
+          without its secret members; Keys lists the records' keys, to a module that
+          watches the store; EraseFields and Delete take a reason and are refused on a
+          held record. Each call is a span on the store's node and an entry in the
+          privacy journal.
         methods:
           - doc: Get returns the record under key as JSON, its secret members left out.
             in:
@@ -3443,6 +3447,22 @@ packages:
             out:
               - type: json.RawMessage
               - type: error
+            recv: value
+          - doc: |-
+              Keys yields the key of every record the store holds, in key order, and
+              nothing of a record: what a watch reads to catch up on the writes it
+              may have missed. It is offered only to a module one of whose watches
+              the store feeds — any other caller, code outside a module's node
+              included, is refused with a [Forbidden] error ([CodeRecordsKeys]) —,
+              and each listing is one entry in the privacy journal, however many
+              keys it yields. A record in the store's trash is not listed. A
+              failure is yielded once, with an empty key, and ends the listing.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Keys
+            out:
+              - type: iter.Seq2[string, error]
             recv: value
           - doc: |-
               EraseFields clears the fields at paths — pointers as [FieldRefValue] gives
@@ -4086,7 +4106,13 @@ packages:
               ([RecordsOf]). Delivery is at least once and in no set order, retried and
               dead-lettered after [MaxDeliveries] attempts: handler must be idempotent,
               and it hears the writes it makes itself on another's store — with
-              OwnStores, never a write its own handler makes.
+              OwnStores, never a write its own handler makes. After a stop that was
+              not clean — the process died with the watch running —, its next start
+              queues a notice for every record of every store that feeds it, so that
+              no write a crash took the notice of goes unheard; a deletion whose
+              notice was lost is not among them. The mark that says a watch runs is
+              kept in the data directory: an app without one does not catch up (ADR
+              0178 C6).
 
               	var Content = Service.Watch("content", kit.Moderated, Screen)
               	var Posts = Service.Watch("posts", kit.Moderated, Stamp, kit.OwnStores())
@@ -5422,9 +5448,10 @@ packages:
         target: ikit.QueryConfigurer
       - doc: |-
           Records is one store's records without their type. Get returns a record
-          without its secret members; EraseFields and Delete take a reason and are
-          refused on a held record. Each call is a span on the store's node and an
-          entry in the privacy journal.
+          without its secret members; Keys lists the records' keys, to a module that
+          watches the store; EraseFields and Delete take a reason and are refused on a
+          held record. Each call is a span on the store's node and an entry in the
+          privacy journal.
         name: Records
         target: ikit.RecordsService
       - doc: |-
@@ -5916,6 +5943,13 @@ packages:
         name: CodeWatchQueue
         type: errs.Code
         value: "0x00_04_02_2F"
+      - doc: |-
+          CodeRecordsKeys refuses [Records].Keys to a caller none of whose module's
+          watches the store feeds: only a module that watches a store lists its
+          keys (ADR 0178 C6).
+        name: CodeRecordsKeys
+        type: errs.Code
+        value: "0x00_04_02_4D"
       - doc: Sealing at rest (ADR 0006, step 3).
         name: CodeSealKey
         type: errs.Code

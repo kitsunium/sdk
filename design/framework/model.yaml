@@ -1683,6 +1683,10 @@ packages:
         type: string
         value: "\"read\""
       - blockDoc: The operations of the privacy journal.
+        name: JournalList
+        type: string
+        value: "\"list\""
+      - blockDoc: The operations of the privacy journal.
         name: JournalErase
         type: string
         value: "\"erase\""
@@ -3326,6 +3330,9 @@ packages:
       - blockDoc: The operations of the privacy journal.
         name: JournalRead
         value: "\"read\""
+      - blockDoc: The operations of the privacy journal.
+        name: JournalList
+        value: "\"list\""
       - blockDoc: The operations of the privacy journal.
         name: JournalErase
         value: "\"erase\""

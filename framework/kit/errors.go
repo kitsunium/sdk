@@ -195,6 +195,11 @@ const (
 	// Watches (ADR 0008).
 	CodeWatchQueue errs.Code = ikit.CodeWatchQueue
 
+	// CodeRecordsKeys refuses [Records].Keys to a caller none of whose module's
+	// watches the store feeds: only a module that watches a store lists its
+	// keys (ADR 0178 C6).
+	CodeRecordsKeys errs.Code = ikit.CodeRecordsKeys
+
 	// Sealing at rest (ADR 0006, step 3).
 	CodeSealKey errs.Code = ikit.CodeSealKey
 

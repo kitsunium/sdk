@@ -2,6 +2,7 @@ package kit
 
 import (
 	"context"
+	"iter"
 	"slices"
 	"sync/atomic"
 
@@ -41,7 +42,9 @@ import (
 // outside any transaction, or in one on another database, the data
 // directory or memory, queues its notice once it stands, so a crash between
 // the two loses it, and so does a queue that refuses it — the write stands,
-// and kit says the notice was lost. A notice queued is kept as the queue
+// and kit says the notice was lost — until the watch's next start, which
+// catches up after a stop that was not clean (watch_catchup.go, ADR 0178 C6).
+// A notice queued is kept as the queue
 // keeps it: in its table on a database, on disk under a data directory, in
 // memory without one. A store no watch hears pays one atomic load per write,
 // and a product that mounts no watch nothing else.
@@ -92,7 +95,13 @@ var marks = []Mark{Personal, Special, Moderated}
 // ([RecordsOf]). Delivery is at least once and in no set order, retried and
 // dead-lettered after [MaxDeliveries] attempts: handler must be idempotent,
 // and it hears the writes it makes itself on another's store — with
-// OwnStores, never a write its own handler makes.
+// OwnStores, never a write its own handler makes. After a stop that was
+// not clean — the process died with the watch running —, its next start
+// queues a notice for every record of every store that feeds it, so that
+// no write a crash took the notice of goes unheard; a deletion whose
+// notice was lost is not among them. The mark that says a watch runs is
+// kept in the data directory: an app without one does not catch up (ADR
+// 0178 C6).
 //
 //	var Content = Service.Watch("content", kit.Moderated, Screen)
 //	var Posts = Service.Watch("posts", kit.Moderated, Stamp, kit.OwnStores())
@@ -143,6 +152,9 @@ type feeder interface {
 	// feed puts w among the watches the store's writes are told to, and
 	// returns what takes exactly it off.
 	feed(w *Watch) (unfeed func())
+	// keys are every key the store holds, in key order: what a watch's
+	// catch-up queues a notice for (watch_catchup.go).
+	keys(ctx context.Context) iter.Seq2[string, error]
 }
 
 // Mark is what a module looks for in the product's fields: kit.Personal,
