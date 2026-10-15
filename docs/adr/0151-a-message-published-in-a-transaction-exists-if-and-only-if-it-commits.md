@@ -2,6 +2,7 @@
 
 - **Status**: Accepted
 - **Amended**: 2026-10-15 — a sixth capability sibling, `DeadLetterWriter`, and `INVALID_DEAD_LETTER` `0.2.23.8` (see the dated section at the end), for ADR 0178's `data copy`
+- **Amended**: 2026-10-15 — a seventh and an eighth capability sibling, `MessageReader` and `MessageWriter`, and `INVALID_MESSAGE` `0.2.23.9` (see the second dated section at the end), for ADR 0178's `data copy`
 - **Date**: 2026-09-30
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) §Consequences — §D6: the driver's withheld text is one `Withheld` in `service/data/sql`, shared by the queue's and the document store's SQL engines, not a copy per package
@@ -473,6 +474,75 @@ rolled-back transaction, then a committed one.
 MySQL; `pkg/v1/data/queue` builds the three new names without an internal
 import. Kit's `data copy` (ADR 0178, C7 item 13), built on it next, is to
 run it on a real SQLite through `framework/connectors/sqlite`.
+
+## Amendment (2026-10-15): a seventh and an eighth sibling, `MessageReader` and `MessageWriter`, for a live message that moves
+
+**Why.** ADR 0178's `data copy` moves "the waiting and dead messages of each
+file queue" and fingerprints each message as `SHA-256(payload ‖ dead ‖
+deliveries ‖ reason ‖ code)`. The dead ones have `DeadLetterWriter` (above).
+The live ones had nothing, as the brokers stood on `660c9615`: no port read a
+live message without leasing it — `Receive` leases and counts a delivery, and
+reads nothing a consumer already leases —, and no port wrote one with its
+count — `Publish` counts none and stamps its own enqueue instant —, so a
+message retried before the copy would come back as if it had never been
+tried, and its fingerprint would refuse the copy. Reading the file broker's
+names, or writing the SQL broker's rows, from kit was set aside: it would tie
+kit to this package's private formats.
+
+**Decision.** `core/data/queue` gains two ADR 0039 siblings of `Broker`, one
+method each, frozen like the others, and the value they share, published by
+`pkg/v1/data/queue` as `MessageReader`, `MessageWriter` and `LiveMessage`.
+
+```go
+type LiveMessageValue struct {
+	VisibleAt  time.Time // a queued message's visibility, a leased one's lease deadline
+	Message    MessageValue
+	Deliveries int
+	Leased     bool
+}
+type MessageReader interface {
+	Messages(ctx context.Context, after string, max int) ([]LiveMessageValue, error)
+}
+type MessageWriter interface {
+	PutMessage(ctx context.Context, live LiveMessageValue) (string, error)
+}
+```
+
+- **Two ports, not one `PutMessage` for both states.** A dead letter's record
+  is a failure — its instant, reason, cause and code —, a live message's is a
+  visibility; one value carrying both would leave half its fields meaningless
+  in each state, and `PutDeadLetter` is already published. The reader is a
+  port of its own because `DeadLetterReader` lists the dead.
+- **`Messages`** lists the queued and the leased messages whose identifier
+  sorts after `after`, in byte order, up to `max` (`INVALID_BATCH_SIZE`
+  otherwise), and leases, counts and reclaims nothing. **memory** copies under
+  its read lock; **file** reads `ready/` and `inflight/`, whose names already
+  say each message's state, instant and count, then the payloads, renaming
+  nothing; **SQL** sends one unlocked read, on the transaction its context
+  carries.
+- **`PutMessage`** writes a queued message visible at `VisibleAt`, its count
+  and enqueue instant kept, under an identifier the target mints: never
+  delivered before that instant, and its next delivery counts one more.
+  `Message.ID` must be empty and `Leased` false — a lease is the broker's that
+  granted it —; `INVALID_MESSAGE` (`0.2.23.9`, `EX_DATAERR`), its `field` field
+  naming which, refuses those, a count below 0 or above 2³¹−1, and an instant
+  outside 1970–2262, identically on the three brokers, nothing written; a
+  payload above the bound is `MESSAGE_TOO_LARGE`. **memory** inserts the record
+  in its ready list; **file** publishes the `ready/` file a retry leaves,
+  atomically and durably; **SQL** sends one INSERT of a live row through D2's
+  `run` — a savepoint of the caller's transaction — and wakes the consumers
+  after the commit, as `Publish` does.
+
+**Verification.** `message_copy_external_test.go` over `everyBroker`: a queued,
+a retried and a leased message listed in identifier order with their counts,
+instants and lease, twice the same, and the next `Receive` still the first
+delivery of the queued one; paging resumes after an identifier;
+`INVALID_BATCH_SIZE` for a batch of 0; written messages read back as given,
+the one already due delivered at its count plus one, the others not before
+their instant; every refusal naming its field, nothing written; the SQL
+broker's in a rolled-back transaction, then a committed one waking its
+consumers. `sql_statements_external_test.go` pins the two statements;
+`pkg/v1/data/queue` builds the five new names without an internal import.
 
 ## References
 

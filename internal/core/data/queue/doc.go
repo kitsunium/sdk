@@ -7,7 +7,8 @@
 //
 // Package queue — the three ADR 0039 siblings that act on the dead-letter
 // store: sending a message there at once, deciding what becomes of one there,
-// and writing one there as it lies.
+// and writing one there as it lies; and the two that read the live messages
+// and write one, as they lie, for a copy (ADR 0178).
 //
 // Package queue — declares the sentinel *errs.Error port outcomes, and the
 // implementation outcomes of the brokers and the consumer engine in

@@ -13,14 +13,14 @@ and the consumer engine.
 | Kind | Names |
 |---|---|
 | Ports | `Broker` (frozen at four methods), `Handler` (func port) |
-| Values | `Message`, `Delivery`, `Lease`, `Receipt`, `Nack`, `Policy` (with `MaxRetryDelay`, ADR 0151), `DeadLetter` |
-| ADR 0039 siblings | `DeadLetterReader`, `LeaseExtender`, `Waker` (+ its value `Wake`), `Rejecter`, `DeadLetterManager`, `DeadLetterWriter` (ADR 0178) — reached by type assertion |
+| Values | `Message`, `LiveMessage` (ADR 0178), `Delivery`, `Lease`, `Receipt`, `Nack`, `Policy` (with `MaxRetryDelay`, ADR 0151), `DeadLetter` |
+| ADR 0039 siblings | `DeadLetterReader`, `LeaseExtender`, `Waker` (+ its value `Wake`), `Rejecter`, `DeadLetterManager`, `DeadLetterWriter`, `MessageReader`, `MessageWriter` (ADR 0178) — reached by type assertion |
 | Configs | `FileConfig`, `SQLConfig`, `MemoryConfig`, `ConsumerConfig` |
 | Constructors | `NewFile` (its broker also answers `io.Closer` by type assertion, releasing its two directory descriptors; the messages stay on disk), `NewSQL`, `NewMemory` |
 | Functions | `SQLMigration` (the SQL broker's one table, a `sql.Migration` the caller numbers), `DoNotRetry` (a failure no retry can fix) |
 | Engine | `Consume` |
-| Constants | `DefaultMaxMessageBytes`, `MaxDeadlineOffset`, `DefaultPollInterval`, `MaxSQLTableLen`, `CodeNotRetryable`, `CodeDeadLetterNotFound`, `CodeSQLQueueMisconfigured`, `CodeInvalidDeadLetter` |
-| Sentinels | `QueueMisconfigured`, `MessageTooLarge`, `UnknownReceipt`, `LeaseExpired`, `InvalidBatchSize`, `NotRetryable`, `DeadLetterNotFound`, `InvalidDeadLetter`, `QueueBackendFailed`, `QueueDirectoryUnusable`, `SQLQueueMisconfigured`, `ConsumerMisconfigured`, `HandlerPanicked` |
+| Constants | `DefaultMaxMessageBytes`, `MaxDeadlineOffset`, `DefaultPollInterval`, `MaxSQLTableLen`, `CodeNotRetryable`, `CodeDeadLetterNotFound`, `CodeSQLQueueMisconfigured`, `CodeInvalidDeadLetter`, `CodeInvalidMessage` |
+| Sentinels | `QueueMisconfigured`, `MessageTooLarge`, `UnknownReceipt`, `LeaseExpired`, `InvalidBatchSize`, `NotRetryable`, `DeadLetterNotFound`, `InvalidDeadLetter`, `InvalidMessage`, `QueueBackendFailed`, `QueueDirectoryUnusable`, `SQLQueueMisconfigured`, `ConsumerMisconfigured`, `HandlerPanicked` |
 
 ## Why this shape
 
@@ -57,7 +57,7 @@ and the consumer engine.
   test's own making, `SQLMigration`, `DoNotRetry`, both new siblings on the
   memory and file brokers — and ADR 0178's `DeadLetterWriter`,
   `InvalidDeadLetter` and `CodeInvalidDeadLetter` (`queue_external_test.go`,
-  `TestTheFacadeWritesADeadLetterAsItLies`). Issue #259 was a public API a downstream module
+  `TestTheFacadeWritesADeadLetterAsItLies`), and `MessageReader`, `MessageWriter`, `LiveMessage`, `InvalidMessage` and `CodeInvalidMessage` (`TestTheFacadeMovesALiveMessage`). Issue #259 was a public API a downstream module
   could not spell; this is the check that it can.
 
 ## Generated
@@ -82,7 +82,7 @@ and the consumer engine.
 
 - ADR 0054 — `docs/adr/0054-sdk-queue-domain.md`
 - ADR 0151 — the SQL broker, the growing retry delay, `DoNotRetry`, `Rejecter`, `DeadLetterManager`
-- ADR 0178 — `DeadLetterWriter`: a dead letter written as it lies, for kit's `data copy`
+- ADR 0178 — `DeadLetterWriter`, `MessageReader`, `MessageWriter`: a dead letter and a live message moved as they lie, for kit's `data copy`
 - ADR 0053 — `events`, the other column of the frontier table
 - ADR 0008 — README generation from Go doc comments
 - `internal/core/data/queue/CLAUDE.md` — the port and the five decisions

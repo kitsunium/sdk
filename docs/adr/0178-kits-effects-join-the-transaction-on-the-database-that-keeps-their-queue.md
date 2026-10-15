@@ -1,6 +1,6 @@
 # ADR 0178 — kit's effects join the transaction on the database that keeps their queue
 
-- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4, and C6's assumption about the file engine's key order, refuted after acceptance by a measurement, with its remedy inserted as item 8, and C7's assumption about writing a dead letter into the SQL broker, refuted after acceptance by reading the brokers, with its remedy inserted as item 12, and the assumption C7's fingerprint of a version implies — a version written under its own number and instant —, refuted the same way, with its remedy inserted as item 13. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key); the SDK's items 4 and 5 in #325 (`sql.Aborter`, `mailspool.Config.Broker` and `Config.Deferrer`); C1 and C2 for topics, queued commands and watches in #327 (item 6); C1 for the mailer in item 7 — the outbox on the database that keeps the mailer's service, sealed under data-key, its mail written in the transaction; the SDK's read of the keys alone, item 8, in #334 (`KeyLister`, `KeyListerContext`); C6, item 9 — `Records.Keys` and the watches' catch-up after a stop that was not clean —, its command `<product> watch replay <watch>` not built yet; the SDK's tombstone, item 10 of C7's order, in #329 (ADR 0143 amended on 2026-10-15: `Trash`, `Restore`, `Purge`, `Tombstones`), which C4 — kit's item 11 — builds on; the SDK's `DeadLetterWriter`, item 12, which `data copy` — item 14 — writes the dead letters with (ADR 0151 amended on 2026-10-15), and its `VersionWriter`, item 13, which it writes the stores' versions and trash with (ADR 0143 amended on 2026-10-15). The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
+- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4, and C6's assumption about the file engine's key order, refuted after acceptance by a measurement, with its remedy inserted as item 8, and C7's assumption about writing a dead letter into the SQL broker, refuted after acceptance by reading the brokers, with its remedy inserted as item 12, and the assumption C7's fingerprint of a version implies — a version written under its own number and instant —, refuted the same way, with its remedy inserted as item 13, and C7's assumption that the live messages of a file queue can be copied with their delivery counts, refuted the same way, with its remedy inserted as item 14. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key); the SDK's items 4 and 5 in #325 (`sql.Aborter`, `mailspool.Config.Broker` and `Config.Deferrer`); C1 and C2 for topics, queued commands and watches in #327 (item 6); C1 for the mailer in item 7 — the outbox on the database that keeps the mailer's service, sealed under data-key, its mail written in the transaction; the SDK's read of the keys alone, item 8, in #334 (`KeyLister`, `KeyListerContext`); C6, item 9 — `Records.Keys` and the watches' catch-up after a stop that was not clean —, its command `<product> watch replay <watch>` not built yet; the SDK's tombstone, item 10 of C7's order, in #329 (ADR 0143 amended on 2026-10-15: `Trash`, `Restore`, `Purge`, `Tombstones`), which C4 — kit's item 11 — builds on; the SDK's `DeadLetterWriter`, item 12, which `data copy` — item 15 — writes the dead letters with (ADR 0151 amended on 2026-10-15), its `VersionWriter`, item 13, which it writes the stores' versions and trash with (ADR 0143 amended on 2026-10-15), and its `MessageReader` and `MessageWriter`, item 14, which it reads and writes the live messages with (ADR 0151 amended again on 2026-10-15). The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
 - **Date**: 2026-10-14
 - **Accepted**: 2026-10-14
 - **Deciders**: SDK maintainers (issue #274); arbitrated by the owner
@@ -559,7 +559,21 @@ copy` reads source and target back through the engines and compares:
   message's identity cannot be compared; each message is
   `SHA-256(payload ‖ dead ‖ deliveries ‖ reason ‖ code)`, and the queue's
   digests are compared as a sorted multiset — the same messages, the same
-  number of times, in any order.
+  number of times, in any order. **(implied for the live messages, and
+  refuted as the SDK stood — checked after acceptance, on `660c9615`.)** The
+  digest takes for granted that a copy can read a waiting or leased message
+  without changing its count, and write it with that count. No port could:
+  `Receive` leases a message and counts a delivery, and reads none a consumer
+  already leases; `Publish` counts none and stamps its own enqueue instant;
+  `DeadLetterWriter` writes only the dead. Reading the file broker's names or
+  writing the SQL broker's rows from kit was set aside: it would tie kit to
+  the SDK's private formats. **The remedy (C7, item 14)**, the owner's
+  choice: two more siblings of `Broker` (ADR 0039) in the three brokers,
+  `MessageReader.Messages(ctx, after, max)` — the queued and leased messages
+  listed in identifier order, nothing leased or counted — and
+  `MessageWriter.PutMessage(ctx, live)` — a live message written with its
+  count and its instants, visible at its instant; `INVALID_MESSAGE`
+  (`0.2.23.9`); amending ADR 0151 again.
 
 *Cost*: one more full read of each side, streamed — constant memory for the
 stores, 32 bytes per message for the queues' sort (32 MB for a million
@@ -622,7 +636,11 @@ as given; amending ADR 0151.
     its versions and its trash as they are given, in both engines of docstore
     (design first; inserted after acceptance, C7's refuted assumption about
     the versions; amends ADR 0143).
-14. `data copy`, last, after 12 and 13.
+14. SDK — `MessageReader` and `MessageWriter`, the live messages of a queue
+    read and written as they lie, in the three brokers of `queue` (design
+    first; inserted after acceptance, C7's refuted assumption about the live
+    messages; amends ADR 0151).
+15. `data copy`, last, after 12, 13 and 14.
 
 **Decision.** A — small pull requests, in this order, `data copy` verified
 by fingerprints — by the owner's decision, 2026-10-14. Item 4 was inserted
@@ -634,7 +652,9 @@ same way, when C7's assumption about writing a dead letter into the SQL broker
 was refuted (C7); `data copy` became item 13. Item 13 was inserted the same
 way, when the assumption C7's fingerprint of a version implies — a version
 written under its own number and instant — was refuted (C7); `data copy`
-became item 14.
+became item 14. Item 14 was inserted the same way, when the assumption that
+the live messages can be copied with their counts was refuted (C7); `data
+copy` became item 15.
 
 **Sealing the mail outbox (item 7).** kit seals the spool's payload in a
 broker that wraps the one C1 gives the spool — the way `wrapQueue` already
@@ -698,8 +718,11 @@ holds its registration open for ever, and the remedy is a cancellation
 signal beside `Deferrer` (C7, item 4). A sixth, implied by C7's fingerprint
 of a version — that a copy can write a version under its own number and
 instant —, was **refuted** after acceptance: no write of either engine of
-docstore can, and the remedy is the SDK's `VersionWriter` (C7, item 13).
-Corrected by #323: a read is
+docstore can, and the remedy is the SDK's `VersionWriter` (C7, item 13). A
+seventh, implied by C7's digest of a queue — that a live message can be read
+and written with its count —, was **refuted** after acceptance: no port of
+any broker can, and the remedy is the SDK's `MessageReader` and
+`MessageWriter` (C7, item 14). Corrected by #323: a read is
 journaled without a reason and files no key (Context), and C3's month is
 the UTC month on the app's clock.
 
@@ -736,6 +759,7 @@ refused. The pull requests still to come change:
 | Amended | 2026-10-15 | C6's assumption about the file engine's key order refuted by a measurement (every exported listing copied the documents, paging was quadratic, and the SQL engine exported no keyed page): the remedy, a read of the keys alone in both engines of docstore (`KeyLister`, `KeyListerContext`), inserted as item 8 of C7's order; the items after it renumbered |
 | Amended | 2026-10-15 | C7's assumption that a dead letter can be written into the SQL broker as dead refuted by reading the brokers on `8af43a95` (`DeadLetterManager` only replays or deletes, `Publish`'s INSERT writes a live row, the dead state is reached only through a lease, and `errs.Define` refuses the code 0 of a death by expired leases): the remedy, the owner's choice, the SDK's `DeadLetterWriter.PutDeadLetter` in the three brokers with `INVALID_DEAD_LETTER` `0.2.23.8` (ADR 0151 amended), inserted as item 12 of C7's order; `data copy` is item 13 |
 | Amended | 2026-10-15 | C7's fingerprint of a version took for granted that a copy can write a version under its own number and instant, and a trashed document at its own instant; refuted by reading both engines on `8af43a95` (a write numbers after the current version and stamps with the clock, `RewriteVersions` keeps numbers and instants, `Trash` stamps with the clock, a version 1 at an unknown instant cannot be made): the remedy, the owner's choice, the SDK's `VersionWriter.PutDocument` and `VersionWriterContext.PutDocument` in both engines, with `VERSIONS_INVALID` `0.3.80.22` (ADR 0143 amended), inserted as item 13 of C7's order; `data copy` is item 14 |
+| Amended | 2026-10-15 | C7's digest of a queue took for granted that a copy can read a live message without changing its count and write it with that count; refuted by reading the brokers on `660c9615` (`Receive` leases and counts, and reads no leased message; `Publish` counts none and stamps its own instant; `DeadLetterWriter` writes only the dead): the remedy, the owner's choice, the SDK's `MessageReader.Messages` and `MessageWriter.PutMessage` in the three brokers, with `INVALID_MESSAGE` `0.2.23.9` (ADR 0151 amended again), inserted as item 14 of C7's order; `data copy` is item 15 |
 | Accepted, item 9 | 2026-10-15 | C6 implemented (C7 item 9), on the SDK's `KeyLister` (item 8, #334): `Records.Keys` offered to a module one of whose watches the store feeds — any other caller refused, `Forbidden`, `CodeRecordsKeys` (0.4.2.77) —, one `list` entry in the journal per listing; a watch's running mark in the data directory, and a start that finds it queues a notice for every key of every store that feeds the watch; the command `<product> watch replay <watch>` not built yet |
 
 ## Alternatives considered

@@ -26,7 +26,8 @@ const reasonLeaseExpired string = "LEASE_EXPIRED"
 // bug in this package.
 const reasonUnreported string = "UNREPORTED"
 
-// maxDeadDeliveries is the largest delivery count PutDeadLetter writes: the
+// maxDeadDeliveries is the largest delivery count PutDeadLetter and
+// PutMessage write: the
 // SQL broker's deliveries column is a 32-bit INT on MySQL, and a count the
 // table cannot hold is refused before a statement is sent, by every broker
 // alike.
@@ -163,6 +164,39 @@ func checkDeadLetter(dead corequeue.DeadLetterValue, maxBytes int) error {
 	}
 	//: MessageTooLarge, or nil: the bound Publish enforces.
 	return checkSize(len(dead.Message.Payload), maxBytes)
+}
+
+// checkLiveMessage refuses a live message no broker keeps as it is given
+// (core/data/queue.MessageWriter), so the three brokers refuse identical
+// inputs identically, then a payload the policy's bound refuses. What it
+// reports names a field, never a value.
+func checkLiveMessage(live corequeue.LiveMessageValue, maxBytes int) error {
+	field := ""
+	switch {
+	//: the identifier is the broker's to mint, as for a dead letter.
+	case live.Message.ID != "":
+		field = "Message.ID"
+	//: a lease is the broker's that granted it; a written message waits.
+	case live.Leased:
+		field = "Leased"
+	//: a count a durable broker cannot record would come back as another.
+	case live.Deliveries < 0 || live.Deliveries > maxDeadDeliveries:
+		field = "Deliveries"
+	//: an instant outside int64 Unix nanoseconds is one no name and no
+	//: column carries back.
+	case !nameable(live.Message.EnqueuedAt):
+		field = "Message.EnqueuedAt"
+	//: the same bound on when it becomes visible.
+	case !nameable(live.VisibleAt):
+		field = "VisibleAt"
+	}
+	//: one value no broker keeps as given.
+	if field != "" {
+		//: InvalidMessage, naming the field and never its value.
+		return kerrs.Wrap(corequeue.InvalidMessage, kerrs.WrapParams{}, kerrs.String("field", field))
+	}
+	//: MessageTooLarge, or nil: the bound Publish enforces.
+	return checkSize(len(live.Message.Payload), maxBytes)
 }
 
 // keptAsWritten reports whether value survives oneLine unchanged: no line

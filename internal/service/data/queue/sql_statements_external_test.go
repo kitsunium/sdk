@@ -61,6 +61,12 @@ func TestSQLTheStatementsAsSent(t *testing.T) {
 		{dialect: coresql.DialectPostgres, role: "deleteDead", text: `DELETE FROM "app__jobs" WHERE id = $1 AND dead = 1`},
 		{dialect: coresql.DialectPostgres, role: "putDead", text: `INSERT INTO "app__jobs" (id, dead, due, enqueued_at, deliveries, payload, reason, cause, code)` +
 			` VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8)`},
+		{dialect: coresql.DialectPostgres, role: "liveList", text: `SELECT id, enqueued_at, deliveries, due, lease, payload FROM "app__jobs"` +
+			` WHERE dead = 0 AND id > $1 ORDER BY id LIMIT $2`},
+		{dialect: coresql.DialectPostgres, role: "putLive", text: `INSERT INTO "app__jobs" (id, dead, due, enqueued_at, deliveries, payload)` +
+			` VALUES ($1, 0, $2, $3, $4, $5)`},
+		{dialect: coresql.DialectMySQL, role: "putLive", text: "INSERT INTO `app__jobs` (id, dead, due, enqueued_at, deliveries, payload)" +
+			" VALUES (?, 0, ?, ?, ?, ?)"},
 		{dialect: coresql.DialectMySQL, role: "putDead", text: "INSERT INTO `app__jobs` (id, dead, due, enqueued_at, deliveries, payload, reason, cause, code)" +
 			" VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?)"},
 		{dialect: coresql.DialectMySQL, role: "insert", text: "INSERT INTO `app__jobs` (id, dead, due, enqueued_at, deliveries, payload) VALUES (?, 0, ?, ?, 0, ?)"},
