@@ -228,6 +228,10 @@ packages:
           - comment: "0.4.2.69 — a version no longer decodes into the store's type: Revisions, Revision and Restore refuse it"
             name: CodeRevisionDecode
             value: "0x00_04_02_45"
+          - comment: "0.4.2.77 — a store's trash cannot be read or emptied: what the product deleted stays in it until a later purge"
+            doc: The trash (kitsunium/sdk ADR 0178 C4).
+            name: CodeTrash
+            value: "0x00_04_02_4D"
           - comment: "0.4.2.49 — a scheduled job's run was skipped: the previous one is still going"
             doc: |-
               The framework's own signals and refusals, typed since the move into the
@@ -3500,6 +3504,19 @@ packages:
           - constraint: any
             name: T
       - doc: |-
+          TombstoneEvent is one record in a store's trash: its key, when the product
+          deleted it, on the app's clock, and when kit purges it — its trash's
+          length after the deletion, or sooner when its retention says so.
+        name: TombstoneEvent
+        struct:
+          fields:
+            - name: Key
+              type: string
+            - name: At
+              type: time.Time
+            - name: PurgeAt
+              type: time.Time
+      - doc: |-
           Binary is one executable the product ships, made of process roles: a
           status line and its daemon are two roles of one binary, "statusline" and
           "statusline daemon". Each role is an App — its own services, its own
@@ -4386,6 +4403,35 @@ packages:
               - type: error
             recv: pointer
             variadic: true
+          - doc: |-
+              Untrash brings the record the product deleted under key back from the
+              store's trash, as it was when deleted — its versions kept, no version
+              made — and returns it. A key with no record in the trash — never deleted,
+              purged, or written again since — is a [NotFound]; a unique index another
+              record took a key of meanwhile refuses it with a [Conflict], and it stays
+              in the trash; a store without [Revisions] keeps no trash: an [Invalid].
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Untrash
+            out:
+              - type: T
+              - type: error
+            recv: pointer
+          - doc: |-
+              Trashed returns the records in the store's trash, in key order: each
+              one's key, when the product deleted it, and when kit purges it. A store
+              without [Revisions] keeps no trash: an [Invalid].
+            in:
+              - name: ctx
+                type: context.Context
+            name: Trashed
+            out:
+              - type: "[]TombstoneEvent"
+              - type: error
+            recv: pointer
           - doc: Get returns the entity with the given key, or a [NotFound] error.
             in:
               - name: ctx
@@ -4458,10 +4504,15 @@ packages:
             recv: pointer
           - doc: |-
               Delete removes the entity with the given key, or returns a [NotFound] error.
-              When the store seals at rest and the entity was its person's last record,
-              their data key goes with it, as with an erasure — at the commit, in a
-              [Transact] —, once nothing kit keeps still needs it: a held record, or a
-              former value or version sealed under it, keeps the key.
+              On a store with [Revisions] it moves the entity to the store's trash
+              instead, for <store>-trash — 30 days unless that setting says otherwise, 0
+              deleting at once —: gone from every read, its unique keys free, its
+              versions kept, [StoreService.Untrash] brings it back, and kit purges it
+              once its time is up. When the store seals at rest and the entity was its
+              person's last record, their data key goes with it, as with an erasure —
+              at the commit, in a [Transact] —, once nothing kit keeps still needs it: a
+              held record, a record in the trash, or a former value or version sealed
+              under it, keeps the key.
             in:
               - name: ctx
                 type: context.Context
@@ -5440,6 +5491,12 @@ packages:
           - constraint: any
             name: T
       - doc: |-
+          Tombstone is one record in a store's trash: its key, when the product
+          deleted it, on the app's clock, and when kit purges it — its trash's
+          length after the deletion, or sooner when its retention says so.
+        name: Tombstone
+        target: ikit.TombstoneEvent
+      - doc: |-
           Edit is one change between two versions of a record, in RFC 6902's words:
           Op is add, remove or replace, Path the RFC 6901 JSON pointer of the member
           it changes, From the value it had and To the value it has, as JSON. A
@@ -5948,6 +6005,12 @@ packages:
         name: CodeRevisionDecode
         type: errs.Code
         value: "0x00_04_02_45"
+      - doc: |-
+          CodeTrash is a store's trash that cannot be read or emptied: what the
+          product deleted stays in it until a later purge (ADR 0178 C4).
+        name: CodeTrash
+        type: errs.Code
+        value: "0x00_04_02_4D"
       - doc: |-
           The framework's own signals and refusals, typed since the move into the
           SDK (rule 2: no fmt.Errorf, no errors.New in production code).

@@ -3065,6 +3065,10 @@ codes:
     const: CodeDatabaseVersion
     hex: "0x00_04_02_4C"
     package: framework/internal/kit
+  - code: "0.4.2.77"
+    const: CodeTrash
+    hex: "0x00_04_02_4D"
+    package: framework/internal/kit
   - code: "0.4.3.1"
     const: CodeMisconfigured
     hex: "0x00_04_03_01"

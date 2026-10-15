@@ -219,6 +219,10 @@ const (
 	// CodeRevisionDecode is CodeRevisionDecode.
 	CodeRevisionDecode errs.Code = ikit.CodeRevisionDecode
 
+	// CodeTrash is a store's trash that cannot be read or emptied: what the
+	// product deleted stays in it until a later purge (ADR 0178 C4).
+	CodeTrash errs.Code = ikit.CodeTrash
+
 	// The framework's own signals and refusals, typed since the move into the
 	// SDK (rule 2: no fmt.Errorf, no errors.New in production code).
 	CodeJobOverlapped errs.Code = ikit.CodeJobOverlapped

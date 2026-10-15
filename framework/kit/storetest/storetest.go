@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/kit"
+	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -40,6 +41,11 @@ const (
 	waitFor time.Duration = 5 * time.Second
 	// pollEvery is how often eventually looks.
 	pollEvery time.Duration = 10 * time.Millisecond
+	// trashDays is how long a store with revisions keeps what is deleted,
+	// unless its setting says otherwise (ADR 0178 C4).
+	trashDays time.Duration = 30 * 24 * time.Hour
+	// rewrittenN is the N of a page written again after its purge.
+	rewrittenN int = 7
 )
 
 var (
@@ -51,20 +57,24 @@ var (
 	cases = []struct {
 		name string
 		run  func(t *testing.T, s *suite)
+		// clocked runs the case on a manual clock: what it checks waits
+		// on the app's clock, never on the wall clock.
+		clocked bool
 	}{
-		{"write-modes", writeModes},
-		{"one-insert-wins", oneInsertWins},
-		{"update-is-atomic", updateIsAtomic},
-		{"unique-names-its-index", uniqueNamesItsIndex},
-		{"find-in-key-order", findInKeyOrder},
-		{"keys-are-bytes", keysAreBytes},
-		{"document-as-written", documentAsWritten},
-		{"transactions", transactions},
-		{"held-publish", heldPublish},
-		{"hooks-after-the-commit", hooksAfterTheCommit},
-		{"revisions", revisions},
-		{"revisions-restore", revisionsRestore},
-		{"revisions-rollback", revisionsRollback},
+		{"trash", trash, true},
+		{"write-modes", writeModes, false},
+		{"one-insert-wins", oneInsertWins, false},
+		{"update-is-atomic", updateIsAtomic, false},
+		{"unique-names-its-index", uniqueNamesItsIndex, false},
+		{"find-in-key-order", findInKeyOrder, false},
+		{"keys-are-bytes", keysAreBytes, false},
+		{"document-as-written", documentAsWritten, false},
+		{"transactions", transactions, false},
+		{"held-publish", heldPublish, false},
+		{"hooks-after-the-commit", hooksAfterTheCommit, false},
+		{"revisions", revisions, false},
+		{"revisions-restore", revisionsRestore, false},
+		{"revisions-rollback", revisionsRollback, false},
 	}
 
 	// unorderedKeys are written out of order.
@@ -83,6 +93,9 @@ var (
 	transitionEdits = []string{"replace /n 3 4", "add /ready  true", "replace /state \"new\" \"done\""}
 	// refusedRestore are a page's versions after a refused restore.
 	refusedRestore = []string{"3:1", "2:2", "1:1"}
+
+	// epoch is where the suite's manual clock starts.
+	epoch = time.Date(2026, time.October, 1, 9, 0, 0, 0, time.UTC)
 )
 
 // BackendConfig is where Run runs kit's stores: a name for the subtests and
@@ -119,6 +132,9 @@ type suite struct {
 	// over them.
 	pages    *kit.Store[doc]
 	pageFlow *kit.Workflow[doc, string]
+	// clock is the app's, a manual one at epoch, for a case that waits on
+	// it; nil for the others, which run on the wall clock.
+	clock *clock.ManualClock
 }
 
 // heard are the messages a subscription was delivered.
@@ -147,13 +163,13 @@ func (h *heard) has(id string) bool {
 // Run runs every case of the suite on b.
 func Run(t *testing.T, b BackendConfig) {
 	for _, c := range cases {
-		t.Run(b.Name+"/"+c.name, func(t *testing.T) { c.run(t, open(t, b, c.name)) })
+		t.Run(b.Name+"/"+c.name, func(t *testing.T) { c.run(t, open(t, b, c.name, c.clocked)) })
 	}
 }
 
 // open declares the case's service — its store, a topic and its
 // subscription, a workflow — and runs it on b until the test ends.
-func open(t *testing.T, b BackendConfig, name string) *suite {
+func open(t *testing.T, b BackendConfig, name string, clocked bool) *suite {
 	t.Helper()
 	t.Setenv("KIT_SMTP_URL", "")
 	t.Setenv("KIT_SECRETS", "memory")
@@ -176,6 +192,10 @@ func open(t *testing.T, b BackendConfig, name string) *suite {
 	app := kit.NewApp(App, svc).With(append([]kit.AppOption{
 		kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvDev), kit.Analyze(false), kit.Logs(io.Discard),
 	}, b.Options(t, App)...)...)
+	if clocked {
+		s.clock = clock.NewManualClock(epoch)
+		app = app.With(kit.Clock(s.clock))
+	}
 	if err := app.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -640,5 +660,105 @@ func rolledTransition(t *testing.T, s *suite) {
 		if r.Value.State != "new" {
 			t.Errorf("version %d holds the state a rollback undid: %q", r.Number, r.Value.State)
 		}
+	}
+}
+
+// trash checks the trash of a store with revisions (ADR 0178 C4): a deletion
+// leaves every read and frees its unique keys, Untrash brings the record
+// back with its versions — refused while another record holds its unique
+// key —, and kit purges it 30 days after on the app's clock, not a second
+// before, after which the key starts again at version 1. A store without
+// revisions deletes at once and keeps no trash.
+func trash(t *testing.T, s *suite) {
+	trashDeletes(t, s)
+	trashUntrashes(t, s)
+	trashPurges(t, s)
+	trashNeedsRevisions(t, s)
+}
+
+// trashDeletes checks that a deletion leaves every read, into the trash.
+func trashDeletes(t *testing.T, s *suite) {
+	ctx := t.Context()
+	must(t, s.pages.Insert(ctx, doc{ID: "p", Email: "a@example.com", N: 1}))
+	_, err := s.pages.Update(ctx, "p", setN(2))
+	must(t, err)
+	must(t, s.pages.Delete(ctx, "p"))
+	_, err = s.pages.Get(ctx, "p")
+	expect(t, "a read of a trashed page", err, kit.WireNotFound)
+	if all, err := s.pages.List(ctx); err != nil || len(all) != 0 {
+		t.Errorf("a list after the deletion: %v %v", idsOf(all), err)
+	}
+	expectTrash(t, s, "after the deletion", []kit.Tombstone{{Key: "p", At: epoch, PurgeAt: epoch.Add(trashDays)}})
+}
+
+// trashUntrashes checks that Untrash brings a page back with its versions,
+// once no other page holds its unique key.
+func trashUntrashes(t *testing.T, s *suite) {
+	ctx := t.Context()
+	must(t, s.pages.Insert(ctx, doc{ID: "q", Email: "a@example.com"}))
+	_, err := s.pages.Untrash(ctx, "p")
+	expect(t, "an untrash a unique index refuses", err, kit.WireConflict)
+	must(t, s.pages.Delete(ctx, "q"))
+	got, err := s.pages.Untrash(ctx, "p")
+	if err != nil || got.N != 2 || got.Email != "a@example.com" {
+		t.Errorf("the page untrashed: %+v %v", got, err)
+	}
+	expectVersions(t, s, "after the untrash", []string{"2:2", "1:1"})
+	_, err = s.pages.Untrash(ctx, "p")
+	expect(t, "an untrash of a page not in the trash", err, kit.WireNotFound)
+	expectTrash(t, s, "after the untrash", []kit.Tombstone{{Key: "q", At: epoch, PurgeAt: epoch.Add(trashDays)}})
+}
+
+// trashPurges checks that kit purges each page at its instant on the app's
+// clock, not a second before, and that its key starts again at version 1.
+func trashPurges(t *testing.T, s *suite) {
+	ctx := t.Context()
+	s.clock.Advance(time.Hour)
+	must(t, s.pages.Delete(ctx, "p"))
+	s.clock.Advance(trashDays - time.Second)
+	eventually(t, "q purged at its instant", func() bool {
+		stones, err := s.pages.Trashed(ctx)
+		return err == nil && len(stones) == 1 && stones[0].Key == "p"
+	})
+	expectTrash(t, s, "a second before p's instant", []kit.Tombstone{{Key: "p", At: epoch.Add(time.Hour), PurgeAt: epoch.Add(time.Hour + trashDays)}})
+	s.clock.Advance(time.Second)
+	eventually(t, "p purged at its instant", func() bool {
+		stones, err := s.pages.Trashed(ctx)
+		return err == nil && len(stones) == 0
+	})
+	_, err := s.pages.Revisions(ctx, "p")
+	expect(t, "the versions of a purged page", err, kit.WireNotFound)
+	must(t, s.pages.Insert(ctx, doc{ID: "p", N: rewrittenN}))
+	if got := ns(t, s, "p"); !slices.Equal(got, []string{"1:" + strconv.Itoa(rewrittenN)}) {
+		t.Errorf("a page written after its purge: %q, want version 1 again", got)
+	}
+}
+
+// trashNeedsRevisions checks that a store without revisions deletes at once
+// and keeps no trash.
+func trashNeedsRevisions(t *testing.T, s *suite) {
+	ctx := t.Context()
+	must(t, s.docs.Insert(ctx, doc{ID: "d"}))
+	must(t, s.docs.Delete(ctx, "d"))
+	_, err := s.docs.Untrash(ctx, "d")
+	expect(t, "an untrash on a store without revisions", err, kit.WireInvalid)
+	_, err = s.docs.Trashed(ctx)
+	expect(t, "the trash of a store without revisions", err, kit.WireInvalid)
+	must(t, s.docs.Insert(ctx, doc{ID: "d"}))
+}
+
+// expectTrash checks what the pages' trash holds.
+func expectTrash(t *testing.T, s *suite, what string, want []kit.Tombstone) {
+	t.Helper()
+	got, err := s.pages.Trashed(t.Context())
+	if err != nil {
+		t.Fatalf("the trash %s: %v", what, err)
+	}
+	same := len(got) == len(want)
+	for i := 0; same && i < len(got); i++ {
+		same = got[i].Key == want[i].Key && got[i].At.Equal(want[i].At) && got[i].PurgeAt.Equal(want[i].PurgeAt)
+	}
+	if !same {
+		t.Errorf("the trash %s: %+v, want %+v", what, got, want)
 	}
 }

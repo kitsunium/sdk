@@ -34,6 +34,11 @@ func Revisions(n int) StoreOption {
 // command —; and the record as it was, its secret members zeroed.
 type Revision[T any] = ikit.RevisionEvent[T]
 
+// Tombstone is one record in a store's trash: its key, when the product
+// deleted it, on the app's clock, and when kit purges it — its trash's
+// length after the deletion, or sooner when its retention says so.
+type Tombstone = ikit.TombstoneEvent
+
 // Edit is one change between two versions of a record, in RFC 6902's words:
 // Op is add, remove or replace, Path the RFC 6901 JSON pointer of the member
 // it changes, From the value it had and To the value it has, as JSON. A

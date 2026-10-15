@@ -191,10 +191,19 @@ func (h *historied[T]) reconcile(ctx context.Context) error {
 }
 
 // recordExists reports whether the store holds a record under key; one it
-// cannot decode is there.
+// cannot decode is there, and so is one in the trash (trash.go), whose
+// former values its restoration brings back.
 func (h *historied[T]) recordExists(ctx context.Context, key string) bool {
 	_, err := h.Get(ctx, key)
-	return !errors.Is(err, docstore.DocumentNotFound)
+	if !errors.Is(err, docstore.DocumentNotFound) {
+		return true
+	}
+	vk, ok := h.storeEngine.(versionKeeper)
+	if !ok {
+		return false
+	}
+	_, err = vk.storedVersions(ctx, key)
+	return err == nil
 }
 
 // Close closes the store's engine, then its history's.

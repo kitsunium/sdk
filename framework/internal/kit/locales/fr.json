@@ -240,6 +240,8 @@
   "static.unservable": "le frontend « {name} » ne peut pas être servi : {detail}",
   "store.nil-key": "le store « {name} » n’a pas de fonction de clé",
   "store.revisions": "store « {store} » : kit.Revisions({n}) garde de 1 à {max} versions précédentes de chaque enregistrement",
+  "store.trash-name": "store « {store} » : son réglage de corbeille « {setting} » n’est pas un nom de réglage : 1 à {max} lettres minuscules, chiffres et tirets",
+  "store.trash-negative": "il doit être une durée nulle ou positive : 0 désactive la corbeille",
   "store.unconfirmed": "une écriture dans {store} est faite, mais le dossier de données ne l’a pas confirmée : elle pourrait ne pas survivre à une coupure de courant",
   "subscription.limits": "l’abonnement « {name} » demande MaxDeliveries ≥ 1 et Parallelism ≥ 1",
   "subscription.nil-handler": "l’abonnement « {name} » n’a pas de fonction",

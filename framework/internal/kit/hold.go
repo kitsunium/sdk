@@ -283,8 +283,9 @@ func (s *StoreService[T]) heldUntilRefusal(ctx context.Context, a *App, key stri
 	return nil
 }
 
-// removeUnlessHeld removes the record under key unless a hold keeps it:
-// Store.Delete's hook. The person's data key goes with their last record,
+// removeUnlessHeld removes the record under key unless a hold keeps it —
+// to the store's trash, on a store that keeps one (trash.go): Store.Delete's
+// hook. The person's data key goes with their last record,
 // as with an erasure or a retention's deletion — at the commit in a
 // transaction —, once nothing kit keeps needs it (shredIfLast); a key that
 // could not be destroyed is said in the log, and the deletion stands.
@@ -295,7 +296,7 @@ func (s *StoreService[T]) removeUnlessHeld(ctx context.Context, a *App, key stri
 		return err
 	}
 	subject, known := s.subjectAt(ctx, a, key)
-	if err := s.remove(ctx, key); err != nil {
+	if err := s.discard(ctx, key); err != nil {
 		return err
 	}
 	if !known {

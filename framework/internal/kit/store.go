@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/concur/snapshot"
@@ -74,6 +76,12 @@ type StoreService[T any] struct {
 	// revisions is how many former versions each record keeps
 	// (kit.Revisions, revisions.go): none when zero.
 	revisions int
+	// trashFor is the store's <store>-trash, declared with its revisions:
+	// how long the trash keeps what the product deletes (trash.go).
+	trashFor *SettingService[time.Duration]
+	// bin is the running trash's agenda and loop (trash_run.go); nil while
+	// none runs.
+	bin atomic.Pointer[trashRun[T]]
 	// states name the state field of each workflow over the store: a
 	// restore keeps them as they are, and a transition that changes only
 	// one makes no version (revisions.go).
@@ -224,10 +232,15 @@ func (s *StoreService[T]) Update(ctx context.Context, key string, fn func(*T) er
 }
 
 // Delete removes the entity with the given key, or returns a [NotFound] error.
-// When the store seals at rest and the entity was its person's last record,
-// their data key goes with it, as with an erasure — at the commit, in a
-// [Transact] —, once nothing kit keeps still needs it: a held record, or a
-// former value or version sealed under it, keeps the key.
+// On a store with [Revisions] it moves the entity to the store's trash
+// instead, for <store>-trash — 30 days unless that setting says otherwise, 0
+// deleting at once —: gone from every read, its unique keys free, its
+// versions kept, [StoreService.Untrash] brings it back, and kit purges it
+// once its time is up. When the store seals at rest and the entity was its
+// person's last record, their data key goes with it, as with an erasure —
+// at the commit, in a [Transact] —, once nothing kit keeps still needs it: a
+// held record, a record in the trash, or a former value or version sealed
+// under it, keeps the key.
 func (s *StoreService[T]) Delete(ctx context.Context, key string) error {
 	a := s.app()
 	if a == nil {

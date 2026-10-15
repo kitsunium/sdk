@@ -87,6 +87,7 @@ func (s *StoreService[T]) declareRevisions(svc *Service, o storeOptions) {
 		return
 	}
 	s.revisions = o.revisions
+	s.declareTrash(svc)
 }
 
 // RevisionEvent is one version of a record a store with [Revisions] keeps: its
