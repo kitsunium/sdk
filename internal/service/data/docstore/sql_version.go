@@ -522,3 +522,146 @@ func knownInstant(at time.Time) *time.Time {
 	//: known.
 	return &at
 }
+
+// PutDocument writes the document key with its versions as they are
+// given, in one transaction — a savepoint of the caller's when ctx carries
+// one —, as core/data/docstore.VersionWriterContext says: the document's
+// row and its index rows unless it is trashed, and a version row for each
+// version — the trash's row, numbered 0, at trashedAt when it is set. It
+// calls OnWrite once that transaction commits, for a stored document.
+// DocumentExists when anything is under key — a document, the trash, or
+// version rows —, VersionsInvalid, DocumentUndecodable, KeyTooLong or
+// UniqueKeyTaken for what cannot be written as given, VersionsNotKept on
+// a store that keeps none; nothing changes on a refusal.
+func (s *SQLStore[T]) PutDocument(ctx context.Context, key string, versions []coredocstore.VersionValue, trashedAt time.Time) error {
+	//: a store that keeps none has no versions to write.
+	if s.keep == 0 {
+		//: VersionsNotKept, naming the store.
+		return versionsNotKept(s.table)
+	}
+	p, given, err := s.preparedDocument(key, versions)
+	//: what cannot be written as given: no transaction opened.
+	if err != nil {
+		//: VersionsInvalid, DocumentKeyEmpty, DocumentUndecodable or KeyTooLong.
+		return err
+	}
+	err = s.run(ctx, true, func(txCtx context.Context, ex coresql.Executor) error {
+		//: the document, its index rows and its version rows, or nothing.
+		return s.putDocument(txCtx, ex, p, given, trashedAt)
+	})
+	//: nothing written.
+	if err != nil {
+		//: the refusal, or the classified failure.
+		return s.settle(ctx, err)
+	}
+	//: a stored document is announced; a trashed one left no read to announce.
+	if trashedAt.IsZero() {
+		s.announce(ctx, &s.onWrite, key)
+	}
+	//: written.
+	return nil
+}
+
+// preparedDocument checks what PutDocument is given and computes what it
+// writes, before any transaction: the current document prepared as a write
+// prepares it — its key, its index rows — holding the JSON given, and the
+// versions as the store keeps them.
+func (s *SQLStore[T]) preparedDocument(key string, versions []coredocstore.VersionValue) (*sqlPrepared, []coredocstore.VersionValue, error) {
+	//: a document the store could never find again.
+	if key == "" {
+		//: DocumentKeyEmpty.
+		return nil, nil, kerrs.Wrap(coredocstore.DocumentKeyEmpty, kerrs.WrapParams{}, kerrs.String("store", s.table))
+	}
+	given, err := checkDocument(s.table, versions)
+	//: VersionsInvalid.
+	if err != nil {
+		//: nothing to write.
+		return nil, nil, err
+	}
+	v, err := decodeAs[T](s.table, given[0].JSON)
+	//: a document the store's type does not decode.
+	if err != nil {
+		//: DocumentUndecodable.
+		return nil, nil, err
+	}
+	p, err := s.prepare(v)
+	//: DocumentKeyEmpty, DocumentUnencodable or KeyTooLong.
+	if err != nil {
+		//: nothing to write.
+		return nil, nil, err
+	}
+	//: a document filed under another key than its own would be served under
+	//: one identity and refused by Update as a rename.
+	if p.key != key {
+		//: VersionsInvalid, naming the problem.
+		return nil, nil, versionsInvalid(s.table, problemOtherKey)
+	}
+	//: the document as it was given, byte for byte once compacted.
+	p.raw = given[0].JSON
+	//: ready.
+	return p, given, nil
+}
+
+// putDocument is PutDocument's work, inside its transaction.
+func (s *SQLStore[T]) putDocument(ctx context.Context, ex coresql.Executor, p *sqlPrepared, given []coredocstore.VersionValue, trashedAt time.Time) error {
+	//: a document, the trash or version rows already under the key.
+	if err := s.keyTaken(ctx, ex, p.key); err != nil {
+		//: DocumentExists, or StatementFailed.
+		return err
+	}
+	rows := make([]versionRow, 0, len(given)+1)
+	//: newest first; the current version's document is the documents'
+	//: table's, or the trash's.
+	for i, v := range given {
+		row := versionRow{at: knownInstant(v.At), meta: v.Meta, num: v.Number}
+		//: a former version holds its document.
+		if i > 0 {
+			row.doc = v.JSON
+		}
+		rows = append(rows, row)
+	}
+	//: in the trash at its instant, filed nowhere.
+	if !trashedAt.IsZero() {
+		rows = append(rows, versionRow{at: new(trashedAt.UTC()), doc: p.raw, num: uint64(tombstoneNum)})
+		//: nil, or StatementFailed.
+		return s.insertVersionRows(ctx, ex, p.key, rows)
+	}
+	//: DocumentExists — a key raced in — or a collision.
+	if insertErr := s.insertRow(ctx, ex, p); insertErr != nil {
+		//: the write rolls back.
+		return insertErr
+	}
+	//: its index rows; UniqueKeyTaken when another document holds a key.
+	if fileErr := s.fileIndexes(ctx, ex, p, false); fileErr != nil {
+		//: the write rolls back.
+		return fileErr
+	}
+	//: nil, or StatementFailed.
+	return s.insertVersionRows(ctx, ex, p.key, rows)
+}
+
+// keyTaken refuses a key that holds anything: a version row — the trash's
+// among them — or a document's row, a document stored while the store kept
+// no versions included. Both reads lock what they find.
+func (s *SQLStore[T]) keyTaken(ctx context.Context, ex coresql.Executor, key string) error {
+	_, _, found, err := s.firstVersion(ctx, ex, key)
+	//: StatementFailed.
+	if err != nil {
+		//: the write rolls back.
+		return err
+	}
+	var raw []byte
+	lockErr := ex.QueryRowContext(ctx, s.stmts.lockDoc, []byte(key)).Scan(&raw)
+	//: the locking read did not complete.
+	if lockErr != nil && !errors.Is(lockErr, stdsql.ErrNoRows) {
+		//: StatementFailed.
+		return s.failed("lock a document", lockErr)
+	}
+	//: something is under the key.
+	if found || lockErr == nil {
+		//: DocumentExists, naming no key.
+		return kerrs.Wrap(coredocstore.DocumentExists, kerrs.WrapParams{}, kerrs.String("store", s.table))
+	}
+	//: free.
+	return nil
+}

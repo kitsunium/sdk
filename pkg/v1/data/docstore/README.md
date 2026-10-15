@@ -185,6 +185,7 @@ for key, err := range pages.Keys("") {
   - [func \(\*SQLStore\) OnWrite\(fn func\(key string\)\) \(remove func\(\)\)](<#SQLStore.OnWrite>)
   - [func \(\*SQLStore\) Purge\(ctx context.Context, key string\) error](<#SQLStore.Purge>)
   - [func \(\*SQLStore\) Put\(ctx context.Context, v T\) error](<#SQLStore.Put>)
+  - [func \(\*SQLStore\) PutDocument\(ctx context.Context, key string, versions \[\]coredocstore.VersionValue, trashedAt time.Time\) error](<#SQLStore.PutDocument>)
   - [func \(\*SQLStore\) PutStamped\(ctx context.Context, v T, stamp coredocstore.StampValue\) error](<#SQLStore.PutStamped>)
   - [func \(\*SQLStore\) Reindex\(ctx context.Context\) error](<#SQLStore.Reindex>)
   - [func \(\*SQLStore\) Replace\(ctx context.Context, v T\) error](<#SQLStore.Replace>)
@@ -216,6 +217,7 @@ for key, err := range pages.Keys("") {
   - [func \(\*Store\) OnWrite\(fn func\(key string\)\) \(remove func\(\)\)](<#Store.OnWrite>)
   - [func \(\*Store\) Purge\(key string\) error](<#Store.Purge>)
   - [func \(\*Store\) Put\(v T\) error](<#Store.Put>)
+  - [func \(\*Store\) PutDocument\(key string, versions \[\]coredocstore.VersionValue, trashedAt time.Time\) error](<#Store.PutDocument>)
   - [func \(\*Store\) PutStamped\(v T, stamp coredocstore.StampValue\) error](<#Store.PutStamped>)
   - [func \(\*Store\) Replace\(v T\) error](<#Store.Replace>)
   - [func \(\*Store\) ReplaceStamped\(v T, stamp coredocstore.StampValue\) error](<#Store.ReplaceStamped>)
@@ -240,6 +242,10 @@ for key, err := range pages.Keys("") {
   - [func \(TrashableContext\) Tombstones\(ctx context.Context\) \(\[\]TombstoneValue, error\)](<#TrashableContext.Tombstones>)
   - [func \(TrashableContext\) Trash\(ctx context.Context, key string\) error](<#TrashableContext.Trash>)
 - [type Version](<#Version>)
+- [type VersionWriter](<#VersionWriter>)
+  - [func \(VersionWriter\) PutDocument\(key string, versions \[\]VersionValue, trashedAt time.Time\) error](<#VersionWriter.PutDocument>)
+- [type VersionWriterContext](<#VersionWriterContext>)
+  - [func \(VersionWriterContext\) PutDocument\(ctx context.Context, key string, versions \[\]VersionValue, trashedAt time.Time\) error](<#VersionWriterContext.PutDocument>)
 - [type Versioned](<#Versioned>)
   - [func \(Versioned\) InsertStamped\(v T, stamp StampValue\) error](<#Versioned.InsertStamped>)
   - [func \(Versioned\) PutStamped\(v T, stamp StampValue\) error](<#Versioned.PutStamped>)
@@ -456,6 +462,17 @@ CodeVersionNotFound: the document keeps no version of that number.
 Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.CodeVersionNotFound`.
 
 Code `0.3.80.19`
+
+<a name="CodeVersionsInvalid"></a>
+```go
+const CodeVersionsInvalid errs.Code = 217110
+```
+
+CodeVersionsInvalid: versions PutDocument cannot write as they are given.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.CodeVersionsInvalid`.
+
+Code `0.3.80.22`
 
 <a name="CodeVersionsNotKept"></a>
 ```go
@@ -725,6 +742,17 @@ VersionNotFound is a miss on a version: never made, or pruned.
 Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.VersionNotFound`.
 
 Code `0.3.80.19` · reason `VERSION_NOT_FOUND` · public "The document keeps no version of this number"
+
+<a name="VersionsInvalid"></a>
+```go
+var VersionsInvalid *errs.Error
+```
+
+VersionsInvalid refuses versions PutDocument cannot write as they are given.
+
+Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.VersionsInvalid`.
+
+Code `0.3.80.22` · reason `VERSIONS_INVALID` · public "The document's versions cannot be written as they were given"
 
 <a name="VersionsNotKept"></a>
 ```go
@@ -1480,6 +1508,15 @@ func (*SQLStore) Put(ctx context.Context, v T) error
 
 Put stores v under its key, creating it or replacing whatever was there. On a store that keeps versions, it makes one, stamped with nothing.
 
+<a name="SQLStore.PutDocument"></a>
+### func \(SQLStore\) [PutDocument](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_version.go>)
+
+```go
+func (*SQLStore) PutDocument(ctx context.Context, key string, versions []coredocstore.VersionValue, trashedAt time.Time) error
+```
+
+PutDocument writes the document key with its versions as they are given, in one transaction — a savepoint of the caller's when ctx carries one —, as core/data/docstore.VersionWriterContext says: the document's row and its index rows unless it is trashed, and a version row for each version — the trash's row, numbered 0, at trashedAt when it is set. It calls OnWrite once that transaction commits, for a stored document. DocumentExists when anything is under key — a document, the trash, or version rows —, VersionsInvalid, DocumentUndecodable, KeyTooLong or UniqueKeyTaken for what cannot be written as given, VersionsNotKept on a store that keeps none; nothing changes on a refusal.
+
 <a name="SQLStore.PutStamped"></a>
 ### func \(SQLStore\) [PutStamped](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_version.go>)
 
@@ -1806,6 +1843,15 @@ func (*Store) Put(v T) error
 
 Put stores v under its key, creating it or replacing whatever was there. On a store that keeps versions, it makes one, stamped with nothing.
 
+<a name="Store.PutDocument"></a>
+### func \(Store\) [PutDocument](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/version.go>)
+
+```go
+func (*Store) PutDocument(key string, versions []coredocstore.VersionValue, trashedAt time.Time) error
+```
+
+PutDocument writes the document key with its versions as they are given, in one durable write under the writers' lock, as core/data/docstore.VersionWriter says: the current version and the former ones with their numbers, instants and metadata, and — when trashedAt is set — the document in the trash at that instant. Stored, it is filed and OnWrite is told; trashed, it is neither. DocumentExists when anything is under key, VersionsInvalid, DocumentUndecodable or UniqueKeyTaken for what cannot be written as given, VersionsNotKept on a store that keeps none; nothing changes on a refusal.
+
 <a name="Store.PutStamped"></a>
 ### func \(Store\) [PutStamped](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/version.go>)
 
@@ -2105,6 +2151,85 @@ type Version struct {
 	Number uint64
 }
 ```
+
+<a name="VersionWriter"></a>
+## type [VersionWriter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+
+VersionWriter is the public alias for the sibling of [Collection](#Collection) that writes a document with its versions — numbers, instants, metadata — and its trash as they are given, which [Store](#Store) implements: PutDocument. A copy from one engine to another needs it.
+
+```go
+type VersionWriter = coredocstore.VersionWriter
+```
+
+VersionWriter is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.VersionWriter`, declared as:
+
+```go
+type VersionWriter interface {
+	// PutDocument writes the document key with versions, newest first as
+	// [Versioned].Versions returns them: the current version — the document
+	// itself — then the former ones, each kept as given, its number, its
+	// instant (zero for a version 1 made before its store kept versions),
+	// its metadata and its JSON, compacted and HTML-escaped as json.Marshal
+	// writes a document. With trashedAt zero the document is stored and
+	// filed in every index, and OnWrite is told; with trashedAt set, the
+	// document is put in the trash at that instant, filed nowhere, and no
+	// hook is told. Read back, Versions and Tombstones answer what was
+	// given.
+	//
+	// Nothing may be under key: a document, a trashed one, or versions —
+	// DOCUMENT_EXISTS otherwise. VERSIONS_INVALID, its "problem" field
+	// naming which, refuses no version, a number 0, numbers that do not
+	// strictly decrease, an unknown instant on a version other than 1, a
+	// version that is not JSON, and a current document whose own key is not
+	// key; DOCUMENT_UNDECODABLE one the store's type does not decode, and
+	// UNIQUE_KEY_TAKEN a stored document whose unique key another holds. It
+	// asks Held nothing and prunes nothing: the versions are written as
+	// given, and the next write prunes as every write does. A refusal
+	// writes nothing.
+	PutDocument(key string, versions []VersionValue, trashedAt time.Time) error
+}
+```
+
+<a name="VersionWriter.PutDocument"></a>
+### func \(VersionWriter\) [PutDocument](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+
+```go
+func (VersionWriter) PutDocument(key string, versions []VersionValue, trashedAt time.Time) error
+```
+
+PutDocument writes the document key with versions, newest first as [Versioned](#Versioned).Versions returns them: the current version — the document itself — then the former ones, each kept as given, its number, its instant (zero for a version 1 made before its store kept versions), its metadata and its JSON, compacted and HTML-escaped as json.Marshal writes a document. With trashedAt zero the document is stored and filed in every index, and OnWrite is told; with trashedAt set, the document is put in the trash at that instant, filed nowhere, and no hook is told. Read back, Versions and Tombstones answer what was given.
+
+Nothing may be under key: a document, a trashed one, or versions — DOCUMENT\_EXISTS otherwise. VERSIONS\_INVALID, its "problem" field naming which, refuses no version, a number 0, numbers that do not strictly decrease, an unknown instant on a version other than 1, a version that is not JSON, and a current document whose own key is not key; DOCUMENT\_UNDECODABLE one the store's type does not decode, and UNIQUE\_KEY\_TAKEN a stored document whose unique key another holds. It asks Held nothing and prunes nothing: the versions are written as given, and the next write prunes as every write does. A refusal writes nothing.
+
+<a name="VersionWriterContext"></a>
+## type [VersionWriterContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+
+VersionWriterContext is the public alias for [VersionWriter](#VersionWriter) with a context on every call, which [SQLStore](#SQLStore) implements.
+
+```go
+type VersionWriterContext = coredocstore.VersionWriterContext
+```
+
+VersionWriterContext is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.VersionWriterContext`, declared as:
+
+```go
+type VersionWriterContext interface {
+	// PutDocument is VersionWriter.PutDocument under ctx, in one transaction
+	// — a savepoint of the one ctx carries for the store's database — so the
+	// document, its index rows and its versions exist if and only if that
+	// transaction commits; OnWrite is told once it has.
+	PutDocument(ctx context.Context, key string, versions []VersionValue, trashedAt time.Time) error
+}
+```
+
+<a name="VersionWriterContext.PutDocument"></a>
+### func \(VersionWriterContext\) [PutDocument](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+
+```go
+func (VersionWriterContext) PutDocument(ctx context.Context, key string, versions []VersionValue, trashedAt time.Time) error
+```
+
+PutDocument is VersionWriter.PutDocument under ctx, in one transaction — a savepoint of the one ctx carries for the store's database — so the document, its index rows and its versions exist if and only if that transaction commits; OnWrite is told once it has.
 
 <a name="Versioned"></a>
 ## type [Versioned](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)

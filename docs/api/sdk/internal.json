@@ -335,7 +335,7 @@
       "dir": "core/data/docstore",
       "layer": "core",
       "family": "data",
-      "doc": "Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;\nADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21). Both\nengines answer every one of them alike, and the range keeps the LL = 3 its\nengine allocated it under now that it is declared here (ADR 0160).\n\nPackage docstore declares the document-store domain: typed, keyed JSON\ndocuments with unique and multi-valued secondary indexes, kept by two\nengines under one contract — the file engine in memory or through\ncore/data/vfs (ADR 0110), the SQL engine in a database the caller owns\n(ADR 0139), both keeping a document's versions in its own write when asked\n(ADR 0143).\n\nIt holds what the two engines share and nothing only one of them has:\n\n  - the ports. [Collection] is a store whose calls take no context, which\n    the file engine is; [CollectionContext] is the same calls, each taking\n    a context first, which the SQL engine is. [Versioned] and\n    [VersionedContext] are their siblings for a document's versions,\n    [Trashable] and [TrashableContext] for its trash, [KeyLister] and\n    [KeyListerContext] for the keys alone, and [Announcer] is the pair of\n    hooks both engines answer exactly as they are;\n  - the values both engines read and return — [EntryValue], [VersionValue],\n    [StampValue], [TombstoneValue] — and [IndexSpec], the declaration both\n    take, with its two constructors [Unique] and [Index];\n  - the codes of the 0.3.80.* range and their sentinels: both engines answer\n    the same refusals under the same codes (ADR 0160).\n\nThere are two ports and not one because the engines differ on the one\nthing a single interface would have to fix: the file engine waits on\nnothing a caller could abandon and takes no context (ADR 0110 §D6), while\nevery call of the SQL engine waits on a database and takes one. A single\nport would give the file engine a context it cannot honour, or take the SQL\nengine's away (ADR 0139 §D2). So each port is the contract of one shape of\ncall, with the same methods, the same documents and the same refusals.\n\nThe engines, their configurations, the file engine's statistics and every\nstatement live in internal/service/data/docstore.\n\nPackage docstore — the siblings of Collection (ADR 0039): a document's\nversions, its trash, the keys alone (ADR 0178), and the same ports with a\ncontext on every call, which the SQL engine implements.\n\nPackage docstore — declares the sentinel *errs.Error outcomes both engines\nanswer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE\nform.\n\nNo Public and no Private below carries a key or a document. A store key is\nroutinely an e-mail address or the hash of a token, and an index key is\nusually exactly the value a caller must not learn back from a refusal: the\nfields name the index and the operation, never what was looked up.\n\nThe HTTP statuses are spelled as the integers errs.WithHTTPStatus takes,\neach named after its status: the core imports no net/http to read five\nnumbers (ADR 0160).\n\nPackage docstore — the declaration of a secondary index, which both engines\ntake at construction and file by the same rule.\n\nPackage docstore — the values both engines read and return: a stored\ndocument as JSON, one version of a document, what a write says about the\nversion it makes, and a document in the trash.\n"
+      "doc": "Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;\nADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21, and\nADR 0178 22, for a document written with its versions). Both\nengines answer every one of them alike, and the range keeps the LL = 3 its\nengine allocated it under now that it is declared here (ADR 0160).\n\nPackage docstore declares the document-store domain: typed, keyed JSON\ndocuments with unique and multi-valued secondary indexes, kept by two\nengines under one contract — the file engine in memory or through\ncore/data/vfs (ADR 0110), the SQL engine in a database the caller owns\n(ADR 0139), both keeping a document's versions in its own write when asked\n(ADR 0143).\n\nIt holds what the two engines share and nothing only one of them has:\n\n  - the ports. [Collection] is a store whose calls take no context, which\n    the file engine is; [CollectionContext] is the same calls, each taking\n    a context first, which the SQL engine is. [Versioned] and\n    [VersionedContext] are their siblings for a document's versions,\n    [Trashable] and [TrashableContext] for its trash, [KeyLister] and\n    [KeyListerContext] for the keys alone, [VersionWriter] and\n    [VersionWriterContext] for a document written with its versions as they\n    are, and [Announcer] is the pair of hooks both engines answer exactly as\n    they are;\n  - the values both engines read and return — [EntryValue], [VersionValue],\n    [StampValue], [TombstoneValue] — and [IndexSpec], the declaration both\n    take, with its two constructors [Unique] and [Index];\n  - the codes of the 0.3.80.* range and their sentinels: both engines answer\n    the same refusals under the same codes (ADR 0160).\n\nThere are two ports and not one because the engines differ on the one\nthing a single interface would have to fix: the file engine waits on\nnothing a caller could abandon and takes no context (ADR 0110 §D6), while\nevery call of the SQL engine waits on a database and takes one. A single\nport would give the file engine a context it cannot honour, or take the SQL\nengine's away (ADR 0139 §D2). So each port is the contract of one shape of\ncall, with the same methods, the same documents and the same refusals.\n\nThe engines, their configurations, the file engine's statistics and every\nstatement live in internal/service/data/docstore.\n\nPackage docstore — the siblings of Collection (ADR 0039): a document's\nversions, its trash, the keys alone (ADR 0178), a document written with its\nversions as they are (ADR 0178), and the same ports with a context on every\ncall, which the SQL engine implements.\n\nPackage docstore — declares the sentinel *errs.Error outcomes both engines\nanswer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE\nform.\n\nNo Public and no Private below carries a key or a document. A store key is\nroutinely an e-mail address or the hash of a token, and an index key is\nusually exactly the value a caller must not learn back from a refusal: the\nfields name the index and the operation, never what was looked up.\n\nThe HTTP statuses are spelled as the integers errs.WithHTTPStatus takes,\neach named after its status: the core imports no net/http to read five\nnumbers (ADR 0160).\n\nPackage docstore — the declaration of a secondary index, which both engines\ntake at construction and file by the same rule.\n\nPackage docstore — the values both engines read and return: a stored\ndocument as JSON, one version of a document, what a write says about the\nversion it makes, and a document in the trash.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/core/data/queue",
@@ -19621,6 +19621,22 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.CodeVersionsInvalid",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "CodeVersionsInvalid",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "217110",
+      "code": {
+        "value": "0.3.80.22"
+      },
+      "doc": "CodeVersionsInvalid identifies a document whose versions a store refuses\nto write as they are given: none, a number 0, numbers not strictly\ndecreasing, an unknown instant on a version other than 1, a version that\nis not JSON, or a document whose own key is another (ADR 0178).\n",
+      "file": "core/data/docstore/codes_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.CodeVersionsNotKept",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
@@ -20622,6 +20638,56 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionWriter",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "VersionWriter",
+      "spelled": "interface{PutDocument(key string, versions []VersionValue, trashedAt time.Time) error}",
+      "canonical": "interface{PutDocument(key string, versions []github.com/kitsunium/sdk/internal/core/data/docstore.VersionValue, trashedAt time.Time) error}",
+      "doc": "VersionWriter writes a document with its versions as they are given, on a\nstore whose calls take no context: the sibling of [Collection],\n[Versioned] and [Trashable] the file engine implements beside them (ADR\n0178). It exists for a copy — a store moved from one engine to another —\nthat must keep each version's number, instant and metadata, and the\ntrash's instant: no other write can, since a write numbers the version it\nmakes after the current one and stamps it with the store's clock. Only a\nstore that keeps versions has it; one that keeps none answers\nVERSIONS_NOT_KEPT.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionWriter.PutDocument",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "PutDocument",
+      "recv": "VersionWriter",
+      "spelled": "func(key string, versions []VersionValue, trashedAt time.Time) error",
+      "canonical": "func(key string, versions []github.com/kitsunium/sdk/internal/core/data/docstore.VersionValue, trashedAt time.Time) error",
+      "doc": "PutDocument writes the document key with versions, newest first as\n[Versioned].Versions returns them: the current version — the document\nitself — then the former ones, each kept as given, its number, its\ninstant (zero for a version 1 made before its store kept versions),\nits metadata and its JSON, compacted and HTML-escaped as json.Marshal\nwrites a document. With trashedAt zero the document is stored and\nfiled in every index, and OnWrite is told; with trashedAt set, the\ndocument is put in the trash at that instant, filed nowhere, and no\nhook is told. Read back, Versions and Tombstones answer what was\ngiven.\n\nNothing may be under key: a document, a trashed one, or versions —\nDOCUMENT_EXISTS otherwise. VERSIONS_INVALID, its \"problem\" field\nnaming which, refuses no version, a number 0, numbers that do not\nstrictly decrease, an unknown instant on a version other than 1, a\nversion that is not JSON, and a current document whose own key is not\nkey; DOCUMENT_UNDECODABLE one the store's type does not decode, and\nUNIQUE_KEY_TAKEN a stored document whose unique key another holds. It\nasks Held nothing and prunes nothing: the versions are written as\ngiven, and the next write prunes as every write does. A refusal\nwrites nothing.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionWriterContext",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "VersionWriterContext",
+      "spelled": "interface{PutDocument(ctx context.Context, key string, versions []VersionValue, trashedAt time.Time) error}",
+      "canonical": "interface{PutDocument(ctx context.Context, key string, versions []github.com/kitsunium/sdk/internal/core/data/docstore.VersionValue, trashedAt time.Time) error}",
+      "doc": "VersionWriterContext is [VersionWriter] with a context on every call: the\nsibling of [CollectionContext] the SQL engine implements beside it.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionWriterContext.PutDocument",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "PutDocument",
+      "recv": "VersionWriterContext",
+      "spelled": "func(ctx context.Context, key string, versions []VersionValue, trashedAt time.Time) error",
+      "canonical": "func(ctx context.Context, key string, versions []github.com/kitsunium/sdk/internal/core/data/docstore.VersionValue, trashedAt time.Time) error",
+      "doc": "PutDocument is VersionWriter.PutDocument under ctx, in one transaction\n— a savepoint of the one ctx carries for the store's database — so the\ndocument, its index rows and its versions exist if and only if that\ntransaction commits; OnWrite is told once it has.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.Versioned",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
@@ -20824,6 +20890,23 @@
       "canonical": "func(ctx context.Context, key string) ([]github.com/kitsunium/sdk/internal/core/data/docstore.VersionValue, error)",
       "doc": "Versions is Versioned.Versions under ctx.\n",
       "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.VersionsInvalid",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "VersionsInvalid",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.80.22",
+        "reason": "VERSIONS_INVALID",
+        "public": "The document's versions cannot be written as they were given"
+      },
+      "doc": "VersionsInvalid refuses a document PutDocument cannot write with its\nversions as they are given: no version, a number 0, numbers that do\nnot strictly decrease from the newest, an unknown instant on a version\nother than 1, a version that is not JSON, or a current document whose\nown key is another. The \"problem\" field names which. Nothing changed.\n\nIt refuses rather than corrects: a copy that renumbered, re-stamped or\nre-keyed what it copied would no longer be a copy.\n",
+      "file": "core/data/docstore/codes_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -55372,6 +55455,19 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*SQLStore[...]).PutDocument",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
+      "name": "PutDocument",
+      "recv": "SQLStore",
+      "spelled": "func(ctx context.Context, key string, versions []coredocstore.VersionValue, trashedAt time.Time) error",
+      "canonical": "func(ctx context.Context, key string, versions []github.com/kitsunium/sdk/internal/core/data/docstore.VersionValue, trashedAt time.Time) error",
+      "doc": "PutDocument writes the document key with its versions as they are\ngiven, in one transaction — a savepoint of the caller's when ctx carries\none —, as core/data/docstore.VersionWriterContext says: the document's\nrow and its index rows unless it is trashed, and a version row for each\nversion — the trash's row, numbered 0, at trashedAt when it is set. It\ncalls OnWrite once that transaction commits, for a stored document.\nDocumentExists when anything is under key — a document, the trash, or\nversion rows —, VersionsInvalid, DocumentUndecodable, KeyTooLong or\nUniqueKeyTaken for what cannot be written as given, VersionsNotKept on\na store that keeps none; nothing changes on a refusal.\n",
+      "file": "service/data/docstore/sql_version.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*SQLStore[...]).PutStamped",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
@@ -55790,6 +55886,19 @@
       "canonical": "func(v T) error",
       "doc": "Put stores v under its key, creating it or replacing whatever was there.\nOn a store that keeps versions, it makes one, stamped with nothing.\n",
       "file": "service/data/docstore/write.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*Store[...]).PutDocument",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
+      "name": "PutDocument",
+      "recv": "Store",
+      "spelled": "func(key string, versions []coredocstore.VersionValue, trashedAt time.Time) error",
+      "canonical": "func(key string, versions []github.com/kitsunium/sdk/internal/core/data/docstore.VersionValue, trashedAt time.Time) error",
+      "doc": "PutDocument writes the document key with its versions as they are\ngiven, in one durable write under the writers' lock, as\ncore/data/docstore.VersionWriter says: the current version and the\nformer ones with their numbers, instants and metadata, and — when\ntrashedAt is set — the document in the trash at that instant. Stored,\nit is filed and OnWrite is told; trashed, it is neither. DocumentExists\nwhen anything is under key, VersionsInvalid, DocumentUndecodable or\nUniqueKeyTaken for what cannot be written as given, VersionsNotKept on\na store that keeps none; nothing changes on a refusal.\n",
+      "file": "service/data/docstore/version.go",
       "layer": "service",
       "family": "data"
     },

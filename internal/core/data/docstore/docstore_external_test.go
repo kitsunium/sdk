@@ -5,6 +5,7 @@ import (
 	"iter"
 	"slices"
 	"testing"
+	"time"
 
 	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -139,6 +140,21 @@ func (keyListerContextDouble) Keys(context.Context, string) iter.Seq2[string, er
 	return func(func(string, error) bool) {}
 }
 
+// versionWriterDouble carries exactly the methods VersionWriter declares.
+type versionWriterDouble struct{}
+
+func (versionWriterDouble) PutDocument(string, []coredocstore.VersionValue, time.Time) error {
+	return nil
+}
+
+// versionWriterContextDouble carries exactly the methods VersionWriterContext
+// declares.
+type versionWriterContextDouble struct{}
+
+func (versionWriterContextDouble) PutDocument(context.Context, string, []coredocstore.VersionValue, time.Time) error {
+	return nil
+}
+
 // TestDoublesStillSatisfyThePorts is the ADR 0039 guard, executable rather
 // than documentary: each double above holds exactly its port's methods, so a
 // method added to a port fails this file's compilation before review.
@@ -152,6 +168,8 @@ func TestDoublesStillSatisfyThePorts(t *testing.T) {
 	var trashableWithContext coredocstore.TrashableContext = trashableContextDouble{}
 	var keys coredocstore.KeyLister = keyListerDouble{}
 	var keysWithContext coredocstore.KeyListerContext = keyListerContextDouble{}
+	var writer coredocstore.VersionWriter = versionWriterDouble{}
+	var writerWithContext coredocstore.VersionWriterContext = versionWriterContextDouble{}
 	announcers := []coredocstore.Announcer{collection, withContext}
 	if _, err := collection.Get("k"); err != nil {
 		t.Fatalf("Collection.Get = %v, want nil", err)
@@ -176,6 +194,12 @@ func TestDoublesStillSatisfyThePorts(t *testing.T) {
 	}
 	for range keysWithContext.Keys(t.Context(), "") {
 		t.Fatal("KeyListerContext.Keys of the double yielded")
+	}
+	if err := writer.PutDocument("k", nil, time.Time{}); err != nil {
+		t.Fatalf("VersionWriter.PutDocument = %v, want nil", err)
+	}
+	if err := writerWithContext.PutDocument(t.Context(), "k", nil, time.Time{}); err != nil {
+		t.Fatalf("VersionWriterContext.PutDocument = %v, want nil", err)
 	}
 	for _, announcer := range announcers {
 		announcer.OnWrite(func(string) {})()
@@ -216,6 +240,7 @@ func TestSentinelsCarryTheirDocumentedCodes(t *testing.T) {
 		{coredocstore.VersionNotFound, "VERSION_NOT_FOUND", 0x00_03_50_13, 70, 404},
 		{coredocstore.VersionsRewriteRefused, "VERSIONS_REWRITE_REFUSED", 0x00_03_50_14, 70, 400},
 		{coredocstore.DocumentNotTrashed, "DOCUMENT_NOT_TRASHED", 0x00_03_50_15, 70, 404},
+		{coredocstore.VersionsInvalid, "VERSIONS_INVALID", 0x00_03_50_16, 70, 400},
 	}
 	for _, tc := range cases {
 		t.Run(tc.reason, func(t *testing.T) {

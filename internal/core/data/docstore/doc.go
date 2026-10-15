@@ -1,5 +1,6 @@
 // Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;
-// ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21). Both
+// ADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21, and
+// ADR 0178 22, for a document written with its versions). Both
 // engines answer every one of them alike, and the range keeps the LL = 3 its
 // engine allocated it under now that it is declared here (ADR 0160).
 //
@@ -17,8 +18,10 @@
 //     a context first, which the SQL engine is. [Versioned] and
 //     [VersionedContext] are their siblings for a document's versions,
 //     [Trashable] and [TrashableContext] for its trash, [KeyLister] and
-//     [KeyListerContext] for the keys alone, and [Announcer] is the pair of
-//     hooks both engines answer exactly as they are;
+//     [KeyListerContext] for the keys alone, [VersionWriter] and
+//     [VersionWriterContext] for a document written with its versions as they
+//     are, and [Announcer] is the pair of hooks both engines answer exactly as
+//     they are;
 //   - the values both engines read and return — [EntryValue], [VersionValue],
 //     [StampValue], [TombstoneValue] — and [IndexSpec], the declaration both
 //     take, with its two constructors [Unique] and [Index];
@@ -37,8 +40,9 @@
 // statement live in internal/service/data/docstore.
 //
 // Package docstore — the siblings of Collection (ADR 0039): a document's
-// versions, its trash, the keys alone (ADR 0178), and the same ports with a
-// context on every call, which the SQL engine implements.
+// versions, its trash, the keys alone (ADR 0178), a document written with its
+// versions as they are (ADR 0178), and the same ports with a context on every
+// call, which the SQL engine implements.
 //
 // Package docstore — declares the sentinel *errs.Error outcomes both engines
 // answer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
