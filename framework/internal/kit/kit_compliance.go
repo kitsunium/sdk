@@ -112,6 +112,7 @@ var (
 	_ feeder          = (*StoreService[struct{}])(nil)
 	_ sealingSource   = (*StoreService[struct{}])(nil)
 	_ revisionsSource = (*StoreService[struct{}])(nil)
+	_ trashSource     = (*StoreService[struct{}])(nil)
 	_ sealAller       = (*StoreService[struct{}])(nil)
 	_ tabled          = (*StoreService[struct{}])(nil)
 

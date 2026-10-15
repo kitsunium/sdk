@@ -4794,6 +4794,21 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeTrashList",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "CodeTrashList",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262738",
+      "code": {
+        "value": "0.4.2.82"
+      },
+      "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
+      "file": "framework/internal/kit/codes_gen.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeUndecodable",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/internal/kit",
@@ -11755,6 +11770,22 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.CodeTrashList",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "CodeTrashList",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262738",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeTrashList",
+      "code": {
+        "value": "0.4.2.82"
+      },
+      "doc": "CodeTrashList refuses the Studio's list of a store's trash (GET\n/_kit/api/trash) when the store named is none of the product's — a\nNotFound — or keeps no trash, having no kit.Revisions — an Invalid (ADR\n0178 C4).\n",
+      "file": "framework/kit/errors.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/kit.CodeUndecodable",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/kit",
@@ -18365,6 +18396,18 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/model.StoreTrash",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/model",
+      "name": "StoreTrash",
+      "spelled": "core.StoreTrashMessage",
+      "canonical": "github.com/kitsunium/sdk/framework/model/internal/core.StoreTrashMessage",
+      "owner": "go:github.com/kitsunium/sdk/framework/model/internal/core.StoreTrashMessage",
+      "doc": "StoreTrash is a page of a store's trash as the Studio lists it (GET\n/_kit/api/trash), in key order.\n",
+      "file": "framework/model/history.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/model.SubscriptionInfo",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/framework/model",
@@ -18471,6 +18514,18 @@
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.TransportSMTP",
       "doc": "TransportSMTP delivers to an SMTP relay.\n",
       "file": "framework/model/node_info.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model.TrashedRecord",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/model",
+      "name": "TrashedRecord",
+      "spelled": "core.TrashedRecordMessage",
+      "canonical": "github.com/kitsunium/sdk/framework/model/internal/core.TrashedRecordMessage",
+      "owner": "go:github.com/kitsunium/sdk/framework/model/internal/core.TrashedRecordMessage",
+      "doc": "TrashedRecord is one record in a store's trash as the Studio lists it\n(GET /_kit/api/trash): its key, when the product deleted it and when kit\npurges it — never its value.\n",
+      "file": "framework/model/history.go",
       "layer": "framework"
     },
     {
@@ -23721,8 +23776,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
       "name": "ModuleMessage",
-      "spelled": "struct{Name string \"json:\\\"name\\\"\"; Doc string \"json:\\\"doc,omitempty\\\"\"; Docs map[string]string \"json:\\\"docs,omitempty\\\"\"; Package string \"json:\\\"package,omitempty\\\"\"; Build *ModuleVersionMessage \"json:\\\"build,omitempty\\\"\"; Services []string \"json:\\\"services\\\"\"; Requires []string \"json:\\\"requires,omitempty\\\"\"; RequiredBy []string \"json:\\\"requiredBy,omitempty\\\"\"; Prefix string \"json:\\\"prefix\\\"\"; Source *SourceMessage \"json:\\\"source,omitempty\\\"\"; Mount *SourceMessage \"json:\\\"mount,omitempty\\\"\"}",
-      "canonical": "struct{Name string \"json:\\\"name\\\"\"; Doc string \"json:\\\"doc,omitempty\\\"\"; Docs map[string]string \"json:\\\"docs,omitempty\\\"\"; Package string \"json:\\\"package,omitempty\\\"\"; Build *github.com/kitsunium/sdk/framework/model/internal/core.ModuleVersionMessage \"json:\\\"build,omitempty\\\"\"; Services []string \"json:\\\"services\\\"\"; Requires []string \"json:\\\"requires,omitempty\\\"\"; RequiredBy []string \"json:\\\"requiredBy,omitempty\\\"\"; Prefix string \"json:\\\"prefix\\\"\"; Source *github.com/kitsunium/sdk/framework/model/internal/core.SourceMessage \"json:\\\"source,omitempty\\\"\"; Mount *github.com/kitsunium/sdk/framework/model/internal/core.SourceMessage \"json:\\\"mount,omitempty\\\"\"}",
+      "spelled": "struct{Name string \"json:\\\"name\\\"\"; Doc string \"json:\\\"doc,omitempty\\\"\"; Docs map[string]string \"json:\\\"docs,omitempty\\\"\"; Package string \"json:\\\"package,omitempty\\\"\"; Build *ModuleVersionMessage \"json:\\\"build,omitempty\\\"\"; Services []string \"json:\\\"services\\\"\"; Requires []string \"json:\\\"requires,omitempty\\\"\"; RequiredBy []string \"json:\\\"requiredBy,omitempty\\\"\"; Prefix string \"json:\\\"prefix\\\"\"; Source *SourceMessage \"json:\\\"source,omitempty\\\"\"; Mount *SourceMessage \"json:\\\"mount,omitempty\\\"\"; Only []string \"json:\\\"only,omitempty\\\"\"}",
+      "canonical": "struct{Name string \"json:\\\"name\\\"\"; Doc string \"json:\\\"doc,omitempty\\\"\"; Docs map[string]string \"json:\\\"docs,omitempty\\\"\"; Package string \"json:\\\"package,omitempty\\\"\"; Build *github.com/kitsunium/sdk/framework/model/internal/core.ModuleVersionMessage \"json:\\\"build,omitempty\\\"\"; Services []string \"json:\\\"services\\\"\"; Requires []string \"json:\\\"requires,omitempty\\\"\"; RequiredBy []string \"json:\\\"requiredBy,omitempty\\\"\"; Prefix string \"json:\\\"prefix\\\"\"; Source *github.com/kitsunium/sdk/framework/model/internal/core.SourceMessage \"json:\\\"source,omitempty\\\"\"; Mount *github.com/kitsunium/sdk/framework/model/internal/core.SourceMessage \"json:\\\"mount,omitempty\\\"\"; Only []string \"json:\\\"only,omitempty\\\"\"}",
       "fields": [
         {
           "name": "Name",
@@ -23788,6 +23843,12 @@
           "type": "*SourceMessage",
           "tag": "json:\"mount,omitempty\"",
           "doc": "Mount is where the app mounts it — App.With or kit.Mount —; absent\nwhen only another module's kit.Requires mounted it, at its defaults.\n"
+        },
+        {
+          "name": "Only",
+          "type": "[]string",
+          "tag": "json:\"only,omitempty\"",
+          "doc": "Only are the environments its mounts hold in (kit.Only), sorted:\npresent when every mount the app gives it names its environments,\nabsent when one holds in every environment, or when only another\nmodule's kit.Requires mounted it. Added at Version 5: a reader\nthat does not know it reads the graph as before.\n"
         }
       ],
       "doc": "ModuleMessage is a module the app mounts: a Go module's services, released and\nmounted together like a bundle (ADR 0008). Everything a module declares is\nqualified with its name: its services are \"<module>.<service>\" — the one\nnamed like the module is \"<module>\" —, so its nodes are\n\"<module>.<service>/<kind>/<name>\" and carry [NodeEntity.Module].\n",
@@ -26933,6 +26994,40 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.StoreTrashMessage",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/model/internal/core",
+      "name": "StoreTrashMessage",
+      "spelled": "struct{Store string \"json:\\\"store\\\"\"; Total int \"json:\\\"total\\\"\"; Records []TrashedRecordMessage \"json:\\\"records\\\"\"; Next int \"json:\\\"next,omitempty\\\"\"}",
+      "canonical": "struct{Store string \"json:\\\"store\\\"\"; Total int \"json:\\\"total\\\"\"; Records []github.com/kitsunium/sdk/framework/model/internal/core.TrashedRecordMessage \"json:\\\"records\\\"\"; Next int \"json:\\\"next,omitempty\\\"\"}",
+      "fields": [
+        {
+          "name": "Store",
+          "type": "string",
+          "tag": "json:\"store\"",
+          "doc": "Store is the store's node ID.\n"
+        },
+        {
+          "name": "Total",
+          "type": "int",
+          "tag": "json:\"total\""
+        },
+        {
+          "name": "Records",
+          "type": "[]TrashedRecordMessage",
+          "tag": "json:\"records\""
+        },
+        {
+          "name": "Next",
+          "type": "int",
+          "tag": "json:\"next,omitempty\""
+        }
+      ],
+      "doc": "StoreTrashMessage is a page of a store's trash as the Studio lists it (GET\n/_kit/api/trash?store=&offset=&limit=): Total records in the trash, in\nkey order, Records those from the page's offset, Next the offset of the\npage after — absent on the last. A page is bounded, 200 records unless\nthe Studio asks from 1 to 1000; an offset counts records, never quotes a\nkey.\n",
+      "file": "framework/model/internal/core/history.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.SubscriptionSpec",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
@@ -27283,6 +27378,43 @@
       "value": "\"smtp\"",
       "doc": "TransportSMTP delivers to an SMTP relay.\n",
       "file": "framework/model/internal/core/node_info.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.TrashedRecordMessage",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/model/internal/core",
+      "name": "TrashedRecordMessage",
+      "spelled": "struct{Key string \"json:\\\"key,omitempty\\\"\"; Hidden bool \"json:\\\"hidden,omitempty\\\"\"; At time.Time \"json:\\\"at\\\"\"; PurgeAt time.Time \"json:\\\"purgeAt\\\"\"}",
+      "canonical": "struct{Key string \"json:\\\"key,omitempty\\\"\"; Hidden bool \"json:\\\"hidden,omitempty\\\"\"; At time.Time \"json:\\\"at\\\"\"; PurgeAt time.Time \"json:\\\"purgeAt\\\"\"}",
+      "fields": [
+        {
+          "name": "Key",
+          "type": "string",
+          "tag": "json:\"key,omitempty\"",
+          "doc": "Key is the record's key; empty when Hidden.\n"
+        },
+        {
+          "name": "Hidden",
+          "type": "bool",
+          "tag": "json:\"hidden,omitempty\"",
+          "doc": "Hidden says the key reads a personal, special or secret member, or\nthe record no longer opens to tell: the Studio is not given it.\n"
+        },
+        {
+          "name": "At",
+          "type": "time.Time",
+          "tag": "json:\"at\"",
+          "doc": "At is when the product deleted it.\n"
+        },
+        {
+          "name": "PurgeAt",
+          "type": "time.Time",
+          "tag": "json:\"purgeAt\"",
+          "doc": "PurgeAt is when kit purges it: its trash's length after At, or its\nretention's instant when that comes first.\n"
+        }
+      ],
+      "doc": "TrashedRecordMessage is one record in a store's trash as the Studio lists\nit (GET /_kit/api/trash, ADR 0178 C4): its key, when the product deleted\nit and when kit purges it, on the app's clock — never its value. A key\nthat reads a personal, special or secret member — the subject included —\nis not given, as the data browser never shows that member: Hidden says so.\n",
+      "file": "framework/model/internal/core/history.go",
       "layer": "framework"
     },
     {

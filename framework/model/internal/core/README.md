@@ -149,12 +149,14 @@ Package core is the Product Graph under the names the role rule asks for: every 
 - [type StoreHistoryMessage](<#StoreHistoryMessage>)
 - [type StorePrivacyMessage](<#StorePrivacyMessage>)
 - [type StoreSpec](<#StoreSpec>)
+- [type StoreTrashMessage](<#StoreTrashMessage>)
 - [type SubscriptionSpec](<#SubscriptionSpec>)
 - [type SystemMessage](<#SystemMessage>)
 - [type TopicSpec](<#TopicSpec>)
 - [type TraceMessage](<#TraceMessage>)
 - [type TransitionEvent](<#TransitionEvent>)
 - [type TransitionSpec](<#TransitionSpec>)
+- [type TrashedRecordMessage](<#TrashedRecordMessage>)
 - [type WakeSourceMessage](<#WakeSourceMessage>)
 - [type WorkflowSpec](<#WorkflowSpec>)
 
@@ -3648,6 +3650,12 @@ type ModuleMessage struct {
 	// Mount is where the app mounts it — App.With or kit.Mount —; absent
 	// when only another module's kit.Requires mounted it, at its defaults.
 	Mount      *SourceMessage        `json:"mount,omitempty"`
+	// Only are the environments its mounts hold in (kit.Only), sorted:
+	// present when every mount the app gives it names its environments,
+	// absent when one holds in every environment, or when only another
+	// module's kit.Requires mounted it. Added at Version 5: a reader
+	// that does not know it reads the graph as before.
+	Only       []string              `json:"only,omitempty"`
 }
 ```
 
@@ -4727,6 +4735,21 @@ type StoreSpec struct {
 }
 ```
 
+<a name="StoreTrashMessage"></a>
+## type [StoreTrashMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
+
+StoreTrashMessage is a page of a store's trash as the Studio lists it (GET /\_kit/api/trash?store=&offset=&limit=): Total records in the trash, in key order, Records those from the page's offset, Next the offset of the page after — absent on the last. A page is bounded, 200 records unless the Studio asks from 1 to 1000; an offset counts records, never quotes a key.
+
+```go
+type StoreTrashMessage struct {
+	// Store is the store's node ID.
+	Store   string                 `json:"store"`
+	Total   int                    `json:"total"`
+	Records []TrashedRecordMessage `json:"records"`
+	Next    int                    `json:"next,omitempty"`
+}
+```
+
 <a name="SubscriptionSpec"></a>
 ## type [SubscriptionSpec](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/node_info.go>)
 
@@ -4874,6 +4897,26 @@ type TransitionSpec struct {
 	Source  *SourceMessage `json:"source,omitempty"`
 	// Callers are the node IDs found to fire this event.
 	Callers []string       `json:"callers,omitempty"`
+}
+```
+
+<a name="TrashedRecordMessage"></a>
+## type [TrashedRecordMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
+
+TrashedRecordMessage is one record in a store's trash as the Studio lists it (GET /\_kit/api/trash, ADR 0178 C4): its key, when the product deleted it and when kit purges it, on the app's clock — never its value. A key that reads a personal, special or secret member — the subject included — is not given, as the data browser never shows that member: Hidden says so.
+
+```go
+type TrashedRecordMessage struct {
+	// Key is the record's key; empty when Hidden.
+	Key     string    `json:"key,omitempty"`
+	// Hidden says the key reads a personal, special or secret member, or
+	// the record no longer opens to tell: the Studio is not given it.
+	Hidden  bool      `json:"hidden,omitempty"`
+	// At is when the product deleted it.
+	At      time.Time `json:"at"`
+	// PurgeAt is when kit purges it: its trash's length after At, or its
+	// retention's instant when that comes first.
+	PurgeAt time.Time `json:"purgeAt"`
 }
 ```
 

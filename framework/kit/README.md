@@ -1285,6 +1285,17 @@ Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeTrash`.
 
 Code `0.4.2.78`
 
+<a name="CodeTrashList"></a>
+```go
+const CodeTrashList errs.Code = 262738
+```
+
+CodeTrashList refuses the Studio's list of a store's trash (GET /\_kit/api/trash) when the store named is none of the product's — a NotFound — or keeps no trash, having no kit.Revisions — an Invalid (ADR 0178 C4).
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeTrashList`.
+
+Code `0.4.2.82`
+
 <a name="CodeUndecodable"></a>
 ```go
 const CodeUndecodable errs.Code = 262665

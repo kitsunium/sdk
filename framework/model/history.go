@@ -54,6 +54,19 @@ type (
 )
 
 type (
+	// TrashedRecord is one record in a store's trash as the Studio lists it
+	// (GET /_kit/api/trash): its key, when the product deleted it and when kit
+	// purges it — never its value.
+	TrashedRecord = core.TrashedRecordMessage
+)
+
+type (
+	// StoreTrash is a page of a store's trash as the Studio lists it (GET
+	// /_kit/api/trash), in key order.
+	StoreTrash = core.StoreTrashMessage
+)
+
+type (
 	// ExportedVersions are the versions of one exported record.
 	ExportedVersions = core.ExportedVersionsMessage
 )

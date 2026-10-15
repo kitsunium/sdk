@@ -411,6 +411,42 @@ decision, 2026-10-14.
 - `CodeTrash` (0.4.2.78, `TRASH`): the trash could not be read or emptied;
   the record stays in it and the loop tries again after a backoff.
 
+**Amended on 2026-10-15 — the Studio reads the trash.** The Studio (the kit
+tool's, in kitsunium/platform) had no route to list what a store's trash
+holds. `GET /_kit/api/trash?store=ID[&offset=N&limit=N]` is one more read of
+the dev tools, behind the Studio's guard as every `/_kit/api` route
+(`hostGuard`: this machine unless `KIT_STUDIO_REMOTE=on`, a Host in
+`KIT_ALLOWED_HOSTS`; absent outside dev). It answers a `model.StoreTrash`:
+
+```json
+{"store": "folk/store/members", "total": 3, "next": 2,
+ "records": [{"key": "m1", "at": "2026-09-27T10:00:00Z", "purgeAt": "2026-10-27T10:00:00Z"},
+             {"hidden": true, "at": "…", "purgeAt": "…"}]}
+```
+
+- Each record gives its key, when the product deleted it and when kit purges
+  it (`Trashed`'s instants, the retention's when it comes first) — never its
+  value, which the Studio has the revisions route for.
+- A key that reads a personal, special or secret member — the subject
+  included, an account keyed by its email — is not given (`hidden`), as the
+  data browser never shows that member: the record, those members cleared,
+  no longer gives the key (`keyShown`, the walk `sealKeyed` uses). A record
+  that no longer opens says nothing, and its key is hidden too. Any other key
+  is given, as the workflow instances give theirs.
+- In key order, a page at a time: `limit` from 1 to 1000, 200 unless given,
+  as the mailbox's; `offset` counts records, `next` is the offset of the page
+  after, absent on the last. An offset rather than a key cursor, so the
+  cursor never quotes a hidden key.
+- A store that does not exist is a `NotFound`, one without `Revisions(n)` —
+  it keeps no trash — an `Invalid`, both carrying `CodeTrashList`
+  (0.4.2.82; reasons `TRASH_STORE_UNKNOWN`, `TRASH_NOT_KEPT`); a malformed
+  page an `Invalid`, as the neighbouring routes answer one.
+- No route restores or purges (D13): `Store.Untrash` stays the product's.
+
+`TestTheStudioListsTheTrash`, `TestTheTrashListHidesAPersonalKey`,
+`TestTheTrashListRefusesWhatItCannotList`,
+`TestTheTrashListIsRefusedWithATypedCode`.
+
 ### C5 — a `subject` in a list
 
 **Question.** Vigie's endpoints return lists of records whose type has a
@@ -806,7 +842,17 @@ leave a record never rewritten with its old versions.
   `kit.Only` that names no environment, or a name that cannot be one
   (`[a-z0-9]`, dashes inside, 63 at most — the grammar of an environment's
   configuration file). These are start diagnostics, like every other mount
-  problem: no error code.
+  problem: no error code. **Amended on 2026-10-15** for the Studio, which
+  reads the graph and could not tell a mount per environment: each module
+  of the graph says the environments its mounts name, `Module.Only` (JSON
+  `only`, sorted, once each, whatever environment the product runs in) —
+  present when every mount the app gives the module is limited by
+  `kit.Only`, absent when one mount holds everywhere or when only another
+  module's `kit.Requires` mounted it, as `Module.Mount` is. The field is
+  additive and `omitempty`: a reader that does not know it reads the graph
+  as before, so `model.Version` stays 5 (the model's rule: a bump for what an
+  older reader would misread). `TestTheGraphSaysWhereAModuleIsMounted`,
+  `TestAModuleSaysTheEnvironmentsItIsMountedIn`.
 - *`kit add` and `kit remove`*: they write the mount into the product's
   `design/` — which already declares its mounts — then say to run `go get` and
   `kit gen`. Design first; editing `main.go` by AST (option B) is refused. The
@@ -930,6 +976,7 @@ refused. The pull requests still to come change:
 | Accepted, item 9 | 2026-10-15 | C6's command implemented: `<product> watch replay <watch>`, the product stopped, queues in the watch's own queue one notice per key of every store that feeds it — the catch-up's loop — and journals one `list` entry per store it lists, by `cli`; a name that is no watch refused, `NotFound`, `CodeWatchReplay` (0.4.2.81); no confirmation, a replay heard twice being the watch's at-least-once contract; the Status line says so |
 | Accepted, item 15 | 2026-10-15 | `data copy --to NAME`, last of C7's order: one transaction on the target, verified by the fingerprints of C7 before it commits — each store's in key order, the first key that differs named; each queue's as a sorted multiset —, a target holding rows refused, the file queues moved aside under `<data>/.data-copy/`; a mailer's outbox fingerprinted on its mails opened, the source keeping them in clear and the target sealed |
 | Decisions of 15 October | 2026-10-15 | The owner delegated the triage's three questions on #274 and each recommendation was applied: Q1, no index of the oldest `data-key` version — the scan kept and measured (`BenchmarkSubjectKeysOldestRootPopulation`, about 4 µs a key), kit's cache of the last `Rewrap` the fallback; Q2, the age limit on versions still deferred (C4), an agenda per store reusing the trash's the shape when needed; Q3, `kit.Only(envs…)` a mount option, `kit add`/`kit remove` writing the mount into the product's `design/` in platform's `kit` command, `kit.As` deferred |
+| Amended | 2026-10-15 | For the Studio, two reads #274 still lacked: the graph's `Module.Only` (`only`, the environments a module's mounts name, sorted; absent when one mount holds everywhere or only `kit.Requires` mounted it), additive so `model.Version` stays 5 (Q3); and `GET /_kit/api/trash?store=&offset=&limit=` behind the Studio's guard, a store's trash as `model.StoreTrash` — key, `at`, `purgeAt`, never the value, a key that reads a personal, special or secret member `hidden`, pages of 200 (1 to 1000) by offset, an unknown store `NotFound` and one without revisions `Invalid`, both `CodeTrashList` 0.4.2.82 (C4); the Studio's half of the deferred "trash in the Studio" done, the export's still deferred |
 
 ## Alternatives considered
 
@@ -954,10 +1001,11 @@ preferred. Two more were set aside before the choices:
 - **An age limit on versions** (C4), deferred again as ADR 0143 deferred it,
   and confirmed deferred on 2026-10-15 (Q2): when a product needs it, an
   agenda per store reusing the trash's purge agenda.
-- **The trash in an export and in the Studio** (C4): `kit.Export` reads a
-  person's records through the subject index, which a trashed record has
-  left, so it does not carry their trashed records yet; the Studio shows no
-  trash. Both read `Trashed` and `trashedValue` when they come.
+- **The trash in an export** (C4): `kit.Export` reads a person's records
+  through the subject index, which a trashed record has left, so it does not
+  carry their trashed records yet; it reads `trashedValue` when it comes.
+  The Studio's half was **implemented on 2026-10-15** (amendment below): a
+  read, `GET /_kit/api/trash`, and no route that untrashes or purges (D13).
 - **An index of the oldest `data-key` version in use** (Q1): not built; the
   scan is measured, and kit's cache of the last `Rewrap` is the fallback.
 - **A module mounted twice or renamed, `kit.As`** (Q3): deferred until a

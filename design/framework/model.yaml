@@ -173,6 +173,17 @@ packages:
           them (GET /_kit/api/revisions), and what changed between two.
         name: RecordVersions
         target: core.RecordVersionsMessage
+      - doc: |-
+          TrashedRecord is one record in a store's trash as the Studio lists it
+          (GET /_kit/api/trash): its key, when the product deleted it and when kit
+          purges it — never its value.
+        name: TrashedRecord
+        target: core.TrashedRecordMessage
+      - doc: |-
+          StoreTrash is a page of a store's trash as the Studio lists it (GET
+          /_kit/api/trash), in key order.
+        name: StoreTrash
+        target: core.StoreTrashMessage
       - doc: ExportedVersions are the versions of one exported record.
         name: ExportedVersions
         target: core.ExportedVersionsMessage
@@ -4663,6 +4674,58 @@ packages:
               tag: json:"edits,omitempty"
               type: "[]EditMessage"
       - doc: |-
+          TrashedRecordMessage is one record in a store's trash as the Studio lists
+          it (GET /_kit/api/trash, ADR 0178 C4): its key, when the product deleted
+          it and when kit purges it, on the app's clock — never its value. A key
+          that reads a personal, special or secret member — the subject included —
+          is not given, as the data browser never shows that member: Hidden says so.
+        name: TrashedRecordMessage
+        struct:
+          fields:
+            - doc: Key is the record's key; empty when Hidden.
+              name: Key
+              tag: json:"key,omitempty"
+              type: string
+            - doc: |-
+                Hidden says the key reads a personal, special or secret member, or
+                the record no longer opens to tell: the Studio is not given it.
+              name: Hidden
+              tag: json:"hidden,omitempty"
+              type: bool
+            - doc: At is when the product deleted it.
+              name: At
+              tag: json:"at"
+              type: time.Time
+            - doc: |-
+                PurgeAt is when kit purges it: its trash's length after At, or its
+                retention's instant when that comes first.
+              name: PurgeAt
+              tag: json:"purgeAt"
+              type: time.Time
+      - doc: |-
+          StoreTrashMessage is a page of a store's trash as the Studio lists it (GET
+          /_kit/api/trash?store=&offset=&limit=): Total records in the trash, in
+          key order, Records those from the page's offset, Next the offset of the
+          page after — absent on the last. A page is bounded, 200 records unless
+          the Studio asks from 1 to 1000; an offset counts records, never quotes a
+          key.
+        name: StoreTrashMessage
+        struct:
+          fields:
+            - doc: Store is the store's node ID.
+              name: Store
+              tag: json:"store"
+              type: string
+            - name: Total
+              tag: json:"total"
+              type: int
+            - name: Records
+              tag: json:"records"
+              type: "[]TrashedRecordMessage"
+            - name: Next
+              tag: json:"next,omitempty"
+              type: int
+      - doc: |-
           IDValue is a node's identity, parsed: the one grammar of [IDPattern]. Its
           String is the ID it was parsed from.
         methods:
@@ -5134,6 +5197,15 @@ packages:
               name: Mount
               tag: json:"mount,omitempty"
               type: "*SourceMessage"
+            - doc: |-
+                Only are the environments its mounts hold in (kit.Only), sorted:
+                present when every mount the app gives it names its environments,
+                absent when one holds in every environment, or when only another
+                module's kit.Requires mounted it. Added at Version 5: a reader
+                that does not know it reads the graph as before.
+              name: Only
+              tag: json:"only,omitempty"
+              type: "[]string"
       - doc: |-
           FileMessage is one file a graph points at: its path, relative to its root — the
           product's module, or the Go module [SourceMessage.GoModule] names.

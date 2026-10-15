@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
@@ -35,6 +36,27 @@ func TestOnlyMountsAModuleInTheEnvironmentsItNames(t *testing.T) {
 	}
 	if r := call(t, app, "POST /reviews/reviews", Review{ID: "r1", Text: "lovely"}); r.status != http.StatusNotFound {
 		t.Errorf("a module mounted only in staging serves its route in dev: %d", r.status)
+	}
+}
+
+// The graph says in which environments a module is mounted: the union of
+// the environments its mounts name, sorted, when every mount of it is given
+// kit.Only; nothing when one mount holds everywhere, nor for a module only
+// another module's kit.Requires mounts — as its Mount says nothing.
+func TestTheGraphSaysWhereAModuleIsMounted(t *testing.T) {
+	app := start(t, kit.Mount(ReviewsModule, kit.Only("staging", "dev")), kit.Mount(ReviewsModule, kit.Only("dev", "qa")))
+	g := app.Graph()
+	if m := g.ModuleOf("reviews"); m == nil || !slices.Equal(m.Only, []string{"dev", "qa", "staging"}) {
+		t.Errorf("a module mounted for staging, dev and qa says %+v", m)
+	}
+	if m := g.ModuleOf("ratings"); m == nil || m.Only != nil {
+		t.Errorf("a module another module requires says %+v", m)
+	}
+	stopApp(t, app)
+
+	app = start(t, kit.Mount(ReviewsModule, kit.Only("staging")), kit.Mount(ReviewsModule))
+	if m := app.Graph().ModuleOf("reviews"); m == nil || m.Only != nil {
+		t.Errorf("a module one mount mounts everywhere says %+v", m)
 	}
 }
 

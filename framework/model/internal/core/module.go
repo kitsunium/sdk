@@ -39,6 +39,12 @@ type ModuleMessage struct {
 	// Mount is where the app mounts it — App.With or kit.Mount —; absent
 	// when only another module's kit.Requires mounted it, at its defaults.
 	Mount *SourceMessage `json:"mount,omitempty"`
+	// Only are the environments its mounts hold in (kit.Only), sorted:
+	// present when every mount the app gives it names its environments,
+	// absent when one holds in every environment, or when only another
+	// module's kit.Requires mounted it. Added at Version 5: a reader
+	// that does not know it reads the graph as before.
+	Only []string `json:"only,omitempty"`
 }
 
 // FileMessage is one file a graph points at: its path, relative to its root — the
@@ -97,6 +103,7 @@ func normalizeModules(modules []ModuleMessage) {
 	slices.SortFunc(modules, func(a, b ModuleMessage) int { return cmp.Compare(a.Name, b.Name) })
 	for i := range modules {
 		slices.Sort(modules[i].RequiredBy)
+		slices.Sort(modules[i].Only)
 		if modules[i].Services == nil {
 			modules[i].Services = []string{}
 		}
