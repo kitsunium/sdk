@@ -54,6 +54,7 @@ const SealedPlaceholder = "[sealed]"
 const (
 	JournalExport      = "export"       // a person's records exported
 	JournalRead        = "read"         // a record read by a module, through kit.Records
+	JournalList        = "list"         // a store's keys listed by a module that watches it, through kit.Records
 	JournalErase       = "erase"        // a record's personal data cleared
 	JournalDelete      = "delete"       // a record removed
 	JournalEraseFields = "erase-fields" // some fields of a record cleared, by a module

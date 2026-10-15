@@ -53,6 +53,7 @@ const SealedPlaceholder string = core.SealedPlaceholder
 const (
 	JournalExport      string = core.JournalExport      // a person's records exported
 	JournalRead        string = core.JournalRead        // a record read by a module, through kit.Records
+	JournalList        string = core.JournalList        // a store's keys listed by a module that watches it, through kit.Records
 	JournalErase       string = core.JournalErase       // a record's personal data cleared
 	JournalDelete      string = core.JournalDelete      // a record removed
 	JournalEraseFields string = core.JournalEraseFields // some fields of a record cleared, by a module

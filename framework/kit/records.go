@@ -19,9 +19,10 @@ const (
 )
 
 // Records is one store's records without their type. Get returns a record
-// without its secret members; EraseFields and Delete take a reason and are
-// refused on a held record. Each call is a span on the store's node and an
-// entry in the privacy journal.
+// without its secret members; Keys lists the records' keys, to a module that
+// watches the store; EraseFields and Delete take a reason and are refused on a
+// held record. Each call is a span on the store's node and an entry in the
+// privacy journal.
 type Records = ikit.RecordsService
 
 // RecordsOf is [App].Records for code the app runs and that does not hold

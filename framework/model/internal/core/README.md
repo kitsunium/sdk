@@ -799,6 +799,13 @@ const JournalHold = "hold"
 
 The operations of the privacy journal.
 
+<a name="JournalList"></a>
+```go
+const JournalList = "list"
+```
+
+The operations of the privacy journal.
+
 <a name="JournalRead"></a>
 ```go
 const JournalRead = "read"

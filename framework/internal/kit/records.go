@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"reflect"
 	"slices"
 
@@ -80,9 +81,10 @@ func RecordsOf(ctx context.Context, store string) (RecordsService, error) {
 }
 
 // RecordsService is one store's records without their type. Get returns a record
-// without its secret members; EraseFields and Delete take a reason and are
-// refused on a held record. Each call is a span on the store's node and an
-// entry in the privacy journal.
+// without its secret members; Keys lists the records' keys, to a module that
+// watches the store; EraseFields and Delete take a reason and are refused on a
+// held record. Each call is a span on the store's node and an entry in the
+// privacy journal.
 type RecordsService struct {
 	port recordsPort
 }
@@ -90,6 +92,7 @@ type RecordsService struct {
 // recordsPort is a store's side of Records.
 type recordsPort interface {
 	recordGet(ctx context.Context, key string) (json.RawMessage, error)
+	recordKeys(ctx context.Context) iter.Seq2[string, error]
 	recordEraseFields(ctx context.Context, key, reason string, paths []string) error
 	recordDelete(ctx context.Context, key, reason string) error
 }
@@ -100,6 +103,21 @@ func (r RecordsService) Get(ctx context.Context, key string) (json.RawMessage, e
 		return nil, NotFound("no such store")
 	}
 	return r.port.recordGet(ctx, key)
+}
+
+// Keys yields the key of every record the store holds, in key order, and
+// nothing of a record: what a watch reads to catch up on the writes it
+// may have missed. It is offered only to a module one of whose watches
+// the store feeds — any other caller, code outside a module's node
+// included, is refused with a [Forbidden] error ([CodeRecordsKeys]) —,
+// and each listing is one entry in the privacy journal, however many
+// keys it yields. A record in the store's trash is not listed. A
+// failure is yielded once, with an empty key, and ends the listing.
+func (r RecordsService) Keys(ctx context.Context) iter.Seq2[string, error] {
+	if r.port == nil {
+		return func(yield func(string, error) bool) { yieldKeys(yield, nil, NotFound("no such store")) }
+	}
+	return r.port.recordKeys(ctx)
 }
 
 // EraseFields clears the fields at paths — pointers as [FieldRefValue] gives
