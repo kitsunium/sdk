@@ -1270,6 +1270,17 @@ Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeWatchQueue
 
 Code `0.4.2.47`
 
+<a name="CodeWatchReplay"></a>
+```go
+const CodeWatchReplay errs.Code = 262737
+```
+
+CodeWatchReplay refuses \`\<product> watch replay WATCH\` when WATCH names no watch of the product: the command replays a watch the product declares, and nothing else (ADR 0178 C6).
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeWatchReplay`.
+
+Code `0.4.2.81`
+
 <a name="CodeWorkflowHookChange"></a>
 ```go
 const CodeWorkflowHookChange errs.Code = 262670
@@ -2749,7 +2760,7 @@ Main is the whole main function of a product:
 func main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }
 ```
 
-It understands eight commands, so every kit binary can describe itself, be probed, say its configuration, manage its secrets, migrate its databases and answer for the personal data it keeps without a shell or another tool in its image:
+It understands nine commands, so every kit binary can describe itself, be probed, say its configuration, manage its secrets, migrate its databases, answer for the personal data it keeps and replay what its watches hear without a shell or another tool in its image:
 
 ```
 serve        run the product (the default)
@@ -2761,6 +2772,7 @@ migrate      the databases' migrations: status, up, down SET VERSION
 privacy      the register of processing, a person's export and erasure,
              the legal holds, the privacy journal, the retention
 revisions    a record's version restored
+watch        replay WATCH: one notice per record of each store that feeds it
 ```
 
 A product's CLI command runs when the first argument names it. A command declared with DefaultCommand runs when the first argument names no command at all — with every argument —, and when there is none, in serve's place: Main then never answers a usage error.

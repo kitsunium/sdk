@@ -3345,7 +3345,7 @@
       "recv": "App",
       "spelled": "func(ctx context.Context, args []string) int",
       "canonical": "func(ctx context.Context, args []string) int",
-      "doc": "Main is the whole main function of a product:\n\n\tfunc main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }\n\nIt understands eight commands, so every kit binary can describe itself, be\nprobed, say its configuration, manage its secrets, migrate its databases\nand answer for the personal data it keeps without a shell or another tool\nin its image:\n\n\tserve        run the product (the default)\n\tgraph        print the product graph: -format json|mermaid\n\thealthcheck  exit 0 when the product running on KIT_ADDR is ready\n\tconfig       every setting: its value, never a secret's, and its origin\n\tsecrets      list the secrets, set one from standard input, rotate one\n\tmigrate      the databases' migrations: status, up, down SET VERSION\n\tprivacy      the register of processing, a person's export and erasure,\n\t             the legal holds, the privacy journal, the retention\n\trevisions    a record's version restored\n\nA product's CLI command runs when the first argument names it. A command\ndeclared with DefaultCommand runs when the first argument names no command\nat all — with every argument —, and when there is none, in serve's place:\nMain then never answers a usage error.\n\nIt returns the process exit status rather than exiting, so that deferred\nwork runs and a test can call it.\n",
+      "doc": "Main is the whole main function of a product:\n\n\tfunc main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }\n\nIt understands nine commands, so every kit binary can describe itself, be\nprobed, say its configuration, manage its secrets, migrate its databases,\nanswer for the personal data it keeps and replay what its watches hear\nwithout a shell or another tool in its image:\n\n\tserve        run the product (the default)\n\tgraph        print the product graph: -format json|mermaid\n\thealthcheck  exit 0 when the product running on KIT_ADDR is ready\n\tconfig       every setting: its value, never a secret's, and its origin\n\tsecrets      list the secrets, set one from standard input, rotate one\n\tmigrate      the databases' migrations: status, up, down SET VERSION\n\tprivacy      the register of processing, a person's export and erasure,\n\t             the legal holds, the privacy journal, the retention\n\trevisions    a record's version restored\n\twatch        replay WATCH: one notice per record of each store that feeds it\n\nA product's CLI command runs when the first argument names it. A command\ndeclared with DefaultCommand runs when the first argument names no command\nat all — with every argument —, and when there is none, in serve's place:\nMain then never answers a usage error.\n\nIt returns the process exit status rather than exiting, so that deferred\nwork runs and a test can call it.\n",
       "file": "framework/internal/kit/main.go",
       "layer": "framework"
     },
@@ -4775,6 +4775,21 @@
         "value": "0.4.2.47"
       },
       "doc": "Watches (ADR 0008).\n",
+      "file": "framework/internal/kit/codes_gen.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeWatchReplay",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "CodeWatchReplay",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262737",
+      "code": {
+        "value": "0.4.2.81"
+      },
+      "doc": "The framework's own failures carry SDK error codes in 0.4.2.* — layer 4 is\nthe framework's, PP 2 this package (ADR 0147 §3) — so a product keeps\nthe whole application range 0x40–0x7F for its own codes. Match them with\nerrs.HasCode. Their Public text is the only part that may reach a caller;\nnone of them is a 4xx, so a caller only ever reads \"internal error\".\n",
       "file": "framework/internal/kit/codes_gen.go",
       "layer": "framework"
     },
@@ -11615,6 +11630,22 @@
         "value": "0.4.2.47"
       },
       "doc": "Watches (ADR 0008).\n",
+      "file": "framework/kit/errors.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.CodeWatchReplay",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "CodeWatchReplay",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262737",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeWatchReplay",
+      "code": {
+        "value": "0.4.2.81"
+      },
+      "doc": "CodeWatchReplay refuses `<product> watch replay WATCH` when WATCH names no\nwatch of the product: the command replays a watch the product declares,\nand nothing else (ADR 0178 C6).\n",
       "file": "framework/kit/errors.go",
       "layer": "framework"
     },

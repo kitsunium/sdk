@@ -205,6 +205,9 @@ packages:
           - comment: "0.4.2.77 — Records.Keys asked by a caller none of whose module's watches the store feeds: refused, Forbidden"
             name: CodeRecordsKeys
             value: "0x00_04_02_4D"
+          - comment: "0.4.2.81 — `watch replay` names no watch of the product: refused, NotFound"
+            name: CodeWatchReplay
+            value: "0x00_04_02_51"
           - comment: "0.4.2.61 — kit's data keys cannot be reached: data-key, or kit's own store of data keys"
             doc: Sealing at rest (ADR 0006, step 3).
             name: CodeSealKey
@@ -2481,10 +2484,10 @@ packages:
 
               	func main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }
 
-              It understands eight commands, so every kit binary can describe itself, be
-              probed, say its configuration, manage its secrets, migrate its databases
-              and answer for the personal data it keeps without a shell or another tool
-              in its image:
+              It understands nine commands, so every kit binary can describe itself, be
+              probed, say its configuration, manage its secrets, migrate its databases,
+              answer for the personal data it keeps and replay what its watches hear
+              without a shell or another tool in its image:
 
               	serve        run the product (the default)
               	graph        print the product graph: -format json|mermaid
@@ -2495,6 +2498,7 @@ packages:
               	privacy      the register of processing, a person's export and erasure,
               	             the legal holds, the privacy journal, the retention
               	revisions    a record's version restored
+              	watch        replay WATCH: one notice per record of each store that feeds it
 
               A product's CLI command runs when the first argument names it. A command
               declared with DefaultCommand runs when the first argument names no command
@@ -5950,6 +5954,13 @@ packages:
         name: CodeRecordsKeys
         type: errs.Code
         value: "0x00_04_02_4D"
+      - doc: |-
+          CodeWatchReplay refuses `<product> watch replay WATCH` when WATCH names no
+          watch of the product: the command replays a watch the product declares,
+          and nothing else (ADR 0178 C6).
+        name: CodeWatchReplay
+        type: errs.Code
+        value: "0x00_04_02_51"
       - doc: Sealing at rest (ADR 0006, step 3).
         name: CodeSealKey
         type: errs.Code

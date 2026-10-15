@@ -1243,6 +1243,15 @@ Watches (ADR 0008).
 
 Code `0.4.2.47`
 
+<a name="CodeWatchReplay"></a>
+```go
+const CodeWatchReplay errs.Code = 262737
+```
+
+The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is the framework's, PP 2 this package (ADR 0147 §3) — so a product keeps the whole application range 0x40–0x7F for its own codes. Match them with errs.HasCode. Their Public text is the only part that may reach a caller; none of them is a 4xx, so a caller only ever reads "internal error".
+
+Code `0.4.2.81`
+
 <a name="CodeWorkflowHookChange"></a>
 ```go
 const CodeWorkflowHookChange errs.Code = 262670
@@ -2807,7 +2816,7 @@ Main is the whole main function of a product:
 func main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }
 ```
 
-It understands eight commands, so every kit binary can describe itself, be probed, say its configuration, manage its secrets, migrate its databases and answer for the personal data it keeps without a shell or another tool in its image:
+It understands nine commands, so every kit binary can describe itself, be probed, say its configuration, manage its secrets, migrate its databases, answer for the personal data it keeps and replay what its watches hear without a shell or another tool in its image:
 
 ```
 serve        run the product (the default)
@@ -2819,6 +2828,7 @@ migrate      the databases' migrations: status, up, down SET VERSION
 privacy      the register of processing, a person's export and erasure,
              the legal holds, the privacy journal, the retention
 revisions    a record's version restored
+watch        replay WATCH: one notice per record of each store that feeds it
 ```
 
 A product's CLI command runs when the first argument names it. A command declared with DefaultCommand runs when the first argument names no command at all — with every argument —, and when there is none, in serve's place: Main then never answers a usage error.

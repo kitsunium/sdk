@@ -3081,6 +3081,10 @@ codes:
     const: CodeRecordsKeys
     hex: "0x00_04_02_4D"
     package: framework/internal/kit
+  - code: "0.4.2.81"
+    const: CodeWatchReplay
+    hex: "0x00_04_02_51"
+    package: framework/internal/kit
   - code: "0.4.3.1"
     const: CodeMisconfigured
     hex: "0x00_04_03_01"

@@ -200,6 +200,11 @@ const (
 	// keys (ADR 0178 C6).
 	CodeRecordsKeys errs.Code = ikit.CodeRecordsKeys
 
+	// CodeWatchReplay refuses `<product> watch replay WATCH` when WATCH names no
+	// watch of the product: the command replays a watch the product declares,
+	// and nothing else (ADR 0178 C6).
+	CodeWatchReplay errs.Code = ikit.CodeWatchReplay
+
 	// Sealing at rest (ADR 0006, step 3).
 	CodeSealKey errs.Code = ikit.CodeSealKey
 
