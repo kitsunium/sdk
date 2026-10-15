@@ -5,6 +5,7 @@
 - **Deciders**: SDK maintainers
 - **Amended**: 2026-10-15 — the trash this record deferred, for [ADR 0178](0178-kits-effects-join-the-transaction-on-the-database-that-keeps-their-queue.md) C4 (see the dated section at the end)
 - **Amended**: 2026-10-15 — a document written with its versions and its trash as they are given, `VersionWriter.PutDocument`, and `VERSIONS_INVALID` `0.3.80.22`, for ADR 0178's `data copy` (see the second dated section at the end)
+- **Amended**: 2026-10-15 — what the versions weigh, `VersionWeigher` and `VersionWeigherContext`, for kit's Studio (its ADR 0007 §5; see the third dated section at the end)
 - **Closes**: [ADR 0139](0139-a-document-store-over-sql-joins-the-transaction-its-context-carries.md) §D10 and §Deferred, for versions (side values stay deferred)
 - **Related**: [ADR 0110](0110-a-document-store-writes-one-entry-and-rests-as-one-file.md) (the overlay entry a write publishes, the order-free replay), [ADR 0056](0056-sdk-vfs-domain.md) (the atomic publication), [ADR 0055](0055-sdk-sql-domain.md) (the transactions and savepoints), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (no port, so the values are the engines'), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (the refused settings), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the fields added to two published configurations), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port the versions are stamped with, public); kitsunium/platform ADR 0007 §3 and "Implementation, in order", step 3
 
@@ -422,7 +423,8 @@ configuration type of its own, or `pkg/v2`.
 
 - **What the versions weigh**, per store — kit's Studio wants it (its ADR 0007
   §5). A counter in `Stats` for the file engine, a query for the SQL engine,
-  when the Studio asks.
+  when the Studio asks. Done on 2026-10-15, when #274's triage asked for it:
+  see the third amendment below.
 - **A trash**: a deleted document's last version kept for some days. kit defers
   it too; it is the one thing that would need a number kept across a deletion.
   Done on 2026-10-15, when ADR 0178 C4 asked for it: see the amendment below.
@@ -720,3 +722,95 @@ store reopened before and after a fold. The facade builds the four new names
 without an internal import. kit's `data copy` (ADR 0178, C7), built on it
 next, is to run it on a real SQLite through `framework/connectors/sqlite`.
 
+## Amendment (2026-10-15): what the versions weigh
+
+**Why.** kit's ADR 0007 §5 has the Studio show "what the versions weigh, per
+store", and its §6 records that it is not shown because "the SDK counts no
+version yet": this record deferred it (§Deferred), with its form already
+fixed — a counter in `Stats` for the file engine, a query for the SQL engine.
+#274's triage (item 9) asked for it. Without it, a caller could only read every
+document's versions: on the file engine 3 ms at 1 000 documents of ten former
+versions and 60 to 100 ms at 10 000, and over SQL one statement per document,
+1.3 s at 10 000 on SQLite.
+
+**Decision.** `core/data/docstore` gains a sibling port per family (ADR 0039),
+no port widened, not generic — no call names a `T` —, published by
+`pkg/v1/data/docstore` as the aliases `VersionWeigher`,
+`VersionWeigherContext` and `VersionWeight`:
+
+```go
+type VersionWeigher interface {
+	VersionWeight() (VersionWeightValue, error)
+}
+type VersionWeigherContext interface {
+	VersionWeight(ctx context.Context) (VersionWeightValue, error)
+}
+type VersionWeightValue struct {
+	Former  int   // former versions, every document's, a trashed one's included
+	Trashed int   // documents in the trash
+	Bytes   int64 // the JSON they hold — the former versions and the trashed documents
+}
+```
+
+- **What it counts** is what a store keeps beyond its documents: a document's
+  current version is the document and counts in none. `Bytes` is the length
+  of the JSON each holds, compact, as both engines keep it, instants and
+  metadata left out; on a framework that seals its records, the JSON as it
+  rests, sealed. The same writes weigh the same on both engines, and the
+  contract test holds every step to a recount through `Versions` and
+  `Tombstones`.
+- **A store that keeps no versions** answers `VERSIONS_NOT_KEPT`, as every
+  call on versions does (D6): a weight of nothing would say a history is kept
+  and empty. A closed file store answers `STORE_CLOSED`.
+- **File engine: the counter in `Stats`.** `StatsValue` gains `Versions`
+  (ADR 0040: a field added to a published value), and `VersionWeight` reads
+  the same counter. `setVersions` is the one place a key's record changes —
+  every write, a trash, a restoration, a purge, a rewrite, `PutDocument`, and
+  the load from the versions file and the overlay — and moves the counter by
+  what the new record weighs less what the old one did; a record is never
+  changed once stored (D3), so both are exact. Asking costs 20 to 30 ns and no
+  allocation whatever the store holds; a write pays one loop over the versions
+  it already built, within the noise of `BenchmarkPutVersioned` and with the
+  same allocations.
+- **SQL engine: one aggregate statement**, no migration:
+  `SELECT COUNT(CASE WHEN num > 0 AND doc IS NOT NULL THEN 1 END), COUNT(CASE
+  WHEN num = 0 THEN 1 END), COALESCE(SUM(LENGTH(doc)), 0) FROM <table>___vs`,
+  on the transaction the context carries, else on the pool. A former row
+  holds a document, the current version's holds NULL and the trash's is
+  numbered 0 (the first amendment); `doc` is binary on every engine, so
+  `LENGTH` counts bytes, which the integration suite checks with two-byte
+  UTF-8 characters. The database scans the table and sends one row: on SQLite
+  5 ms at 11 000 rows and 53 ms at 110 000. The rows of D7's one gap — a
+  document deleted and written again while its store kept no versions — weigh
+  what they hold, as they rest in the table.
+- **No code.** The refusals are `VERSIONS_NOT_KEPT`, `STORE_CLOSED` and
+  `STATEMENT_FAILED`, already defined; `0.3.80.23` stays free.
+
+**kit.** `model.StoreHistory` gains `Versions`, `Trashed` and
+`VersionBytes`, on a runtime graph of a store with `Revisions(n)`, beside
+`Kept` and `Bytes`; the graph's revision ignores them, as it ignores what the
+histories weigh. kit asks its engine through a sibling of its own store port
+(`versionWeighter`), which the sealing and history engines forward. The
+Studio's view of them is kitsunium/platform's.
+
+**Verification.** `internal/service/data/docstore`: `weight_external_test.go`
+runs one contract on the memory store, the file store and the SQL store on
+each dialect over the fake engine — a creation, a change, the same JSON and a
+write in place, pruning, a second document, a trashing, a restoration, a
+rewrite, a purge and a deletion, `PutDocument` into the trash —, each step
+held to a recount; a store without versions; the counter in `Stats` and
+after `Close`; the counter rebuilt after a crash and after a fold; eight
+writers and trashers at once under the race detector; the SQL statement alone,
+on the caller's transaction and refused `STATEMENT_FAILED` quoting nothing.
+`sql_statements_external_test.go`: the statement per dialect.
+`internal/core/data/docstore`: the two doubles. `pkg/v1/data/docstore`:
+`TestFacadeVersionWeight`. `e2e/integration/sql/docstore_weight_integration_test.go`,
+under `-tags integration`, on SQLite, PostgreSQL 17 and MySQL 8.4. kit:
+`TestTheModelSaysWhatTheVersionsWeigh` in memory, in the data directory and
+on its fake database, and `TestRevisionsOnTheFile` on a SQLite file through
+`framework/connectors/sqlite`, the weight equal to the sealed rows' bytes.
+
+**Breaking changes.** None in the API: two ports, two methods, a value and a
+field of `StatsValue`, all new; an unkeyed `StatsValue` literal, which no
+caller has reason to write, no longer compiles, under ADR 0040. Nothing stored
+changes.
