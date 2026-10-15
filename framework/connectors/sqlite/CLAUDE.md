@@ -34,6 +34,10 @@ Rules:
   (ADR 0178 C1): `queue_test.go` runs the outbox on a real file — a
   publication, a queued dispatch and a watch's notice written in the
   transaction, absent after a rollback, a refusal failing the transaction.
+- `Records.Keys` and the watches' catch-up (ADR 0178 C6): `catchup_test.go`
+  lists the keys a watch hears through the SDK's document store over SQL,
+  hears after a stop that was not clean the memo whose notice was lost, and
+  after a clean stop nothing again.
 - Migrations run — kit's own set, which makes the tables of the stores the
   database keeps, then the modules' and the product's — under the database
   file's own write lock, one transaction per run (the SDK's ADR 0140). A

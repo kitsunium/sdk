@@ -1003,6 +1003,15 @@ The operations of the privacy journal.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.JournalHold`.
 
+<a name="JournalList"></a>
+```go
+const JournalList string = "list"
+```
+
+The operations of the privacy journal.
+
+Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.JournalList`.
+
 <a name="JournalRead"></a>
 ```go
 const JournalRead string = "read"

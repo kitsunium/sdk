@@ -26,13 +26,14 @@ type watchNotice struct {
 }
 
 // start opens the watch's queue, puts the watch on the stores that feed it,
-// and starts its consumer. The stores start before the subscriptions: every
-// write they confirm from now on is noticed.
+// catches up after a stop that was not clean (watch_catchup.go), and starts
+// its consumer. The stores start before the subscriptions: every write they
+// confirm from now on is noticed.
 //
 // Goroutine lifecycle: the supervisor's goroutine consumes the watch's
 // queue until stop cancels it and waits for it; a consumer whose queue
 // fails comes back after kit's backoff.
-func (w *Watch) start(_ context.Context, a *App) error {
+func (w *Watch) start(ctx context.Context, a *App) error {
 	broker, db, err := a.openConsumerQueue(&w.nodeBase, w.queueUnder(), w.maxDeliver)
 	if err != nil {
 		return failure(CodeWatchQueue, "WATCH_QUEUE", "a watch's queue cannot be opened", err, errs.String("watch", w.id))
@@ -46,6 +47,7 @@ func (w *Watch) start(_ context.Context, a *App) error {
 	for _, st := range feeders {
 		r.unfeed = append(r.unfeed, st.feed(w))
 	}
+	w.catchUp(ctx, a, r, feeders)
 	loop := a.loop(w.id+" consumer", w.id, model.LoopConsumer, consumerHow)
 	c := consumer{a: a, loop: loop, node: w.id, name: w.name, wake: model.WakeChange}
 	handler := w.deliver(&c, r)
@@ -106,8 +108,9 @@ func (w *Watch) deliver(c *consumer, r *watchRun) queue.Handler {
 }
 
 // stop takes the watch off its stores, then ends its consumer: what waits
-// in a file queue is delivered at the next start.
-func (w *Watch) stop(ctx context.Context, _ *App) error {
+// in a file queue is delivered at the next start. A consumer that ended takes
+// the watch's running mark off: the next start has nothing to catch up on.
+func (w *Watch) stop(ctx context.Context, a *App) error {
 	r := w.run.Load()
 	if r == nil || r.sup == nil {
 		return nil
@@ -115,7 +118,11 @@ func (w *Watch) stop(ctx context.Context, _ *App) error {
 	for _, unfeed := range r.unfeed {
 		unfeed()
 	}
-	return r.sup.Stop(ctx)
+	if err := r.sup.Stop(ctx); err != nil {
+		return err
+	}
+	w.unmark(a)
+	return nil
 }
 
 // noticeOf is what a watch's queue carries of a write a store says it made:
