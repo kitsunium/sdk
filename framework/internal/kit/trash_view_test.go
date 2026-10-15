@@ -128,18 +128,23 @@ func TestTheTrashListHidesAPersonalKey(t *testing.T) {
 // which keeps no trash —, and a page it cannot read.
 func TestTheTrashListRefusesWhatItCannotList(t *testing.T) {
 	app := startBin(t, clock.NewManualClock(epoch))
-	for _, bad := range []struct{ query, code string }{
-		{"store=bin/store/nothing", kit.WireNotFound},
-		{"store=", kit.WireNotFound},
-		{"store=bin/store/scores", kit.WireInvalid},
-		{"store=bin/store/passes&limit=0", kit.WireInvalid},
-		{"store=bin/store/passes&limit=1001", kit.WireInvalid},
-		{"store=bin/store/passes&limit=many", kit.WireInvalid},
-		{"store=bin/store/passes&offset=-1", kit.WireInvalid},
-	} {
-		r := call(t, app, "GET /_kit/api/trash?"+bad.query, noBody)
-		if r.status < 400 || r.status >= 500 || r.errorCode(t) != bad.code {
-			t.Errorf("trash?%s answers %d %s, want %s", bad.query, r.status, r.body, bad.code)
+	type tc struct{ name, query, code string }
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		r := call(t, app, "GET /_kit/api/trash?"+c.query, noBody)
+		if r.status < 400 || r.status >= 500 || r.errorCode(t) != c.code {
+			t.Errorf("trash?%s answers %d %s, want %s", c.query, r.status, r.body, c.code)
 		}
+	}
+	for _, c := range []tc{
+		{"unknown store", "store=bin/store/nothing", kit.WireNotFound},
+		{"no store", "store=", kit.WireNotFound},
+		{"no revisions", "store=bin/store/scores", kit.WireInvalid},
+		{"limit zero", "store=bin/store/passes&limit=0", kit.WireInvalid},
+		{"limit past the bound", "store=bin/store/passes&limit=1001", kit.WireInvalid},
+		{"limit not a number", "store=bin/store/passes&limit=many", kit.WireInvalid},
+		{"negative offset", "store=bin/store/passes&offset=-1", kit.WireInvalid},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }

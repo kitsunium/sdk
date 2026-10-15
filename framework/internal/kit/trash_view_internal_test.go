@@ -28,14 +28,19 @@ func TestTheTrashListIsRefusedWithATypedCode(t *testing.T) {
 	if err != nil || got != trashSource(binnedKept) {
 		t.Fatalf("trashOf(%s) = %v, %v; want the store", binnedKept.id, got, err)
 	}
-	for _, c := range []struct{ id, wire, public string }{
-		{"binned/store/nothing", WireNotFound, "no such store: binned/store/nothing"},
-		{binnedPlain.id, WireInvalid, "binned/store/plain keeps no trash: declare it with kit.Revisions(n)"},
-	} {
+	type tc struct{ name, id, wire, public string }
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
 		_, err := app.trashOf(c.id)
 		var ke *Error
 		if !errs.HasCode(err, CodeTrashList) || !errors.As(err, &ke) || ke.Code != c.wire || ke.Message != c.public {
 			t.Errorf("trashOf(%s) = %v; want a %s CodeTrashList saying %q", c.id, err, c.wire, c.public)
 		}
+	}
+	for _, c := range []tc{
+		{"unknown store", "binned/store/nothing", WireNotFound, "no such store: binned/store/nothing"},
+		{"no revisions", binnedPlain.id, WireInvalid, "binned/store/plain keeps no trash: declare it with kit.Revisions(n)"},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }

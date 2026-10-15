@@ -44,19 +44,44 @@ func TestOnlyMountsAModuleInTheEnvironmentsItNames(t *testing.T) {
 // kit.Only; nothing when one mount holds everywhere, nor for a module only
 // another module's kit.Requires mounts — as its Mount says nothing.
 func TestTheGraphSaysWhereAModuleIsMounted(t *testing.T) {
-	app := start(t, kit.Mount(ReviewsModule, kit.Only("staging", "dev")), kit.Mount(ReviewsModule, kit.Only("dev", "qa")))
-	g := app.Graph()
-	if m := g.ModuleOf("reviews"); m == nil || !slices.Equal(m.Only, []string{"dev", "qa", "staging"}) {
-		t.Errorf("a module mounted for staging, dev and qa says %+v", m)
+	type tc struct {
+		name   string
+		mounts []kit.AppConfigurer
+		// reviews is the Only the reviews module says; ratings is whether
+		// the module it requires is checked to say none.
+		reviews []string
+		ratings bool
 	}
-	if m := g.ModuleOf("ratings"); m == nil || m.Only != nil {
-		t.Errorf("a module another module requires says %+v", m)
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		app := start(t, c.mounts...)
+		g := app.Graph()
+		if m := g.ModuleOf("reviews"); m == nil || !slices.Equal(m.Only, c.reviews) {
+			t.Errorf("reviews says %+v, want only %q", m, c.reviews)
+		}
+		if m := g.ModuleOf("ratings"); c.ratings && (m == nil || m.Only != nil) {
+			t.Errorf("a module another module requires says %+v", m)
+		}
 	}
-	stopApp(t, app)
-
-	app = start(t, kit.Mount(ReviewsModule, kit.Only("staging")), kit.Mount(ReviewsModule))
-	if m := app.Graph().ModuleOf("reviews"); m == nil || m.Only != nil {
-		t.Errorf("a module one mount mounts everywhere says %+v", m)
+	for _, c := range []tc{
+		{
+			name: "every mount limited",
+			mounts: []kit.AppConfigurer{
+				kit.Mount(ReviewsModule, kit.Only("staging", "dev")),
+				kit.Mount(ReviewsModule, kit.Only("dev", "qa")),
+			},
+			reviews: []string{"dev", "qa", "staging"},
+			ratings: true,
+		},
+		{
+			name: "one mount everywhere",
+			mounts: []kit.AppConfigurer{
+				kit.Mount(ReviewsModule, kit.Only("staging")),
+				kit.Mount(ReviewsModule),
+			},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
