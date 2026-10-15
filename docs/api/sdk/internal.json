@@ -335,7 +335,7 @@
       "dir": "core/data/docstore",
       "layer": "core",
       "family": "data",
-      "doc": "Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;\nADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21). Both\nengines answer every one of them alike, and the range keeps the LL = 3 its\nengine allocated it under now that it is declared here (ADR 0160).\n\nPackage docstore declares the document-store domain: typed, keyed JSON\ndocuments with unique and multi-valued secondary indexes, kept by two\nengines under one contract — the file engine in memory or through\ncore/data/vfs (ADR 0110), the SQL engine in a database the caller owns\n(ADR 0139), both keeping a document's versions in its own write when asked\n(ADR 0143).\n\nIt holds what the two engines share and nothing only one of them has:\n\n  - the ports. [Collection] is a store whose calls take no context, which\n    the file engine is; [CollectionContext] is the same calls, each taking\n    a context first, which the SQL engine is. [Versioned] and\n    [VersionedContext] are their siblings for a document's versions,\n    [Trashable] and [TrashableContext] for its trash, and [Announcer] is\n    the pair of hooks both engines answer exactly as they are;\n  - the values both engines read and return — [EntryValue], [VersionValue],\n    [StampValue], [TombstoneValue] — and [IndexSpec], the declaration both\n    take, with its two constructors [Unique] and [Index];\n  - the codes of the 0.3.80.* range and their sentinels: both engines answer\n    the same refusals under the same codes (ADR 0160).\n\nThere are two ports and not one because the engines differ on the one\nthing a single interface would have to fix: the file engine waits on\nnothing a caller could abandon and takes no context (ADR 0110 §D6), while\nevery call of the SQL engine waits on a database and takes one. A single\nport would give the file engine a context it cannot honour, or take the SQL\nengine's away (ADR 0139 §D2). So each port is the contract of one shape of\ncall, with the same methods, the same documents and the same refusals.\n\nThe engines, their configurations, the file engine's statistics and every\nstatement live in internal/service/data/docstore.\n\nPackage docstore — the siblings of Collection (ADR 0039): a document's\nversions, its trash, and the same ports with a context on every call, which\nthe SQL engine implements.\n\nPackage docstore — declares the sentinel *errs.Error outcomes both engines\nanswer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE\nform.\n\nNo Public and no Private below carries a key or a document. A store key is\nroutinely an e-mail address or the hash of a token, and an index key is\nusually exactly the value a caller must not learn back from a refusal: the\nfields name the index and the operation, never what was looked up.\n\nThe HTTP statuses are spelled as the integers errs.WithHTTPStatus takes,\neach named after its status: the core imports no net/http to read five\nnumbers (ADR 0160).\n\nPackage docstore — the declaration of a secondary index, which both engines\ntake at construction and file by the same rule.\n\nPackage docstore — the values both engines read and return: a stored\ndocument as JSON, one version of a document, what a write says about the\nversion it makes, and a document in the trash.\n"
+      "doc": "Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;\nADR 0139 added 16 and 17, ADR 0143 18 to 20 and, for its trash, 21). Both\nengines answer every one of them alike, and the range keeps the LL = 3 its\nengine allocated it under now that it is declared here (ADR 0160).\n\nPackage docstore declares the document-store domain: typed, keyed JSON\ndocuments with unique and multi-valued secondary indexes, kept by two\nengines under one contract — the file engine in memory or through\ncore/data/vfs (ADR 0110), the SQL engine in a database the caller owns\n(ADR 0139), both keeping a document's versions in its own write when asked\n(ADR 0143).\n\nIt holds what the two engines share and nothing only one of them has:\n\n  - the ports. [Collection] is a store whose calls take no context, which\n    the file engine is; [CollectionContext] is the same calls, each taking\n    a context first, which the SQL engine is. [Versioned] and\n    [VersionedContext] are their siblings for a document's versions,\n    [Trashable] and [TrashableContext] for its trash, [KeyLister] and\n    [KeyListerContext] for the keys alone, and [Announcer] is the pair of\n    hooks both engines answer exactly as they are;\n  - the values both engines read and return — [EntryValue], [VersionValue],\n    [StampValue], [TombstoneValue] — and [IndexSpec], the declaration both\n    take, with its two constructors [Unique] and [Index];\n  - the codes of the 0.3.80.* range and their sentinels: both engines answer\n    the same refusals under the same codes (ADR 0160).\n\nThere are two ports and not one because the engines differ on the one\nthing a single interface would have to fix: the file engine waits on\nnothing a caller could abandon and takes no context (ADR 0110 §D6), while\nevery call of the SQL engine waits on a database and takes one. A single\nport would give the file engine a context it cannot honour, or take the SQL\nengine's away (ADR 0139 §D2). So each port is the contract of one shape of\ncall, with the same methods, the same documents and the same refusals.\n\nThe engines, their configurations, the file engine's statistics and every\nstatement live in internal/service/data/docstore.\n\nPackage docstore — the siblings of Collection (ADR 0039): a document's\nversions, its trash, the keys alone (ADR 0178), and the same ports with a\ncontext on every call, which the SQL engine implements.\n\nPackage docstore — declares the sentinel *errs.Error outcomes both engines\nanswer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE\nform.\n\nNo Public and no Private below carries a key or a document. A store key is\nroutinely an e-mail address or the hash of a token, and an index key is\nusually exactly the value a caller must not learn back from a refusal: the\nfields name the index and the operation, never what was looked up.\n\nThe HTTP statuses are spelled as the integers errs.WithHTTPStatus takes,\neach named after its status: the core imports no net/http to read five\nnumbers (ADR 0160).\n\nPackage docstore — the declaration of a secondary index, which both engines\ntake at construction and file by the same rule.\n\nPackage docstore — the values both engines read and return: a stored\ndocument as JSON, one version of a document, what a write says about the\nversion it makes, and a document in the trash.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/internal/core/data/queue",
@@ -20210,6 +20210,56 @@
       },
       "doc": "IndexUnknown refuses a lookup in an index the store never declared.\n",
       "file": "core/data/docstore/codes_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.KeyLister",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "KeyLister",
+      "spelled": "interface{Keys(after string) iter.Seq2[string, error]}",
+      "canonical": "interface{Keys(after string) iter.Seq2[string, error]}",
+      "doc": "KeyLister is the keys of a store's documents and nothing else, on a store\nwhose calls take no context: the sibling of [Collection] the file engine\nimplements beside it (ADR 0178). It reads no document, so what it costs\ndoes not grow with what the documents weigh. A document the store no\nlonger holds — deleted, or in the trash ([Trashable]) — is not listed:\nKeys lists what Get finds.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.KeyLister.Keys",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "Keys",
+      "recv": "KeyLister",
+      "spelled": "func(after string) iter.Seq2[string, error]",
+      "canonical": "func(after string) iter.Seq2[string, error]",
+      "doc": "Keys yields the key of every document the store holds that sorts after\nafter — every key when after is empty — in key order, byte order as Go\ncompares strings, and no document. Stopping early is allowed, and\nafter is where a later call resumes. A failure is yielded once, with\nan empty key, and ends the listing; a closed store yields\nSTORE_CLOSED.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.KeyListerContext",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "KeyListerContext",
+      "spelled": "interface{Keys(ctx context.Context, after string) iter.Seq2[string, error]}",
+      "canonical": "interface{Keys(ctx context.Context, after string) iter.Seq2[string, error]}",
+      "doc": "KeyListerContext is [KeyLister] with a context on every call: the sibling\nof [CollectionContext] the SQL engine implements beside it.\n",
+      "file": "core/data/docstore/design_gen.go",
+      "layer": "core",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/core/data/docstore.KeyListerContext.Keys",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/core/data/docstore",
+      "name": "Keys",
+      "recv": "KeyListerContext",
+      "spelled": "func(ctx context.Context, after string) iter.Seq2[string, error]",
+      "canonical": "func(ctx context.Context, after string) iter.Seq2[string, error]",
+      "doc": "Keys is KeyLister.Keys under ctx: each step that reads runs on the\ntransaction ctx carries for the store's database, and on the pool\notherwise.\n",
+      "file": "core/data/docstore/design_gen.go",
       "layer": "core",
       "family": "data"
     },
@@ -55173,6 +55223,19 @@
       "family": "data"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*SQLStore[...]).Keys",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
+      "name": "Keys",
+      "recv": "SQLStore",
+      "spelled": "func(ctx context.Context, after string) iter.Seq2[string, error]",
+      "canonical": "func(ctx context.Context, after string) iter.Seq2[string, error]",
+      "doc": "Keys yields the key of every document the store holds that sorts after\nafter — every key when after is empty — in key order, byte order, and\nno document. It reads them in pages of a few hundred, each page one\nstatement on the primary key that resumes after the last key yielded,\non the transaction ctx carries, else on the pool: a document written\nduring the range after the last key read is seen, one written before\nit is not. A failed statement is yielded once, as StatementFailed,\nand ends the listing.\n",
+      "file": "service/data/docstore/sql_store.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*SQLStore[...]).List",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
@@ -55578,6 +55641,19 @@
       "canonical": "func(v T, stamp github.com/kitsunium/sdk/internal/core/data/docstore.StampValue) error",
       "doc": "InsertStamped is Insert, with what the write says about the version it\nmakes: version 1, whatever stamp.InPlace says — or, under the key of a\ndocument in the trash, a write over that document.\n",
       "file": "service/data/docstore/version.go",
+      "layer": "service",
+      "family": "data"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/data/docstore.(*Store[...]).Keys",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/data/docstore",
+      "name": "Keys",
+      "recv": "Store",
+      "spelled": "func(after string) iter.Seq2[string, error]",
+      "canonical": "func(after string) iter.Seq2[string, error]",
+      "doc": "Keys yields the key of every document the store holds that sorts after\nafter — every key when after is empty — in key order, and no document.\nThe keys are taken once, under the read lock, when the range starts:\na write made during the range is not seen by it. What it costs is the\nkeys' sort, never a document's copy. A closed store yields\nStoreClosed once.\n",
+      "file": "service/data/docstore/docstore.go",
       "layer": "service",
       "family": "data"
     },

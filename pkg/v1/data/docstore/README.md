@@ -79,7 +79,7 @@ A failure of the database is StatementFailed, which a caller answers with a 503:
 
 ### The ports, for a double
 
-[Store](#Store) and [SQLStore](#SQLStore) are engines. A caller that must stand a double in for one depends instead on the port it implements: [Collection](#Collection), [Versioned](#Versioned) and [Trashable](#Trashable) for a [Store](#Store), whose calls take no context, [CollectionContext](#CollectionContext), [VersionedContext](#VersionedContext) and [TrashableContext](#TrashableContext) for a [SQLStore](#SQLStore), whose every call takes one, and [Announcer](#Announcer) — OnWrite and OnDelete — for either. Each pair carries the same methods, the same documents and the same refusals; there is no single port over both, because the file engine waits on nothing a context could abandon while the SQL engine waits on a database (ADR 0160).
+[Store](#Store) and [SQLStore](#SQLStore) are engines. A caller that must stand a double in for one depends instead on the port it implements: [Collection](#Collection), [Versioned](#Versioned), [Trashable](#Trashable) and [KeyLister](#KeyLister) for a [Store](#Store), whose calls take no context, [CollectionContext](#CollectionContext), [VersionedContext](#VersionedContext), [TrashableContext](#TrashableContext) and [KeyListerContext](#KeyListerContext) for a [SQLStore](#SQLStore), whose every call takes one, and [Announcer](#Announcer) — OnWrite and OnDelete — for either. Each pair carries the same methods, the same documents and the same refusals; there is no single port over both, because the file engine waits on nothing a context could abandon while the SQL engine waits on a database (ADR 0160).
 
 ### Versions
 
@@ -108,6 +108,21 @@ err = pages.Purge(page.ID)            // or gone for good, its versions with it
 ```
 
 A trashed document leaves every read and frees its unique keys, as a former version does; Versions still reads what it kept, the trashed document first. Its number is kept: a creation under its key is a write over the trashed document, which continues its versions. Restore brings it back exactly as it was, or refuses with UniqueKeyTaken when another document took one of its unique keys meanwhile. Purge removes it and its versions. Delete never reaches the trash: it takes a document and its versions at once, which is what an erasure needs, and finds no trashed document. How long a document stays in the trash is the caller's to decide; the store empties nothing by itself.
+
+### Keys
+
+Keys lists the keys of the documents a store holds, in key order, and reads no document — for a caller that must visit every record, a re-scan after a crash, without paying for what the records weigh (ADR 0178):
+
+```
+for key, err := range pages.Keys("") {
+	if err != nil {
+		return err
+	}
+	…
+}
+```
+
+[Store](#Store) sorts the keys it holds once, when the range starts; [SQLStore](#SQLStore) reads them in pages on the primary key, each resuming after the last key read. Both resume after the key a caller names, so a listing stopped early continues where it stopped. A document in the trash is not listed: Keys lists what Get finds.
 
 ## Index
 
@@ -149,6 +164,10 @@ A trashed document leaves every read and frees its unique keys, as a former vers
 - [type Config](<#Config>)
 - [type Entry](<#Entry>)
 - [type IndexSpec](<#IndexSpec>)
+- [type KeyLister](<#KeyLister>)
+  - [func \(KeyLister\) Keys\(after string\) iter.Seq2\[string, error\]](<#KeyLister.Keys>)
+- [type KeyListerContext](<#KeyListerContext>)
+  - [func \(KeyListerContext\) Keys\(ctx context.Context, after string\) iter.Seq2\[string, error\]](<#KeyListerContext.Keys>)
 - [type SQLConfig](<#SQLConfig>)
 - [type SQLStore](<#SQLStore>)
   - [func \(\*SQLStore\) Count\(ctx context.Context\) \(int, error\)](<#SQLStore.Count>)
@@ -159,6 +178,7 @@ A trashed document leaves every read and frees its unique keys, as a former vers
   - [func \(\*SQLStore\) Get\(ctx context.Context, key string\) \(T, error\)](<#SQLStore.Get>)
   - [func \(\*SQLStore\) Insert\(ctx context.Context, v T\) error](<#SQLStore.Insert>)
   - [func \(\*SQLStore\) InsertStamped\(ctx context.Context, v T, stamp coredocstore.StampValue\) error](<#SQLStore.InsertStamped>)
+  - [func \(\*SQLStore\) Keys\(ctx context.Context, after string\) iter.Seq2\[string, error\]](<#SQLStore.Keys>)
   - [func \(\*SQLStore\) List\(ctx context.Context\) \(\[\]T, error\)](<#SQLStore.List>)
   - [func \(\*SQLStore\) Lookup\(ctx context.Context, index string, key string\) \(T, error\)](<#SQLStore.Lookup>)
   - [func \(\*SQLStore\) OnDelete\(fn func\(key string\)\) \(remove func\(\)\)](<#SQLStore.OnDelete>)
@@ -189,6 +209,7 @@ A trashed document leaves every read and frees its unique keys, as a former vers
   - [func \(\*Store\) Get\(key string\) \(T, error\)](<#Store.Get>)
   - [func \(\*Store\) Insert\(v T\) error](<#Store.Insert>)
   - [func \(\*Store\) InsertStamped\(v T, stamp coredocstore.StampValue\) error](<#Store.InsertStamped>)
+  - [func \(\*Store\) Keys\(after string\) iter.Seq2\[string, error\]](<#Store.Keys>)
   - [func \(\*Store\) List\(\) \(\[\]T, error\)](<#Store.List>)
   - [func \(\*Store\) Lookup\(index string, key string\) \(T, error\)](<#Store.Lookup>)
   - [func \(\*Store\) OnDelete\(fn func\(key string\)\) \(remove func\(\)\)](<#Store.OnDelete>)
@@ -1186,6 +1207,67 @@ type IndexSpec[T any] struct {
 }
 ```
 
+<a name="KeyLister"></a>
+## type [KeyLister](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+
+KeyLister is the public alias for the sibling of [Collection](#Collection) that lists the documents' keys alone, in key order and without a context, which [Store](#Store) implements: Keys.
+
+```go
+type KeyLister = coredocstore.KeyLister
+```
+
+KeyLister is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.KeyLister`, declared as:
+
+```go
+type KeyLister interface {
+	// Keys yields the key of every document the store holds that sorts after
+	// after — every key when after is empty — in key order, byte order as Go
+	// compares strings, and no document. Stopping early is allowed, and
+	// after is where a later call resumes. A failure is yielded once, with
+	// an empty key, and ends the listing; a closed store yields
+	// STORE_CLOSED.
+	Keys(after string) iter.Seq2[string, error]
+}
+```
+
+<a name="KeyLister.Keys"></a>
+### func \(KeyLister\) [Keys](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+
+```go
+func (KeyLister) Keys(after string) iter.Seq2[string, error]
+```
+
+Keys yields the key of every document the store holds that sorts after after — every key when after is empty — in key order, byte order as Go compares strings, and no document. Stopping early is allowed, and after is where a later call resumes. A failure is yielded once, with an empty key, and ends the listing; a closed store yields STORE\_CLOSED.
+
+<a name="KeyListerContext"></a>
+## type [KeyListerContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+
+KeyListerContext is the public alias for [KeyLister](#KeyLister) with a context on every call, which [SQLStore](#SQLStore) implements.
+
+```go
+type KeyListerContext = coredocstore.KeyListerContext
+```
+
+KeyListerContext is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.KeyListerContext`, declared as:
+
+```go
+type KeyListerContext interface {
+	// Keys is KeyLister.Keys under ctx: each step that reads runs on the
+	// transaction ctx carries for the store's database, and on the pool
+	// otherwise.
+	Keys(ctx context.Context, after string) iter.Seq2[string, error]
+}
+```
+
+<a name="KeyListerContext.Keys"></a>
+### func \(KeyListerContext\) [Keys](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+
+```go
+func (KeyListerContext) Keys(ctx context.Context, after string) iter.Seq2[string, error]
+```
+
+Keys is KeyLister.Keys under ctx: each step that reads runs on the transaction ctx carries for the store's database, and on the pool otherwise.
+
 <a name="SQLConfig"></a>
 ## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
 
@@ -1251,7 +1333,7 @@ type SQLConfig[T any] struct {
 <a name="SQLStore"></a>
 ## type [SQLStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
 
-SQLStore is the public alias for the document store over SQL: Get, List, Filter, Entries, Count, Lookup and Find read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version and RewriteVersions, Trash, Restore, Purge and Tombstones as for [Store](#Store); OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
+SQLStore is the public alias for the document store over SQL: Get, List, Filter, Entries, Keys, Count, Lookup and Find read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version and RewriteVersions, Trash, Restore, Purge and Tombstones as for [Store](#Store); OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
 
 ```go
 type SQLStore[T any] = svcdocstore.SQLStore[T]
@@ -1334,6 +1416,15 @@ func (*SQLStore) InsertStamped(ctx context.Context, v T, stamp coredocstore.Stam
 ```
 
 InsertStamped is Insert, with what the write says about the version it makes: version 1, whatever stamp.InPlace says — or, under the key of a document in the trash, a write over that document.
+
+<a name="SQLStore.Keys"></a>
+### func \(SQLStore\) [Keys](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_store.go>)
+
+```go
+func (*SQLStore) Keys(ctx context.Context, after string) iter.Seq2[string, error]
+```
+
+Keys yields the key of every document the store holds that sorts after after — every key when after is empty — in key order, byte order, and no document. It reads them in pages of a few hundred, each page one statement on the primary key that resumes after the last key yielded, on the transaction ctx carries, else on the pool: a document written during the range after the last key read is seen, one written before it is not. A failed statement is yielded once, as StatementFailed, and ends the listing.
 
 <a name="SQLStore.List"></a>
 ### func \(SQLStore\) [List](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_store.go>)
@@ -1559,7 +1650,7 @@ type Stats struct {
 <a name="Store"></a>
 ## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
 
-Store is the public alias for the document store: Get, List, Filter, Entries, Lookup, Find and Stats read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones; Trash, Restore, Purge and Tombstones keep its trash; OnWrite and OnDelete announce; Fold and Close bring it to rest.
+Store is the public alias for the document store: Get, List, Filter, Entries, Keys, Lookup, Find and Stats read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones; Trash, Restore, Purge and Tombstones keep its trash; OnWrite and OnDelete announce; Fold and Close bring it to rest.
 
 ```go
 type Store[T any] = svcdocstore.Store[T]
@@ -1651,6 +1742,15 @@ func (*Store) InsertStamped(v T, stamp coredocstore.StampValue) error
 ```
 
 InsertStamped is Insert, with what the write says about the version it makes: version 1, whatever stamp.InPlace says — or, under the key of a document in the trash, a write over that document.
+
+<a name="Store.Keys"></a>
+### func \(Store\) [Keys](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/docstore.go>)
+
+```go
+func (*Store) Keys(after string) iter.Seq2[string, error]
+```
+
+Keys yields the key of every document the store holds that sorts after after — every key when after is empty — in key order, and no document. The keys are taken once, under the read lock, when the range starts: a write made during the range is not seen by it. What it costs is the keys' sort, never a document's copy. A closed store yields StoreClosed once.
 
 <a name="Store.List"></a>
 ### func \(Store\) [List](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/docstore.go>)

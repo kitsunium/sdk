@@ -31,7 +31,7 @@ func RenderSQLForTest(dialect coresql.Dialect, table string) RenderedSQL {
 			s.getDoc: "getDoc", s.listDocs: "listDocs", s.entries: "entries", s.entriesLimit: "entriesLimit",
 			s.count: "count", s.exists: "exists", s.upsert: "upsert", s.insert: "insert", s.replace: "replace",
 			s.lockDoc: "lockDoc", s.writeLocked: "writeLocked", s.deleteDoc: "deleteDoc",
-			s.deleteIndex: "deleteIndex", s.clearIndex: "clearIndex", s.pageAfter: "pageAfter",
+			s.deleteIndex: "deleteIndex", s.clearIndex: "clearIndex", s.pageAfter: "pageAfter", s.keysAfter: "keysAfter",
 			s.lookup: "lookup", s.find: "find",
 			s.claim: "claim", s.versionHead: "versionHead", s.retireHead: "retireHead", s.pruneCut: "pruneCut",
 			s.pruneVersions: "pruneVersions", s.dropVersions: "dropVersions", s.dropFormers: "dropFormers",

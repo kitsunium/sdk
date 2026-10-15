@@ -21,7 +21,7 @@ restored or purged (ADR 0143, amended for ADR 0178 C4).
 |---|---|---|
 | `Open[T](cfg, indexes...)` | func | a `*Store[T]`, loaded from `cfg.FS` when set |
 | `Unique[T](name, key)` / `Index[T](name, keys)` | func | index declarations |
-| `Store[T]` | type alias | `Get`, `List`, `Filter`, `Entries`, `Lookup`, `Find`, `Stats`; `Put`, `Insert`, `Replace`, `Update`, `Delete`; `PutStamped`, `InsertStamped`, `ReplaceStamped`, `UpdateStamped`; `Versions`, `Version`, `RewriteVersions`; `Trash`, `Restore`, `Purge`, `Tombstones`; `OnWrite`, `OnDelete`; `Fold`, `Close` |
+| `Store[T]` | type alias | `Get`, `List`, `Filter`, `Entries`, `Keys`, `Lookup`, `Find`, `Stats`; `Put`, `Insert`, `Replace`, `Update`, `Delete`; `PutStamped`, `InsertStamped`, `ReplaceStamped`, `UpdateStamped`; `Versions`, `Version`, `RewriteVersions`; `Trash`, `Restore`, `Purge`, `Tombstones`; `OnWrite`, `OnDelete`; `Fold`, `Close` |
 | `Config[T]` | type alias | `Key` (required), `FS` + `Path` (both or neither), `FoldAt`, `Versions` + `Clock` + `Held` |
 | `Version` | type alias | `= coredocstore.VersionValue` — `Number` (from 1), `At`, `Meta`, `JSON` (compact, the caller's copy) |
 | `Stamp` | type alias | `= coredocstore.StampValue` — `Meta` (who, which command), `InPlace` (no version) |
@@ -31,7 +31,7 @@ restored or purged (ADR 0143, amended for ADR 0178 C4).
 | `Stats` | type alias | `= svcdocstore.StatsValue` — `Documents`, `Pending`, `Folds`, `FoldError` |
 | `DefaultFoldAt` | const | 1024 |
 | `OpenSQL[T](cfg, indexes...)` | func | a `*SQLStore[T]` over `cfg.Transactor`; sends no statement |
-| `SQLStore[T]` | type alias | `Get`, `List`, `Filter`, `Entries`, `Count`, `Lookup`, `Find`; `Put`, `Insert`, `Replace`, `Update`, `Delete` and their Stamped forms; `Versions`, `Version`, `RewriteVersions`; `Trash`, `Restore`, `Purge`, `Tombstones`; `OnWrite`, `OnDelete`; `Reindex` — every read and write takes a context (the two hook registrations do not) |
+| `SQLStore[T]` | type alias | `Get`, `List`, `Filter`, `Entries`, `Keys`, `Count`, `Lookup`, `Find`; `Put`, `Insert`, `Replace`, `Update`, `Delete` and their Stamped forms; `Versions`, `Version`, `RewriteVersions`; `Trash`, `Restore`, `Purge`, `Tombstones`; `OnWrite`, `OnDelete`; `Reindex` — every read and write takes a context (the two hook registrations do not) |
 | `SQLConfig[T]` | type alias | `Key`, `Transactor`, `Dialect`, `Table` (required), `IndexKey`, `Versions` + `Clock` + `Held` |
 | `SQLMigration(dialect, table, version)` | func | the two tables as one idempotent `sql.Migration` |
 | `SQLVersionsMigration(dialect, table, version)` | func | the versions table `<table>___vs`, which a store opened with `Versions` needs; its Down drops it |
@@ -39,6 +39,7 @@ restored or purged (ADR 0143, amended for ADR 0178 C4).
 | `Collection[T]` / `Versioned[T]` | type alias | `= coredocstore.Collection[T]` / `Versioned[T]` — the ports `*Store[T]` implements, a call taking no context |
 | `CollectionContext[T]` / `VersionedContext[T]` | type alias | `= coredocstore.CollectionContext[T]` / `VersionedContext[T]` — the same calls each taking a context, which `*SQLStore[T]` implements |
 | `Trashable` / `TrashableContext` | type alias | `= coredocstore.Trashable` / `TrashableContext` — the trash's ports, `*Store[T]`'s and `*SQLStore[T]`'s |
+| `KeyLister` / `KeyListerContext` | type alias | `= coredocstore.KeyLister` / `KeyListerContext` — `Keys(after)`, the keys alone in byte order, which `*Store[T]` / `*SQLStore[T]` implement (ADR 0178) |
 | `Announcer` | type alias | `= coredocstore.Announcer` — `OnWrite`, `OnDelete`, which both engines implement |
 | `Code*` | const | `0.3.80.1`–`0.3.80.21` |
 | `DocumentNotFound` … `WriteUnconfirmed`, `StatementFailed`, `KeyTooLong`, `VersionsNotKept`, `VersionNotFound`, `VersionsRewriteRefused`, `DocumentNotTrashed` | var | the twenty-one sentinels |
