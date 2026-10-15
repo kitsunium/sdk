@@ -55,6 +55,15 @@ packages:
         type: errs.Code
       - const:
           - doc: |-
+              CodeInvalidDeadLetter identifies a dead letter a broker refuses to write:
+              one naming an identifier, a delivery count below one, an instant a
+              durable broker cannot record, or a reason or cause no store keeps as
+              written (ADR 0178).
+            name: CodeInvalidDeadLetter
+            value: "0x00_02_17_08"
+        type: errs.Code
+      - const:
+          - doc: |-
               CodeQueueBackendFailed identifies an operation a durable broker depends on
               that its storage refused: a filesystem call the operating system refused,
               or a statement the SQL broker's database did not complete.
@@ -146,8 +155,9 @@ packages:
       brokers' and the consumer engine's 0.3.53.* (ADR 0054 service/data/queue
       block, declared here since ADR 0160).
 
-      Package queue — the two ADR 0039 siblings that act on the dead-letter store:
-      sending a message there at once, and deciding what becomes of one there.
+      Package queue — the three ADR 0039 siblings that act on the dead-letter
+      store: sending a message there at once, deciding what becomes of one there,
+      and writing one there as it lies.
 
       Package queue — declares the sentinel *errs.Error port outcomes, and the
       implementation outcomes of the brokers and the consumer engine in
@@ -461,6 +471,56 @@ packages:
               - type: error
         name: DeadLetterManager
       - doc: |-
+          DeadLetterWriter writes a dead letter into the dead-letter store as it is
+          given, without the message ever being delivered there.
+
+          It exists for a copy: a queue moved from one broker to another — a file
+          queue into a table of the database (ADR 0178) — must carry its dead letters
+          with what they recorded, and no other verb can. [Rejecter] buries a message
+          this broker leased, at the count it reached here and with a cause that is
+          an SDK error, so a death by an expired lease, with no code, could only be
+          re-enacted; [DeadLetterManager] replays or deletes, it never inserts.
+
+          A sibling of [Broker] for the reason [DeadLetterReader] is. The three
+          brokers in internal/service/data/queue implement it.
+
+          	if writer, ok := target.(queue.DeadLetterWriter); ok {
+          		dead.Message.ID = "" // the target mints its own
+          		id, err := writer.PutDeadLetter(ctx, dead)
+          	}
+        methods:
+          - doc: |-
+              PutDeadLetter writes dead into the dead-letter store and returns the
+              identifier the broker minted for it. Everything else is kept as given:
+              the payload, the enqueue instant, the failure instant, the delivery
+              count, the reason, the cause and the code — 0 included, the code of a
+              failure that carried none. What [DeadLetterReader.DeadLetters] then
+              returns of it equals dead but for the identifier, and
+              [DeadLetterManager] acts on it as on any other dead letter.
+
+              dead.Message.ID must be empty: the identifier is the broker's to mint,
+              as [Broker.Publish] mints it, and one a caller set would not be kept.
+              dead is refused with [InvalidDeadLetter] — the "field" field naming
+              which — when its Deliveries is below one or above 2147483647, when an
+              instant lies outside what a durable broker records (1970 to 2262), or
+              when its Reason or Cause is longer than 120 runes or holds a line
+              break; a payload above [PolicyValue.MaxMessageBytes] is
+              [MessageTooLarge]. A refused dead letter writes nothing.
+
+              It is never delivered and wakes no consumer. A broker that joins the
+              transaction ctx carries (ADR 0151) writes it in that transaction, so
+              it exists if and only if the transaction commits.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: dead
+                type: DeadLetterValue
+            name: PutDeadLetter
+            out:
+              - type: string
+              - type: error
+        name: DeadLetterWriter
+      - doc: |-
           Broker is one named queue: producers publish into it, consumers lease from
           it, and it — not the consumer — owns the delivery count and the decision to
           dead-letter. Implementations MUST be safe for concurrent use by multiple
@@ -473,8 +533,8 @@ packages:
           interfaces are structural, and a fifth method would break every downstream
           implementation at compile time with no deprecation window (ADR 0039). A new
           capability arrives as a sibling interface reached by type assertion —
-          [DeadLetterReader], [LeaseExtender], [Waker], [Rejecter] and
-          [DeadLetterManager] are the ones that ship.
+          [DeadLetterReader], [LeaseExtender], [Waker], [Rejecter],
+          [DeadLetterManager] and [DeadLetterWriter] are the ones that ship.
 
           # Why the BROKER owns the delivery count
 
@@ -732,6 +792,24 @@ packages:
             private: "core/data/queue: the dead-letter store holds no message under the identifier; nothing was replayed or deleted"
             public: No dead letter has that identifier
             reason: DEAD_LETTER_NOT_FOUND
+          - code: CodeInvalidDeadLetter
+            doc: |-
+              InvalidDeadLetter refuses a dead letter [DeadLetterWriter.PutDeadLetter]
+              cannot write as it was given: an identifier set by the caller, which the
+              broker mints; a delivery count below one or above what a durable broker
+              records; an enqueue or failure instant outside 1970 to 2262; a reason or
+              cause longer than 120 runes or holding a line break, which every store
+              would otherwise cut. The "field" field names which value. Nothing was
+              written.
+
+              It refuses rather than corrects, because a copy that silently changed
+              what it copies is the one outcome a copy must never have.
+            name: InvalidDeadLetter
+            options:
+              - errs.WithExitCode(exitDataErr)
+            private: "core/data/queue: a dead letter to write carries a value no broker keeps as given; the field names which, never the payload"
+            public: The dead letter cannot be written as it was given
+            reason: INVALID_DEAD_LETTER
           - code: CodeQueueBackendFailed
             doc: |-
               QueueBackendFailed reports a refusal from a durable broker's storage:
@@ -1292,7 +1370,8 @@ packages:
       consumers that died, and leasing what is visible.
 
       Package queue — the durable broker's dead-letter decisions: putting a dead
-      letter back into the queue, or deleting it.
+      letter back into the queue, or deleting it — and writing one there as it
+      lies.
 
       Package queue — one entry in the in-memory broker's lease-deadline heap.
 
@@ -1369,7 +1448,8 @@ packages:
       a configuration no SQL broker could run gets.
 
       Package queue — the SQL broker's dead letters: burying one a handler
-      rejected, reading them back, and the two decisions an operator takes.
+      rejected, reading them back, the two decisions an operator takes, and
+      writing one as it lies.
 
       Package queue — the only place the SQL broker renders SQL. Every statement
       it sends is built here, once, at NewSQL, for its dialect and its table; the
@@ -1836,6 +1916,13 @@ packages:
       		err := manager.ReplayDeadLetter(ctx, dead[0].Message.ID)
       	}
 
+      A dead letter moves between brokers with [DeadLetterWriter]: PutDeadLetter
+      writes one into the store as another broker recorded it — its payload, its
+      count, its instants, its reason, cause and code — under an identifier the
+      target mints. It is what a copy of a queue from a directory into a database
+      needs, and nothing else does; a value no store keeps as given is
+      [InvalidDeadLetter].
+
       # A failure no retry can fix is dead-lettered at once
 
       A payload that does not decode will not decode on the fifth attempt either.
@@ -2024,12 +2111,21 @@ packages:
             typed: true
             value: "0x00_03_35_05"
         doc: The codes of the sentinels ADR 0151 added, for errs.HasCode.
+      - const:
+          - doc: |-
+              CodeInvalidDeadLetter is [InvalidDeadLetter]'s code, the one sentinel ADR
+              0178 added, for errs.HasCode.
+            name: CodeInvalidDeadLetter
+            reexport: corequeue.CodeInvalidDeadLetter
+            type: errs.Code
+            typed: true
+            value: "0x00_02_17_08"
       - alias:
           - doc: |-
               Broker is the public alias for the queue contract. It is FROZEN at four
               methods; capabilities arrive as siblings ([DeadLetterReader],
-              [LeaseExtender], [Waker], [Rejecter], [DeadLetterManager]) reached by type
-              assertion.
+              [LeaseExtender], [Waker], [Rejecter], [DeadLetterManager],
+              [DeadLetterWriter]) reached by type assertion.
             name: Broker
             target: corequeue.Broker
       - alias:
@@ -2113,6 +2209,13 @@ packages:
             target: corequeue.DeadLetterManager
       - alias:
           - doc: |-
+              DeadLetterWriter is the public alias for the capability of writing a dead
+              letter into the store as it was recorded elsewhere — what a copy of a
+              queue from one broker to another needs. Every broker here implements it.
+            name: DeadLetterWriter
+            target: corequeue.DeadLetterWriter
+      - alias:
+          - doc: |-
               SQLConfig is the public alias for [NewSQL]'s configuration: Transactor,
               Dialect and Table (required), Policy, and Clock.
             name: SQLConfig
@@ -2168,6 +2271,12 @@ packages:
               the store does not hold.
             name: DeadLetterNotFound
             reexport: corequeue.DeadLetterNotFound
+            type: "*errs.Error"
+          - doc: |-
+              InvalidDeadLetter refuses a dead letter [DeadLetterWriter] cannot write
+              as it was given; the "field" field names which value.
+            name: InvalidDeadLetter
+            reexport: corequeue.InvalidDeadLetter
             type: "*errs.Error"
           - doc: |-
               SQLQueueMisconfigured refuses an SQLConfig no SQL broker could run: no

@@ -379,6 +379,16 @@ func (e *sqlEngine) execute(role, query string, args []driver.Value, work queueT
 		}
 		work[id] = queueRow{id: id, due: args[1].(int64), enqueued: args[2].(int64), payload: blob(args[3])}
 		return answer{affected: 1}, nil
+	case "putDead":
+		id := str(args[0])
+		if _, taken := work[id]; taken {
+			return answer{}, errDuplicate{key: id}
+		}
+		work[id] = queueRow{
+			id: id, dead: 1, due: args[1].(int64), enqueued: args[2].(int64), count: args[3].(int64),
+			payload: blob(args[4]), reason: blob(args[5]), cause: blob(args[6]), code: args[7],
+		}
+		return answer{affected: 1}, nil
 	case "lock":
 		return answer{}, nil
 	case "probe":

@@ -4,6 +4,8 @@ import (
 	"context"
 	"path"
 	"strings"
+
+	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
 )
 
 // ReplayDeadLetter queues the dead letter id again, visible now, with its
@@ -84,6 +86,43 @@ func (b *fileBroker) DeleteDeadLetter(ctx context.Context, id string) error {
 	}
 	//: payload, cause and all.
 	return b.removeDead(records)
+}
+
+// PutDeadLetter writes dead into the dead-letter directory as it is given,
+// under an identifier minted from its enqueue instant
+// (core/data/queue.DeadLetterWriter).
+//
+// The record is the one a burial writes — the same header, the payload
+// verbatim — published atomically and durably, so it is on the device when
+// the call returns and a crash leaves it whole or absent. A dead letter is
+// never receivable, so no consumer is woken.
+func (b *fileBroker) PutDeadLetter(ctx context.Context, dead corequeue.DeadLetterValue) (string, error) {
+	//: a cancelled caller must not write what nobody asked for any more.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return "", ctx.Err()
+	}
+	//: the refusals every broker makes, before a byte reaches the device.
+	if invalid := checkDeadLetter(dead, b.policy.MaxMessageBytes); invalid != nil {
+		//: InvalidDeadLetter or MessageTooLarge.
+		return "", invalid
+	}
+	entropy, entropyErr := randomHex(idEntropyBytes)
+	//: the identifier's random half, as Publish mints it.
+	if entropyErr != nil {
+		//: QueueBackendFailed — nothing was written.
+		return "", backendFailed("rand", "", entropyErr)
+	}
+	name := nameValue{EnqueuedAt: dead.Message.EnqueuedAt.UnixNano(), Entropy: entropy, Deliveries: dead.Deliveries}
+	cause := causeValue{reason: dead.Reason, public: dead.Cause, code: dead.Code}
+	record := encodeDead(name, cause, dead.FailedAt.UnixNano(), dead.Message.Payload)
+	//: THE durable step, exactly as a burial takes it.
+	if writeErr := b.publisher.WriteAtomic(path.Join(dirDead, name.deadName()), record, messageMode); writeErr != nil {
+		//: QueueBackendFailed — vfs guarantees nothing was published.
+		return "", backendFailed("publish", dirDead, writeErr)
+	}
+	//: dead, as it was given, under its new identifier.
+	return name.ID(), nil
 }
 
 // deadRecordsOf lists the names of every dead-letter record of the message

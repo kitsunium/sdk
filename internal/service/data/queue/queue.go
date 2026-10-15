@@ -3,6 +3,9 @@ package queue
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"math"
+	"strings"
+	"unicode/utf8"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 
@@ -22,6 +25,12 @@ const reasonLeaseExpired string = "LEASE_EXPIRED"
 // recorded as one, rather than as an empty string a reader would take for a
 // bug in this package.
 const reasonUnreported string = "UNREPORTED"
+
+// maxDeadDeliveries is the largest delivery count PutDeadLetter writes: the
+// SQL broker's deliveries column is a 32-bit INT on MySQL, and a count the
+// table cannot hold is refused before a statement is sent, by every broker
+// alike.
+const maxDeadDeliveries int = math.MaxInt32
 
 // causeValue is what a dead letter keeps of the failure that produced it:
 // the SCREAMING_SNAKE reason, the wire-safe Public half, and the dotted-quad
@@ -116,4 +125,49 @@ func deadLetterNotFound(broker, id string) error {
 	//: which broker, and which identifier it was asked for.
 	return kerrs.Wrap(corequeue.DeadLetterNotFound, kerrs.WrapParams{},
 		kerrs.String("broker", broker), kerrs.String("id", id))
+}
+
+// checkDeadLetter refuses a dead letter no broker keeps as it is given
+// (core/data/queue.DeadLetterWriter), so the three brokers refuse identical
+// inputs identically, then a payload the policy's bound refuses. What it
+// reports names a field, never a value.
+func checkDeadLetter(dead corequeue.DeadLetterValue, maxBytes int) error {
+	field := ""
+	switch {
+	//: the identifier is the broker's to mint; one the caller set would not
+	//: be kept, and a copy that silently renamed what it copied is refused.
+	case dead.Message.ID != "":
+		field = "Message.ID"
+	//: a dead letter was delivered at least once, and a count a durable
+	//: broker cannot record would come back as another number.
+	case dead.Deliveries < 1 || dead.Deliveries > maxDeadDeliveries:
+		field = "Deliveries"
+	//: an instant outside int64 Unix nanoseconds — the zero time.Time
+	//: included — is one no name and no column carries back.
+	case !nameable(dead.Message.EnqueuedAt):
+		field = "Message.EnqueuedAt"
+	//: the same bound on the failure's instant.
+	case !nameable(dead.FailedAt):
+		field = "FailedAt"
+	//: what every store would otherwise cut: one line, publicMaxRunes runes.
+	case !keptAsWritten(dead.Reason):
+		field = "Reason"
+	//: the same bound on the cause.
+	case !keptAsWritten(dead.Cause):
+		field = "Cause"
+	}
+	//: one value no store keeps as given.
+	if field != "" {
+		//: InvalidDeadLetter, naming the field and never its value.
+		return kerrs.Wrap(corequeue.InvalidDeadLetter, kerrs.WrapParams{}, kerrs.String("field", field))
+	}
+	//: MessageTooLarge, or nil: the bound Publish enforces.
+	return checkSize(len(dead.Message.Payload), maxBytes)
+}
+
+// keptAsWritten reports whether value survives oneLine unchanged: no line
+// break, and at most publicMaxRunes runes.
+func keptAsWritten(value string) bool {
+	//: what oneLine would rewrite is refused instead of rewritten.
+	return !strings.ContainsAny(value, "\r\n") && utf8.RuneCountInString(value) <= publicMaxRunes
 }

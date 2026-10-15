@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T12:00:00Z -->
+<!-- updated: 2026-10-15T00:00:00Z -->
 # pkg/v1/data/queue/
 
 ## Purpose
@@ -14,13 +14,13 @@ and the consumer engine.
 |---|---|
 | Ports | `Broker` (frozen at four methods), `Handler` (func port) |
 | Values | `Message`, `Delivery`, `Lease`, `Receipt`, `Nack`, `Policy` (with `MaxRetryDelay`, ADR 0151), `DeadLetter` |
-| ADR 0039 siblings | `DeadLetterReader`, `LeaseExtender`, `Waker` (+ its value `Wake`), `Rejecter`, `DeadLetterManager` — reached by type assertion |
+| ADR 0039 siblings | `DeadLetterReader`, `LeaseExtender`, `Waker` (+ its value `Wake`), `Rejecter`, `DeadLetterManager`, `DeadLetterWriter` (ADR 0178) — reached by type assertion |
 | Configs | `FileConfig`, `SQLConfig`, `MemoryConfig`, `ConsumerConfig` |
 | Constructors | `NewFile` (its broker also answers `io.Closer` by type assertion, releasing its two directory descriptors; the messages stay on disk), `NewSQL`, `NewMemory` |
 | Functions | `SQLMigration` (the SQL broker's one table, a `sql.Migration` the caller numbers), `DoNotRetry` (a failure no retry can fix) |
 | Engine | `Consume` |
-| Constants | `DefaultMaxMessageBytes`, `MaxDeadlineOffset`, `DefaultPollInterval`, `MaxSQLTableLen`, `CodeNotRetryable`, `CodeDeadLetterNotFound`, `CodeSQLQueueMisconfigured` |
-| Sentinels | `QueueMisconfigured`, `MessageTooLarge`, `UnknownReceipt`, `LeaseExpired`, `InvalidBatchSize`, `NotRetryable`, `DeadLetterNotFound`, `QueueBackendFailed`, `QueueDirectoryUnusable`, `SQLQueueMisconfigured`, `ConsumerMisconfigured`, `HandlerPanicked` |
+| Constants | `DefaultMaxMessageBytes`, `MaxDeadlineOffset`, `DefaultPollInterval`, `MaxSQLTableLen`, `CodeNotRetryable`, `CodeDeadLetterNotFound`, `CodeSQLQueueMisconfigured`, `CodeInvalidDeadLetter` |
+| Sentinels | `QueueMisconfigured`, `MessageTooLarge`, `UnknownReceipt`, `LeaseExpired`, `InvalidBatchSize`, `NotRetryable`, `DeadLetterNotFound`, `InvalidDeadLetter`, `QueueBackendFailed`, `QueueDirectoryUnusable`, `SQLQueueMisconfigured`, `ConsumerMisconfigured`, `HandlerPanicked` |
 
 ## Why this shape
 
@@ -55,7 +55,9 @@ and the consumer engine.
 - **Every new name is built by a test with no internal import**
   (`sql_external_test.go`): `SQLConfig`, `NewSQL` over a transactor of the
   test's own making, `SQLMigration`, `DoNotRetry`, both new siblings on the
-  memory and file brokers. Issue #259 was a public API a downstream module
+  memory and file brokers — and ADR 0178's `DeadLetterWriter`,
+  `InvalidDeadLetter` and `CodeInvalidDeadLetter` (`queue_external_test.go`,
+  `TestTheFacadeWritesADeadLetterAsItLies`). Issue #259 was a public API a downstream module
   could not spell; this is the check that it can.
 
 ## Generated
@@ -80,6 +82,7 @@ and the consumer engine.
 
 - ADR 0054 — `docs/adr/0054-sdk-queue-domain.md`
 - ADR 0151 — the SQL broker, the growing retry delay, `DoNotRetry`, `Rejecter`, `DeadLetterManager`
+- ADR 0178 — `DeadLetterWriter`: a dead letter written as it lies, for kit's `data copy`
 - ADR 0053 — `events`, the other column of the frontier table
 - ADR 0008 — README generation from Go doc comments
 - `internal/core/data/queue/CLAUDE.md` — the port and the five decisions

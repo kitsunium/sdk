@@ -141,6 +141,7 @@ func TestTheQueueSiblingsKeepTheirMethodCounts(t *testing.T) {
 		{reflect.TypeFor[corequeue.Waker](), 1},
 		{reflect.TypeFor[corequeue.Rejecter](), 1},
 		{reflect.TypeFor[corequeue.DeadLetterManager](), 2},
+		{reflect.TypeFor[corequeue.DeadLetterWriter](), 1},
 	}
 	for _, testCase := range cases {
 		if got := testCase.typ.NumMethod(); got != testCase.want {

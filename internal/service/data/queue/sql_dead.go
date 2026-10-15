@@ -135,6 +135,54 @@ func (b *sqlBroker) DeleteDeadLetter(ctx context.Context, id string) error {
 	})
 }
 
+// PutDeadLetter writes dead into the table as a dead letter, as it is given,
+// under an identifier minted from its enqueue instant
+// (core/data/queue.DeadLetterWriter).
+//
+// It is one INSERT. Inside a transaction its context carries, it is a
+// savepoint of that transaction, so the dead letter exists if and only if the
+// transaction commits; outside one, it is durable when it returns. A dead
+// letter is never receivable, so no consumer is woken.
+func (b *sqlBroker) PutDeadLetter(ctx context.Context, dead corequeue.DeadLetterValue) (string, error) {
+	//: a cancelled caller must not write what nobody asked for any more.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return "", ctx.Err()
+	}
+	//: the refusals every broker makes, before a statement is sent.
+	if invalid := checkDeadLetter(dead, b.policy.MaxMessageBytes); invalid != nil {
+		//: InvalidDeadLetter or MessageTooLarge.
+		return "", invalid
+	}
+	entropy, entropyErr := randomHex(idEntropyBytes)
+	//: the identifier's random half, as Publish mints it.
+	if entropyErr != nil {
+		//: QueueBackendFailed — nothing was sent.
+		return "", backendFailed("rand", "", entropyErr)
+	}
+	enqueuedAt := dead.Message.EnqueuedAt.UnixNano()
+	id := messageID(enqueuedAt, entropy)
+	err := b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
+		_, execErr := ex.ExecContext(txCtx, b.stmts.putDead,
+			[]byte(id), dead.FailedAt.UnixNano(), enqueuedAt, int64(dead.Deliveries), dead.Message.Payload,
+			[]byte(dead.Reason), []byte(dead.Cause), int64(dead.Code))
+		//: the insertion did not complete.
+		if execErr != nil {
+			//: QueueBackendFailed, the driver's text withheld.
+			return b.failed("write a dead letter", execErr)
+		}
+		//: written.
+		return nil
+	})
+	//: nothing was written.
+	if err != nil {
+		//: QueueBackendFailed, or the transactor's own verdict.
+		return "", err
+	}
+	//: dead, as it was given, under its new identifier.
+	return id, nil
+}
+
 // deadLetterMoved turns a statement on one dead letter into the call's
 // verdict: one row is the dead letter acted on, none is one the store does not
 // hold.

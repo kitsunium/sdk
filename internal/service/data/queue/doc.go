@@ -58,7 +58,8 @@
 // consumers that died, and leasing what is visible.
 //
 // Package queue — the durable broker's dead-letter decisions: putting a dead
-// letter back into the queue, or deleting it.
+// letter back into the queue, or deleting it — and writing one there as it
+// lies.
 //
 // Package queue — one entry in the in-memory broker's lease-deadline heap.
 //
@@ -135,7 +136,8 @@
 // a configuration no SQL broker could run gets.
 //
 // Package queue — the SQL broker's dead letters: burying one a handler
-// rejected, reading them back, and the two decisions an operator takes.
+// rejected, reading them back, the two decisions an operator takes, and
+// writing one as it lies.
 //
 // Package queue — the only place the SQL broker renders SQL. Every statement
 // it sends is built here, once, at NewSQL, for its dialect and its table; the
