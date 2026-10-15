@@ -20,10 +20,8 @@ import (
 
 // A MySQL server below the floor refuses the start, naming the server and
 // the version it read, never the rest of its answer; one at or above it is
-// not refused for its version. ledgerApp gives the app a data directory, so
-// the case needs the file store, as every other start of a ledger does.
+// not refused for its version.
 func TestAMySQLServerBelowTheFloorRefusesTheStart(t *testing.T) {
-	needsFileStore(t)
 	for answer, refused := range map[string]string{
 		"5.7.44-log":     "MySQL 5.7.44",
 		"8.0.0-dmr":      "MySQL 8.0.0",
