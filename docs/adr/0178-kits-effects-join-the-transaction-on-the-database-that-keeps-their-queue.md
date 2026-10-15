@@ -1,6 +1,6 @@
 # ADR 0178 — kit's effects join the transaction on the database that keeps their queue
 
-- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), and C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key); the SDK's items 4 and 5 in #325 (`sql.Aborter`, `mailspool.Config.Broker` and `Config.Deferrer`); C1 and C2 for topics, queued commands and watches in #327 (item 6); C1 for the mailer in item 7 — the outbox on the database that keeps the mailer's service, sealed under data-key, its mail written in the transaction; the SDK's tombstone, item 9 of C7's order, in #329 (ADR 0143 amended on 2026-10-15: `Trash`, `Restore`, `Purge`, `Tombstones`), which C4 — kit's item 10 — builds on. The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
+- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4, and C6's assumption about the file engine's key order, refuted after acceptance by a measurement, with its remedy inserted as item 8. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key); the SDK's items 4 and 5 in #325 (`sql.Aborter`, `mailspool.Config.Broker` and `Config.Deferrer`); C1 and C2 for topics, queued commands and watches in #327 (item 6); C1 for the mailer in item 7 — the outbox on the database that keeps the mailer's service, sealed under data-key, its mail written in the transaction; the SDK's tombstone, item 10 of C7's order, in #329 (ADR 0143 amended on 2026-10-15: `Trash`, `Restore`, `Purge`, `Tombstones`), which C4 — kit's item 11 — builds on. The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
 - **Date**: 2026-10-14
 - **Accepted**: 2026-10-14
 - **Deciders**: SDK maintainers (issue #274); arbitrated by the owner
@@ -426,6 +426,45 @@ confidentiality, at what engine cost, and how does the catch-up use it?
   is `SELECT id … WHERE id > ? ORDER BY id LIMIT ?` on the primary key.
   **(assumed: that the file engine's key order is reachable without copying
   every document; to check in `internal/service/data/docstore`.)**
+  **(refuted, as the SDK stood — measured after acceptance.)** kit's file
+  engine reaches the SDK's `docstore.Store` only through what it exports, and
+  none of it lists keys alone: `List` and `Filter` decode every document,
+  `Entries(limit)` copies each document's JSON it returns
+  (`internal/service/data/docstore/docstore.go`, `Entries`), and it has no
+  `after`, so walking it page by page re-reads every page before. The cheap
+  path — the sorted keys under the read lock (`sortedKeys`) — existed, but
+  unexported. Measured on `cf51fe67` (Go 1.27.2, AMD EPYC 7351P, 8 threads),
+  the store in memory, which the file engine reads the same way:
+
+  | Listing the keys | Documents × size | ns/op | B/op |
+  |---|---|---|---|
+  | `Entries(0)`, the only exported way | 1 000 × 100 B | 0.33 ms | 221 KB |
+  | | 1 000 × 4 KiB | 2.2 ms | 4.96 MB |
+  | | 10 000 × 100 B | 5.5 ms | 2.5 MB |
+  | | 10 000 × 4 KiB | 19.1 ms | 49.9 MB |
+  | | 100 000 × 100 B | 55 ms | 27.3 MB |
+  | `Entries(limit)` in pages of 256 | 10 000 × 100 B | 155 ms | 62 MB |
+  | the sorted keys alone (unexported) | 10 000 × 100 B | 2.6 ms | 666 KB |
+  | | 10 000 × 4 KiB | 2.8 ms | 666 KB |
+
+  The memory a listing took grew with what the documents weigh, and paging
+  made it quadratic; the keys alone cost the same whatever the documents
+  weigh. The SQL half was not marked, and did not hold either: the SDK's
+  `SQLStore` exported no keyed page — its one (`pageAfter`, for `Reindex`)
+  reads `doc` too, and is unexported. **The remedy (C7, item 8)**: the SDK
+  grows a read of the keys alone in both engines, sibling ports of
+  `Collection` and `CollectionContext` (ADR 0039) — `KeyLister.Keys(after)`
+  and `KeyListerContext.Keys(ctx, after)`, an `iter.Seq2[string, error]` in
+  byte order resuming after the key named. The file engine takes the keys
+  above `after` once, under the read lock, when the range starts, and sorts
+  them — the map's own strings, no document copied; the SQL engine reads
+  pages of 256 with `SELECT doc_key … WHERE doc_key > ? ORDER BY doc_key
+  LIMIT ?`, each resuming after the last key read. After it, the same
+  measure of `Keys("")` ranged to the end gives 10 000 documents in 2.3 ms
+  and 164 KB at 100 B as at 4 KiB, in two allocations, and 100 000 in 28 ms
+  and 1.6 MB. A document a store no longer holds is not listed: a trashed one
+  (item 10) leaves the documents in both engines, so it is not either.
+  `Records.Keys` (item 9) is written on that read.
 - **B. `Keys(ctx, after string, limit int) ([]string, string, error)`**, the
   page made explicit. Same cost; the caller writes the loop.
 - **C. `Changed(ctx, since Cursor)`**, the keys written since a cursor.
@@ -498,7 +537,7 @@ the boxes open under the target's keys — the keys are copied as boxes too,
 and a sample of records is read through kit, opened, as the last step.
 **(assumed: that a dead letter can be written into the SQL broker as dead,
 with its reason and count; `DeadLetterManager` replays or deletes, it does
-not insert — to check before PR 11, and an SDK addition if not.)**
+not insert — to check before PR 12, and an SDK addition if not.)**
 
 **Options for the split.**
 
@@ -522,15 +561,20 @@ not insert — to check before PR 11, and an SDK addition if not.)**
    the two-phase release; the MySQL floor; the SQLite busy timeout tied to
    `<name>-timeout`; message sealing extended to SQL queues.
 7. C1 for the mailer — the outbox on SQL, sealed (below), after 5.
-8. C6 — `Records.Keys` and the watches' catch-up.
-9. SDK — docstore's tombstone (design first).
-10. C4 — the trash, after 9.
-11. `data copy`, last.
+8. SDK — a read of the keys alone in both engines of docstore,
+   `KeyLister` and `KeyListerContext` (design first; inserted after
+   acceptance, C6's refuted assumption).
+9. C6 — `Records.Keys` and the watches' catch-up, after 8.
+10. SDK — docstore's tombstone (design first).
+11. C4 — the trash, after 10.
+12. `data copy`, last.
 
 **Decision.** A — small pull requests, in this order, `data copy` verified
 by fingerprints — by the owner's decision, 2026-10-14. Item 4 was inserted
 after acceptance, when C1's assumption about the spool was refuted (C1);
-the items after it moved down by one.
+the items after it moved down by one. Item 8 was inserted the same way,
+when C6's assumption about the file engine was refuted by a measurement
+(C6); the items after it moved down by one again.
 
 **Sealing the mail outbox (item 7).** kit seals the spool's payload in a
 broker that wraps the one C1 gives the spool — the way `wrapQueue` already
@@ -581,9 +625,12 @@ not follow that person's erasure) and sealing hooks in the spool's `Config`
 
 Verified by reading the code at `55c542da`: every **(verified)** line of the
 Context, with its file and line. Not proved, and owned by the PR that needs
-it: four **(assumed)** lines — the file engine's key order, the data
-directory always present with a database, WordPress's 30 days, a dead
-letter written as dead by `data copy`. A fifth, the spool's deferred
+it: three **(assumed)** lines — the data directory always present with a
+database, WordPress's 30 days, a dead letter written as dead by `data
+copy`. A fourth, the file engine's key order, was **refuted** after
+acceptance by a measurement (C6): no exported read of either engine listed
+the keys without the documents, and the remedy is the SDK's `KeyLister`
+(C7, item 8). A fifth, the spool's deferred
 announcement, was **refuted** after acceptance (C1): a rolled-back `Send`
 holds its registration open for ever, and the remedy is a cancellation
 signal beside `Deferrer` (C7, item 4). Corrected by #323: a read is
@@ -608,7 +655,7 @@ refused. The pull requests still to come change:
 - **Start refusals** (PR 6): a MySQL older than 8.0.1, a MariaDB older than
   10.6, a SQLite `<name>-timeout` under 500 ms, and a SQLite URL whose busy
   timeout reaches `<name>-timeout` no longer start.
-- **Deletion** (PR 10): on a store with `Revisions(n)`, a product's deletion
+- **Deletion** (PR 11): on a store with `Revisions(n)`, a product's deletion
   keeps the record restorable 30 days unless `<store>-trash` is 0.
 - C3 and C5 break nothing: entries sealed under their own keys keep
   opening, and C5 only accepts types that were refused.
@@ -620,6 +667,7 @@ refused. The pull requests still to come change:
 | Proposed | 2026-10-14 | The design, merged in #320 |
 | Accepted | the owner's decision, 2026-10-14 | The recommendation of each choice retained as written; a *Decision* line per choice. C5 implemented in the same pull request. Two facts #323 established written in: a read is journaled without a reason and files no key (the Context's growth claim corrected), and C3's month is the UTC month of the entry's instant on the app's injected clock. C1's assumption about the spool's deferred `EventQueued` refuted (a rolled-back `Send` keeps its registration open): the remedy, a cancellation signal in `core/data/sql` beside `Deferrer` (amends ADR 0139) reached through `mailspool.Config.Deferrer`, inserted as item 4 of C7's order; ways B and C set aside |
 | Accepted, item 7 | 2026-10-15 | C1 for the mailer implemented (C7 item 7): the outbox on the database that keeps the mailer's service, `kit_queue__<service>__<mailer>__outbox`, each mail sealed under data-key bound to the mailer by a broker in front of the SQL one; a mail sent in a transaction on that database written in it before the commit, the database's transaction manager handed to the spool as `Config.Deferrer`; the Status line names the items implemented so far |
+| Amended | 2026-10-15 | C6's assumption about the file engine's key order refuted by a measurement (every exported listing copied the documents, paging was quadratic, and the SQL engine exported no keyed page): the remedy, a read of the keys alone in both engines of docstore (`KeyLister`, `KeyListerContext`), inserted as item 8 of C7's order; the items after it renumbered |
 
 ## Alternatives considered
 
