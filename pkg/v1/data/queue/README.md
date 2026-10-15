@@ -546,7 +546,7 @@ SQLMigration returns the migration that creates the one table an SQL queue named
 <a name="Broker"></a>
 ## type [Broker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/queue/facade_gen.go>)
 
-Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings ([DeadLetterReader](#DeadLetterReader), [LeaseExtender](#LeaseExtender), [Waker](#Waker), [Rejecter](#Rejecter), [DeadLetterManager](#DeadLetterManager), [DeadLetterWriter](#DeadLetterWriter)) reached by type assertion.
+Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings ([DeadLetterReader](#DeadLetterReader), [LeaseExtender](#LeaseExtender), [Waker](#Waker), [Rejecter](#Rejecter), [DeadLetterManager](#DeadLetterManager), [DeadLetterWriter](#DeadLetterWriter), [MessageReader](#MessageReader), [MessageWriter](#MessageWriter)) reached by type assertion.
 
 ```go
 type Broker = corequeue.Broker

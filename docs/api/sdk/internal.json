@@ -21084,7 +21084,7 @@
       "code": {
         "value": "0.2.23.5"
       },
-      "doc": "CodeInvalidBatchSize identifies a Receive or DeadLetters asked for a\nnon-positive number of messages.\n",
+      "doc": "CodeInvalidBatchSize identifies a Receive, DeadLetters or Messages asked\nfor a non-positive number of messages.\n",
       "file": "core/data/queue/codes_gen.go",
       "layer": "core",
       "family": "data"
@@ -21510,7 +21510,7 @@
         "reason": "INVALID_BATCH_SIZE",
         "public": "A batch size must be positive"
       },
-      "doc": "InvalidBatchSize refuses a Receive or DeadLetters asked for a\nnon-positive count.\n\nReturning an empty slice instead would be ADR 0031's inert policy: a\nconsumer loop asking for zero messages spins forever, processes\nnothing, reports no error, and looks exactly like an idle queue.\n",
+      "doc": "InvalidBatchSize refuses a Receive, DeadLetters or Messages asked for a\nnon-positive count.\n\nReturning an empty slice instead would be ADR 0031's inert policy: a\nconsumer loop asking for zero messages spins forever, processes\nnothing, reports no error, and looks exactly like an idle queue.\n",
       "file": "core/data/queue/codes_gen.go",
       "layer": "core",
       "family": "data"

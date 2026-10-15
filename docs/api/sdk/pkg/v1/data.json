@@ -6014,7 +6014,7 @@
       "spelled": "corequeue.Broker",
       "canonical": "github.com/kitsunium/sdk/internal/core/data/queue.Broker",
       "owner": "go:github.com/kitsunium/sdk/internal/core/data/queue.Broker",
-      "doc": "Broker is the public alias for the queue contract. It is FROZEN at four\nmethods; capabilities arrive as siblings ([DeadLetterReader],\n[LeaseExtender], [Waker], [Rejecter], [DeadLetterManager],\n[DeadLetterWriter]) reached by type assertion.\n",
+      "doc": "Broker is the public alias for the queue contract. It is FROZEN at four\nmethods; capabilities arrive as siblings ([DeadLetterReader],\n[LeaseExtender], [Waker], [Rejecter], [DeadLetterManager],\n[DeadLetterWriter], [MessageReader], [MessageWriter]) reached by type\nassertion.\n",
       "file": "queue/facade_gen.go",
       "layer": "public",
       "family": "data"

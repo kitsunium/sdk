@@ -33,8 +33,8 @@ packages:
         type: errs.Code
       - const:
           - doc: |-
-              CodeInvalidBatchSize identifies a Receive or DeadLetters asked for a
-              non-positive number of messages.
+              CodeInvalidBatchSize identifies a Receive, DeadLetters or Messages asked
+              for a non-positive number of messages.
             name: CodeInvalidBatchSize
             value: "0x00_02_17_05"
         type: errs.Code
@@ -846,7 +846,7 @@ packages:
             reason: LEASE_EXPIRED
           - code: CodeInvalidBatchSize
             doc: |-
-              InvalidBatchSize refuses a Receive or DeadLetters asked for a
+              InvalidBatchSize refuses a Receive, DeadLetters or Messages asked for a
               non-positive count.
 
               Returning an empty slice instead would be ADR 0031's inert policy: a
@@ -855,7 +855,7 @@ packages:
             name: InvalidBatchSize
             options:
               - errs.WithExitCode(exitConfig)
-            private: "core/data/queue: Receive/DeadLetters called with max <= 0, which would poll forever and deliver nothing"
+            private: "core/data/queue: Receive/DeadLetters/Messages called with max <= 0, which would poll forever and deliver nothing"
             public: A batch size must be positive
             reason: INVALID_BATCH_SIZE
           - code: CodeNotRetryable
@@ -2279,7 +2279,8 @@ packages:
               Broker is the public alias for the queue contract. It is FROZEN at four
               methods; capabilities arrive as siblings ([DeadLetterReader],
               [LeaseExtender], [Waker], [Rejecter], [DeadLetterManager],
-              [DeadLetterWriter]) reached by type assertion.
+              [DeadLetterWriter], [MessageReader], [MessageWriter]) reached by type
+              assertion.
             name: Broker
             target: corequeue.Broker
       - alias:
