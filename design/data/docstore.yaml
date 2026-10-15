@@ -177,11 +177,13 @@ packages:
           [Trashable] and [TrashableContext] for its trash, [KeyLister] and
           [KeyListerContext] for the keys alone, [VersionWriter] and
           [VersionWriterContext] for a document written with its versions as they
-          are, and [Announcer] is the pair of hooks both engines answer exactly as
-          they are;
+          are, [VersionWeigher] and [VersionWeigherContext] for what the versions
+          weigh, and [Announcer] is the pair of hooks both engines answer exactly
+          as they are;
         - the values both engines read and return — [EntryValue], [VersionValue],
-          [StampValue], [TombstoneValue] — and [IndexSpec], the declaration both
-          take, with its two constructors [Unique] and [Index];
+          [StampValue], [TombstoneValue], [VersionWeightValue] — and [IndexSpec],
+          the declaration both take, with its two constructors [Unique] and
+          [Index];
         - the codes of the 0.3.80.* range and their sentinels: both engines answer
           the same refusals under the same codes (ADR 0160).
 
@@ -198,8 +200,8 @@ packages:
 
       Package docstore — the siblings of Collection (ADR 0039): a document's
       versions, its trash, the keys alone (ADR 0178), a document written with its
-      versions as they are (ADR 0178), and the same ports with a context on every
-      call, which the SQL engine implements.
+      versions as they are (ADR 0178), what the versions weigh, and the same ports
+      with a context on every call, which the SQL engine implements.
 
       Package docstore — declares the sentinel *errs.Error outcomes both engines
       answer. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
@@ -219,7 +221,7 @@ packages:
 
       Package docstore — the values both engines read and return: a stored
       document as JSON, one version of a document, what a write says about the
-      version it makes, and a document in the trash.
+      version it makes, a document in the trash, and what the versions weigh.
     functions:
       - doc: |-
           Unique declares a unique index over the one key key returns: no two
@@ -935,6 +937,42 @@ packages:
             out:
               - type: error
         name: VersionWriterContext
+      - doc: |-
+          VersionWeigher is what a store's versions weigh, on a store whose calls
+          take no context: the sibling of [Collection] and [Versioned] the file
+          engine implements beside them (ADR 0143, amended for kit's Studio). It
+          reads no document: the file engine keeps the weight as a counter every
+          write moves, so asking costs the same whatever the store holds. Only a
+          store that keeps versions has it; one that keeps none answers
+          VERSIONS_NOT_KEPT.
+        methods:
+          - doc: |-
+              VersionWeight reports what the store keeps beyond its documents: how
+              many former versions, how many documents in the trash, and the bytes
+              of the JSON they hold. A closed store answers STORE_CLOSED.
+            name: VersionWeight
+            out:
+              - type: VersionWeightValue
+              - type: error
+        name: VersionWeigher
+      - doc: |-
+          VersionWeigherContext is [VersionWeigher] with a context on every call:
+          the sibling of [CollectionContext] and [VersionedContext] the SQL engine
+          implements beside them. It is one aggregate statement over the versions
+          table, which the database answers without sending a version.
+        methods:
+          - doc: |-
+              VersionWeight is VersionWeigher.VersionWeight under ctx, read in one
+              statement on the transaction ctx carries for the store's database, and
+              on the pool otherwise.
+            in:
+              - name: ctx
+                type: context.Context
+            name: VersionWeight
+            out:
+              - type: VersionWeightValue
+              - type: error
+        name: VersionWeigherContext
     sentinels:
       - var:
           - code: CodeDocumentNotFound
@@ -1290,6 +1328,29 @@ packages:
                 clock and kept to the nanosecond, as a version's instant is.
               name: At
               type: time.Time
+      - doc: |-
+          VersionWeightValue is what a store's versions weigh, as
+          [VersionWeigher].VersionWeight reports it: what the store keeps beyond
+          the documents it holds. A document's current version is the document
+          itself, and counts in none of its fields. Both engines count the same
+          versions the same way, so the same writes weigh the same on either.
+        name: VersionWeightValue
+        struct:
+          fields:
+            - doc: |-
+                Former is how many former versions the store keeps, every document's
+                — a trashed one's included.
+              name: Former
+              type: int
+            - doc: Trashed is how many documents are in the trash ([Trashable]).
+              name: Trashed
+              type: int
+            - doc: |-
+                Bytes is what the former versions and the trashed documents weigh:
+                the length of the JSON each holds, compact, as both engines keep it.
+                The instants and the metadata they carry are not counted.
+              name: Bytes
+              type: int64
   - constants:
       - doc: |-
           DefaultFoldAt is the least number of overlay entries that folds the overlay
@@ -1992,6 +2053,17 @@ packages:
             out:
               - type: error
             recv: pointer
+          - doc: |-
+              VersionWeight reports what the store keeps beyond its documents — its
+              former versions, its trashed documents and the bytes of their JSON — as
+              core/data/docstore.VersionWeigher says. It reads the counter every
+              write moves, which Stats also reports, and no document.
+              VersionsNotKept on a store that keeps none, StoreClosed after Close.
+            name: VersionWeight
+            out:
+              - type: coredocstore.VersionWeightValue
+              - type: error
+            recv: pointer
         name: Store
         struct:
           unexported: true
@@ -2000,7 +2072,8 @@ packages:
             name: T
       - doc: |-
           StatsValue is what a store can say about itself: how many documents it
-          holds, how far its overlay has grown, and how its folds have gone.
+          holds, how far its overlay has grown, how its folds have gone, and what
+          its versions weigh.
         name: StatsValue
         struct:
           fields:
@@ -2021,6 +2094,12 @@ packages:
             - doc: Folds is how many folds ran since the store opened, Open's own included.
               name: Folds
               type: int
+            - doc: |-
+                Versions is what the store's versions weigh — its former versions, its
+                trashed documents and their bytes —, a counter every write moves:
+                zero on a store that keeps none (ADR 0143).
+              name: Versions
+              type: coredocstore.VersionWeightValue
       - doc: |-
           SQLConfig configures [OpenSQL]. Key, Transactor, Dialect and Table are
           required. The secondary indexes are OpenSQL's other arguments, declared
@@ -2533,6 +2612,22 @@ packages:
             out:
               - type: error
             recv: pointer
+          - doc: |-
+              VersionWeight reports what the store keeps beyond its documents, as
+              core/data/docstore.VersionWeigherContext says: one aggregate statement
+              over the versions table — its former rows, its trash rows numbered 0,
+              and the length of the documents they hold —, on the transaction ctx
+              carries, else on the pool. The database scans the table and sends one
+              row. VersionsNotKept on a store that keeps none, StatementFailed when
+              the database does not answer.
+            in:
+              - name: ctx
+                type: context.Context
+            name: VersionWeight
+            out:
+              - type: coredocstore.VersionWeightValue
+              - type: error
+            recv: pointer
         name: SQLStore
         struct:
           unexported: true
@@ -2665,9 +2760,11 @@ packages:
 
       [Store] and [SQLStore] are engines. A caller that must stand a double in for
       one depends instead on the port it implements: [Collection], [Versioned],
-      [Trashable] and [KeyLister] for a [Store], whose calls take no context,
-      [CollectionContext], [VersionedContext], [TrashableContext] and
-      [KeyListerContext] for a [SQLStore], whose every call takes one, and
+      [Trashable], [KeyLister], [VersionWriter] and [VersionWeigher] for a
+      [Store], whose calls take no context, [CollectionContext],
+      [VersionedContext], [TrashableContext], [KeyListerContext],
+      [VersionWriterContext] and [VersionWeigherContext] for a [SQLStore], whose
+      every call takes one, and
       [Announcer] — OnWrite and OnDelete — for either. Each pair carries the same
       methods, the same documents and the same refusals; there is no single port
       over both, because the file engine waits on nothing a context could abandon
@@ -2726,6 +2823,19 @@ packages:
       once, which is what an erasure needs, and finds no trashed document. How
       long a document stays in the trash is the caller's to decide; the store
       empties nothing by itself.
+
+      # What the versions weigh
+
+      VersionWeight says what a store keeps beyond its documents — for a page
+      that shows what a history costs (ADR 0143):
+
+      	w, err := pages.VersionWeight() // w.Former versions and w.Trashed documents, w.Bytes of JSON
+
+      A document's current version is the document itself and is not counted.
+      [Store] keeps the weight as a counter every write moves — Stats reports it
+      too — so asking reads no version; [SQLStore] asks its database one
+      aggregate statement over the versions table, which sends back one row. The
+      same writes weigh the same on both.
 
       # Keys
 
@@ -3017,8 +3127,9 @@ packages:
               Entries, Keys, Lookup, Find and Stats read; Put, Insert, Replace, Update and
               Delete write, and their Stamped forms say what the version they make
               records; Versions and Version read a document's versions, RewriteVersions
-              rewrites its former ones; Trash, Restore, Purge and Tombstones keep its
-              trash; OnWrite and OnDelete announce; Fold and Close bring it to rest.
+              rewrites its former ones, VersionWeight says what they weigh; Trash,
+              Restore, Purge and Tombstones keep its trash; OnWrite and OnDelete
+              announce; Fold and Close bring it to rest.
             name: Store
             target: svcdocstore.Store[T]
             typeParams:
@@ -3055,6 +3166,13 @@ packages:
             target: coredocstore.TombstoneValue
       - alias:
           - doc: |-
+              VersionWeight is the public alias for what a store's versions weigh, as
+              VersionWeight reports it: its Former versions, its Trashed documents,
+              and the Bytes of the JSON they hold.
+            name: VersionWeight
+            target: coredocstore.VersionWeightValue
+      - alias:
+          - doc: |-
               IndexSpec is the public alias for one secondary index's declaration, built
               by [Unique] or [Index] and given to [Open].
             name: IndexSpec
@@ -3069,7 +3187,8 @@ packages:
       - alias:
           - doc: |-
               Stats is the public alias for what a store says about itself: documents,
-              pending overlay entries, folds, and the last automatic fold's failure.
+              pending overlay entries, folds, the last automatic fold's failure, and
+              what its versions weigh.
             name: Stats
             target: svcdocstore.StatsValue
       - alias:
@@ -3077,8 +3196,8 @@ packages:
               SQLStore is the public alias for the document store over SQL: Get, List,
               Filter, Entries, Keys, Count, Lookup and Find read; Put, Insert, Replace, Update
               and Delete write, and their Stamped forms say what the version they make
-              records; Versions, Version and RewriteVersions, Trash, Restore, Purge and
-              Tombstones as for [Store]; OnWrite and OnDelete announce once the write's
+              records; Versions, Version, RewriteVersions and VersionWeight, Trash,
+              Restore, Purge and Tombstones as for [Store]; OnWrite and OnDelete announce once the write's
               transaction commits; Reindex files the stored documents again. Every call
               takes a context.
             name: SQLStore
@@ -3177,6 +3296,19 @@ packages:
               context on every call, which [SQLStore] implements.
             name: VersionWriterContext
             target: coredocstore.VersionWriterContext
+      - alias:
+          - doc: |-
+              VersionWeigher is the public alias for the sibling of [Collection] that
+              reports what a store's versions weigh without a context, which [Store]
+              implements: VersionWeight.
+            name: VersionWeigher
+            target: coredocstore.VersionWeigher
+      - alias:
+          - doc: |-
+              VersionWeigherContext is the public alias for [VersionWeigher] with a
+              context on every call, which [SQLStore] implements.
+            name: VersionWeigherContext
+            target: coredocstore.VersionWeigherContext
       - alias:
           - doc: |-
               Announcer is the public alias for the pair of hooks both engines answer

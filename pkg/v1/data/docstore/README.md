@@ -79,7 +79,7 @@ A failure of the database is StatementFailed, which a caller answers with a 503:
 
 ### The ports, for a double
 
-[Store](#Store) and [SQLStore](#SQLStore) are engines. A caller that must stand a double in for one depends instead on the port it implements: [Collection](#Collection), [Versioned](#Versioned), [Trashable](#Trashable) and [KeyLister](#KeyLister) for a [Store](#Store), whose calls take no context, [CollectionContext](#CollectionContext), [VersionedContext](#VersionedContext), [TrashableContext](#TrashableContext) and [KeyListerContext](#KeyListerContext) for a [SQLStore](#SQLStore), whose every call takes one, and [Announcer](#Announcer) — OnWrite and OnDelete — for either. Each pair carries the same methods, the same documents and the same refusals; there is no single port over both, because the file engine waits on nothing a context could abandon while the SQL engine waits on a database (ADR 0160).
+[Store](#Store) and [SQLStore](#SQLStore) are engines. A caller that must stand a double in for one depends instead on the port it implements: [Collection](#Collection), [Versioned](#Versioned), [Trashable](#Trashable), [KeyLister](#KeyLister), [VersionWriter](#VersionWriter) and [VersionWeigher](#VersionWeigher) for a [Store](#Store), whose calls take no context, [CollectionContext](#CollectionContext), [VersionedContext](#VersionedContext), [TrashableContext](#TrashableContext), [KeyListerContext](#KeyListerContext), [VersionWriterContext](#VersionWriterContext) and [VersionWeigherContext](#VersionWeigherContext) for a [SQLStore](#SQLStore), whose every call takes one, and [Announcer](#Announcer) — OnWrite and OnDelete — for either. Each pair carries the same methods, the same documents and the same refusals; there is no single port over both, because the file engine waits on nothing a context could abandon while the SQL engine waits on a database (ADR 0160).
 
 ### Versions
 
@@ -108,6 +108,16 @@ err = pages.Purge(page.ID)            // or gone for good, its versions with it
 ```
 
 A trashed document leaves every read and frees its unique keys, as a former version does; Versions still reads what it kept, the trashed document first. Its number is kept: a creation under its key is a write over the trashed document, which continues its versions. Restore brings it back exactly as it was, or refuses with UniqueKeyTaken when another document took one of its unique keys meanwhile. Purge removes it and its versions. Delete never reaches the trash: it takes a document and its versions at once, which is what an erasure needs, and finds no trashed document. How long a document stays in the trash is the caller's to decide; the store empties nothing by itself.
+
+### What the versions weigh
+
+VersionWeight says what a store keeps beyond its documents — for a page that shows what a history costs (ADR 0143):
+
+```
+w, err := pages.VersionWeight() // w.Former versions and w.Trashed documents, w.Bytes of JSON
+```
+
+A document's current version is the document itself and is not counted. [Store](#Store) keeps the weight as a counter every write moves — Stats reports it too — so asking reads no version; [SQLStore](#SQLStore) asks its database one aggregate statement over the versions table, which sends back one row. The same writes weigh the same on both.
 
 ### Keys
 
@@ -197,6 +207,7 @@ for key, err := range pages.Keys("") {
   - [func \(\*SQLStore\) Update\(ctx context.Context, key string, fn func\(\*T\) error\) \(T, error\)](<#SQLStore.Update>)
   - [func \(\*SQLStore\) UpdateStamped\(ctx context.Context, key string, stamp coredocstore.StampValue, fn func\(\*T\) error\) \(T, error\)](<#SQLStore.UpdateStamped>)
   - [func \(\*SQLStore\) Version\(ctx context.Context, key string, number uint64\) \(coredocstore.VersionValue, error\)](<#SQLStore.Version>)
+  - [func \(\*SQLStore\) VersionWeight\(ctx context.Context\) \(coredocstore.VersionWeightValue, error\)](<#SQLStore.VersionWeight>)
   - [func \(\*SQLStore\) Versions\(ctx context.Context, key string\) \(versions \[\]coredocstore.VersionValue, err error\)](<#SQLStore.Versions>)
 - [type Stamp](<#Stamp>)
 - [type Stats](<#Stats>)
@@ -229,6 +240,7 @@ for key, err := range pages.Keys("") {
   - [func \(\*Store\) Update\(key string, fn func\(\*T\) error\) \(T, error\)](<#Store.Update>)
   - [func \(\*Store\) UpdateStamped\(key string, stamp coredocstore.StampValue, fn func\(\*T\) error\) \(T, error\)](<#Store.UpdateStamped>)
   - [func \(\*Store\) Version\(key string, number uint64\) \(coredocstore.VersionValue, error\)](<#Store.Version>)
+  - [func \(\*Store\) VersionWeight\(\) \(coredocstore.VersionWeightValue, error\)](<#Store.VersionWeight>)
   - [func \(\*Store\) Versions\(key string\) \(\[\]coredocstore.VersionValue, error\)](<#Store.Versions>)
 - [type Tombstone](<#Tombstone>)
 - [type Trashable](<#Trashable>)
@@ -242,6 +254,11 @@ for key, err := range pages.Keys("") {
   - [func \(TrashableContext\) Tombstones\(ctx context.Context\) \(\[\]TombstoneValue, error\)](<#TrashableContext.Tombstones>)
   - [func \(TrashableContext\) Trash\(ctx context.Context, key string\) error](<#TrashableContext.Trash>)
 - [type Version](<#Version>)
+- [type VersionWeigher](<#VersionWeigher>)
+  - [func \(VersionWeigher\) VersionWeight\(\) \(VersionWeightValue, error\)](<#VersionWeigher.VersionWeight>)
+- [type VersionWeigherContext](<#VersionWeigherContext>)
+  - [func \(VersionWeigherContext\) VersionWeight\(ctx context.Context\) \(VersionWeightValue, error\)](<#VersionWeigherContext.VersionWeight>)
+- [type VersionWeight](<#VersionWeight>)
 - [type VersionWriter](<#VersionWriter>)
   - [func \(VersionWriter\) PutDocument\(key string, versions \[\]VersionValue, trashedAt time.Time\) error](<#VersionWriter.PutDocument>)
 - [type VersionWriterContext](<#VersionWriterContext>)
@@ -1361,7 +1378,7 @@ type SQLConfig[T any] struct {
 <a name="SQLStore"></a>
 ## type [SQLStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
 
-SQLStore is the public alias for the document store over SQL: Get, List, Filter, Entries, Keys, Count, Lookup and Find read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version and RewriteVersions, Trash, Restore, Purge and Tombstones as for [Store](#Store); OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
+SQLStore is the public alias for the document store over SQL: Get, List, Filter, Entries, Keys, Count, Lookup and Find read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version, RewriteVersions and VersionWeight, Trash, Restore, Purge and Tombstones as for [Store](#Store); OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
 
 ```go
 type SQLStore[T any] = svcdocstore.SQLStore[T]
@@ -1622,6 +1639,15 @@ func (*SQLStore) Version(ctx context.Context, key string, number uint64) (coredo
 
 Version returns the version numbered number of the document stored under key, VersionNotFound when the document keeps none of that number — never made, or pruned — and what Versions returns otherwise.
 
+<a name="SQLStore.VersionWeight"></a>
+### func \(SQLStore\) [VersionWeight](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_version.go>)
+
+```go
+func (*SQLStore) VersionWeight(ctx context.Context) (coredocstore.VersionWeightValue, error)
+```
+
+VersionWeight reports what the store keeps beyond its documents, as core/data/docstore.VersionWeigherContext says: one aggregate statement over the versions table — its former rows, its trash rows numbered 0, and the length of the documents they hold —, on the transaction ctx carries, else on the pool. The database scans the table and sends one row. VersionsNotKept on a store that keeps none, StatementFailed when the database does not answer.
+
 <a name="SQLStore.Versions"></a>
 ### func \(SQLStore\) [Versions](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/sql_version.go>)
 
@@ -1660,7 +1686,7 @@ type Stamp struct {
 <a name="Stats"></a>
 ## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
 
-Stats is the public alias for what a store says about itself: documents, pending overlay entries, folds, and the last automatic fold's failure.
+Stats is the public alias for what a store says about itself: documents, pending overlay entries, folds, the last automatic fold's failure, and what its versions weigh.
 
 ```go
 type Stats = svcdocstore.StatsValue
@@ -1681,13 +1707,17 @@ type Stats struct {
 	Pending   int
 	// Folds is how many folds ran since the store opened, Open's own included.
 	Folds     int
+	// Versions is what the store's versions weigh — its former versions, its
+	// trashed documents and their bytes —, a counter every write moves:
+	// zero on a store that keeps none (ADR 0143).
+	Versions  coredocstore.VersionWeightValue
 }
 ```
 
 <a name="Store"></a>
 ## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
 
-Store is the public alias for the document store: Get, List, Filter, Entries, Keys, Lookup, Find and Stats read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones; Trash, Restore, Purge and Tombstones keep its trash; OnWrite and OnDelete announce; Fold and Close bring it to rest.
+Store is the public alias for the document store: Get, List, Filter, Entries, Keys, Lookup, Find and Stats read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones, VersionWeight says what they weigh; Trash, Restore, Purge and Tombstones keep its trash; OnWrite and OnDelete announce; Fold and Close bring it to rest.
 
 ```go
 type Store[T any] = svcdocstore.Store[T]
@@ -1955,6 +1985,15 @@ func (*Store) Version(key string, number uint64) (coredocstore.VersionValue, err
 
 Version returns the version numbered number of the document stored under key, VersionNotFound when the document keeps none of that number — never made, or pruned — and what Versions returns otherwise.
 
+<a name="Store.VersionWeight"></a>
+### func \(Store\) [VersionWeight](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/version.go>)
+
+```go
+func (*Store) VersionWeight() (coredocstore.VersionWeightValue, error)
+```
+
+VersionWeight reports what the store keeps beyond its documents — its former versions, its trashed documents and the bytes of their JSON — as core/data/docstore.VersionWeigher says. It reads the counter every write moves, which Stats also reports, and no document. VersionsNotKept on a store that keeps none, StoreClosed after Close.
+
 <a name="Store.Versions"></a>
 ### func \(Store\) [Versions](<https://github.com/kitsunium/sdk/blob/main/internal/service/data/docstore/version.go>)
 
@@ -2149,6 +2188,89 @@ type Version struct {
 	// document deleted, or purged from the trash, and written again is a new
 	// document, and starts again at 1.
 	Number uint64
+}
+```
+
+<a name="VersionWeigher"></a>
+## type [VersionWeigher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+
+VersionWeigher is the public alias for the sibling of [Collection](#Collection) that reports what a store's versions weigh without a context, which [Store](#Store) implements: VersionWeight.
+
+```go
+type VersionWeigher = coredocstore.VersionWeigher
+```
+
+VersionWeigher is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.VersionWeigher`, declared as:
+
+```go
+type VersionWeigher interface {
+	// VersionWeight reports what the store keeps beyond its documents: how
+	// many former versions, how many documents in the trash, and the bytes
+	// of the JSON they hold. A closed store answers STORE_CLOSED.
+	VersionWeight() (VersionWeightValue, error)
+}
+```
+
+<a name="VersionWeigher.VersionWeight"></a>
+### func \(VersionWeigher\) [VersionWeight](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+
+```go
+func (VersionWeigher) VersionWeight() (VersionWeightValue, error)
+```
+
+VersionWeight reports what the store keeps beyond its documents: how many former versions, how many documents in the trash, and the bytes of the JSON they hold. A closed store answers STORE\_CLOSED.
+
+<a name="VersionWeigherContext"></a>
+## type [VersionWeigherContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+
+VersionWeigherContext is the public alias for [VersionWeigher](#VersionWeigher) with a context on every call, which [SQLStore](#SQLStore) implements.
+
+```go
+type VersionWeigherContext = coredocstore.VersionWeigherContext
+```
+
+VersionWeigherContext is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.VersionWeigherContext`, declared as:
+
+```go
+type VersionWeigherContext interface {
+	// VersionWeight is VersionWeigher.VersionWeight under ctx, read in one
+	// statement on the transaction ctx carries for the store's database, and
+	// on the pool otherwise.
+	VersionWeight(ctx context.Context) (VersionWeightValue, error)
+}
+```
+
+<a name="VersionWeigherContext.VersionWeight"></a>
+### func \(VersionWeigherContext\) [VersionWeight](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/docstore/design_gen.go>)
+
+```go
+func (VersionWeigherContext) VersionWeight(ctx context.Context) (VersionWeightValue, error)
+```
+
+VersionWeight is VersionWeigher.VersionWeight under ctx, read in one statement on the transaction ctx carries for the store's database, and on the pool otherwise.
+
+<a name="VersionWeight"></a>
+## type [VersionWeight](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/facade_gen.go>)
+
+VersionWeight is the public alias for what a store's versions weigh, as VersionWeight reports it: its Former versions, its Trashed documents, and the Bytes of the JSON they hold.
+
+```go
+type VersionWeight = coredocstore.VersionWeightValue
+```
+
+VersionWeight is an alias of `github.com/kitsunium/sdk/internal/core/data/docstore.VersionWeightValue`, declared as:
+
+```go
+type VersionWeight struct {
+	// Former is how many former versions the store keeps, every document's
+	// — a trashed one's included.
+	Former  int
+	// Trashed is how many documents are in the trash ([Trashable]).
+	Trashed int
+	// Bytes is what the former versions and the trashed documents weigh:
+	// the length of the JSON each holds, compact, as both engines keep it.
+	// The instants and the metadata they carry are not counted.
+	Bytes   int64
 }
 ```
 

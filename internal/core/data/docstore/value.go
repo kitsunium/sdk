@@ -64,3 +64,20 @@ type TombstoneValue struct {
 	// clock and kept to the nanosecond, as a version's instant is.
 	At time.Time
 }
+
+// VersionWeightValue is what a store's versions weigh, as
+// [VersionWeigher].VersionWeight reports it: what the store keeps beyond
+// the documents it holds. A document's current version is the document
+// itself, and counts in none of its fields. Both engines count the same
+// versions the same way, so the same writes weigh the same on either.
+type VersionWeightValue struct {
+	// Former is how many former versions the store keeps, every document's
+	// — a trashed one's included.
+	Former int
+	// Trashed is how many documents are in the trash ([Trashable]).
+	Trashed int
+	// Bytes is what the former versions and the trashed documents weigh:
+	// the length of the JSON each holds, compact, as both engines keep it.
+	// The instants and the metadata they carry are not counted.
+	Bytes int64
+}

@@ -276,7 +276,7 @@ func (s *Store[T]) readVersions() error {
 			//: LoadFailed, naming the file and never the key.
 			return recordErr
 		}
-		s.versions[key] = compacted(record)
+		s.setVersions(key, compacted(record))
 	}
 	//: loaded.
 	return nil

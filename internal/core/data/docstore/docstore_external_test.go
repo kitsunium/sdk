@@ -155,6 +155,21 @@ func (versionWriterContextDouble) PutDocument(context.Context, string, []coredoc
 	return nil
 }
 
+// versionWeigherDouble carries exactly the methods VersionWeigher declares.
+type versionWeigherDouble struct{}
+
+func (versionWeigherDouble) VersionWeight() (coredocstore.VersionWeightValue, error) {
+	return coredocstore.VersionWeightValue{Former: 1}, nil
+}
+
+// versionWeigherContextDouble carries exactly the methods
+// VersionWeigherContext declares.
+type versionWeigherContextDouble struct{}
+
+func (versionWeigherContextDouble) VersionWeight(context.Context) (coredocstore.VersionWeightValue, error) {
+	return coredocstore.VersionWeightValue{Trashed: 1, Bytes: 2}, nil
+}
+
 // TestDoublesStillSatisfyThePorts is the ADR 0039 guard, executable rather
 // than documentary: each double above holds exactly its port's methods, so a
 // method added to a port fails this file's compilation before review.
@@ -170,6 +185,8 @@ func TestDoublesStillSatisfyThePorts(t *testing.T) {
 	var keysWithContext coredocstore.KeyListerContext = keyListerContextDouble{}
 	var writer coredocstore.VersionWriter = versionWriterDouble{}
 	var writerWithContext coredocstore.VersionWriterContext = versionWriterContextDouble{}
+	var weigher coredocstore.VersionWeigher = versionWeigherDouble{}
+	var weigherWithContext coredocstore.VersionWeigherContext = versionWeigherContextDouble{}
 	announcers := []coredocstore.Announcer{collection, withContext}
 	if _, err := collection.Get("k"); err != nil {
 		t.Fatalf("Collection.Get = %v, want nil", err)
@@ -200,6 +217,12 @@ func TestDoublesStillSatisfyThePorts(t *testing.T) {
 	}
 	if err := writerWithContext.PutDocument(t.Context(), "k", nil, time.Time{}); err != nil {
 		t.Fatalf("VersionWriterContext.PutDocument = %v, want nil", err)
+	}
+	if w, err := weigher.VersionWeight(); err != nil || w.Former != 1 {
+		t.Fatalf("VersionWeigher.VersionWeight = %+v, %v, want one former version", w, err)
+	}
+	if w, err := weigherWithContext.VersionWeight(t.Context()); err != nil || w.Trashed != 1 || w.Bytes != 2 {
+		t.Fatalf("VersionWeigherContext.VersionWeight = %+v, %v, want one trashed document of two bytes", w, err)
 	}
 	for _, announcer := range announcers {
 		announcer.OnWrite(func(string) {})()
