@@ -87,6 +87,7 @@ go_test(
         "sqlite_internal_test.go",
         "sqlite_test.go",
         "subsystems_test.go",
+        "trash_test.go",
     ],
     embed = [":sqlite"],
     deps = [

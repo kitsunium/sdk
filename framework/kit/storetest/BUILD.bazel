@@ -13,6 +13,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//framework/kit",
+        "//pkg/v1/clock",
         "//pkg/v1/errs",
     ],
 )

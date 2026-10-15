@@ -773,6 +773,9 @@ func (a *App) addComponents() error {
 		// The stores' retention loops, once whatever their writes wake is up
 		// (retention.go).
 		a.addRetention,
+		// The stores' trash: what is past due goes at start, the rest at its
+		// instant (trash_run.go).
+		a.addTrash,
 		a.addServing,
 	)
 }

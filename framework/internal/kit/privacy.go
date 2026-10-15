@@ -100,6 +100,7 @@ type privacyRun struct {
 type privacyStore interface {
 	node
 	retentionRunner
+	trashRunner
 	plan() *classPlan
 	privacyDeclared() bool
 	retains() bool

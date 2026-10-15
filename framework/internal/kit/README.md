@@ -570,9 +570,12 @@ Package kit — the ports the workflow engine reaches a store through.
   - [func \(\*StoreService\) Restore\(ctx context.Context, key string, number uint64, fields ...string\) \(T, error\)](<#StoreService.Restore>)
   - [func \(\*StoreService\) Revision\(ctx context.Context, key string, number uint64\) \(RevisionEvent\[T\], error\)](<#StoreService.Revision>)
   - [func \(\*StoreService\) Revisions\(ctx context.Context, key string\) \(\[\]RevisionEvent\[T\], error\)](<#StoreService.Revisions>)
+  - [func \(\*StoreService\) Trashed\(ctx context.Context\) \(\[\]TombstoneEvent, error\)](<#StoreService.Trashed>)
+  - [func \(\*StoreService\) Untrash\(ctx context.Context, key string\) \(T, error\)](<#StoreService.Untrash>)
   - [func \(\*StoreService\) Update\(ctx context.Context, key string, fn func\(\*T\) error\) \(T, error\)](<#StoreService.Update>)
 - [type SubscriptionConfigurer](<#SubscriptionConfigurer>)
 - [type SubscriptionWorker](<#SubscriptionWorker>)
+- [type TombstoneEvent](<#TombstoneEvent>)
 - [type TopicService](<#TopicService>)
   - [func \(\*TopicService\) Publish\(ctx context.Context, msg T\) error](<#TopicService.Publish>)
 - [type UID](<#UID>)
@@ -1224,6 +1227,15 @@ const CodeTransactionSpan errs.Code = 262722
 A transaction wrote a store another database keeps than the one it belongs to — the data directory counting as one: refused, Invalid.
 
 Code `0.4.2.66`
+
+<a name="CodeTrash"></a>
+```go
+const CodeTrash errs.Code = 262734
+```
+
+The trash (kitsunium/sdk ADR 0178 C4).
+
+Code `0.4.2.78`
 
 <a name="CodeUndecodable"></a>
 ```go
@@ -4395,7 +4407,7 @@ Count returns how many entities the store holds.
 func (*StoreService) Delete(ctx context.Context, key string) error
 ```
 
-Delete removes the entity with the given key, or returns a [NotFound](#NotFound) error. When the store seals at rest and the entity was its person's last record, their data key goes with it, as with an erasure — at the commit, in a [Transact](#Transact) —, once nothing kit keeps still needs it: a held record, or a former value or version sealed under it, keeps the key.
+Delete removes the entity with the given key, or returns a [NotFound](#NotFound) error. On a store with [Revisions](#Revisions) it moves the entity to the store's trash instead, for \<store>-trash — 30 days unless that setting says otherwise, 0 deleting at once —: gone from every read, its unique keys free, its versions kept, [StoreService.Untrash](#StoreService.Untrash) brings it back, and kit purges it once its time is up. When the store seals at rest and the entity was its person's last record, their data key goes with it, as with an erasure — at the commit, in a [Transact](#Transact) —, once nothing kit keeps still needs it: a held record, a record in the trash, or a former value or version sealed under it, keeps the key.
 
 <a name="StoreService.Diff"></a>
 ### func \(StoreService\) [Diff](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/revisions.go>)
@@ -4541,6 +4553,24 @@ func (*StoreService) Revisions(ctx context.Context, key string) ([]RevisionEvent
 
 Revisions returns the versions the store keeps of the record under key, newest first: the record as it is now, then the former ones — n at most, more while a legal hold keeps the record. A secret member is zeroed in each: a former password hash never reaches the product. A missing record is a [NotFound](#NotFound), a store that keeps no revisions an [Invalid](#Invalid).
 
+<a name="StoreService.Trashed"></a>
+### func \(StoreService\) [Trashed](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/trash.go>)
+
+```go
+func (*StoreService) Trashed(ctx context.Context) ([]TombstoneEvent, error)
+```
+
+Trashed returns the records in the store's trash, in key order: each one's key, when the product deleted it, and when kit purges it. A store without [Revisions](#Revisions) keeps no trash: an [Invalid](#Invalid).
+
+<a name="StoreService.Untrash"></a>
+### func \(StoreService\) [Untrash](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/trash.go>)
+
+```go
+func (*StoreService) Untrash(ctx context.Context, key string) (T, error)
+```
+
+Untrash brings the record the product deleted under key back from the store's trash, as it was when deleted — its versions kept, no version made — and returns it. A key with no record in the trash — never deleted, purged, or written again since — is a [NotFound](#NotFound); a unique index another record took a key of meanwhile refuses it with a [Conflict](#Conflict), and it stays in the trash; a store without [Revisions](#Revisions) keeps no trash: an [Invalid](#Invalid).
+
 <a name="StoreService.Update"></a>
 ### func \(StoreService\) [Update](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go>)
 
@@ -4570,6 +4600,19 @@ SubscriptionWorker consumes a topic: its handler runs once per message, at least
 
 ```go
 type SubscriptionWorker[T any] struct{}
+```
+
+<a name="TombstoneEvent"></a>
+## type [TombstoneEvent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/trash.go>)
+
+TombstoneEvent is one record in a store's trash: its key, when the product deleted it, on the app's clock, and when kit purges it — its trash's length after the deletion, or sooner when its retention says so.
+
+```go
+type TombstoneEvent struct {
+	Key     string
+	At      time.Time
+	PurgeAt time.Time
+}
 ```
 
 <a name="TopicService"></a>

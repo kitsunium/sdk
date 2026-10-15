@@ -395,6 +395,16 @@ func (a *App) erase(ctx context.Context, reason string, ids []string) (Erasure, 
 // records it erased were sealed under.
 func (a *App) eraseIn(ctx context.Context, st privacyStore, reason string, ids []string, refs map[string]bool) (model.StoreErasure, error) {
 	part := model.StoreErasure{Store: st.base().id}
+	// What the product deleted of them and the trash still keeps goes first,
+	// at once (ADR 0178 C4): an erasure never leaves a person in the trash.
+	purged, err := st.eraseTrashed(ctx, a, ids, reason)
+	part.Deleted = append(part.Deleted, purged...)
+	if err != nil {
+		if len(purged) > 0 {
+			err = errors.Join(err, st.fold(ctx))
+		}
+		return part, err
+	}
 	keys, err := st.subjectKeys(ctx, a, ids)
 	for _, key := range keys {
 		var outcome erasureOutcome

@@ -239,6 +239,14 @@ func (e *sealedEngine[T]) Delete(ctx context.Context, key string) error {
 	if (err != nil && !errors.Is(err, docstore.WriteUnconfirmed)) || !e.s.plan().sealsAny() {
 		return err
 	}
+	e.dropOwnKeyAfter(ctx, key)
+	return err
+}
+
+// dropOwnKeyAfter destroys the own data key of the record under key, gone
+// — deleted, or purged from the trash —: at the commit, in a transaction,
+// since a rollback puts the record back, sealed under it.
+func (e *sealedEngine[T]) dropOwnKeyAfter(ctx context.Context, key string) {
 	drop := func(ctx context.Context) {
 		if derr := e.dropOwnKey(ctx, key); derr != nil {
 			logger.Warn(ctx, e.a.log, "a deleted record's own data key could not be destroyed",
@@ -251,7 +259,6 @@ func (e *sealedEngine[T]) Delete(ctx context.Context, key string) error {
 	}}) {
 		drop(ctx)
 	}
-	return err
 }
 
 // dropOwnKey destroys the own data key of the record under key, once the
@@ -272,8 +279,25 @@ func (e *sealedEngine[T]) dropOwnKey(ctx context.Context, key string) error {
 	if _, err := e.inner.Get(ctx, key); !errors.Is(err, docstore.DocumentNotFound) {
 		return nil // written again meanwhile: the key seals it
 	}
+	if e.inTrash(ctx, key) {
+		return nil // trashed meanwhile: the key seals what a restoration brings back
+	}
 	_, err = e.z.destroy(ctx, ref)
 	return err
+}
+
+// inTrash reports whether the record under key is in the trash: its
+// versions read while no record is stored.
+func (e *sealedEngine[T]) inTrash(ctx context.Context, key string) bool {
+	if e.s.revisions == 0 {
+		return false
+	}
+	vk, ok := e.inner.(versionKeeper)
+	if !ok {
+		return false
+	}
+	_, err := vk.storedVersions(ctx, key)
+	return err == nil
 }
 
 // Watch registers the store's hooks with the engine inside.

@@ -276,17 +276,29 @@ func (e *docEngine[T]) before(ctx context.Context, key string) func(context.Cont
 			return errors.Join(err, e.forget(key, head, prev))
 		}
 	case errors.Is(err, docstore.DocumentNotFound):
-		return func(context.Context) error {
-			err := e.ds.Delete(key)
-			if errors.Is(err, docstore.DocumentNotFound) {
-				return nil
-			}
-			e.tell(key, true, err)
-			return err
-		}
+		return e.uncreate(key)
 	}
 	// What the key holds no longer decodes: it cannot be written back.
 	return func(context.Context) error { return err }
+}
+
+// uncreate is what takes back a write that finds no document under key: its
+// deletion — or, over a record in the trash, which the write takes out
+// (ADR 0178 C4), the record put back in, where an earlier trash's own
+// rollback finds it to restore. The version the write made stays: a number
+// is never given twice.
+func (e *docEngine[T]) uncreate(key string) func(context.Context) error {
+	if e.trashedNow(key) {
+		return func(context.Context) error { return e.unconfirmed(e.ds.Trash(key), key, true) }
+	}
+	return func(context.Context) error {
+		err := e.ds.Delete(key)
+		if errors.Is(err, docstore.DocumentNotFound) {
+			return nil
+		}
+		e.tell(key, true, err)
+		return err
+	}
 }
 
 // after keeps, once a write stands, what writes back what it replaced, and

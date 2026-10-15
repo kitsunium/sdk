@@ -4749,6 +4749,21 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeTrash",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "CodeTrash",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262734",
+      "code": {
+        "value": "0.4.2.78"
+      },
+      "doc": "The trash (kitsunium/sdk ADR 0178 C4).\n",
+      "file": "framework/internal/kit/codes_gen.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeUndecodable",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/internal/kit",
@@ -7565,7 +7580,7 @@
       "recv": "StoreService",
       "spelled": "func(ctx context.Context, key string) error",
       "canonical": "func(ctx context.Context, key string) error",
-      "doc": "Delete removes the entity with the given key, or returns a [NotFound] error.\nWhen the store seals at rest and the entity was its person's last record,\ntheir data key goes with it, as with an erasure — at the commit, in a\n[Transact] —, once nothing kit keeps still needs it: a held record, or a\nformer value or version sealed under it, keeps the key.\n",
+      "doc": "Delete removes the entity with the given key, or returns a [NotFound] error.\nOn a store with [Revisions] it moves the entity to the store's trash\ninstead, for <store>-trash — 30 days unless that setting says otherwise, 0\ndeleting at once —: gone from every read, its unique keys free, its\nversions kept, [StoreService.Untrash] brings it back, and kit purges it\nonce its time is up. When the store seals at rest and the entity was its\nperson's last record, their data key goes with it, as with an erasure —\nat the commit, in a [Transact] —, once nothing kit keeps still needs it: a\nheld record, a record in the trash, or a former value or version sealed\nunder it, keeps the key.\n",
       "file": "framework/internal/kit/store.go",
       "layer": "framework"
     },
@@ -7762,6 +7777,30 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.(*StoreService[...]).Trashed",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "Trashed",
+      "recv": "StoreService",
+      "spelled": "func(ctx context.Context) ([]TombstoneEvent, error)",
+      "canonical": "func(ctx context.Context) ([]github.com/kitsunium/sdk/framework/internal/kit.TombstoneEvent, error)",
+      "doc": "Trashed returns the records in the store's trash, in key order: each\none's key, when the product deleted it, and when kit purges it. A store\nwithout [Revisions] keeps no trash: an [Invalid].\n",
+      "file": "framework/internal/kit/trash.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.(*StoreService[...]).Untrash",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "Untrash",
+      "recv": "StoreService",
+      "spelled": "func(ctx context.Context, key string) (T, error)",
+      "canonical": "func(ctx context.Context, key string) (T, error)",
+      "doc": "Untrash brings the record the product deleted under key back from the\nstore's trash, as it was when deleted — its versions kept, no version\nmade — and returns it. A key with no record in the trash — never deleted,\npurged, or written again since — is a [NotFound]; a unique index another\nrecord took a key of meanwhile refuses it with a [Conflict], and it stays\nin the trash; a store without [Revisions] keeps no trash: an [Invalid].\n",
+      "file": "framework/internal/kit/trash.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit.(*StoreService[...]).Update",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/framework/internal/kit",
@@ -7826,6 +7865,31 @@
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/kit.OperationOption",
       "doc": "Timeout cancels the handler's context after d and answers 504. It is the\nSDK's resilience timeout.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/internal/kit/endpoint.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.TombstoneEvent",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "TombstoneEvent",
+      "spelled": "struct{Key string; At time.Time; PurgeAt time.Time}",
+      "canonical": "struct{Key string; At time.Time; PurgeAt time.Time}",
+      "fields": [
+        {
+          "name": "Key",
+          "type": "string"
+        },
+        {
+          "name": "At",
+          "type": "time.Time"
+        },
+        {
+          "name": "PurgeAt",
+          "type": "time.Time"
+        }
+      ],
+      "doc": "TombstoneEvent is one record in a store's trash: its key, when the product\ndeleted it, on the app's clock, and when kit purges it — its trash's\nlength after the deletion, or sooner when its retention says so.\n",
+      "file": "framework/internal/kit/trash.go",
       "layer": "framework"
     },
     {
@@ -11587,6 +11651,22 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.CodeTrash",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "CodeTrash",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262734",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeTrash",
+      "code": {
+        "value": "0.4.2.78"
+      },
+      "doc": "CodeTrash is a store's trash that cannot be read or emptied: what the\nproduct deleted stays in it until a later purge (ADR 0178 C4).\n",
+      "file": "framework/kit/errors.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/kit.CodeUndecodable",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/kit",
@@ -13398,6 +13478,18 @@
       "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/kit.OperationOption",
       "doc": "Timeout cancels the handler's context after d and answers 504. It is the\nSDK's resilience timeout.\n\nIFACE-OPAQUE: the option is sealed — its method is unexported — so a caller\nonly hands it to the declaration it configures.\n",
       "file": "framework/kit/endpoint.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.Tombstone",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "Tombstone",
+      "spelled": "ikit.TombstoneEvent",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit.TombstoneEvent",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/kit.TombstoneEvent",
+      "doc": "Tombstone is one record in a store's trash: its key, when the product\ndeleted it, on the app's clock, and when kit purges it — its trash's\nlength after the deletion, or sooner when its retention says so.\n",
+      "file": "framework/kit/revisions.go",
       "layer": "framework"
     },
     {

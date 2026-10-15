@@ -184,14 +184,15 @@ func (s *StoreService[T]) formerSealUnder(ctx context.Context, ref string) (bool
 }
 
 // versionsSealUnder reports whether a version a record of se keeps is
-// sealed under the data key ref.
+// sealed under the data key ref — a record in the trash's included: its
+// restoration needs the key (trash.go).
 func versionsSealUnder[T any](ctx context.Context, se *sealedEngine[T], ref string) (bool, error) {
-	entries, err := se.resting(ctx, 0)
+	keys, err := keptKeys(ctx, se)
 	if err != nil {
 		return false, err
 	}
-	for _, en := range entries {
-		versions, err := se.storedVersions(ctx, en.Key)
+	for _, key := range keys {
+		versions, err := se.storedVersions(ctx, key)
 		switch {
 		case errors.Is(err, docstore.DocumentNotFound):
 			continue // deleted meanwhile, its versions with it
@@ -205,6 +206,27 @@ func versionsSealUnder[T any](ctx context.Context, se *sealedEngine[T], ref stri
 		}
 	}
 	return false, nil
+}
+
+// keptKeys are the keys of every record se keeps versions of: those it
+// holds, and those in its trash.
+func keptKeys[T any](ctx context.Context, se *sealedEngine[T]) ([]string, error) {
+	entries, err := se.resting(ctx, 0)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(entries))
+	for _, en := range entries {
+		keys = append(keys, en.Key)
+	}
+	stones, err := se.tombstones(ctx)
+	if err != nil && !errors.Is(err, docstore.VersionsNotKept) {
+		return nil, err
+	}
+	for _, st := range stones {
+		keys = append(keys, st.Key)
+	}
+	return keys, nil
 }
 
 // sealedUnder reports whether raw — a record, a version, a former value —
