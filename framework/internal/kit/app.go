@@ -67,8 +67,11 @@ type App struct {
 	services []*Service
 	// modules are the modules it mounts, in start order (mount.go).
 	modules []*mountedModule
-	decl    pos
-	opts    appOptions
+	// mountEnv is the environment's name the mounts were resolved for: a
+	// mount given kit.Only holds only where it names it (mount.go).
+	mountEnv string
+	decl     pos
+	opts     appOptions
 
 	// Resolved when the app starts or describes itself.
 	cfg     config
@@ -202,6 +205,7 @@ type mountedModule struct {
 //go:noinline
 func NewApp(name string, services ...*Service) *App {
 	a := &App{name: name, own: services, decl: callerPos(), phase: model.PhaseStopped}
+	a.mountEnv = mountEnv(&a.opts, os.Getenv)
 	a.modules, a.services = mounts(a.own, nil)
 	return a
 }
@@ -221,7 +225,8 @@ func (a *App) With(opts ...AppConfigurer) *App {
 		}
 	}
 	b.opts.withAt = pos{}
-	b.modules, b.services = mounts(b.own, b.opts.mounts)
+	b.mountEnv = mountEnv(&b.opts, os.Getenv)
+	b.modules, b.services = mounts(b.own, mountsIn(b.opts.mounts, b.mountEnv))
 	return b
 }
 
@@ -256,6 +261,8 @@ func (a *App) Handler() http.Handler {
 // root. It is shared by Start and by describing the app without running it.
 func (a *App) resolve() error {
 	a.cfg = resolveConfig(&a.opts, os.Getenv)
+	// A mount given kit.Only holds in the environment this run names.
+	a.remount(a.cfg.envName)
 	if a.cliRun {
 		// A CLI command is not a product anybody looks at: no Studio, and no
 		// question to git about the build, whatever the environment.

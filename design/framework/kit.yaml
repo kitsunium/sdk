@@ -1558,6 +1558,27 @@ packages:
         out:
           - type: MountConfigurer
       - doc: |-
+          Only makes a mount hold in the environments envs names alone — the name
+          KIT_ENV or [Env] gives, lower-cased, "production" when neither does:
+
+          	app := kit.NewApp("vigie", identity.Service).
+          		With(kit.Mount(debugbar.Module, kit.Only("dev", "staging")))
+
+          Elsewhere the mount is as if it had not been given, its [Prefix] and its
+          [Bind] with it; another mount of the module without Only still mounts it.
+          Several Only on one mount add up. The start refuses an Only that names no
+          environment, a name that cannot be one — lower-case letters, digits and
+          dashes inside, 63 at most —, and a module a mounted module requires
+          ([Requires]) that its mount leaves out, rather than mounting it at its
+          defaults behind the product's back.
+        in:
+          - name: envs
+            type: string
+        name: Only
+        out:
+          - type: MountConfigurer
+        variadic: true
+      - doc: |-
           MinLength refuses a password shorter than n characters, counted as NIST
           counts them: one per Unicode code point. The default is 15, NIST's figure
           for a password used alone; 8 is the floor NIST allows with a second
@@ -3227,7 +3248,7 @@ packages:
         interface:
           unexported: true
         name: ModuleConfigurer
-      - doc: "MountConfigurer configures the mount of a module: [Prefix], [Bind]."
+      - doc: "MountConfigurer configures the mount of a module: [Prefix], [Bind], [Only]."
         interface:
           unexported: true
         name: MountConfigurer
@@ -5434,7 +5455,7 @@ packages:
           kit's stores ([Migrations]).
         name: ModulePart
         target: ikit.ModuleConfigurer
-      - doc: "MountOption configures the mount of a module: [Prefix], [Bind]."
+      - doc: "MountOption configures the mount of a module: [Prefix], [Bind], [Only]."
         name: MountOption
         target: ikit.MountConfigurer
       - doc: |-
@@ -6308,7 +6329,8 @@ packages:
       it declares is qualified with its name: its services are
       "<module>.<service>", its settings and secrets "<module>.<name>", its
       routes served under its prefix; a module it [Requires] is mounted with it,
-      and the modules start first.
+      and the modules start first. A mount given [Only] holds in the
+      environments it names alone — kit.Mount(m, kit.Only("dev", "staging")).
 
       # Processes
 
@@ -7143,6 +7165,27 @@ packages:
         name: Prefix
         out:
           - type: MountOption
+      - doc: |-
+          Only makes a mount hold in the environments envs names alone — the name
+          KIT_ENV or [Env] gives, lower-cased, "production" when neither does:
+
+          	app := kit.NewApp("vigie", identity.Service).
+          		With(kit.Mount(debugbar.Module, kit.Only("dev", "staging")))
+
+          Elsewhere the mount is as if it had not been given, its [Prefix] and its
+          [Bind] with it; another mount of the module without Only still mounts it.
+          Several Only on one mount add up. The start refuses an Only that names no
+          environment, a name that cannot be one — lower-case letters, digits and
+          dashes inside, 63 at most —, and a module a mounted module requires
+          ([Requires]) that its mount leaves out, rather than mounting it at its
+          defaults behind the product's back.
+        in:
+          - name: envs
+            type: string
+        name: Only
+        out:
+          - type: MountOption
+        variadic: true
       - doc: |-
           MinLength refuses a password shorter than n characters, counted as NIST
           counts them: one per Unicode code point. The default is 15, NIST's figure

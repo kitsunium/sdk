@@ -8,11 +8,11 @@ import (
 
 // Mounting a module. A *Module is an AppOption: the app mounts it at its
 // defaults. [Mount] mounts it with options — where its routes are served
-// ([Prefix]), what its ports call ([Bind]). A module the mounted ones
-// require is mounted too, at its defaults, when the app does not mount it
-// itself.
+// ([Prefix]), what its ports call ([Bind]), in which environments the mount
+// holds ([Only]). A module the mounted ones require is mounted too, at its
+// defaults, when the app does not mount it itself.
 
-// MountConfigurer configures the mount of a module: [Prefix], [Bind].
+// MountConfigurer configures the mount of a module: [Prefix], [Bind], [Only].
 type MountConfigurer interface {
 	mountConfigure(d *mountDecl)
 }
@@ -27,6 +27,12 @@ type mountDecl struct {
 	// at is where the app mounts it: the kit.Mount call, or the App.With
 	// that was given the module.
 	at pos
+	// limited says Only was given: the mount holds only in the
+	// environments only names, none when only is empty. onlyAt is where the
+	// first Only was given.
+	limited bool
+	only    []string
+	onlyAt  pos
 }
 
 // mountOption is Mount's AppOption.
@@ -64,6 +70,7 @@ func Mount(m *Module, opts ...MountConfigurer) AppConfigurer {
 	}
 	for i := range d.binds {
 		d.binds[i].scope = m
+		d.binds[i].limited, d.binds[i].only = d.limited, d.only
 	}
 	return &mountOption{decl: d}
 }
@@ -83,6 +90,80 @@ func (p *prefixOption) mountConfigure(d *mountDecl) { d.prefix, d.prefixAt = p.p
 //
 //go:noinline
 func Prefix(prefix string) MountConfigurer { return &prefixOption{prefix: prefix, at: callerPos()} }
+
+type onlyOption struct {
+	envs []string
+	at   pos
+}
+
+// mountConfigure sets the option on what it configures: the environments of
+// every Only given to one mount add up.
+func (o *onlyOption) mountConfigure(d *mountDecl) {
+	if !d.limited {
+		d.limited, d.onlyAt = true, o.at
+	}
+	d.only = append(d.only, o.envs...)
+}
+
+// Only makes a mount hold in the environments envs names alone — the name
+// KIT_ENV or [Env] gives, lower-cased, "production" when neither does:
+//
+//	app := kit.NewApp("vigie", identity.Service).
+//		With(kit.Mount(debugbar.Module, kit.Only("dev", "staging")))
+//
+// Elsewhere the mount is as if it had not been given, its [Prefix] and its
+// [Bind] with it; another mount of the module without Only still mounts it.
+// Several Only on one mount add up. The start refuses an Only that names no
+// environment, a name that cannot be one — lower-case letters, digits and
+// dashes inside, 63 at most —, and a module a mounted module requires
+// ([Requires]) that its mount leaves out, rather than mounting it at its
+// defaults behind the product's back.
+//
+//go:noinline
+func Only(envs ...string) MountConfigurer {
+	return &onlyOption{envs: slices.Clone(envs), at: callerPos()}
+}
+
+// holdsIn reports whether a mount limited to only holds in env.
+func holdsIn(limited bool, only []string, env string) bool {
+	return !limited || slices.Contains(only, env)
+}
+
+// mountsIn are the mounts of decls that hold in env, in their order.
+func mountsIn(decls []mountDecl, env string) []mountDecl {
+	out := make([]mountDecl, 0, len(decls))
+	for _, d := range decls {
+		if holdsIn(d.limited, d.only, env) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// mountEnv is the environment's name the mounts are resolved for: kit.Env's,
+// else KIT_ENV's, as resolveConfig reads them.
+func mountEnv(o *appOptions, getenv func(string) string) string {
+	env := getenv("KIT_ENV")
+	if o.env != nil {
+		env = *o.env
+	}
+	_, name := resolveEnv(env)
+	return name
+}
+
+// remount resolves the mounts again for the environment the configuration
+// names, when an Only makes it matter and it is not the one App.With read:
+// kit's own services the app already runs stay first.
+func (a *App) remount(env string) {
+	if a.mountEnv == env || !slices.ContainsFunc(a.opts.mounts, func(d mountDecl) bool { return d.limited }) {
+		a.mountEnv = env
+		return
+	}
+	own := slices.DeleteFunc(slices.Clone(a.services), func(s *Service) bool { return s == Privacy || !kitOwn(s) })
+	a.mountEnv = env
+	a.modules, a.services = mounts(a.own, mountsIn(a.opts.mounts, env))
+	a.services = slices.Concat(own, a.services)
+}
 
 // mounts resolves the modules an app mounts, in the order they start —
 // the modules others require first, needs before those who need them, then
