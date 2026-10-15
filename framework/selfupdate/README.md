@@ -53,6 +53,10 @@ A product whose updates are silent by design builds its Service WithAutomaticCon
 
 Service.WithVendorKeys links several keys, in order, and a release verifies against any of them: a rotation publishes under the new key while builds that carry both accept it, and neither side has to be updated first (ADR 0150). Service.WithSignatureDomain makes each signature cover a domain — so a key that also signs other documents cannot have one read as a release — and makes the signed manifest say which tag it is and until when it may be installed ("# tag v1.4.0", "# expires 2026-12-31T00:00:00Z"): an older release replayed under a newer name, or a stale one, is refused. Service.WithProbe keeps the previous binary as \<binary>.prev and runs the new one with the product's probe arguments; a probe that fails puts the previous one back (CodeProbeFailed).
 
+### Companions: a second executable from the same archive
+
+A product that ships more than one executable in its release archive — a thin client beside a daemon — declares the others with Service.WithCompanions. Each one installed beside the running binary is replaced from the archive that was already authenticated, as one set with the binary: every file staged, every previous one kept, then renamed, and a rename or a probe that fails puts back the files already replaced. One that is not installed is not created.
+
 ### Two limits a caller must know before relying on this
 
 \*\*Without a signature domain, a compromised release host can serve an OLDER signed release.\*\* The historical manifest is signed but carries no release tag, so a host that answers a request for v2 with v1's manifest, signature and archive passes every check and installs v1. WithSignatureDomain closes it by putting the tag and an expiry INSIDE the signed document; a product that has not adopted the format keeps the gap.
@@ -91,6 +95,7 @@ It does not roll back on its own. The replacement is atomic (temp file, chmod, r
   - [func \(\*Service\) ListCandidates\(\) \(candidates \[\]CandidateValue, listErr error\)](<#Service.ListCandidates>)
   - [func \(\*Service\) Upgrade\(\) \(info UpdateValue, upgradeErr error\)](<#Service.Upgrade>)
   - [func \(\*Service\) WithAutomaticConsent\(\) \*Service](<#Service.WithAutomaticConsent>)
+  - [func \(\*Service\) WithCompanions\(names ...string\) \*Service](<#Service.WithCompanions>)
   - [func \(\*Service\) WithProbe\(args \[\]string, timeout time.Duration\) \*Service](<#Service.WithProbe>)
   - [func \(\*Service\) WithSignatureDomain\(domain string\) \*Service](<#Service.WithSignatureDomain>)
   - [func \(\*Service\) WithVendorKey\(key \[\]byte\) \*Service](<#Service.WithVendorKey>)
@@ -949,6 +954,17 @@ func (*Service) WithAutomaticConsent() *Service
 ```
 
 WithAutomaticConsent declares that the PRODUCT consents to unrequested upgrades — a status line that updates itself silently, its decision D11 —, so no environment variable has to grant it. An operator still refuses with \<PREFIX>\_AUTO\_UPGRADE=0: an explicit answer always wins. It grants nothing else: escalation keeps its own, separate opt-in.
+
+<a name="Service.WithCompanions"></a>
+### func \(Service\) [WithCompanions](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/companions.go>)
+
+```go
+func (*Service) WithCompanions(names ...string) *Service
+```
+
+WithCompanions makes an upgrade also replace each named file the release archive carries beside the product binary — a second executable shipped in the same archive — from that SAME archive, after the one signature and checksum check that covers it: nothing is downloaded twice. A companion is replaced where it is installed, beside the running binary, its symlinks resolved; one that is not installed there is not created. A companion that resolves to the binary itself, or to a file another name already reached, is that file and is replaced once.
+
+Every file is staged in its own directory before any is renamed, and each installed one is kept by a hard link as \<file>.prev. A rename, or the probe WithProbe declared, that fails puts back every file already replaced, so the product and its companions are never left at two versions; the kept files are dropped once all stand, unless a probe keeps them as it keeps the binary's. A companion the archive lacks refuses the upgrade (BinaryNotInArchive) with nothing replaced. The replacement of a set is never elevated: a directory the user cannot write, or a file system that cannot link, refuses it (StagingFailed) with nothing replaced.
 
 <a name="Service.WithProbe"></a>
 ### func \(Service\) [WithProbe](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/probe.go>)

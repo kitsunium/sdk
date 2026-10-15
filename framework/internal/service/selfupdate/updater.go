@@ -94,6 +94,9 @@ type Service struct {
 	clock      clock.Clock
 	// probe is what a replacement must answer before it stands (probe.go).
 	probe probeSpec
+	// companions are the archive members replaced with the binary when they
+	// are installed beside it (companions.go).
+	companions []string
 	// automatic is WithAutomaticConsent's (consent_product.go).
 	automatic bool
 }
@@ -352,6 +355,20 @@ func (u *Service) downloadAndReplace(version string) error {
 		return err
 	}
 
+	//: A companion installed beside the binary is replaced with it, from these
+	//: same verified bytes, as one set (companions.go).
+	installed, err := u.installedCompanions(execPath)
+	//: A companion whose installed path cannot be resolved stops the set.
+	if err != nil {
+		//: Bare bubble — installedCompanions names the path.
+		return err
+	}
+	//: Only a companion that is installed turns the replacement into a set.
+	if len(installed) > 0 {
+		//: Bare bubble — replaceSet classifies every step it runs.
+		return u.replaceSet(archive, execPath, installed)
+	}
+
 	// Extract the inner binary from the verified archive bytes.
 	binReader, cleanup, err := u.openInnerBinary(bytes.NewReader(archive))
 	//: Extract pipeline failure — wrap to identify the phase in operator logs.
@@ -371,8 +388,15 @@ func (u *Service) downloadAndReplace(version string) error {
 // in the downloaded release archive. Returned cleanup must always be called
 // (uses no-op when there's nothing to close). The reader is single-use.
 func (u *Service) openInnerBinary(body io.Reader) (binary io.Reader, cleanup func(), openErr error) {
+	//: The product binary is the archive member named after the product.
+	return u.openMember(body, u.innerBinaryName())
+}
+
+// openMember returns a reader over the regular file named want inside the
+// release archive, in this platform's archive format: the product binary, or
+// a companion WithCompanions declared. Returned cleanup must always be called.
+func (u *Service) openMember(body io.Reader, want string) (member io.Reader, cleanup func(), openErr error) {
 	suffix := u.getArchiveSuffix()
-	want := u.innerBinaryName()
 	//: Two-way archive dispatch — linux/darwin → tar.gz, windows → zip.
 	switch suffix {
 	//: tar.gz path streams via gzip.NewReader + tar.NewReader.

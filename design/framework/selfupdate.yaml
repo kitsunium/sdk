@@ -1147,6 +1147,33 @@ packages:
               - type: "*Service"
             recv: pointer
           - doc: |-
+              WithCompanions makes an upgrade also replace each named file the release
+              archive carries beside the product binary — a second executable shipped in
+              the same archive — from that SAME archive, after the one signature and
+              checksum check that covers it: nothing is downloaded twice. A companion is
+              replaced where it is installed, beside the running binary, its symlinks
+              resolved; one that is not installed there is not created. A companion that
+              resolves to the binary itself, or to a file another name already reached,
+              is that file and is replaced once.
+
+              Every file is staged in its own directory before any is renamed, and each
+              installed one is kept by a hard link as <file>.prev. A rename, or the probe
+              WithProbe declared, that fails puts back every file already replaced, so
+              the product and its companions are never left at two versions; the kept
+              files are dropped once all stand, unless a probe keeps them as it keeps the
+              binary's. A companion the archive lacks refuses the upgrade
+              (BinaryNotInArchive) with nothing replaced. The replacement of a set
+              is never elevated: a directory the user cannot write, or a file system that
+              cannot link, refuses it (StagingFailed) with nothing replaced.
+            in:
+              - name: names
+                type: string
+            name: WithCompanions
+            out:
+              - type: "*Service"
+            recv: pointer
+            variadic: true
+          - doc: |-
               WithVendorKey pins the ed25519 public half every release must be signed
               with, and returns the Service so construction reads as one expression —
               the same chaining shape license.NewService(...).WithVersion(...) uses.
@@ -1444,6 +1471,16 @@ packages:
       previous binary as <binary>.prev and runs the new one with the product's
       probe arguments; a probe that fails puts the previous one back
       (CodeProbeFailed).
+
+      # Companions: a second executable from the same archive
+
+      A product that ships more than one executable in its release archive — a
+      thin client beside a daemon — declares the others with
+      Service.WithCompanions. Each one installed beside the running binary is
+      replaced from the archive that was already authenticated, as one set with
+      the binary: every file staged, every previous one kept, then renamed, and a
+      rename or a probe that fails puts back the files already replaced. One that
+      is not installed is not created.
 
       # Two limits a caller must know before relying on this
 
