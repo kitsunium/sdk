@@ -255,6 +255,43 @@ func TestFacadeTrash(t *testing.T) {
 	var _ docstore.TrashableContext = (*docstore.SQLStore[member])(nil)
 }
 
+// TestFacadePutDocument writes a document with its versions through public
+// names only — VersionWriter, Version, VersionsInvalid and its code — and
+// reads them back as given.
+func TestFacadePutDocument(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	store, err := docstore.Open(
+		docstore.Config[member]{Key: func(m member) string { return m.ID }, Versions: 2},
+		docstore.Unique("email", func(m member) string { return m.Email }),
+	)
+	if err != nil {
+		t.Fatalf("Open() = %v", err)
+	}
+	var writer docstore.VersionWriter = store
+	given := []docstore.Version{
+		{Number: 5, At: at, Meta: map[string]string{"by": "ada"}, JSON: json.RawMessage(`{"id":"m1","email":"ada@example.com"}`)},
+		{Number: 1, JSON: json.RawMessage(`{"id":"m1"}`)},
+	}
+	if err := writer.PutDocument("m1", given, time.Time{}); err != nil {
+		t.Fatalf("PutDocument() = %v", err)
+	}
+	versions, err := store.Versions("m1")
+	if err != nil || len(versions) != 2 || versions[0].Number != 5 || !versions[0].At.Equal(at) ||
+		versions[1].Number != 1 || !versions[1].At.IsZero() {
+		t.Fatalf("Versions() = %+v, %v; want the versions given", versions, err)
+	}
+	if got, err := store.Lookup("email", "ada@example.com"); err != nil || got.ID != "m1" {
+		t.Fatalf("Lookup() = %+v, %v", got, err)
+	}
+	given[1].Number = 5
+	if err := writer.PutDocument("m2", given, time.Time{}); !errs.HasCode(err, docstore.CodeVersionsInvalid) ||
+		!errors.Is(err, docstore.VersionsInvalid) {
+		t.Fatalf("PutDocument with a number twice = %v, want VersionsInvalid", err)
+	}
+	var _ docstore.VersionWriterContext = (*docstore.SQLStore[member])(nil)
+}
+
 func TestAStoreServesThroughItsPort(t *testing.T) {
 	t.Parallel()
 	store := open(t, vfs.NewMem())
