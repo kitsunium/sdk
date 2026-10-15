@@ -4529,6 +4529,10 @@ packages:
             target: svcconsensus.HealthValue
           - name: PeerHealthValue
             target: svcconsensus.PeerHealthValue
+          - name: HealthFlags
+            target: svcconsensus.HealthFlags
+          - name: PeerFlags
+            target: svcconsensus.PeerFlags
           - name: ReadMode
             target: svcconsensus.ReadMode
           - name: Durability
@@ -4776,6 +4780,38 @@ packages:
             type: coreconsensus.Role
             value: "5"
         doc: The roles a Status reports.
+      - const:
+          - name: HealthReady
+            reexport: svcconsensus.HealthReady
+            type: svcconsensus.HealthFlags
+            value: "1"
+          - name: HealthHasLeader
+            reexport: svcconsensus.HealthHasLeader
+            type: svcconsensus.HealthFlags
+            value: "2"
+          - name: HealthQuorumReachable
+            reexport: svcconsensus.HealthQuorumReachable
+            type: svcconsensus.HealthFlags
+            value: "4"
+          - name: HealthStopped
+            reexport: svcconsensus.HealthStopped
+            type: svcconsensus.HealthFlags
+            value: "8"
+        doc: The answers a HealthValue carries, read with HealthFlags.Has.
+      - const:
+          - name: PeerVoter
+            reexport: svcconsensus.PeerVoter
+            type: svcconsensus.PeerFlags
+            value: "1"
+          - name: PeerUnreachable
+            reexport: svcconsensus.PeerUnreachable
+            type: svcconsensus.PeerFlags
+            value: "2"
+          - name: PeerSnapshot
+            reexport: svcconsensus.PeerSnapshot
+            type: svcconsensus.PeerFlags
+            value: "4"
+        doc: The facts a PeerHealthValue carries, read with PeerFlags.Has.
       - const:
           - name: ReadIndex
             reexport: svcconsensus.ReadIndex
