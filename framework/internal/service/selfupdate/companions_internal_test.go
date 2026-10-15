@@ -121,15 +121,17 @@ func serveFixture(t *testing.T, fixture *releaseFixture) http.HandlerFunc {
 // The whole contract, one row per promise: both files from one verified
 // archive, a companion not installed never created, an unverified archive
 // replacing nothing, a failed second rename putting the first back, a member
-// the archive lacks and a file system that cannot link replacing nothing.
+// the archive lacks and a file system that cannot link replacing nothing, and
+// a companion that is the binary itself never written over it.
 func TestWithCompanionsReplacesTheSetFromOneVerifiedArchive(t *testing.T) {
 	t.Parallel()
 	both := [][2]string{{testSource.Product, "new binary"}, {companionName, "new companion"}}
 
-	tests := []struct {
+	type tc struct {
 		name          string
 		members       [][2]string
 		withCompanion bool
+		linkToBinary  bool
 		mutate        func(t *testing.T, f *releaseFixture)
 		failSecond    bool
 		noLink        bool
@@ -138,7 +140,8 @@ func TestWithCompanionsReplacesTheSetFromOneVerifiedArchive(t *testing.T) {
 		wantExe       string
 		wantCompanion string
 		wantEntries   []string
-	}{
+	}
+	tests := []tc{
 		{
 			name: "an installed companion is replaced with the binary", members: both, withCompanion: true,
 			wantExe: "new binary", wantCompanion: "new companion",
@@ -187,57 +190,72 @@ func TestWithCompanionsReplacesTheSetFromOneVerifiedArchive(t *testing.T) {
 			wantExe: "old binary", wantCompanion: "old companion",
 			wantEntries: []string{testSource.Product, companionName},
 		},
+		{
+			name: "a companion that links to the binary is not written over it", members: both,
+			linkToBinary: true, wantExe: "new binary", wantCompanion: "new binary",
+			wantEntries: []string{testSource.Product, companionName},
+		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	runCase := func(t *testing.T, tc tc) {
+		exe, companion := installSet(t, tc.withCompanion)
+		//: The companion name installed as a link to the running binary.
+		if tc.linkToBinary {
+			if err := os.Symlink(exe, companion); err != nil {
+				t.Fatal(err)
+			}
+		}
+		fixture := setFixture(t, makeTarGzMembers(t, tc.members...))
+		if tc.mutate != nil {
+			tc.mutate(t, &fixture)
+		}
+		var fsys FileSystem = setFS{exe: exe}
+		//: The set renames over the companion's REAL path, so the failure
+		//: is injected there: a temporary directory reached through a
+		//: symlink (/var -> /private/var on macOS, an 8.3 short name on
+		//: Windows) would otherwise never match and the rename would pass.
+		if tc.failSecond {
+			realCompanion, err := filepath.EvalSymlinks(companion)
+			//: The companion was just written; resolving it cannot miss.
+			if err != nil {
+				t.Fatal(err)
+			}
+			fsys = setFS{exe: exe, failRename: realCompanion}
+		}
+		if tc.noLink {
+			real := newRealBackedFS(exe)
+			real.evalSymlinksFunc = filepath.EvalSymlinks
+			fsys = real
+		}
+		svc := signedServiceFor(t, fixture.pub, fsys, serveFixture(t, &fixture)).WithCompanions(companionName)
+
+		err := svc.downloadAndReplace("v2.0.0")
+
+		if tc.wantErrIs == nil && err != nil {
+			t.Fatalf("downloadAndReplace() = %v (%s)", err, diagnose(err))
+		}
+		if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+			t.Fatalf("downloadAndReplace() = %v, want errors.Is %v", err, tc.wantErrIs)
+		}
+		if tc.wantFields != "" && !strings.Contains(fieldsOf(err), tc.wantFields) {
+			t.Errorf("fields = %s, want %s", fieldsOf(err), tc.wantFields)
+		}
+		if got := readOr(t, exe); got != tc.wantExe {
+			t.Errorf("binary = %q, want %q", got, tc.wantExe)
+		}
+		if got := readOr(t, companion); got != tc.wantCompanion {
+			t.Errorf("companion = %q, want %q", got, tc.wantCompanion)
+		}
+		//: No staged file and no kept link is left behind, whatever happened.
+		if got := dirEntries(t, filepath.Dir(exe)); !slices.Equal(got, tc.wantEntries) {
+			t.Errorf("directory = %v, want %v", got, tc.wantEntries)
+		}
+	}
+
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			exe, companion := installSet(t, tc.withCompanion)
-			fixture := setFixture(t, makeTarGzMembers(t, tc.members...))
-			if tc.mutate != nil {
-				tc.mutate(t, &fixture)
-			}
-			var fsys FileSystem = setFS{exe: exe}
-			//: The set renames over the companion's REAL path, so the failure
-			//: is injected there: a temporary directory reached through a
-			//: symlink (/var -> /private/var on macOS, an 8.3 short name on
-			//: Windows) would otherwise never match and the rename would pass.
-			if tc.failSecond {
-				realCompanion, err := filepath.EvalSymlinks(companion)
-				//: The companion was just written; resolving it cannot miss.
-				if err != nil {
-					t.Fatal(err)
-				}
-				fsys = setFS{exe: exe, failRename: realCompanion}
-			}
-			if tc.noLink {
-				real := newRealBackedFS(exe)
-				real.evalSymlinksFunc = filepath.EvalSymlinks
-				fsys = real
-			}
-			svc := signedServiceFor(t, fixture.pub, fsys, serveFixture(t, &fixture)).WithCompanions(companionName)
-
-			err := svc.downloadAndReplace("v2.0.0")
-
-			if tc.wantErrIs == nil && err != nil {
-				t.Fatalf("downloadAndReplace() = %v (%s)", err, diagnose(err))
-			}
-			if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
-				t.Fatalf("downloadAndReplace() = %v, want errors.Is %v", err, tc.wantErrIs)
-			}
-			if tc.wantFields != "" && !strings.Contains(fieldsOf(err), tc.wantFields) {
-				t.Errorf("fields = %s, want %s", fieldsOf(err), tc.wantFields)
-			}
-			if got := readOr(t, exe); got != tc.wantExe {
-				t.Errorf("binary = %q, want %q", got, tc.wantExe)
-			}
-			if got := readOr(t, companion); got != tc.wantCompanion {
-				t.Errorf("companion = %q, want %q", got, tc.wantCompanion)
-			}
-			//: No staged file and no kept link is left behind, whatever happened.
-			if got := dirEntries(t, filepath.Dir(exe)); !slices.Equal(got, tc.wantEntries) {
-				t.Errorf("directory = %v, want %v", got, tc.wantEntries)
-			}
+			runCase(t, c)
 		})
 	}
 }
@@ -269,16 +287,30 @@ func TestWithCompanionsReplacesASymlinkedCompanionAtItsRealPath(t *testing.T) {
 }
 
 // A probe that fails puts back the binary AND its companions; one that passes
-// keeps the previous files as <file>.prev, as the single-binary probe does.
+// keeps the previous files as <file>.prev, as the single-binary probe does. A
+// companion declared twice is one file of the set, so it is put back once and
+// the set reports itself rolled back.
 func TestWithCompanionsAFailedProbePutsTheWholeSetBack(t *testing.T) {
 	t.Parallel()
-	for _, pass := range []bool{true, false} {
+	type tc struct {
+		name  string
+		names []string
+		pass  bool
+	}
+	tests := []tc{
+		{name: "a passing probe keeps the previous files", names: []string{companionName}, pass: true},
+		{name: "a failing probe puts the set back", names: []string{companionName}},
+		{name: "a companion declared twice is put back once", names: []string{companionName, companionName}},
+	}
+
+	runCase := func(t *testing.T, c tc) {
 		exe, companion := installSet(t, true)
 		fixture := setFixture(t, makeTarGzMembers(t, [2]string{testSource.Product, "new binary"}, [2]string{companionName, "new companion"}))
 		svc := signedServiceFor(t, fixture.pub, setFS{exe: exe}, serveFixture(t, &fixture)).
-			WithCompanions(companionName).WithProbe([]string{"version"}, time.Second)
+			WithCompanions(c.names...).WithProbe([]string{"version"}, time.Second)
 		svc.probe.run = func(context.Context, string, []string) error {
-			if pass {
+			//: The verdict the case asks for.
+			if c.pass {
 				return nil
 			}
 			return errs.NewRuntime(0x00_03_42_FF, "PROBE_TEST", "the new binary crashed", "test")
@@ -288,13 +320,22 @@ func TestWithCompanionsAFailedProbePutsTheWholeSetBack(t *testing.T) {
 
 		gotExe, gotCompanion := readOr(t, exe), readOr(t, companion)
 		switch {
-		case pass && (err != nil || gotExe != "new binary" || gotCompanion != "new companion" ||
+		//: A passing probe: the new set stands and the old one is kept.
+		case c.pass && (err != nil || gotExe != "new binary" || gotCompanion != "new companion" ||
 			readOr(t, exe+prevSuffix) != "old binary" || readOr(t, companion+prevSuffix) != "old companion"):
 			t.Errorf("a passing probe: err=%v binary=%q companion=%q", err, gotExe, gotCompanion)
-		case !pass && (!errs.HasCode(err, CodeProbeFailed) || gotExe != "old binary" || gotCompanion != "old companion" ||
+		//: A failing probe: the old set is back and says so.
+		case !c.pass && (!errs.HasCode(err, CodeProbeFailed) || gotExe != "old binary" || gotCompanion != "old companion" ||
 			!strings.Contains(fieldsOf(err), "rolled_back=true")):
 			t.Errorf("a failing probe: err=%v (%s) binary=%q companion=%q", err, fieldsOf(err), gotExe, gotCompanion)
 		}
+	}
+
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 

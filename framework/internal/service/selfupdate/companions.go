@@ -30,7 +30,9 @@ type stagedFile struct {
 // the same archive — from that SAME archive, after the one signature and
 // checksum check that covers it: nothing is downloaded twice. A companion is
 // replaced where it is installed, beside the running binary, its symlinks
-// resolved; one that is not installed there is not created.
+// resolved; one that is not installed there is not created. A companion that
+// resolves to the binary itself, or to a file another name already reached,
+// is that file and is replaced once.
 //
 // Every file is staged in its own directory before any is renamed, and each
 // installed one is kept by a hard link as <file>.prev. A rename, or the probe
@@ -58,6 +60,11 @@ func (u *Service) WithCompanions(names ...string) *Service {
 func (u *Service) installedCompanions(execPath string) (installed []companionTarget, resolveErr error) {
 	dir := filepath.Dir(execPath)
 	product := u.innerBinaryName()
+	// Every target is one file: a second entry for a path the set already
+	// holds would be written twice and put back twice, the second restore
+	// failing on the .prev the first consumed. execPath is already resolved,
+	// so a companion that links to the binary is the binary and is skipped.
+	seen := map[string]bool{execPath: true}
 	//: Each declared name, matched on its basename only, so no name can reach
 	//: outside the directory the binary is installed in.
 	for _, name := range u.companions {
@@ -78,6 +85,11 @@ func (u *Service) installedCompanions(execPath string) (installed []companionTar
 				errs.String("step", "resolve_companion"),
 				errs.String("path", filepath.Join(dir, member)))
 		}
+		//: Already in the set — the binary, or a name declared twice.
+		if seen[resolved] {
+			continue
+		}
+		seen[resolved] = true
 		installed = append(installed, companionTarget{member: member, path: resolved})
 	}
 	//: Possibly empty: the single-binary flow then runs unchanged.

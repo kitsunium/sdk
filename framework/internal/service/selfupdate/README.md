@@ -579,7 +579,7 @@ WithAutomaticConsent declares that the PRODUCT consents to unrequested upgrades 
 func (*Service) WithCompanions(names ...string) *Service
 ```
 
-WithCompanions makes an upgrade also replace each named file the release archive carries beside the product binary — a second executable shipped in the same archive — from that SAME archive, after the one signature and checksum check that covers it: nothing is downloaded twice. A companion is replaced where it is installed, beside the running binary, its symlinks resolved; one that is not installed there is not created.
+WithCompanions makes an upgrade also replace each named file the release archive carries beside the product binary — a second executable shipped in the same archive — from that SAME archive, after the one signature and checksum check that covers it: nothing is downloaded twice. A companion is replaced where it is installed, beside the running binary, its symlinks resolved; one that is not installed there is not created. A companion that resolves to the binary itself, or to a file another name already reached, is that file and is replaced once.
 
 Every file is staged in its own directory before any is renamed, and each installed one is kept by a hard link as \<file>.prev. A rename, or the probe WithProbe declared, that fails puts back every file already replaced, so the product and its companions are never left at two versions; the kept files are dropped once all stand, unless a probe keeps them as it keeps the binary's. A companion the archive lacks refuses the upgrade (BinaryNotInArchive) with nothing replaced. The replacement of a set is never elevated: a directory the user cannot write, or a file system that cannot link, refuses it (StagingFailed) with nothing replaced.
 

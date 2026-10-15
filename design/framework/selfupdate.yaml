@@ -1152,7 +1152,9 @@ packages:
               the same archive — from that SAME archive, after the one signature and
               checksum check that covers it: nothing is downloaded twice. A companion is
               replaced where it is installed, beside the running binary, its symlinks
-              resolved; one that is not installed there is not created.
+              resolved; one that is not installed there is not created. A companion that
+              resolves to the binary itself, or to a file another name already reached,
+              is that file and is replaced once.
 
               Every file is staged in its own directory before any is renamed, and each
               installed one is kept by a hard link as <file>.prev. A rename, or the probe
