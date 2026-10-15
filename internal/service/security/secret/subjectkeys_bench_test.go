@@ -162,3 +162,36 @@ func BenchmarkSubjectKeysOldestRoot(b *testing.B) {
 	}
 	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*subjects), "ns/key")
 }
+
+// BenchmarkSubjectKeysOldestRootPopulation is the same question over the
+// populations a product keeps — a thousand, ten thousand and a hundred
+// thousand subjects —, the keys spread over two root versions as they are
+// while a rotation's re-wrap is under way. It is the measurement #274's Q1
+// asked for before any index of the oldest version: ns/key is the cost of one
+// key, ms/pass the cost of the one scan a rotation of the root runs.
+func BenchmarkSubjectKeysOldestRootPopulation(b *testing.B) {
+	for _, subjects := range []int{1_000, 10_000, 100_000} {
+		b.Run(fmt.Sprintf("subjects=%d", subjects), func(b *testing.B) {
+			f, keys := benchEngine(b, 0)
+			ctx := b.Context()
+			//: the first half filed under version 1, the second under
+			//: version 2: the oldest is 1 wherever the scan meets it.
+			for index := range subjects {
+				if index == subjects/2 {
+					putRandomVersion(b, f.roots, rootName)
+				}
+				if _, err := keys.Seal(ctx, fmt.Sprintf("user:%d", index), benchPlaintext); err != nil {
+					b.Fatalf("Seal: %v", err)
+				}
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				if oldest, err := keys.OldestRoot(ctx); err != nil || oldest != 1 {
+					b.Fatalf("OldestRoot = (%d, %v)", oldest, err)
+				}
+			}
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*subjects), "ns/key")
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/1e6, "ms/pass")
+		})
+	}
+}

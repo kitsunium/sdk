@@ -1,6 +1,6 @@
 # ADR 0178 — kit's effects join the transaction on the database that keeps their queue
 
-- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4, and C6's assumption about the file engine's key order, refuted after acceptance by a measurement, with its remedy inserted as item 8, and C7's assumption about writing a dead letter into the SQL broker, refuted after acceptance by reading the brokers, with its remedy inserted as item 12, and the assumption C7's fingerprint of a version implies — a version written under its own number and instant —, refuted the same way, with its remedy inserted as item 13, and C7's assumption that the live messages of a file queue can be copied with their delivery counts, refuted the same way, with its remedy inserted as item 14. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key); the SDK's items 4 and 5 in #325 (`sql.Aborter`, `mailspool.Config.Broker` and `Config.Deferrer`); C1 and C2 for topics, queued commands and watches in #327 (item 6); C1 for the mailer in item 7 — the outbox on the database that keeps the mailer's service, sealed under data-key, its mail written in the transaction; the SDK's read of the keys alone, item 8, in #334 (`KeyLister`, `KeyListerContext`); C6, item 9 — `Records.Keys` and the watches' catch-up after a stop that was not clean —, its command `<product> watch replay <watch>` not built yet; the SDK's tombstone, item 10 of C7's order, in #329 (ADR 0143 amended on 2026-10-15: `Trash`, `Restore`, `Purge`, `Tombstones`), which C4 — kit's item 11 — builds on; the SDK's `DeadLetterWriter`, item 12, which `data copy` — item 15 — writes the dead letters with (ADR 0151 amended on 2026-10-15), its `VersionWriter`, item 13, which it writes the stores' versions and trash with (ADR 0143 amended on 2026-10-15), and its `MessageReader` and `MessageWriter`, item 14, which it reads and writes the live messages with (ADR 0151 amended again on 2026-10-15). The other choices are decided and not implemented yet; each lands in the pull request C7 gives it.
+- **Status**: Accepted on 2026-10-14 by the owner, who retained the recommendation of each of the seven choices (C1 to C7), as written; no text changed but the status, each choice's *Decision* line, two facts #323 established (marked **corrected by #323**), C1's assumption about the spool, refuted after acceptance, with its remedy inserted in C7's order as item 4, and C6's assumption about the file engine's key order, refuted after acceptance by a measurement, with its remedy inserted as item 8, and C7's assumption about writing a dead letter into the SQL broker, refuted after acceptance by reading the brokers, with its remedy inserted as item 12, and the assumption C7's fingerprint of a version implies — a version written under its own number and instant —, refuted the same way, with its remedy inserted as item 13, and C7's assumption that the live messages of a file queue can be copied with their delivery counts, refuted the same way, with its remedy inserted as item 14. Implemented: C5 (PR 2 of C7's order, the subject in a list); C3 in #323 (PR 3, the monthly journal key); the SDK's items 4 and 5 in #325 (`sql.Aborter`, `mailspool.Config.Broker` and `Config.Deferrer`); C1 and C2 for topics, queued commands and watches in #327 (item 6); C1 for the mailer in item 7 — the outbox on the database that keeps the mailer's service, sealed under data-key, its mail written in the transaction; the SDK's read of the keys alone, item 8, in #334 (`KeyLister`, `KeyListerContext`); C6, item 9 — `Records.Keys` and the watches' catch-up after a stop that was not clean —, its command `<product> watch replay <watch>` not built yet; the SDK's tombstone, item 10 of C7's order, in #329 (ADR 0143 amended on 2026-10-15: `Trash`, `Restore`, `Purge`, `Tombstones`), which C4 — kit's item 11 — builds on; the SDK's `DeadLetterWriter`, item 12, which `data copy` — item 15 — writes the dead letters with (ADR 0151 amended on 2026-10-15), its `VersionWriter`, item 13, which it writes the stores' versions and trash with (ADR 0143 amended on 2026-10-15), and its `MessageReader` and `MessageWriter`, item 14, which it reads and writes the live messages with (ADR 0151 amended again on 2026-10-15). The other choices are decided and not implemented yet; each lands in the pull request C7 gives it. Three more points of #274, left open by C1 to C7, were decided on 2026-10-15 by the owner's delegation (*Decisions of 15 October*): no index of the oldest `data-key` version, the scan measured; the age limit on versions still deferred; `kit.Only` for a mount per environment, `kit add`/`kit remove` in platform's `kit` command, `kit.As` deferred.
 - **Date**: 2026-10-14
 - **Accepted**: 2026-10-14
 - **Deciders**: SDK maintainers (issue #274); arbitrated by the owner
@@ -665,6 +665,69 @@ alternatives were the sending user's key (a system mail to a person would
 not follow that person's erasure) and sealing hooks in the spool's `Config`
 (an SDK surface for one consumer).
 
+### Decisions of 15 October — three points of #274 this ADR left open
+
+The triage of what #274 still lists after C7
+([comment of 2026-10-15](https://github.com/kitsunium/sdk/issues/274#issuecomment-6189554171),
+read on `main` at `a12475a0`) asked the owner three questions. The owner
+delegated them on 2026-10-15; the recommendation of each was applied as
+written.
+
+**Q1 — an index of the oldest `data-key` version still in use: none; the
+scan is kept, measured.** `dataKeysInUse` (`seal.go:456-463`) asks the SDK's
+`SubjectKeys.OldestRoot`, which opens every data key once
+(`internal/service/security/secret/subjectrewrap.go`), and only from the
+rotator's `keepFor` — once per rotation of `data-key`, every 30 days. Since
+C3 (#323) the journal no longer files keys, so the keys store grows only with
+the subjects. An index per root version (option B) would change what the
+answer means — `OldestRoot` counts only the keys that still OPEN, which an
+index cannot know without opening them — for a scan that runs twelve times a
+year. `BenchmarkSubjectKeysOldestRootPopulation` measures it: about 4 µs a key
+on a shared 8-core AMD EPYC 7351P (3.1 ms for a thousand subjects, 41 ms for
+ten thousand, 389 ms for a hundred thousand; 0.8 µs a key on the M1 Pro of the
+package's `BENCH.md`), so about 4 s a month for a million subjects; the
+figures are in `internal/service/security/secret/CLAUDE.md`. **Fallback**,
+should a measurement on a real product justify it: option C, a cache in kit
+of the version the last `Rewrap` (`seal.go:466-489`) left every key under,
+scanning only when that `Rewrap` left keys behind — kit alone, the SDK
+unchanged.
+
+**Q2 — an age limit on versions: still deferred.** C4 decided it (the count
+bound `n` and the record's retention already bound a history), and this
+decision only confirms it; nothing is implemented. Should a product express
+the need, the shape is chosen now: option C of the triage, an agenda per
+store that prunes the versions older than the limit, reusing the trash's
+purge agenda (C4, item 11) rather than a pruning at write time, which would
+leave a record never rewritten with its old versions.
+
+**Q3 — the modules: `kit.Only`; `kit add` and `kit remove` in the kit CLI;
+`kit.As` deferred.**
+
+- *Per environment*: a mount option, `kit.Mount(m, kit.Only("dev",
+  "staging"))` — code, which the static analysis reads in `package main` as it
+  reads every mount, never a second file of modules to keep in step with it.
+  A mount given `kit.Only` holds only in the environments it names, the name
+  `KIT_ENV` (or `kit.Env`) gives, lower-cased — `production` when it is unset;
+  elsewhere the mount is as if it had not been given, its prefix and its
+  bindings with it, and another mount of the same module without `kit.Only`
+  still mounts it. Several `kit.Only` on one mount add up. A module so
+  excluded that a mounted module requires (`kit.Requires`) is refused at the
+  start, never mounted at its defaults behind the product's back; so is a
+  `kit.Only` that names no environment, or a name that cannot be one
+  (`[a-z0-9]`, dashes inside, 63 at most — the grammar of an environment's
+  configuration file). These are start diagnostics, like every other mount
+  problem: no error code.
+- *`kit add` and `kit remove`*: they write the mount into the product's
+  `design/` — which already declares its mounts — then say to run `go get` and
+  `kit gen`. Design first; editing `main.go` by AST (option B) is refused. The
+  `kit` command lives in kitsunium/platform (`cmd/kit`), not in this
+  repository: the SDK ships the runtime half, `kit.Only`, and the command is
+  platform's, in a release of the kit binary.
+- *Mounted twice or renamed (`kit.As`)*: deferred. Two instances need distinct
+  IDs, variables, data paths, secrets and migration tables — everything ADR
+  0008's qualification takes from the module's name, data at rest included —
+  and no product mounts a module twice.
+
 ## Consequences / Semantics
 
 - The product with one default database gets every topic publication,
@@ -700,6 +763,10 @@ not follow that person's erasure) and sealing hooks in the spool's `Config`
   `Send` leaves its registration open and stalls every later delivery of
   its identifier (C1, refuted). The cancellation signal of item 4 is the
   answer; the spool's PR (item 5) proves it with a rollback test.
+- **The oldest-version scan grows with the subjects** (Q1): linear, about
+  4 µs a key measured, once per rotation. A product with tens of millions of
+  subjects would pay a minute a month and the memory of the store's listing;
+  the fallback is kit's cache of the last `Rewrap`.
 
 ### Verified and not yet proved
 
@@ -761,6 +828,7 @@ refused. The pull requests still to come change:
 | Amended | 2026-10-15 | C7's fingerprint of a version took for granted that a copy can write a version under its own number and instant, and a trashed document at its own instant; refuted by reading both engines on `8af43a95` (a write numbers after the current version and stamps with the clock, `RewriteVersions` keeps numbers and instants, `Trash` stamps with the clock, a version 1 at an unknown instant cannot be made): the remedy, the owner's choice, the SDK's `VersionWriter.PutDocument` and `VersionWriterContext.PutDocument` in both engines, with `VERSIONS_INVALID` `0.3.80.22` (ADR 0143 amended), inserted as item 13 of C7's order; `data copy` is item 14 |
 | Amended | 2026-10-15 | C7's digest of a queue took for granted that a copy can read a live message without changing its count and write it with that count; refuted by reading the brokers on `660c9615` (`Receive` leases and counts, and reads no leased message; `Publish` counts none and stamps its own instant; `DeadLetterWriter` writes only the dead): the remedy, the owner's choice, the SDK's `MessageReader.Messages` and `MessageWriter.PutMessage` in the three brokers, with `INVALID_MESSAGE` `0.2.23.9` (ADR 0151 amended again), inserted as item 14 of C7's order; `data copy` is item 15 |
 | Accepted, item 9 | 2026-10-15 | C6 implemented (C7 item 9), on the SDK's `KeyLister` (item 8, #334): `Records.Keys` offered to a module one of whose watches the store feeds — any other caller refused, `Forbidden`, `CodeRecordsKeys` (0.4.2.77) —, one `list` entry in the journal per listing; a watch's running mark in the data directory, and a start that finds it queues a notice for every key of every store that feeds the watch; the command `<product> watch replay <watch>` not built yet |
+| Decisions of 15 October | 2026-10-15 | The owner delegated the triage's three questions on #274 and each recommendation was applied: Q1, no index of the oldest `data-key` version — the scan kept and measured (`BenchmarkSubjectKeysOldestRootPopulation`, about 4 µs a key), kit's cache of the last `Rewrap` the fallback; Q2, the age limit on versions still deferred (C4), an agenda per store reusing the trash's the shape when needed; Q3, `kit.Only(envs…)` a mount option, `kit add`/`kit remove` writing the mount into the product's `design/` in platform's `kit` command, `kit.As` deferred |
 
 ## Alternatives considered
 
@@ -782,14 +850,21 @@ preferred. Two more were set aside before the choices:
   same held-effect tag without changing a call site.
 - **`Records.Changed(since)`** (C6 option C), an exact catch-up, which needs
   a store-wide change sequence in both engines.
-- **An age limit on versions** (C4), deferred again as ADR 0143 deferred it.
+- **An age limit on versions** (C4), deferred again as ADR 0143 deferred it,
+  and confirmed deferred on 2026-10-15 (Q2): when a product needs it, an
+  agenda per store reusing the trash's purge agenda.
+- **An index of the oldest `data-key` version in use** (Q1): not built; the
+  scan is measured, and kit's cache of the last `Rewrap` is the fallback.
+- **A module mounted twice or renamed, `kit.As`** (Q3): deferred until a
+  product needs it.
 - **A retention for the journal**, which C3's monthly key makes one
   destruction per month once the owner sets its length.
 - **Cross-process deduplication of a queued command's key**: the `pending`
   set stays in one process.
-- The rest of #274 that this ADR does not design: the oldest `data-key`
-  version index, `privacy seal` on every store, the versions' weight and the
-  revisions in the Studio and the static graph, and the modules' items.
+- The rest of #274 that this ADR does not design: `privacy seal` on every
+  store, the versions' weight and the revisions in the Studio and the static
+  graph, and the modules' items in kitsunium/platform — `kit add` and `kit
+  remove`, the analyser's reading of `kit.Only`, and the Studio's.
 
 ## References
 

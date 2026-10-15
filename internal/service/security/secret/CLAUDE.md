@@ -137,6 +137,27 @@ declarations moved.
   key lost with a pruned version, altered, or no keyring box pins nothing, or
   the root would never prune again — checks the context at every key, and
   fails closed.
+- **`OldestRoot` stays a scan, measured** (#274 Q1, the owner's delegation of
+  2026-10-15; ADR 0178, decisions of 15 October). No index of the oldest
+  version is kept: an index cannot know which keys still OPEN without opening
+  them, which is the one thing `OldestRoot` answers, and the scan runs once per
+  rotation of the root — kit's `data-key` every 30 days, from the rotator's
+  `keepFor`. `BenchmarkSubjectKeysOldestRootPopulation` measures it, the keys
+  over two root versions as during a re-wrap, memory store, median of five on
+  a shared 8-core AMD EPYC 7351P (linux/amd64, go1.27.2, load 5 to 8):
+
+  | subjects | ms/pass | ns/key | B/op | allocs/op |
+  |---|---|---|---|---|
+  | 1 000 | 3.1 | 3 104 | 1.6 MB | 7 065 |
+  | 10 000 | 41 | 4 110 | 16.7 MB | 70 072 |
+  | 100 000 | 389 | 3 893 | 169.7 MB | 700 083 |
+
+  Linear: about 4 µs a key here (0.8 µs on the M1 Pro of `BENCH.md`), so a
+  million subjects cost about 4 s and 1.7 GB of short-lived allocation once a
+  month. The fallback, if a measurement on a real product ever justifies it,
+  is kit's and not this package's: remember the version the last `Rewrap`
+  left every key under and scan only when that `Rewrap` left keys behind —
+  never an index here.
 
 ## The store directory's rule, beside the other four
 
@@ -201,7 +222,10 @@ failures and an erasure in the middle of a re-wrap), by
 by `subjectkeys_internal_test.go` (a value wrapped under the root that is not
 one key long is unreadable: never used as a key, never moved, pinning no
 version).
-`subjectkeys_bench_test.go` feeds `BENCH.md`.
+`subjectkeys_bench_test.go` feeds `BENCH.md`; its
+`BenchmarkSubjectKeysOldestRootPopulation`, added after `BENCH.md` was last
+generated, has its figures under "Decisions worth not relitigating" until the
+next regeneration.
 
 ## Do NOT
 
