@@ -79,6 +79,22 @@ var (
 	_ queue.DeadLetterReader  = (*sealedOutbox)(nil)
 	_ queue.Rejecter          = (*sealedOutbox)(nil)
 	_ queue.DeadLetterManager = (*sealedOutbox)(nil)
+	_ queue.MessageReader     = (*sealedOutbox)(nil)
+	_ queue.MessageWriter     = (*sealedOutbox)(nil)
+	_ queue.DeadLetterWriter  = (*sealedOutbox)(nil)
+	_ queueReader             = (*sealedOutbox)(nil)
+	_ queueWriter             = (*sealedOutbox)(nil)
+
+	_ documenter = (*historied[struct{}])(nil)
+	_ documenter = (*sealedEngine[struct{}])(nil)
+	_ documenter = (*docEngine[struct{}])(nil)
+	_ documenter = (*sqlEngine[struct{}])(nil)
+	_ copyDocs   = (*docEngine[struct{}])(nil)
+	_ copySink   = (*sqlEngine[struct{}])(nil)
+	_ copyDocs   = (*jsonDocs)(nil)
+
+	_ copyPartser   = (*StoreService[struct{}])(nil)
+	_ journalParter = (*WorkflowService[struct{}, string])(nil)
 
 	_ settingDecl = (*SettingService[string])(nil)
 

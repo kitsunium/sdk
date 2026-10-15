@@ -3085,6 +3085,14 @@ codes:
     const: CodeTrash
     hex: "0x00_04_02_4E"
     package: framework/internal/kit
+  - code: "0.4.2.79"
+    const: CodeDataCopy
+    hex: "0x00_04_02_4F"
+    package: framework/internal/kit
+  - code: "0.4.2.80"
+    const: CodeDataCopyDiverged
+    hex: "0x00_04_02_50"
+    package: framework/internal/kit
   - code: "0.4.3.1"
     const: CodeMisconfigured
     hex: "0x00_04_03_01"

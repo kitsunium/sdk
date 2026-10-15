@@ -78,6 +78,7 @@ go_test(
     srcs = [
         "api_gen_test.go",
         "catchup_test.go",
+        "datacopy_test.go",
         "filestore_test.go",
         "floor_test.go",
         "keys_test.go",
@@ -96,6 +97,7 @@ go_test(
         "//framework/kit/storetest",
         "//framework/model",
         "//pkg/v1/app/mail",
+        "//pkg/v1/data/queue",
         "//pkg/v1/data/sql",
         "//pkg/v1/errs",
         "//pkg/v1/security/secret",

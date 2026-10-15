@@ -580,6 +580,28 @@ Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeCommandRee
 
 Code `0.4.2.43`
 
+<a name="CodeDataCopy"></a>
+```go
+const CodeDataCopy errs.Code = 262735
+```
+
+CodeDataCopy refuses a data copy: a database the product does not declare or cannot open, data kept in memory, a product that answers on its address, a table of the database that already holds a row.
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeDataCopy`.
+
+Code `0.4.2.79`
+
+<a name="CodeDataCopyDiverged"></a>
+```go
+const CodeDataCopyDiverged errs.Code = 262736
+```
+
+CodeDataCopyDiverged reports a data copy whose fingerprints differ: the copy is rolled back, and the first key that differs is named.
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeDataCopyDiverged`.
+
+Code `0.4.2.80`
+
 <a name="CodeDatabaseConfig"></a>
 ```go
 const CodeDatabaseConfig errs.Code = 262690
@@ -2763,7 +2785,7 @@ Main is the whole main function of a product:
 func main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }
 ```
 
-It understands eight commands, so every kit binary can describe itself, be probed, say its configuration, manage its secrets, migrate its databases and answer for the personal data it keeps without a shell or another tool in its image:
+It understands nine commands, so every kit binary can describe itself, be probed, say its configuration, manage its secrets, migrate its databases, answer for the personal data it keeps and copy its data directory into a database without a shell or another tool in its image:
 
 ```
 serve        run the product (the default)
@@ -2775,6 +2797,8 @@ migrate      the databases' migrations: status, up, down SET VERSION
 privacy      the register of processing, a person's export and erasure,
              the legal holds, the privacy journal, the retention
 revisions    a record's version restored
+data         the data directory copied into a database: data copy --to NAME,
+             verified by fingerprints
 ```
 
 A product's CLI command runs when the first argument names it. A command declared with DefaultCommand runs when the first argument names no command at all — with every argument —, and when there is none, in serve's place: Main then never answers a usage error.

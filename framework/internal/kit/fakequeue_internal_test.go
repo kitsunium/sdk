@@ -53,6 +53,17 @@ func queueStatement(d *fakeData, query, table string, args []driver.NamedValue) 
 	}
 	a := fakeArgs(args)
 	switch {
+	case strings.HasPrefix(query, "INSERT INTO ") && strings.Contains(query, "reason, cause, code"):
+		id := string(a.bytes(0))
+		q[id] = fakeMessage{
+			id: id, dead: 1, due: a.int(1), enqueued: a.int(2), deliveries: a.int(3), payload: a.bytes(4),
+			reason: a.bytes(5), cause: a.bytes(6), code: a.int(7),
+		}
+		return nil, 1, nil
+	case strings.HasPrefix(query, "INSERT INTO ") && len(a) == 5:
+		id := string(a.bytes(0))
+		q[id] = fakeMessage{id: id, due: a.int(1), enqueued: a.int(2), deliveries: a.int(3), payload: a.bytes(4)}
+		return nil, 1, nil
 	case strings.HasPrefix(query, "INSERT INTO "):
 		id := string(a.bytes(0))
 		q[id] = fakeMessage{id: id, due: a.int(1), enqueued: a.int(2), payload: a.bytes(3)}
@@ -63,6 +74,8 @@ func queueStatement(d *fakeData, query, table string, args []driver.NamedValue) 
 		return fakeQMinDue(q, strings.Contains(query, "due >"), a), 0, nil
 	case strings.HasPrefix(query, "SELECT id, enqueued_at, deliveries, lease, payload"):
 		return fakeQPickDue(q, a.int(0), a.int(1)), 0, nil
+	case strings.HasPrefix(query, "SELECT id, enqueued_at, deliveries, due, lease, payload"):
+		return fakeQLive(q, string(a.bytes(0)), a.int(1)), 0, nil
 	case strings.HasPrefix(query, "SELECT id, enqueued_at, deliveries, due"):
 		return fakeQDeadLetters(q, a.int(0)), 0, nil
 	}
@@ -153,6 +166,23 @@ func fakeQDeadLetters(q map[string]fakeMessage, limit int64) driver.Rows {
 			break
 		}
 		out.rows = append(out.rows, []driver.Value{[]byte(m.id), m.enqueued, m.deliveries, m.due, nilOr(m.reason), nilOr(m.cause), m.code, m.payload})
+	}
+	return out
+}
+
+// fakeQLive is the live messages whose id sorts after after, by id, at most
+// limit: a copy's listing.
+func fakeQLive(q map[string]fakeMessage, after string, limit int64) driver.Rows {
+	out := &fakeRows{cols: []string{"id", "enqueued_at", "deliveries", "due", "lease", "payload"}}
+	live := slices.SortedFunc(maps.Values(q), func(a, b fakeMessage) int { return strings.Compare(a.id, b.id) })
+	for _, m := range live {
+		if m.dead != 0 || m.id <= after {
+			continue
+		}
+		if int64(len(out.rows)) == limit {
+			break
+		}
+		out.rows = append(out.rows, []driver.Value{[]byte(m.id), m.enqueued, m.deliveries, m.due, nilOr(m.lease), m.payload})
 	}
 	return out
 }

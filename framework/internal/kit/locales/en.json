@@ -51,7 +51,7 @@
   "config.studio-missing": "dev asks for the Studio, which kit serves only when the program imports {package}: add import _ \"{package}\"",
   "config.studio-production": "the Studio is never served in production: it exposes the source and live traffic",
   "consumer.failed": "the consumer of {node} failed, and kit restarts it after a backoff: {detail}",
-  "consumer.file-queue-left": "the queue of {node} now lives on database \"{database}\": the messages its file queue under the data directory still holds are not delivered — drain them with the release before, or copy them to the database",
+  "consumer.file-queue-left": "the queue of {node} now lives on database \"{database}\": the messages its file queue under the data directory still holds are not delivered — drain them with the release before, or copy them to the database: data copy --to {database}",
   "database.kept-twice": "{what} is kept by two databases, \"{first}\" and \"{second}\": a thing lives in one database",
   "database.kit-prefix": "database \"{name}\": a database's name cannot start with \"{prefix}\", which kit keeps for its own",
   "database.max-open": "the pool needs a ceiling above 0",

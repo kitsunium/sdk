@@ -51,7 +51,7 @@
   "config.studio-missing": "le mode dev demande le Studio, que kit ne sert que si le programme importe {package} : ajoutez import _ \"{package}\"",
   "config.studio-production": "le Studio n’est jamais servi en production : il expose le code source et le trafic en direct",
   "consumer.failed": "le consommateur de {node} a échoué, et kit le relance après une attente : {detail}",
-  "consumer.file-queue-left": "la file de {node} vit désormais sur la base « {database} » : les messages que sa file fichier sous le répertoire de données garde encore ne sont pas livrés — videz-les avec la version d’avant, ou copiez-les dans la base",
+  "consumer.file-queue-left": "la file de {node} vit désormais sur la base « {database} » : les messages que sa file fichier sous le répertoire de données garde encore ne sont pas livrés — videz-les avec la version d’avant, ou copiez-les dans la base : data copy --to {database}",
   "database.kept-twice": "{what} est gardé par deux bases, « {first} » et « {second} » : une chose vit dans une seule base",
   "database.kit-prefix": "base « {name} » : le nom d’une base ne peut pas commencer par « {prefix} », que kit garde pour les siens",
   "database.max-open": "le pool a besoin d’un plafond supérieur à 0",

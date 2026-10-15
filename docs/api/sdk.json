@@ -3345,7 +3345,7 @@
       "recv": "App",
       "spelled": "func(ctx context.Context, args []string) int",
       "canonical": "func(ctx context.Context, args []string) int",
-      "doc": "Main is the whole main function of a product:\n\n\tfunc main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }\n\nIt understands eight commands, so every kit binary can describe itself, be\nprobed, say its configuration, manage its secrets, migrate its databases\nand answer for the personal data it keeps without a shell or another tool\nin its image:\n\n\tserve        run the product (the default)\n\tgraph        print the product graph: -format json|mermaid\n\thealthcheck  exit 0 when the product running on KIT_ADDR is ready\n\tconfig       every setting: its value, never a secret's, and its origin\n\tsecrets      list the secrets, set one from standard input, rotate one\n\tmigrate      the databases' migrations: status, up, down SET VERSION\n\tprivacy      the register of processing, a person's export and erasure,\n\t             the legal holds, the privacy journal, the retention\n\trevisions    a record's version restored\n\nA product's CLI command runs when the first argument names it. A command\ndeclared with DefaultCommand runs when the first argument names no command\nat all — with every argument —, and when there is none, in serve's place:\nMain then never answers a usage error.\n\nIt returns the process exit status rather than exiting, so that deferred\nwork runs and a test can call it.\n",
+      "doc": "Main is the whole main function of a product:\n\n\tfunc main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }\n\nIt understands nine commands, so every kit binary can describe itself, be\nprobed, say its configuration, manage its secrets, migrate its databases,\nanswer for the personal data it keeps and copy its data directory into a\ndatabase without a shell or another tool in its image:\n\n\tserve        run the product (the default)\n\tgraph        print the product graph: -format json|mermaid\n\thealthcheck  exit 0 when the product running on KIT_ADDR is ready\n\tconfig       every setting: its value, never a secret's, and its origin\n\tsecrets      list the secrets, set one from standard input, rotate one\n\tmigrate      the databases' migrations: status, up, down SET VERSION\n\tprivacy      the register of processing, a person's export and erasure,\n\t             the legal holds, the privacy journal, the retention\n\trevisions    a record's version restored\n\tdata         the data directory copied into a database: data copy --to NAME,\n\t             verified by fingerprints\n\nA product's CLI command runs when the first argument names it. A command\ndeclared with DefaultCommand runs when the first argument names no command\nat all — with every argument —, and when there is none, in serve's place:\nMain then never answers a usage error.\n\nIt returns the process exit status rather than exiting, so that deferred\nwork runs and a test can call it.\n",
       "file": "framework/internal/kit/main.go",
       "layer": "framework"
     },
@@ -3830,6 +3830,36 @@
         "value": "0.4.2.43"
       },
       "doc": "Commands and queries.\n",
+      "file": "framework/internal/kit/codes_gen.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeDataCopy",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "CodeDataCopy",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262735",
+      "code": {
+        "value": "0.4.2.79"
+      },
+      "doc": "CodeDataCopy refuses a data copy (ADR 0178 C7): a database the product\ndoes not declare or cannot open, data kept in memory, a product that\nanswers on its address, a table of the database that already holds a\nrow; or reports a copy done whose file queues could not be moved aside.\n",
+      "file": "framework/internal/kit/codes_gen.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeDataCopyDiverged",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "CodeDataCopyDiverged",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262736",
+      "code": {
+        "value": "0.4.2.80"
+      },
+      "doc": "CodeDataCopyDiverged reports a data copy whose fingerprints differ on\nboth sides of a table, or whose records do not open through kit once\ncopied: the copy's transaction is rolled back, and the first key that\ndiffers is named.\n",
       "file": "framework/internal/kit/codes_gen.go",
       "layer": "framework"
     },
@@ -10671,6 +10701,38 @@
         "value": "0.4.2.43"
       },
       "doc": "Commands and queries.\n",
+      "file": "framework/kit/errors.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.CodeDataCopy",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "CodeDataCopy",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262735",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeDataCopy",
+      "code": {
+        "value": "0.4.2.79"
+      },
+      "doc": "CodeDataCopy refuses a data copy: a database the product does not declare\nor cannot open, data kept in memory, a product that answers on its\naddress, a table of the database that already holds a row.\n",
+      "file": "framework/kit/errors.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.CodeDataCopyDiverged",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "CodeDataCopyDiverged",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262736",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeDataCopyDiverged",
+      "code": {
+        "value": "0.4.2.80"
+      },
+      "doc": "CodeDataCopyDiverged reports a data copy whose fingerprints differ: the\ncopy is rolled back, and the first key that differs is named.\n",
       "file": "framework/kit/errors.go",
       "layer": "framework"
     },
