@@ -58,6 +58,7 @@ Usage:
                                       the personal data the product keeps (%[1]s privacy for more)
   %[1]s revisions restore -store ID -key KEY -rev N [-field PATH]…
                                       a record's version written back, as a new version
+  %[1]s watch replay WATCH            one notice per record of each store that feeds WATCH
   %[1]s data copy --to DATABASE       the data directory copied into DATABASE, verified by fingerprints
 `
 
@@ -65,10 +66,11 @@ Usage:
 //
 //	func main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }
 //
-// It understands nine commands, so every kit binary can describe itself, be
+// It understands ten commands, so every kit binary can describe itself, be
 // probed, say its configuration, manage its secrets, migrate its databases,
-// answer for the personal data it keeps and copy its data directory into a
-// database without a shell or another tool in its image:
+// answer for the personal data it keeps, replay what its watches hear and
+// copy its data directory into a database without a shell or another tool in
+// its image:
 //
 //	serve        run the product (the default)
 //	graph        print the product graph: -format json|mermaid
@@ -79,6 +81,7 @@ Usage:
 //	privacy      the register of processing, a person's export and erasure,
 //	             the legal holds, the privacy journal, the retention
 //	revisions    a record's version restored
+//	watch        replay WATCH: one notice per record of each store that feeds it
 //	data         the data directory copied into a database: data copy --to NAME,
 //	             verified by fingerprints
 //
@@ -132,8 +135,9 @@ func (a *App) mainCommands() map[string]func(ctx context.Context, args []string)
 		"revisions": func(ctx context.Context, args []string) int {
 			return a.revisionsCommand(ctx, args, os.Stdout, os.Stderr)
 		},
-		"data": func(ctx context.Context, args []string) int { return a.dataCommand(ctx, args, os.Stdout, os.Stderr) },
-		"help": help, "-h": help, "-help": help, "--help": help,
+		"watch": func(ctx context.Context, args []string) int { return a.watchCommand(ctx, args, os.Stdout, os.Stderr) },
+		"data":  func(ctx context.Context, args []string) int { return a.dataCommand(ctx, args, os.Stdout, os.Stderr) },
+		"help":  help, "-h": help, "-help": help, "--help": help,
 	}
 }
 

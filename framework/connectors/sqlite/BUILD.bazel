@@ -84,6 +84,7 @@ go_test(
         "keys_test.go",
         "mail_test.go",
         "queue_test.go",
+        "replay_test.go",
         "revisions_test.go",
         "sqlite_internal_test.go",
         "sqlite_test.go",

@@ -262,6 +262,8 @@
   "watch.lost": "une écriture dans {store} est faite, mais la file de {watch} a refusé son avis, qui est perdu : {detail}",
   "watch.mark": "la veille « {name} » surveille « {mark} », qui n’est pas une marque : kit.Personal, kit.Special ou kit.Moderated",
   "watch.nil-handler": "la veille « {name} » n’a pas de fonction",
+  "watch.replay-partial": "{watch} : {notices} avis mis en file avant l’échec du rejeu ; la veille les entend au prochain démarrage du produit — relancez la commande pour le reste",
+  "watch.replayed": "{watch} : {notices} avis mis en file, un par enregistrement des stores qui l’alimentent ({stores}) ; la veille les entend au prochain démarrage du produit, au moins une fois",
   "watch.running-mark": "la marque de fonctionnement de {watch} ne peut être écrite ou retirée dans le répertoire de données, si bien qu'un arrêt non propre peut passer inaperçu : {detail}",
   "workflow.event-name": "workflow « {name} » : une transition demande un autre nom que « {event} »",
   "workflow.event-twice": "workflow « {name} » : l’événement « {event} » quitte déjà l’état {state}",

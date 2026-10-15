@@ -262,6 +262,8 @@
   "watch.lost": "a write to {store} stands, but the queue of {watch} refused its notice, which is lost: {detail}",
   "watch.mark": "watch \"{name}\" watches \"{mark}\", which is no mark: kit.Personal, kit.Special or kit.Moderated",
   "watch.nil-handler": "watch \"{name}\" has a nil handler",
+  "watch.replay-partial": "{watch}: {notices} notices queued before the replay failed; the watch hears them at the product's next start — run the command again for the rest",
+  "watch.replayed": "{watch}: {notices} notices queued, one per record of the stores that feed it ({stores}); the watch hears them at the product's next start, at least once",
   "watch.running-mark": "the running mark of {watch} cannot be written or removed in the data directory, so a stop that is not clean may go unnoticed: {detail}",
   "workflow.event-name": "workflow \"{name}\": a transition needs a name other than \"{event}\"",
   "workflow.event-twice": "workflow \"{name}\": event \"{event}\" already leaves state {state}",
