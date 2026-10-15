@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
@@ -35,6 +36,52 @@ func TestOnlyMountsAModuleInTheEnvironmentsItNames(t *testing.T) {
 	}
 	if r := call(t, app, "POST /reviews/reviews", Review{ID: "r1", Text: "lovely"}); r.status != http.StatusNotFound {
 		t.Errorf("a module mounted only in staging serves its route in dev: %d", r.status)
+	}
+}
+
+// The graph says in which environments a module is mounted: the union of
+// the environments its mounts name, sorted, when every mount of it is given
+// kit.Only; nothing when one mount holds everywhere, nor for a module only
+// another module's kit.Requires mounts — as its Mount says nothing.
+func TestTheGraphSaysWhereAModuleIsMounted(t *testing.T) {
+	type tc struct {
+		name   string
+		mounts []kit.AppConfigurer
+		// reviews is the Only the reviews module says; ratings is whether
+		// the module it requires is checked to say none.
+		reviews []string
+		ratings bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		app := start(t, c.mounts...)
+		g := app.Graph()
+		if m := g.ModuleOf("reviews"); m == nil || !slices.Equal(m.Only, c.reviews) {
+			t.Errorf("reviews says %+v, want only %q", m, c.reviews)
+		}
+		if m := g.ModuleOf("ratings"); c.ratings && (m == nil || m.Only != nil) {
+			t.Errorf("a module another module requires says %+v", m)
+		}
+	}
+	for _, c := range []tc{
+		{
+			name: "every mount limited",
+			mounts: []kit.AppConfigurer{
+				kit.Mount(ReviewsModule, kit.Only("staging", "dev")),
+				kit.Mount(ReviewsModule, kit.Only("dev", "qa")),
+			},
+			reviews: []string{"dev", "qa", "staging"},
+			ratings: true,
+		},
+		{
+			name: "one mount everywhere",
+			mounts: []kit.AppConfigurer{
+				kit.Mount(ReviewsModule, kit.Only("staging")),
+				kit.Mount(ReviewsModule),
+			},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 

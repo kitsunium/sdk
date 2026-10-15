@@ -129,6 +129,24 @@ func holdsIn(limited bool, only []string, env string) bool {
 	return !limited || slices.Contains(only, env)
 }
 
+// onlyOf are the environments the mounts of m among decls hold in, sorted
+// and once each — whatever environment the app runs in —; nil when one of
+// them holds in every environment, or none mounts m.
+func onlyOf(decls []mountDecl, m *Module) []string {
+	var envs []string
+	for _, d := range decls {
+		if d.module != m {
+			continue
+		}
+		if !d.limited {
+			return nil
+		}
+		envs = append(envs, d.only...)
+	}
+	slices.Sort(envs)
+	return slices.Compact(envs)
+}
+
 // mountsIn are the mounts of decls that hold in env, in their order.
 func mountsIn(decls []mountDecl, env string) []mountDecl {
 	out := make([]mountDecl, 0, len(decls))
@@ -326,6 +344,9 @@ func (a *App) describeModules() []model.Module {
 		d := model.Module{
 			Name: m.name, Doc: doc, Docs: docs, Package: m.decl.pkg(), Build: a.moduleBuild(m.decl.pkg()),
 			Prefix: mm.prefix, Source: a.source(&m.decl), Mount: a.source(mm.at),
+		}
+		if mm.at != nil {
+			d.Only = onlyOf(a.opts.mounts, m)
 		}
 		for _, s := range m.services {
 			d.Services = append(d.Services, s.name)

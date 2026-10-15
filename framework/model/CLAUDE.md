@@ -53,12 +53,12 @@ Two packages, one API:
 | `devtools.go` | the mail statuses, `MailMessage`, `MockReplace` |
 | `profile.go` | a CPU or heap `Profile` folded onto the nodes, `Goroutines` grouped |
 | `doc.go` | `SplitDoc`: a doc comment's default text and its translations (`docTag` compiled at its first use) |
-| `history.go` | what a store remembers: `StoreHistory`, `Former`, `RecordHistory` |
+| `history.go` | what a store remembers: `StoreHistory`, `Former`, `RecordHistory`, a record's versions (`RecordVersion`, `RecordVersions`, `Edit`), and a store's trash as the Studio lists it (`StoreTrash`, `TrashedRecord`: key — or `hidden` —, `at`, `purgeAt`, never the value; `GET /_kit/api/trash`, ADR 0178 C4 amended on 2026-10-15) |
 | `privacy.go` | `PersonalData`, `RecordFormer`, `Erasure`, the Privacy page, retention modes, the journal's operations |
 | `runtime.go` | `Runtime`, `Loop`, `Component`, live `Event`s (`LogRecord`, `MailSummary`), `Mock`, `Span` (its operations, `connect` and `cli` among them), `Trace`, `Database`, `Setting` |
 | `connector.go`, `architecture.go` | the connector table, the catalog's `Adapter`s (imports under `framework/connectors/`), the C4 `Container`s |
 | `graph.go` | `NodeID`, `EdgeID`, `Normalize`, `Revision`, `Merge`, `Files` |
-| `module.go` | `Module`, `QualifiedService`, `UnderPrefix`, `File` |
+| `module.go` | `Module` (its `Only`: the environments its mounts name, `kit.Only`, sorted by `Normalize` — ADR 0178 Q3 amended on 2026-10-15), `QualifiedService`, `UnderPrefix`, `File` |
 | `mermaid.go` | the architecture as a Mermaid flowchart |
 | `table.go` | `TableName(service, node, suffix)` — the table a database keeps a kit table in: `<service>__<node><suffix>`, lower case, `-` and `.` written `_`; a name the rule cannot keep as it is (upper case, past `MaxTableLen`, three underscores in a row, SQLite's `sqlite_` prefix) is cut and ends with a digest of the whole — and `MaxTableLen` (58: the SQL document store's `___ix` index table must fit PostgreSQL's 63). The runtime and the analyzer both name tables with it |
 | `errors.go` | `0.4.1.*`: the codes and their sentinels |
@@ -82,7 +82,9 @@ Two packages, one API:
   mounts, what each port calls and which stores feed each watch.
 - `Files` is the source endpoint's allow-list: every `Source` a graph can
   carry must be added there.
-- Bump `Version` for any change an older reader would misread.
+- Bump `Version` for any change an older reader would misread. A field
+  added with `omitempty` that a reader may ignore is not one: the store's
+  versions' weight and `Module.Only` came at `Version` 5.
 - `NodeKind`, `EdgeKind` and `EventType` stay strings under
   `//ktn:wire-format`: not an exclusion, the declaration KTN-CONST-STRENUM
   provides for an enumeration that is a wire format — the graph's JSON and

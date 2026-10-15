@@ -238,6 +238,9 @@ packages:
             doc: The trash (kitsunium/sdk ADR 0178 C4).
             name: CodeTrash
             value: "0x00_04_02_4E"
+          - comment: "0.4.2.82 — the Studio's trash list names no store of the product (NotFound) or one without kit.Revisions (Invalid)"
+            name: CodeTrashList
+            value: "0x00_04_02_52"
           - comment: "0.4.2.49 — a scheduled job's run was skipped: the previous one is still going"
             doc: |-
               The framework's own signals and refusals, typed since the move into the
@@ -6098,6 +6101,14 @@ packages:
         name: CodeTrash
         type: errs.Code
         value: "0x00_04_02_4E"
+      - doc: |-
+          CodeTrashList refuses the Studio's list of a store's trash (GET
+          /_kit/api/trash) when the store named is none of the product's — a
+          NotFound — or keeps no trash, having no kit.Revisions — an Invalid (ADR
+          0178 C4).
+        name: CodeTrashList
+        type: errs.Code
+        value: "0x00_04_02_52"
       - doc: |-
           The framework's own signals and refusals, typed since the move into the
           SDK (rule 2: no fmt.Errorf, no errors.New in production code).

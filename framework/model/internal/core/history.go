@@ -126,6 +126,38 @@ type RecordVersionsMessage struct {
 	Edits []EditMessage `json:"edits,omitempty"`
 }
 
+// TrashedRecordMessage is one record in a store's trash as the Studio lists
+// it (GET /_kit/api/trash, ADR 0178 C4): its key, when the product deleted
+// it and when kit purges it, on the app's clock — never its value. A key
+// that reads a personal, special or secret member — the subject included —
+// is not given, as the data browser never shows that member: Hidden says so.
+type TrashedRecordMessage struct {
+	// Key is the record's key; empty when Hidden.
+	Key string `json:"key,omitempty"`
+	// Hidden says the key reads a personal, special or secret member, or
+	// the record no longer opens to tell: the Studio is not given it.
+	Hidden bool `json:"hidden,omitempty"`
+	// At is when the product deleted it.
+	At time.Time `json:"at"`
+	// PurgeAt is when kit purges it: its trash's length after At, or its
+	// retention's instant when that comes first.
+	PurgeAt time.Time `json:"purgeAt"`
+}
+
+// StoreTrashMessage is a page of a store's trash as the Studio lists it (GET
+// /_kit/api/trash?store=&offset=&limit=): Total records in the trash, in
+// key order, Records those from the page's offset, Next the offset of the
+// page after — absent on the last. A page is bounded, 200 records unless
+// the Studio asks from 1 to 1000; an offset counts records, never quotes a
+// key.
+type StoreTrashMessage struct {
+	// Store is the store's node ID.
+	Store   string                 `json:"store"`
+	Total   int                    `json:"total"`
+	Records []TrashedRecordMessage `json:"records"`
+	Next    int                    `json:"next,omitempty"`
+}
+
 // sources are the declarations a store's history names — its password
 // policies —, for Files.
 func (h *StoreHistoryMessage) sources() []*SourceMessage {

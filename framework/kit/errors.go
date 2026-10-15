@@ -233,6 +233,12 @@ const (
 	// product deleted stays in it until a later purge (ADR 0178 C4).
 	CodeTrash errs.Code = ikit.CodeTrash
 
+	// CodeTrashList refuses the Studio's list of a store's trash (GET
+	// /_kit/api/trash) when the store named is none of the product's — a
+	// NotFound — or keeps no trash, having no kit.Revisions — an Invalid (ADR
+	// 0178 C4).
+	CodeTrashList errs.Code = ikit.CodeTrashList
+
 	// The framework's own signals and refusals, typed since the move into the
 	// SDK (rule 2: no fmt.Errorf, no errors.New in production code).
 	CodeJobOverlapped errs.Code = ikit.CodeJobOverlapped

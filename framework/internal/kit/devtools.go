@@ -18,7 +18,8 @@ const maxMails int = 1000
 const defaultMails int = 200
 
 // What the dev tools read, in dev: the process, the heap profile, goroutines,
-// logs, the mailbox, a field's former values. mountIntrospection mounts every
+// logs, the mailbox, a field's former values, a record's versions, a store's
+// trash. mountIntrospection mounts every
 // route here behind hostGuard; none of them exists outside dev (invariant 4),
 // and none of them acts on the product (D13, ADR 0147 §8): no mock, no fault,
 // no run, no fire, no dispatch, no ask, no wake, no CPU capture.
@@ -35,6 +36,7 @@ func (a *App) mountDevTools(api func(pattern string, h http.HandlerFunc)) {
 	api("GET /_kit/api/mail/{id}", a.serveMail)
 	api("GET /_kit/api/former", a.serveFormer)
 	api("GET /_kit/api/revisions", a.serveRevisions)
+	api("GET /_kit/api/trash", a.serveTrash)
 	a.mountPrivacyTools(api)
 }
 
