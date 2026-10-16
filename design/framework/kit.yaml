@@ -340,6 +340,18 @@ packages:
             name: CodeDataCopyDiverged
             value: "0x00_04_02_50"
         type: errs.Code
+      - const:
+          - comment: "0.4.2.83 — a declaration needs a subsystem whose registration package the program does not import"
+            doc: |-
+              CodeSubsystemMissing refuses a start whose declarations need a
+              subsystem the program does not import (ADR 0179 §6): a store or a
+              database without framework/kit/store, a server without
+              framework/kit/server. The refusal is a [DiagnosticsError] naming
+              every such declaration and the package to import, all at once; it
+              carries this code, which errs.HasCode reads through it.
+            name: CodeSubsystemMissing
+            value: "0x00_04_02_53"
+        type: errs.Code
     constants:
       - blockDoc: The environments.
         doc: |-
@@ -2600,11 +2612,25 @@ packages:
             out:
               - type: string
             recv: pointer
+          - doc: |-
+              Unwrap is what the refusal is, when kit has a code for it: with
+              packages in Missing, an error carrying [CodeSubsystemMissing] (ADR
+              0179 §6), which errs.HasCode reads through the refusal; nil
+              otherwise.
+            name: Unwrap
+            out:
+              - type: error
+            recv: pointer
         name: DiagnosticsError
         struct:
           fields:
             - name: Diagnostics
               type: "[]model.Diagnostic"
+            - doc: |-
+                Missing are the registration packages the program does not import
+                and a declaration needs (ADR 0179 §6), sorted; nil when none is.
+              name: Missing
+              type: "[]string"
       - doc: |-
           AnalyzeFunc reads the product's source — the Go module rooted at dir, and
           the packages that declare the modules it mounts — into a graph the runtime
@@ -4994,6 +5020,25 @@ packages:
         name: LabelLoop
         type: string
         value: "\"kit_loop\""
+      - blockDoc: The write modes.
+        doc: |-
+          WriteUpsert writes whatever the key holds: a creation or a
+          replacement.
+        name: WriteUpsert
+        type: WriteMode
+        value: "0"
+      - blockDoc: The write modes.
+        doc: WriteInsert expects nothing under the key, and is refused otherwise.
+        name: WriteInsert
+        type: WriteMode
+        value: "1"
+      - blockDoc: The write modes.
+        doc: |-
+          WriteReplace expects a document under the key, and is refused
+          otherwise: never a resurrection.
+        name: WriteReplace
+        type: WriteMode
+        value: "2"
     doc: |-
       Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the
       frontends' file server and the process sampler of the runtime graph
@@ -5003,13 +5048,22 @@ packages:
       packages behind them: a product that does not import a subsystem neither
       links nor initialises its packages.
 
+      It is also the contract between kit's core and the subsystems ADR 0179
+      takes out of it, as database/sql/driver is between database/sql and a
+      driver: the store subsystem's engine over documents, its siblings and
+      kit's scope on a database ([Stores]), which framework/kit/store will set.
+      Until it exists the core runs the stores itself; the start refuses a
+      declaration whose subsystem the program does not link.
+
       The package imports the standard library and the framework's model only,
       so that kit and every subsystem can import it.
     imports:
       atomic: sync/atomic
       fs: io/fs
       http: net/http
+      json: encoding/json
       model: github.com/kitsunium/sdk/framework/model
+      sql: database/sql
     path: github.com/kitsunium/sdk/framework/internal/kit/plug
     types:
       - doc: |-
@@ -5119,6 +5173,465 @@ packages:
               out:
                 - type: error
         name: EventStream
+      - doc: |-
+          StoreDriverConfig is what framework/kit/store plugs into kit: how a
+          store's engine opens, and how kit opens its scope on a database.
+        name: StoreDriverConfig
+        struct:
+          fields:
+            - doc: |-
+                Open opens the engine of one store, as cfg places it: loaded from the
+                data directory, empty in memory, or on a database.
+              name: Open
+              type: func(cfg StoreConfig) (StoreEngine, error)
+            - doc: Database opens kit's scope on one database's pool.
+              name: Database
+              type: func(cfg DatabaseConfig) (Database, error)
+      - doc: |-
+          DocumentValue is a record as a store's engine holds it (ADR 0179 §2):
+          its JSON as it rests, byte for byte what kit encodes, and the entity
+          once decoded, kept beside it so that a read, an index or a privacy
+          walk does not decode it twice.
+        name: DocumentValue
+        struct:
+          fields:
+            - doc: JSON is the record as it rests.
+              name: JSON
+              type: json.RawMessage
+            - doc: |-
+                Value is the entity decoded from JSON, nil until something decoded it;
+                the store's typed facade asserts it to its type.
+              name: Value
+              type: any
+      - doc: WriteMode says what a write expects to find under the document's key.
+        name: WriteMode
+        underlying: int
+      - doc: |-
+          IndexSpec declares one secondary index of a store, over documents: the
+          product's index function on its type, wrapped once at the declaration.
+        name: IndexSpec
+        struct:
+          fields:
+            - doc: Name reads the index, and names it in a refusal.
+              name: Name
+              type: string
+            - doc: Unique refuses a write that would file two documents under one key.
+              name: Unique
+              type: bool
+            - doc: Keys are a document's keys in the index; an empty key is not indexed.
+              name: Keys
+              type: func(d DocumentValue) []string
+      - doc: |-
+          StoreConfig is what kit asks of one store's engine: the store, its key and
+          its indexes over documents, where it rests and what it keeps.
+        name: StoreConfig
+        struct:
+          fields:
+            - doc: Name is the store's, as its files and its table name it.
+              name: Name
+              type: string
+            - doc: |-
+                Key is a document's key: the product's key function on its type,
+                wrapped once at the declaration.
+              name: Key
+              type: func(d DocumentValue) string
+            - doc: |-
+                Decode is the entity a document's JSON holds, which the engine keeps
+                as the document's Value.
+              name: Decode
+              type: func(raw json.RawMessage) (any, error)
+            - doc: Indexes are the store's secondary indexes.
+              name: Indexes
+              type: "[]IndexSpec"
+            - doc: |-
+                Data is the data directory the store rests in — the SDK's writable
+                file system, which the engine asserts — and Path its snapshot there;
+                a nil Data and a nil Database keep the store in memory.
+              name: Data
+              type: fs.FS
+            - doc: Path is the store's snapshot in Data.
+              name: Path
+              type: string
+            - doc: Database keeps the store, nil when the data directory or memory does.
+              name: Database
+              type: Database
+            - doc: |-
+                Versions is how many former versions of each record the engine keeps,
+                none when zero; Clock stamps them.
+              name: Versions
+              type: int
+            - doc: Clock is the app's clock, which stamps a version.
+              name: Clock
+              type: func() time.Time
+            - doc: |-
+                Held reports whether a record's versions are held, and no write may
+                prune them.
+              name: Held
+              type: func(key string) bool
+      - doc: |-
+          DatabaseConfig is one database a product declares, as kit opened it: its
+          pool, its dialect and the timeout of each call.
+        name: DatabaseConfig
+        struct:
+          fields:
+            - doc: Name is the database's, as the product declared it.
+              name: Name
+              type: string
+            - doc: DB is the pool kit.Engine opened.
+              name: DB
+              type: "*sql.DB"
+            - doc: |-
+                Dialect is the engine's SQL dialect: "postgres", "mysql" or
+                "sqlite".
+              name: Dialect
+              type: string
+            - doc: Timeout bounds each call kit makes on the database.
+              name: Timeout
+              type: time.Duration
+      - doc: |-
+          Database is kit's scope on one database (ADR 0179 §2): the transactions
+          kit.Transact opens on it, their savepoints, and the functions held until
+          their end. The core knows a database only through it; the store package
+          implements it over the SDK's sql.
+        interface:
+          methods:
+            - doc: |-
+                Transact runs fn in a transaction of the database, or in a savepoint
+                of the one ctx carries for it: nil commits or releases, an error
+                rolls back.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: fn
+                  type: func(ctx context.Context) error
+              name: Transact
+              out:
+                - type: error
+            - doc: |-
+                InTransaction reports whether ctx carries a transaction of this
+                database.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: InTransaction
+              out:
+                - type: bool
+            - doc: |-
+                Defer holds fn until the transaction ctx carries for the database
+                commits, and reports true; outside one it holds nothing and reports
+                false.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: fn
+                  type: func()
+              name: Defer
+              out:
+                - type: bool
+            - doc: |-
+                OnAbort holds fn until the work of the scope ctx carries for the
+                database is undone, and reports true; outside one it holds nothing
+                and reports false.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: fn
+                  type: func(ctx context.Context)
+              name: OnAbort
+              out:
+                - type: bool
+        name: Database
+      - doc: |-
+          StoreEngine is what a store runs on, over documents (ADR 0179 §2): the
+          non-generic engine under Store[T]. Its refusals are kit's: the engine
+          translates the SDK's before they reach the core. Every call takes the
+          caller's context, which carries the transaction the call joins. It grows by
+          the sibling interfaces below, never by a method (the SDK's ADR 0039).
+        interface:
+          methods:
+            - doc: Get returns the document under key.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: Get
+              out:
+                - type: DocumentValue
+                - type: error
+            - doc: List returns every document, in key order.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: List
+              out:
+                - type: "[]DocumentValue"
+                - type: error
+            - doc: Filter returns the documents keep accepts, in key order.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: keep
+                  type: func(d DocumentValue) bool
+              name: Filter
+              out:
+                - type: "[]DocumentValue"
+                - type: error
+            - doc: Lookup returns the document a unique index files under key.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: index
+                  type: string
+                - name: key
+                  type: string
+              name: Lookup
+              out:
+                - type: DocumentValue
+                - type: error
+            - doc: Find returns the documents an index files under key, in key order.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: index
+                  type: string
+                - name: key
+                  type: string
+              name: Find
+              out:
+                - type: "[]DocumentValue"
+                - type: error
+            - doc: Count says how many documents the store holds.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Count
+              out:
+                - type: int
+                - type: error
+            - doc: Entries returns up to limit documents as they rest, in key order.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: limit
+                  type: int
+              name: Entries
+              out:
+                - type: "[]json.RawMessage"
+                - type: error
+            - doc: |-
+                Write stores d as mode says. The document and its index keys are kept
+                together, or neither.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: d
+                  type: DocumentValue
+                - name: mode
+                  type: WriteMode
+              name: Write
+              out:
+                - type: error
+            - doc: |-
+                Update applies fn to the document under key and stores the result,
+                atomically with respect to every other write of the store.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+                - name: fn
+                  type: func(d *DocumentValue) error
+              name: Update
+              out:
+                - type: DocumentValue
+                - type: error
+            - doc: Delete removes the document under key.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: Delete
+              out:
+                - type: error
+            - doc: |-
+                Watch registers the functions told the key of every document written
+                and deleted, once the write stands.
+              in:
+                - name: onWrite
+                  type: func(key string)
+                - name: onDelete
+                  type: func(key string)
+              name: Watch
+            - doc: Close releases the engine.
+              name: Close
+              out:
+                - type: error
+        name: StoreEngine
+      - doc: |-
+          Folder is an engine that keeps what its writes left beside its data, and
+          can fold it in now. A sibling of [StoreEngine].
+        interface:
+          methods:
+            - doc: Fold rewrites the store's data with only what it holds now.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Fold
+              out:
+                - type: error
+        name: Folder
+      - doc: |-
+          Keyser is an engine that lists the keys of its documents, in key order,
+          above after, without reading a document. A sibling of [StoreEngine].
+        interface:
+          methods:
+            - doc: Keys yields the keys above after, in order, then its failure if any.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: after
+                  type: string
+              name: Keys
+              out:
+                - type: iter.Seq2[string, error]
+        name: Keyser
+      - doc: |-
+          VersionValue is one version of a record: its number, when the write
+          that made it ran, what that write said about it, and the record as it
+          held it.
+        name: VersionValue
+        struct:
+          fields:
+            - doc: Number counts a record's versions from 1.
+              name: Number
+              type: uint64
+            - doc: At is when the write that made the version ran, in UTC.
+              name: At
+              type: time.Time
+            - doc: "Meta is what the write said about it: who made it, which command."
+              name: Meta
+              type: map[string]string
+            - doc: JSON is the record as the version holds it.
+              name: JSON
+              type: json.RawMessage
+      - doc: |-
+          VersionKeeper is an engine that keeps its records' versions. A sibling of
+          [StoreEngine].
+        interface:
+          methods:
+            - doc: |-
+                StoredVersions are the versions of the record under key, newest
+                first, the current one first.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: StoredVersions
+              out:
+                - type: "[]VersionValue"
+                - type: error
+            - doc: |-
+                RewriteVersions rewrites the former versions of the record under key
+                as fn returns them: fn may drop a version or change what one holds,
+                never add or renumber one.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+                - name: fn
+                  type: func(vs []VersionValue) ([]VersionValue, error)
+              name: RewriteVersions
+              out:
+                - type: error
+        name: VersionKeeper
+      - doc: |-
+          VersionWeightValue is what a store keeps beyond the records it holds:
+          its former versions and its trash, counted and weighed.
+        name: VersionWeightValue
+        struct:
+          fields:
+            - doc: Former is how many former versions the store keeps.
+              name: Former
+              type: int
+            - doc: Trashed is how many records are in the trash.
+              name: Trashed
+              type: int
+            - doc: Bytes is what the former versions and the trashed records weigh.
+              name: Bytes
+              type: int64
+      - doc: |-
+          VersionWeighter is an engine that says what its records' versions weigh.
+          A sibling of [StoreEngine].
+        interface:
+          methods:
+            - doc: VersionWeight is what the store's versions and trash weigh.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: VersionWeight
+              out:
+                - type: VersionWeightValue
+                - type: error
+        name: VersionWeighter
+      - doc: |-
+          TombstoneValue is one record in a store's trash: its key, and when it was
+          trashed.
+        name: TombstoneValue
+        struct:
+          fields:
+            - doc: Key is the trashed record's key.
+              name: Key
+              type: string
+            - doc: At is when the record was trashed, in UTC.
+              name: At
+              type: time.Time
+      - doc: Trasher is an engine that keeps a trash. A sibling of [StoreEngine].
+        interface:
+          methods:
+            - doc: |-
+                Trash moves the record under key to the trash: gone from every read,
+                its index keys freed, its versions kept.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: Trash
+              out:
+                - type: error
+            - doc: Untrash brings the record trashed under key back as it was.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: Untrash
+              out:
+                - type: error
+            - doc: |-
+                Purge empties the trash of the record trashed under key, its versions
+                with it.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: Purge
+              out:
+                - type: error
+            - doc: Tombstones are every record in the trash, in key order.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Tombstones
+              out:
+                - type: "[]TombstoneValue"
+                - type: error
+        name: Trasher
     variables:
       - doc: |-
           NewHTTPServer builds the HTTP engine an app in the server profile
@@ -5147,6 +5660,14 @@ packages:
           is imported.
         name: StudioProfiler
         type: atomic.Pointer[ProfilerConfig]
+      - doc: |-
+          Stores is the store subsystem: the engines kit's stores run on and kit's
+          scope on a database; nil until framework/kit/store is imported. Until
+          that package exists (ADR 0179, step 3) the core runs the stores itself
+          and nothing sets it; once it does, a product that declares a store or a
+          database without it is refused at the start (ADR 0179 §6).
+        name: Stores
+        type: atomic.Pointer[StoreDriverConfig]
   - doc: |-
       Package serverkit is what framework/kit/server plugs into kit: the HTTP
       engine an app in the server profile serves on (the SDK's net/server), the
@@ -6212,6 +6733,13 @@ packages:
         name: CodeDataCopyDiverged
         type: errs.Code
         value: "0x00_04_02_50"
+      - doc: |-
+          CodeSubsystemMissing refuses a start whose declarations need a subsystem
+          the program does not import (ADR 0179 §6): the [DiagnosticsError] names
+          each declaration and the package to import, and carries this code.
+        name: CodeSubsystemMissing
+        type: errs.Code
+        value: "0x00_04_02_53"
     doc: |-
       Package kit — who may call an operation: the principal, the rules and their
       checks.

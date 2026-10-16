@@ -144,6 +144,7 @@ go_library(
         "store_engine.go",
         "store_sql.go",
         "store_sql_migrate.go",
+        "subsystem.go",
         "telemetry.go",
         "topic.go",
         "transact.go",
