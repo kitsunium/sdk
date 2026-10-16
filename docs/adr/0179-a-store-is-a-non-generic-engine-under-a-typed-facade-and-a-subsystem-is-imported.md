@@ -1,9 +1,10 @@
 # ADR 0179 — a store is a non-generic engine under a typed facade, and a subsystem is imported
 
-- **Status**: Proposed
+- **Status**: Accepted on 2026-10-16 by the owner, who retained the recommendation of each of the eight questions (Q1 to Q8), as written; no text changed but the status, each question's *Decision* line, and the passages that depended on an open question (Q2, Q3, Q5, Q6)
 - **Date**: 2026-10-16
-- **Deciders**: SDK maintainers (issues #273 and #276; the owner's decision of 2026-10-16 to take the clean architecture: a non-generic store engine under a typed `Store[T]`, every subsystem plugged in by an import, breaking under ADR 0040)
-- **Amends** (once accepted): [ADR 0172](0172-a-product-initialises-what-it-imports-and-the-stores-stay-in-the-core.md) §4 — the declared subsystems leave the core; its §1 rule is kept and applied to them
+- **Accepted**: 2026-10-16
+- **Deciders**: SDK maintainers (issues #273 and #276; the owner's decision of 2026-10-16 to take the clean architecture: a non-generic store engine under a typed `Store[T]`, every subsystem plugged in by an import, breaking under ADR 0040); arbitrated by the owner
+- **Amends**: [ADR 0172](0172-a-product-initialises-what-it-imports-and-the-stores-stay-in-the-core.md) §4 — the declared subsystems leave the core; its §1 rule is kept and applied to them
 - **Related**: [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the framework above `pkg`), [ADR 0139](0139-a-document-store-over-sql-joins-the-transaction-its-context-carries.md) and [ADR 0178](0178-kits-effects-join-the-transaction-on-the-database-that-keeps-their-queue.md) (the transactions the engine must keep), [ADR 0176](0176-an-error-sentinel-is-static-data-and-its-options-are-the-designs-fields.md) (the last non-breaking lever of #276), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (siblings, never a widening), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the v0 licence), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (what a published port promises), [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) and [ADR 0171](0171-a-module-per-family-and-a-version-is-never-reused.md) (the framework is the root module), issues #272, #273, #276, kitsunium/statusline#3
 
 ## Context
@@ -177,7 +178,7 @@ not only to those whose reader was already opt-in:
 
 | Registration package | Subsystem | Implementation (imported by it alone) | SDK packages that leave `framework/internal/kit`'s graph |
 |---|---|---|---|
-| `framework/kit/store` | stores, indexes, databases and their migrations, `kit.Transact` on a database, sealing at rest, history, revisions, trash, retention, holds, the privacy journal, `Records`, `data copy` | `framework/internal/kit/storekit` | `data/docstore`, `data/sql`, `database/sql` (see Q5) |
+| `framework/kit/store` | stores, indexes, databases and their migrations, `kit.Transact` on a database, sealing at rest, history, revisions, trash, retention, holds, the privacy journal, `Records`, `data copy` | `framework/internal/kit/storekit` | `data/docstore`, `data/sql` (`database/sql` stays: Q5) |
 | `framework/kit/queue` | topics, subscriptions, watches, queued commands | `framework/internal/kit/queuekit` | `data/queue` |
 | `framework/kit/workflow` | workflows | `framework/internal/kit/workflowkit` | `app/statemachine` |
 | `framework/kit/mail` | mailers: the spool, the outbox, the SMTP transport | `framework/internal/kit/mailkit` | `app/mail/spool` (and `net/smtp`) |
@@ -188,8 +189,8 @@ not only to those whose reader was already opt-in:
 are already this shape and stay as they are; the Studio's gains the
 catalogues. Each new registration package is
 `server.go`'s shape: one `var _ = enable()` that calls its `*kit` package's
-`Enable` and kit's, nothing exported but its documentation — unless Q2 or Q5
-decide that a declaration or the database `Engine` lives there.
+`Enable` and kit's, nothing exported but its documentation: no declaration
+(Q2) and no database `Engine` (Q5) lives there.
 
 ### 2. The store engine is non-generic; `Store[T]` is a typed facade over it
 
@@ -311,9 +312,8 @@ import path, so the registration package's `init` may come after it.
 `framework/kit/initgraph_external_test.go` grows in two ways:
 
 - `TestTheFacadeImportsNoOptInSubsystem`: `go list -deps framework/kit`
-  contains none of `data/docstore`, `data/sql`, `database/sql` (Q5),
-  `data/queue`, `app/statemachine`, `app/mail/spool`, `app/scheduler`,
-  `app/i18n` — beside what it refuses today. During the migration the test
+  contains none of `data/docstore`, `data/sql`, `data/queue`, `app/statemachine`, `app/mail/spool`, `app/scheduler`,
+  `app/i18n` — beside what it refuses today; `database/sql` stays (Q5). During the migration the test
   carries an allow-list of what is still in the core, which each step empties
   and the last one deletes.
 - **A reachability check**: the probe built without any registration import
@@ -361,14 +361,15 @@ per-type instantiations disappear from every product, whatever it imports.
 - **Transactions.** ADR 0139's join, ADR 0178's two-phase release, the writer
   turn, the effects held until the commit: the suites that pin them pass
   unchanged.
-- **A product's code**, apart from its imports (and Q5's answer for a
-  connector author).
+- **A product's code**, apart from its imports; a connector's changes with
+  `kit.Engine`'s dialect type (Q5).
 
 ### Measurement: target and method
 
 - **The probe** (`framework/kit/testdata/cliprobe`, `-trimpath`): `go list -deps`
   without the packages of §7, `go tool nm` without their symbols, machine
-  code down by the ≈ 1.95 MB of §Context (target: at least 1.5 MB; the step-0
+  code down by the ≈ 1.95 MB of §Context less `database/sql`'s 0.066 MB,
+  which stays (Q5) (target: at least 1.5 MB; the step-0
   ceiling replaces the estimate), file size, inits (`GODEBUG=inittrace=1`,
   min and median of 50).
 - **The status line**: `testdata/parity/latency-ab.sh` with its byte-for-byte
@@ -416,11 +417,12 @@ At step 10, under ADR 0040's v0 licence, which the root module still holds:
   the matching registration package, is refused at the start with
   `CodeSubsystemMissing` (allocated by the implementing change). It was
   accepted before.
-- Nothing for kit's languages (Q6 (a)): only the Studio shows a language
+- Nothing for kit's languages (Q6): only the Studio shows a language
   other than English, and a program that mounts the Studio imports
   `framework/kit/studio` already.
-- Depending on Q5, `kit.Engine`'s method set, or its home, changes for a
-  connector author; the three in-tree connectors follow in the same change.
+- `kit.Engine` keeps its home and returns `*sql.DB` still, but its dialect is
+  kit's own type instead of the SDK's `sql.Dialect` (Q5): a connector author
+  changes `Dialect`; the three in-tree connectors follow in the same change.
 - `%T` and reflected names of kit's internal engines change; no exported name
   of `framework/kit` is removed or renamed. `framework/kit/facade_sync` holds
   that.
@@ -454,80 +456,66 @@ At step 10, under ADR 0040's v0 licence, which the root module still holds:
 - **The constructor form for every subsystem** (`store.New[T](svc, …)` in
   place of `svc.Store[T](…)`). The `database/sql` analogy taken literally:
   explicit, and an import a product cannot forget, but every declaration of
-  every product changes for a check the start already makes. It remains Q2's
-  second option, and Q3's fallback for workflows.
+  every product changes for a check the start already makes. Refused with Q2,
+  and not needed for workflows once Q3 instantiates `statemachine` once.
 
-## Questions for the owner
+## Decisions of 16 October — the owner's answers to the eight questions
+
+The owner retained the recommendation of each question as written.
 
 **Q1 — Step 0: a gate, or a measurement?**
-(a) A gate: stop after step 0 if the status line's ceiling is within the
-0.19 ms floor. (b) A measurement: record the ceiling, set the targets of
-§Consequences from it, proceed whatever it says — the decision is
-architectural (one way to plug, a product links what it imports), not only a
-latency. (c) Skip it. **Recommendation: (b).**
+**Decision.** A measurement, not a gate: the ceiling is recorded and sets
+§Consequences' targets, and the migration proceeds whatever it says — the
+decision is architectural (one way to plug, a product links what it imports),
+not only a latency.
 
 **Q2 — Where a product declares a subsystem.**
-(a) The declaring methods stay on `kit.Service` and `kit.App`; the import is a
-blank one, written by `kit gen`; the start refuses a missing one. (b) Every
-declaration moves to a constructor of its registration package
-(`store.New[T](svc, …)`, `queue.Topic[T](svc, …)`): the import cannot be
-forgotten, every call site changes. (c) (a), with constructors only where an
-engine cannot be made non-generic. **Recommendation: (a)**, with Q3 deciding
-whether (c) is ever needed.
+**Decision.** A blank import, written by `kit gen`; the declaring methods of
+`kit.Service` and `kit.App` stay unchanged — no call site of any product
+changes, and the start already refuses a missing import.
 
 **Q3 — Workflows.**
-(a) The SDK's `statemachine` instantiated once, over kit's document and the
-state as its encoded value; `WorkflowService[E, S]` stays a typed facade,
-`svc.Workflow` unchanged. (b) `framework/kit/workflow.New[E, S](…)`, the
-generic engine kept, instantiated by the product (Q2 (c)). (c) Workflows stay
-in the core, an exception to §1. **Recommendation: (a)**; (b) if step 5 finds
-a guard or a timer that cannot be wrapped without a behaviour change.
+**Decision.** The SDK's `statemachine` instantiated once, over kit's document
+and the state as its encoded value; `WorkflowService[E, S]` stays a typed
+facade and `svc.Workflow` is unchanged — the same shape as the stores, so no
+constructor form is needed (Q2).
 
 **Q4 — Do the registration packages import each other?**
-(a) `queue`, `workflow` and `mail` import `store`: a workflow is over a
-store, a sealed message or mail needs kit's store of data keys, and a queue on
-a database joins the store package's transaction. (b) None imports another;
-the start names each missing one. (c) One umbrella, `framework/kit/data`,
-importing all of them. **Recommendation: (a)**: the dependencies are real, and
-(b) would refuse at the start what the import graph can state.
+**Decision.** `queue`, `workflow` and `mail` import `store`: a workflow is
+over a store, a sealed message or mail needs kit's store of data keys, and a
+queue on a database joins the store package's transaction — the import graph
+states what the start would otherwise refuse.
 
 **Q5 — The database `Engine` and `database/sql`.**
-`kit.Engine` names `*sql.DB` (`database/sql`) and `sql.Dialect` (the SDK's
-`sql`), so the core imports both today.
-(a) `kit.Engine` stays in the core with kit's own dialect type, still
-returning `*sql.DB`: `database/sql` (0.066 MB, a small init) stays in the
-core, the SDK's `sql` leaves; product code unchanged, the three connectors
-edited. (b) `Engine` and `kit.Database` move to `framework/kit/store`
-(`store.Database`, `store.Engine`): both leave, every product with a database
-edits its declaration. (c) Unchanged: both stay in the core.
-**Recommendation: (a)**, revisited if step 0 shows `database/sql` matters.
+**Decision.** `kit.Engine` stays in the core with kit's own dialect type,
+still returning `*sql.DB`: `database/sql` stays in the core, the SDK's `sql`
+leaves it, and the three connectors change — product code is unchanged, and
+`database/sql` is revisited only if step 0 shows it matters.
 
 **Q6 — kit's diagnostics in other languages.**
-The terminal, the logs and an error read English; only the Studio shows
-French, its reader's language.
-(a) English is a table in kit's core, written from `locales/en.json`; the
-other catalogues and the SDK's `i18n` are plugged in by
-`framework/kit/studio`, their only reader; `TestKitSpeaksEveryLanguage` moves
-with them. (b) A registration package of their own, `framework/kit/i18n`.
-(c) The catalogues stay in the core (0.06 MB, read at the first diagnostic),
-an exception to §1. **Recommendation: (a)**: no new import for any product,
-and the subsystem is where its reader is, as ADR 0172 §2 put the process
-sampler.
+**Decision.** English is a table in kit's core, written from
+`locales/en.json`; the other catalogues and the SDK's `i18n` are plugged in
+by `framework/kit/studio`, their only reader, with
+`TestKitSpeaksEveryLanguage` — no new import for any product, and the
+subsystem sits where its reader is, as ADR 0172 §2 put the process sampler.
 
 **Q7 — Where the contract lives.**
-(a) `plug` grows one file per subsystem, stdlib and `model` only, as it is
-today. (b) One contract package per subsystem
-(`framework/internal/kit/plug/store`, …), as `database/sql/driver` is to
-`database/sql`. (c) The interfaces in each `*kit` package, the core importing
-none of them through type assertions on `any`. **Recommendation: (a)** while
-it stays under a few hundred lines a subsystem; (b) when one outgrows it.
+**Decision.** In `plug`, one file per subsystem, standard library and
+`model` only — one package of hooks, as today; a contract package of its own
+per subsystem only once one outgrows it.
 
 **Q8 — How the break ships.**
-(a) Steps 1–9 non-breaking behind the facade's own blank imports, the break
-alone in step 10, after `kit gen` and the products have the imports.
-(b) Each subsystem breaks in its own step. (c) One PR for everything.
-**Recommendation: (a)**: every product moves before anything refuses it, and
-the break is one release note.
+**Decision.** Steps 1–9 non-breaking behind the facade's own blank imports,
+the break alone in step 10, after `kit gen` and the products have the imports
+— every product moves before anything refuses it, and the break is one
+release note.
+
+## Revision history
+
+| Version | Date | What changed |
+|---|---|---|
+| Proposed | 2026-10-16 | The design, with eight questions for the owner |
+| Accepted | the owner's decision, 2026-10-16 | The recommendation of each of the eight questions retained as written; each question replaced by its *Decision* line; the status, the header and the passages that depended on an open question (Q2, Q3, Q5, Q6) updated — `database/sql` stays in the core and leaves §7's refused list. No other text changed |
 
 ## Deferred
 
