@@ -72,7 +72,8 @@ product with many stores (step 0, §Consequences).
 
 The share of the file that machine code drags with it (`.gopclntab`, type
 data) follows it; in proportion, the 1.95 MB of code is 3–4 MB of the 21.0 MB
-file. Estimated, not measured: step 0 measures it.
+file. Estimated, not measured: step 0 measures it — measured on 2026-10-16,
+2.39 MB of code and 7.52 MB of the file (§Step 0, measured).
 
 ### Two ways to plug a subsystem
 
@@ -333,7 +334,7 @@ created, until step 10 removes those imports.
 
 | Step | What | Breaking |
 |---|---|---|
-| 0 | **Measure the ceiling** (Q1): the probe and the status line built from a throwaway branch where kit's references to every subsystem of §1 are cut; machine code, file size, inits, `latency-ab.sh` with its control, recorded on #276 | — (not merged) |
+| 0 | **Measure the ceiling** (Q1): the probe and the status line built from a throwaway branch where kit's references to every subsystem of §1 are cut; machine code, file size, inits, `latency-ab.sh` with its control, recorded on #276 — done on 2026-10-16 (§Step 0, measured) | — (not merged) |
 | 1 | the hook types of §3 for the store, the start's check of §6 with its code in the design, the extended `initgraph` test with its allow-list | no |
 | 2 | the store engine non-generic **inside** kit's core (no package moves yet): `StoreService[T]` over documents; `docEngine`, `sqlEngine`, `historied`, `sealedEngine`, revisions, trash, retention, records, data copy on documents; the per-type instantiations gone. `storetest` passes unchanged | no |
 | 3 | `storekit` + `framework/kit/store`: the stores' implementation — the code naming `docstore` and the SDK's `sql` — moves there; `kit.Engine` stays in the core and still returns `*sql.DB`, its dialect now kit's own type (Q5); the connectors import `framework/kit/store` | no (the facade imports it) |
@@ -366,9 +367,10 @@ per-type instantiations disappear from every product, whatever it imports.
 
 - **The probe** (`framework/kit/testdata/cliprobe`, `-trimpath`): `go list -deps`
   without the packages §1 takes out of the core, `go tool nm` without their symbols, machine
-  code down by the ≈ 1.95 MB of §Context less `database/sql`'s 0.066 MB,
-  which stays (Q5) (target: at least 1.5 MB; the step-0
-  ceiling replaces the estimate), file size, inits (`GODEBUG=inittrace=1`,
+  code down by at least 2.15 MB — 90 % of the 2.39 MB step 0 measured
+  (§Step 0, measured), which replaces the estimate of ≈ 1.95 MB less
+  `database/sql`'s 0.066 MB and the first target of 1.5 MB —, the file at
+  least 6.8 MB smaller (90 % of 7.52 MB), inits (`GODEBUG=inittrace=1`,
   min and median of 50).
 - **The status line**: `testdata/parity/latency-ab.sh` with its byte-for-byte
   control, warm p50, 6 rounds × 300, the load recorded, run (a) against the
@@ -384,6 +386,94 @@ per-type instantiations disappear from every product, whatever it imports.
   endpoints and the hook types name it) and the rest of kit stay; the status
   line links the jobs package for its daemon role. The step-0 ceiling says how
   much of the +1.08 ms the subsystems are; the rest is §Deferred.
+
+### Step 0, measured (2026-10-16)
+
+Measured on `origin/main` at 33e09545 (Go 1.27.2, `GOTOOLCHAIN=local`,
+`-trimpath`; the status line static, as its `Makefile` builds it), on the
+8-vCPU VM of `framework/kit/BENCH.md`, every measure started at a 1-minute
+load under 1.5 with no build, test or linter running (loads 0.5–1.2 at the
+start of each round). Nothing of it is merged: the ceiling was built in a
+throwaway copy of the tree, outside the repository.
+
+**How the ceiling was built.** In the copy, `framework/internal/kit`'s
+reachability of every subsystem of §1 was cut where a product enters it:
+`mountPrivacy` mounts nothing and kit's three own stores leave `privacyRun`'s
+type (so no `StoreService[T]` is instantiated); the databases, retention,
+trash and scheduler components add nothing; `migrate`, `privacy`,
+`revisions`, `watch` and `data` answer nothing; `storeRefusals` is empty; and
+`words.go` reads `locales/en.json` alone with `encoding/json`, without the
+SDK's `i18n` (step 8's shape). For the status line, the scheduler stays, since
+its daemon declares two jobs (it will import `framework/kit/jobs`); the cut status line passes
+its 88 parity goldens. The linker then drops what nothing reaches. The SDK
+packages that leave the import graph — 22 for the probe, `docstore`, `queue`,
+`statemachine`, `mail/spool`, `scheduler`, `i18n` and the SDK's `sql` (the
+facade's `kit.Engine` dialect included, Q5), each with its core and service
+halves, and `kernel/collections/heap` — are still imported by the copy, so
+their remaining `init` is measured per package with `inittrace` and
+subtracted; their remaining text is 0.003 MB (the inits themselves).
+
+| | cliprobe today | cliprobe, ceiling | delta | status line today | status line, ceiling | delta |
+|---|---|---|---|---|---|---|
+| file | 22.06 MB | 14.55 MB | **−7.52 MB (−34 %)** | 23.36 MB | 15.95 MB | **−7.41 MB (−32 %)** |
+| text symbols (`go tool nm`, `T`/`t`) | 6.80 MB | 4.41 MB | **−2.39 MB** | 7.21 MB | 4.86 MB | **−2.35 MB** |
+| `.gopclntab` | 5.50 MB | 3.47 MB | −2.03 MB | 5.82 MB | 3.82 MB | −2.00 MB |
+| debug sections | 5.02 MB | 3.65 MB | −1.37 MB | 5.35 MB | 4.00 MB | −1.35 MB |
+| packages | 362 | 340 | −22 | 401 | 382 | −19 |
+| init lines | 149 | 137 | −12 | 183 | 172 | −11 |
+| init, median (`inittrace`) | 0.90–0.99 ms | 0.81–0.91 ms | **≈ −0.08 ms** (three series of 50) | 1.186 ms | 1.100 ms | **≈ −0.09 ms** (40 runs of `daemon status`) |
+| warm p50, fresh process | 4.57–4.70 ms | 4.28–4.33 ms | **−0.29 / −0.37 ms** | 5.86–5.99 ms | 5.67–5.71 ms | −0.19 / −0.29 ms |
+| control (same bytes, another path) | 4.44–4.63 ms | | 0.07 / 0.12 ms from today | 6.16–6.42 ms | | **+0.18 / +0.27 ms** from today |
+
+The probe's p50 is two runs of 8 alternated rounds × 300 execs of the three
+binaries (today, the ceiling, today's byte-for-byte copy); the status line's
+is `latency-ab.sh`, 6 rounds × 300, warm, `busy/default`, run twice against
+today, twice against its control and once against the control's copy
+(−0.52 ms).
+
+The text the ceiling removes, by owner (probe; the status line's differs by
+at most 0.015 MB per line, the scheduler apart):
+
+| Owner | Machine code removed |
+|---|---|
+| kit's generic store family (`StoreService`, `sealedEngine`, `historied`, `docEngine`, `sqlEngine`, …) | 0.866 MB |
+| SDK `docstore` | 0.693 MB |
+| the rest of `framework/internal/kit` (the privacy journal and holds, sealing, retention, trash, the store commands, the queues, the catalogues) | 0.368 MB |
+| the standard library only these reach | 0.152 MB |
+| SDK `queue` | 0.113 MB |
+| other SDK packages only these reach | 0.064 MB |
+| SDK `i18n` | 0.044 MB |
+| SDK `sql` | 0.041 MB |
+| `database/sql`'s code (its types stay, Q5: no database is declared, so nothing reaches its code) | 0.035 MB |
+| SDK `scheduler` (the probe; the status line keeps it, 0.010 MB, and its file 0.07 MB) | 0.009 MB |
+| **total** | **2.39 MB** |
+
+**Reading.**
+
+- The binary is where the subsystems are: a third of the file and 35 % of
+  the machine code, more than §Context's estimate (1.95 MB) because the rest
+  of kit's code that only the subsystems reach, and the standard library under
+  it, go with them. `net/http` and its closure (0.59 MB) stay.
+- The initialisation is not: about 0.08–0.09 ms of it, 22 packages whose
+  inits ADR 0176 had already made almost free.
+- On the probe, the ceiling runs 0.29–0.37 ms faster than today, outside its
+  control (0.07–0.12 ms) and the 0.19 ms floor in three of the four
+  comparisons; against today's copy in the second run, 0.17 ms, inside it.
+  The gain is claimed for the probe at about 0.3 ms.
+- On the status line, the ceiling is faster in each of its three comparisons
+  (−0.19 to −0.52 ms), but the byte-for-byte control itself moved by 0.18 and
+  0.27 ms: by §Measurement's criterion the gain is **within the noise**, and is
+  not claimed. Its binary is 7.41 MB smaller whatever the latency says.
+- So of the status line's +1.08 ms over the commit before kit, the subsystems
+  of §1 are at most about 0.3 ms; the rest is `net/http`, the rest of kit and
+  the runtime (§Deferred). Q1 decided that the migration proceeds whatever
+  this says; the measured ceiling sets §Measurement's targets above.
+
+Not measured by step 0: a product with many stores (the ≈ 0.3 MB per entity
+type of §Context stays an estimate until step 2), the status line against the
+commit before the kit migration with the cut (§Measurement's run (b)), and a
+build where the imports are removed rather than unreached (the leaving
+packages' inits are subtracted, not removed).
 
 ### Risks
 
@@ -515,6 +605,7 @@ release note.
 | Proposed | 2026-10-16 | The design, with eight questions for the owner |
 | Accepted | the owner's decision, 2026-10-16 | The recommendation of each of the eight questions retained as written; each question replaced by its *Decision* line; the status, the header and the passages that depended on an open question (Q2, Q3, Q5, Q6) updated — `database/sql` stays in the core and leaves §7's refused list. No other text changed |
 | Accepted, review | 2026-10-16 | Step 3 says what moves to `storekit` and that `kit.Engine` stays in the core (Q5); §7 keeps the two invariants and leaves the test's package list, allow-list and gate to `framework/kit/CLAUDE.md`; steps 1–9 non-breaking, as Q8 decided |
+| Accepted, step 0 measured | 2026-10-16 | §Step 0, measured: the ceiling built in a throwaway copy — the probe's file −7.52 MB, its code −2.39 MB, its init ≈ −0.08 ms, its warm p50 about −0.3 ms; the status line's file −7.41 MB, its latency gain within the noise of its control; §Measurement's probe target set from the ceiling (at least 2.15 MB of code, 6.8 MB of file); §Context's estimate marked measured. No decision changed |
 
 ## Deferred
 
