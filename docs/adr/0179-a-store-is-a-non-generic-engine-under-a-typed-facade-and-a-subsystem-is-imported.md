@@ -415,11 +415,10 @@ subtracted; their remaining text is 0.003 MB (the inits themselves).
 
 The units and counts are §Context's: a megabyte is 10⁶ bytes — the same
 22,063,718-byte file §Context first wrote as 21.0, its size in MiB —, and
-the binary is built with the same flags, its `.text` the same 7.02 MB. The
-packages are counted from `main` along the import edges `go list -deps`
-reports: 362, where its listing holds 363 lines, one package being listed
-with no import of it reached from `main`; the count leaves no package of
-§1 out either way.
+the binary is built with the same flags, its `.text` the same 7.02 MB.
+`go list -deps` lists 363 packages, the probe's own main package among them:
+362 are its dependencies, the figure the table counts; the count leaves no
+package of §1 out either way.
 
 | | cliprobe today | cliprobe, ceiling | delta | status line today | status line, ceiling | delta |
 |---|---|---|---|---|---|---|
