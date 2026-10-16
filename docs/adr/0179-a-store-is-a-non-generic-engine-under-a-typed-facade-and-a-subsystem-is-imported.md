@@ -45,7 +45,7 @@ executable.
 
 `framework/kit/testdata/cliprobe` — one service, one default fail-safe CLI
 command — built from `origin/main` on 2026-10-16 (`go1.27.2`, `-trimpath`):
-363 packages, a 21.0 MB file, of which 7.02 MB of machine code (`.text`),
+363 packages, a 22.06 MB file (21.0 MiB, as `ls -h` prints it), of which 7.02 MB of machine code (`.text`),
 5.49 MB of `.gopclntab`, 1.49 MB of type data and about 5 MB of debug
 information. Its text symbols (`go tool nm -size`, types `T`/`t`), by owner:
 
@@ -71,7 +71,7 @@ type shape. This is an estimate from the symbol table, to be confirmed on a
 product with many stores (step 0, §Consequences).
 
 The share of the file that machine code drags with it (`.gopclntab`, type
-data) follows it; in proportion, the 1.95 MB of code is 3–4 MB of the 21.0 MB
+data) follows it; in proportion, the 1.95 MB of code is 3–4 MB of the 22.06 MB
 file. Estimated, not measured: step 0 measures it — measured on 2026-10-16,
 2.39 MB of code and 7.52 MB of the file (§Step 0, measured).
 
@@ -413,6 +413,14 @@ halves, and `kernel/collections/heap` — are still imported by the copy, so
 their remaining `init` is measured per package with `inittrace` and
 subtracted; their remaining text is 0.003 MB (the inits themselves).
 
+The units and counts are §Context's: a megabyte is 10⁶ bytes — the same
+22,063,718-byte file §Context first wrote as 21.0, its size in MiB —, and
+the binary is built with the same flags, its `.text` the same 7.02 MB. The
+packages are counted from `main` along the import edges `go list -deps`
+reports: 362, where its listing holds 363 lines, one package being listed
+with no import of it reached from `main`; the count leaves no package of
+§1 out either way.
+
 | | cliprobe today | cliprobe, ceiling | delta | status line today | status line, ceiling | delta |
 |---|---|---|---|---|---|---|
 | file | 22.06 MB | 14.55 MB | **−7.52 MB (−34 %)** | 23.36 MB | 15.95 MB | **−7.41 MB (−32 %)** |
@@ -605,7 +613,7 @@ release note.
 | Proposed | 2026-10-16 | The design, with eight questions for the owner |
 | Accepted | the owner's decision, 2026-10-16 | The recommendation of each of the eight questions retained as written; each question replaced by its *Decision* line; the status, the header and the passages that depended on an open question (Q2, Q3, Q5, Q6) updated — `database/sql` stays in the core and leaves §7's refused list. No other text changed |
 | Accepted, review | 2026-10-16 | Step 3 says what moves to `storekit` and that `kit.Engine` stays in the core (Q5); §7 keeps the two invariants and leaves the test's package list, allow-list and gate to `framework/kit/CLAUDE.md`; steps 1–9 non-breaking, as Q8 decided |
-| Accepted, step 0 measured | 2026-10-16 | §Step 0, measured: the ceiling built in a throwaway copy — the probe's file −7.52 MB, its code −2.39 MB, its init ≈ −0.08 ms, its warm p50 about −0.3 ms; the status line's file −7.41 MB, its latency gain within the noise of its control; §Measurement's probe target set from the ceiling (at least 2.15 MB of code, 6.8 MB of file); §Context's estimate marked measured. No decision changed |
+| Accepted, step 0 measured | 2026-10-16 | §Step 0, measured: the ceiling built in a throwaway copy — the probe's file −7.52 MB, its code −2.39 MB, its init ≈ −0.08 ms, its warm p50 about −0.3 ms; the status line's file −7.41 MB, its latency gain within the noise of its control; §Measurement's probe target set from the ceiling (at least 2.15 MB of code, 6.8 MB of file); §Context's estimate marked measured; §Context's file size written in MB like every other figure (22.06 MB, the 21.0 it gave being MiB) and the package counts reconciled. No decision changed |
 
 ## Deferred
 
