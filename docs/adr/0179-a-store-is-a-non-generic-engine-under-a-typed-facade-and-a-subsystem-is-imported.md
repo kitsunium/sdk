@@ -309,27 +309,25 @@ import path, so the registration package's `init` may come after it.
 
 ### 7. The import graph is held by tests
 
-`framework/kit/initgraph_external_test.go` grows in two ways:
+Two invariants, held by `framework/kit`'s `initgraph` test:
 
-- `TestTheFacadeImportsNoOptInSubsystem`: `go list -deps framework/kit`
-  contains none of `data/docstore`, `data/sql`, `data/queue`, `app/statemachine`, `app/mail/spool`, `app/scheduler`,
-  `app/i18n` — beside what it refuses today; `database/sql` stays (Q5). During the migration the test
-  carries an allow-list of what is still in the core, which each step empties
-  and the last one deletes.
-- **A reachability check**: the probe built without any registration import
-  holds no text symbol of those packages, nor of kit's store engines
-  (`go tool nm`) — an import graph says what is initialised, the symbol table
-  what is linked; and, for each registration package, a probe that imports it
-  does hold them, so the test cannot pass by testing nothing.
+- **The facade imports no opt-in subsystem**: `framework/kit` alone brings
+  none of the SDK packages §1 takes out of the core, and none of what the
+  opt-in subsystems already kept out.
+- **A product links only what it imports**: a program that imports no
+  registration package links none of those packages' code nor kit's store
+  engines — an import graph says what is initialised, the symbol table what
+  is linked —, and one that imports a registration package does link them, so
+  the test cannot pass by testing nothing.
 
-Its gate stays CI's `test-386` job, which runs `go test` with a toolchain on
-`PATH` (rule 12).
+The packages the test refuses, its allow-list while the migration runs, and
+its gate are the test's, recorded in `framework/kit/CLAUDE.md`.
 
 ## Consequences / Semantics
 
 ### Migration, in this order
 
-Each step is one PR, green on its own; steps 1–8 are non-breaking because
+Each step is one PR, green on its own; steps 1–9 are non-breaking because
 `framework/kit` itself blank-imports each registration package as it is
 created, until step 10 removes those imports.
 
@@ -338,7 +336,7 @@ created, until step 10 removes those imports.
 | 0 | **Measure the ceiling** (Q1): the probe and the status line built from a throwaway branch where kit's references to every subsystem of §1 are cut; machine code, file size, inits, `latency-ab.sh` with its control, recorded on #276 | — (not merged) |
 | 1 | the hook types of §3 for the store, the start's check of §6 with its code in the design, the extended `initgraph` test with its allow-list | no |
 | 2 | the store engine non-generic **inside** kit's core (no package moves yet): `StoreService[T]` over documents; `docEngine`, `sqlEngine`, `historied`, `sealedEngine`, revisions, trash, retention, records, data copy on documents; the per-type instantiations gone. `storetest` passes unchanged | no |
-| 3 | `storekit` + `framework/kit/store`: the code naming `docstore`, `sql`, `database/sql` moves; connectors import `framework/kit/store` | no (the facade imports it) |
+| 3 | `storekit` + `framework/kit/store`: the stores' implementation — the code naming `docstore` and the SDK's `sql` — moves there; `kit.Engine` stays in the core and still returns `*sql.DB`, its dialect now kit's own type (Q5); the connectors import `framework/kit/store` | no (the facade imports it) |
 | 4 | `queuekit` + `framework/kit/queue` | no |
 | 5 | `workflowkit` + `framework/kit/workflow` (Q3) | no |
 | 6 | `mailkit` + `framework/kit/mail` | no |
@@ -367,7 +365,7 @@ per-type instantiations disappear from every product, whatever it imports.
 ### Measurement: target and method
 
 - **The probe** (`framework/kit/testdata/cliprobe`, `-trimpath`): `go list -deps`
-  without the packages of §7, `go tool nm` without their symbols, machine
+  without the packages §1 takes out of the core, `go tool nm` without their symbols, machine
   code down by the ≈ 1.95 MB of §Context less `database/sql`'s 0.066 MB,
   which stays (Q5) (target: at least 1.5 MB; the step-0
   ceiling replaces the estimate), file size, inits (`GODEBUG=inittrace=1`,
@@ -516,6 +514,7 @@ release note.
 |---|---|---|
 | Proposed | 2026-10-16 | The design, with eight questions for the owner |
 | Accepted | the owner's decision, 2026-10-16 | The recommendation of each of the eight questions retained as written; each question replaced by its *Decision* line; the status, the header and the passages that depended on an open question (Q2, Q3, Q5, Q6) updated — `database/sql` stays in the core and leaves §7's refused list. No other text changed |
+| Accepted, review | 2026-10-16 | Step 3 says what moves to `storekit` and that `kit.Engine` stays in the core (Q5); §7 keeps the two invariants and leaves the test's package list, allow-list and gate to `framework/kit/CLAUDE.md`; steps 1–9 non-breaking, as Q8 decided |
 
 ## Deferred
 
