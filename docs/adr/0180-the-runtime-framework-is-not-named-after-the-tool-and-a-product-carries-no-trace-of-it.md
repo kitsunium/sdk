@@ -386,8 +386,11 @@ symbol or name, in `cliprobe`, `coreprobe`, `storeprobe`, `queueprobe`,
 `workflowprobe`, `mailprobe` and `jobsprobe`;
 `TestAProductThatImportsTheStudioLinksItsLanguages` requires every one in
 `studioprobe`. Run against the tree before this step, the test fails where
-it should: `cliprobe` and `coreprobe` each hold seven of the names
-(`KIT_DEV_*`, `KIT_STUDIO`, `KIT_ANALYZE`), which the core read.
+it should: in `cliprobe` and in `coreprobe` each of the seven entries of
+`toolVariables` matches — read as substrings, `KIT_DEV_CHANGED` and
+`KIT_STUDIO` also cover `KIT_DEV_CHANGED_MORE` and `KIT_STUDIO_REMOTE`, so
+the seven entries are the nine names the table below counts —, which the
+core read.
 
 Measured as ADR 0179's steps (Go 1.27.2, `GOTOOLCHAIN=local`, `-trimpath`,
 `GOWORK=off`, MB = 10⁶ bytes, text symbols `T`/`t` by `go tool nm -size`),

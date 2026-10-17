@@ -50,22 +50,15 @@ func (f *fakeHost) Reply(w http.ResponseWriter, _ *http.Request, body json.RawMe
 // The Host header is the client's to choose; the Studio also checks where the
 // request comes from.
 func TestStudioAnswersThisMachineOnly(t *testing.T) {
-	h := &fakeHost{hosts: []string{"localhost", "127.0.0.1", "::1"}}
-	s := studio{host: h}
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) })
-	for _, c := range []struct {
+	type tc struct {
 		remote, host string
 		opt          bool
 		want         int
-	}{
-		{"127.0.0.1:5555", "localhost:4000", false, http.StatusTeapot},
-		{"[::1]:5555", "localhost:4000", false, http.StatusTeapot},
-		{"192.168.1.9:5555", "localhost:4000", false, http.StatusForbidden},
-		{"172.17.0.1:5555", "localhost:4000", true, http.StatusTeapot},
-		{"127.0.0.1:5555", "evil.example:4000", false, http.StatusForbidden},
-		{"127.0.0.1:5555", "[::1]:4000", false, http.StatusTeapot},
-	} {
-		h.remote = c.opt
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		s := studio{host: &fakeHost{remote: c.opt, hosts: []string{"localhost", "127.0.0.1", "::1"}}}
 		req := httptest.NewRequest("GET", "http://"+c.host+"/_kit/api/graph", nil)
 		req.RemoteAddr = c.remote
 		rec := httptest.NewRecorder()
@@ -76,6 +69,16 @@ func TestStudioAnswersThisMachineOnly(t *testing.T) {
 		if c.want == http.StatusTeapot && rec.Header().Get("Content-Security-Policy") != studioCSP {
 			t.Errorf("%s as %s: no content security policy", c.remote, c.host)
 		}
+	}
+	for _, c := range []tc{
+		{"127.0.0.1:5555", "localhost:4000", false, http.StatusTeapot},
+		{"[::1]:5555", "localhost:4000", false, http.StatusTeapot},
+		{"192.168.1.9:5555", "localhost:4000", false, http.StatusForbidden},
+		{"172.17.0.1:5555", "localhost:4000", true, http.StatusTeapot},
+		{"127.0.0.1:5555", "evil.example:4000", false, http.StatusForbidden},
+		{"127.0.0.1:5555", "[::1]:4000", false, http.StatusTeapot},
+	} {
+		t.Run(c.remote+" as "+c.host, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
@@ -132,12 +135,15 @@ func TestTheMailboxListsNewestFirst(t *testing.T) {
 // The source endpoint refuses, before it asks the app, a file it would not
 // show: no name, an extension it does not serve, a path outside the root.
 func TestTheSourceEndpointRefusesBeforeReading(t *testing.T) {
-	s := studio{host: &fakeHost{}}
-	for _, q := range []string{"", "?file=.env", "?file=../x.go", "?file=/etc/x.go", "?file=a.txt"} {
+	runCase := func(t *testing.T, query string) {
+		t.Helper()
 		rec := httptest.NewRecorder()
-		s.serveSource(rec, httptest.NewRequest(http.MethodGet, "/_kit/api/source"+q, nil))
+		studio{host: &fakeHost{}}.serveSource(rec, httptest.NewRequest(http.MethodGet, "/_kit/api/source"+query, nil))
 		if rec.Code != http.StatusNotFound {
-			t.Errorf("%q: %d", q, rec.Code)
+			t.Errorf("%q: %d", query, rec.Code)
 		}
+	}
+	for _, q := range []string{"", "?file=.env", "?file=../x.go", "?file=/etc/x.go", "?file=a.txt"} {
+		t.Run(q, func(t *testing.T) { runCase(t, q) })
 	}
 }
