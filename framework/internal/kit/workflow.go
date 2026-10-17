@@ -1056,10 +1056,21 @@ func (w *WorkflowService[E, S]) stop(_ context.Context, _ *App) error {
 
 // check reports what can only be judged once the declaration is complete.
 func (w *WorkflowService[E, S]) check() []phrase {
+	var out []phrase
 	if !w.hasInit {
-		return []phrase{say("workflow.initial", "name", w.name)}
+		out = append(out, say("workflow.initial", "name", w.name))
 	}
-	return nil
+	// The engine knows a state by its spelling (ADR 0179 Q3): two declared
+	// states spelled alike would be one state to it.
+	spelled := make(map[string]bool, len(w.order))
+	for _, st := range w.order {
+		name := fmt.Sprint(st)
+		if spelled[name] {
+			out = append(out, say("workflow.state-spelled-twice", "name", w.name, "state", name))
+		}
+		spelled[name] = true
+	}
+	return out
 }
 
 // instanceList returns the instances, most recently changed first.

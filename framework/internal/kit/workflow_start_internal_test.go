@@ -2,9 +2,11 @@ package kit
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -66,5 +68,47 @@ func TestAWorkflowTakesBackItsOwnStoreHooks(t *testing.T) {
 	}
 	if w, d := hooks(); w != 0 || d != 0 {
 		t.Fatalf("after the stop the store keeps %d write and %d delete hooks", w, d)
+	}
+}
+
+// twin is a state type whose values all spell alike.
+type twin int
+
+// String is every twin's spelling.
+func (twin) String() string { return "same" }
+
+// twinned is the entity of a workflow over twins.
+type twinned struct {
+	ID    string `json:"id"`
+	State twin   `json:"state"`
+}
+
+// The engine knows a state by its spelling (ADR 0179 Q3): a workflow that
+// declares two states spelled alike is refused at the start, naming the
+// spelling, rather than run as one state; distinct spellings start.
+func TestAWorkflowRefusesTwoStatesSpelledAlike(t *testing.T) {
+	type tc struct {
+		name    string
+		to      twin
+		refused bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		svc := NewService("twins", "")
+		items := svc.Store("items", func(w twinned) string { return w.ID })
+		svc.Workflow("pair", items, func(w *twinned) *twin { return &w.State }).Initial(1).On("go", 1, c.to)
+		app := NewApp("twins", svc).With(Profile("daemon"), InMemory(), Logs(io.Discard))
+		err := app.Start(context.Background())
+		if err == nil {
+			must(t, app.Stop(context.Background()))
+		}
+		var de *DiagnosticsError
+		refused := errors.As(err, &de) && strings.Contains(de.Error(), "two states are spelled same")
+		if refused != c.refused {
+			t.Errorf("refused = %v, want %v: %v", refused, c.refused, err)
+		}
+	}
+	for _, c := range []tc{{name: "two states spelled alike", to: 2, refused: true}, {name: "one state", to: 1, refused: false}} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }

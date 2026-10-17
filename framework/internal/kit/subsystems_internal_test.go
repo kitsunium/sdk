@@ -368,44 +368,57 @@ func workflowProduct() *App {
 // A product that declares a workflow without importing framework/kit/workflow
 // is refused at the start (ADR 0179 §6, step 5): every workflow at once, each
 // at its position, naming the package, never its store — whose subsystem the
-// program imports —; the refusal carries CodeSubsystemMissing.
-func TestAWorkflowWithoutItsSubsystemIsRefused(t *testing.T) {
-	withoutWorkflows(t)
-	err := workflowProduct().Start(context.Background())
-	var de *DiagnosticsError
-	if !errors.As(err, &de) {
-		t.Fatalf("the start: %v", err)
+// program imports —; the refusal carries CodeSubsystemMissing. With the
+// subsystem plugged in — framework/kit/workflow's, as the test binary has
+// it —, the same product starts. The cases run in turn: one takes the hook
+// out of the process until it ends.
+func TestAWorkflowIsRefusedWithoutItsSubsystemAlone(t *testing.T) {
+	type tc struct {
+		name    string
+		without bool
 	}
-	var refused []string
-	for _, d := range de.Diagnostics {
-		if !strings.Contains(d.Message, workflowPackage) {
-			continue
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if c.without {
+			withoutWorkflows(t)
 		}
-		refused = append(refused, d.Node)
-		if d.Source == nil || d.Source.Line == 0 || !strings.HasSuffix(d.Source.File, "subsystems_internal_test.go") {
-			t.Errorf("a refusal names no declaration at its position: %+v", d)
+		app := workflowProduct()
+		err := app.Start(context.Background())
+		if !c.without {
+			if err != nil {
+				t.Fatalf("the start: %v", err)
+			}
+			must(t, app.Stop(context.Background()))
+			return
+		}
+		var de *DiagnosticsError
+		if !errors.As(err, &de) {
+			t.Fatalf("the start: %v", err)
+		}
+		var refused []string
+		for _, d := range de.Diagnostics {
+			if !strings.Contains(d.Message, workflowPackage) {
+				continue
+			}
+			refused = append(refused, d.Node)
+			if d.Source == nil || d.Source.Line == 0 || !strings.HasSuffix(d.Source.File, "subsystems_internal_test.go") {
+				t.Errorf("a refusal names no declaration at its position: %+v", d)
+			}
+		}
+		slices.Sort(refused)
+		if want := []string{"desk/workflow/closing", "desk/workflow/triage"}; !slices.Equal(refused, want) {
+			t.Errorf("refused for want of %s: %q, want %q\n%v", workflowPackage, refused, want, de)
+		}
+		if !slices.Equal(de.Missing, []string{workflowPackage}) {
+			t.Errorf("the refusal's Missing = %q, want [%s]", de.Missing, workflowPackage)
+		}
+		if !errs.HasCode(err, CodeSubsystemMissing) {
+			t.Errorf("the refusal does not carry CodeSubsystemMissing: %v", err)
 		}
 	}
-	slices.Sort(refused)
-	if want := []string{"desk/workflow/closing", "desk/workflow/triage"}; !slices.Equal(refused, want) {
-		t.Errorf("refused for want of %s: %q, want %q\n%v", workflowPackage, refused, want, de)
+	for _, c := range []tc{{name: "without the subsystem", without: true}, {name: "with the subsystem"}} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
-	if !slices.Equal(de.Missing, []string{workflowPackage}) {
-		t.Errorf("the refusal's Missing = %q, want [%s]", de.Missing, workflowPackage)
-	}
-	if !errs.HasCode(err, CodeSubsystemMissing) {
-		t.Errorf("the refusal does not carry CodeSubsystemMissing: %v", err)
-	}
-}
-
-// With the workflow subsystem plugged in — framework/kit/workflow's, as the
-// test binary has it —, the same product starts.
-func TestAWorkflowWithItsSubsystemIsNotRefused(t *testing.T) {
-	app := workflowProduct()
-	if err := app.Start(context.Background()); err != nil {
-		t.Fatalf("the start: %v", err)
-	}
-	must(t, app.Stop(context.Background()))
 }
 
 // A workflow started in a program without the subsystem — which the start's

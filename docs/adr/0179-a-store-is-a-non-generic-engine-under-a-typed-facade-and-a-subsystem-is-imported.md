@@ -802,7 +802,7 @@ bytes at rest are unchanged: the same workflow files
 
 The start's check of §6 gains the workflow row: a workflow declared without
 `framework/kit/workflow` is refused with `CodeSubsystemMissing`, every
-declaration at once (`TestAWorkflowWithoutItsSubsystemIsRefused`), and a
+declaration at once (`TestAWorkflowIsRefusedWithoutItsSubsystemAlone`), and a
 workflow started without it — which the check makes unreachable — says the
 import it needs (`workflowsMissing`).
 
@@ -812,9 +812,13 @@ import it needs (`workflowsMissing`).
 `statemachine`'s init, the package being out of its graph —, `storeprobe`
 and `queueprobe` none either, and
 `TestAProductThatImportsTheWorkflowsLinksThem` builds `testdata/workflowprobe`
-(coreprobe with `framework/kit/workflow`) and requires `workflowkit`'s and
-the SDK's statemachine's code linked, the store subsystem's, nothing of the
-queues', and the engine instantiated at kit's entity alone.
+(coreprobe with `framework/kit/workflow` and two workflows over entities and
+states of distinct types) and requires `workflowkit`'s and the SDK's
+statemachine's code linked, the store subsystem's, nothing of the queues',
+the facade compiled at both workflows' types and the engine instantiated at
+kit's entity alone. Since the engine knows a state by its spelling, a
+workflow that declares two states spelled alike is refused at the start
+(`workflow.state-spelled-twice`), never run as one state.
 
 Measured as the steps before (Go 1.27.2, `-trimpath`, MB = 10⁶ bytes, text
 symbols `T`/`t` by `go tool nm -size`, init medians of 50 runs at a 1-minute
@@ -823,14 +827,14 @@ load under 1.5), before on `origin/main` at 63ec721a:
 | | coreprobe before | coreprobe after | storeprobe before | storeprobe after | queueprobe before | queueprobe after | workflowprobe after | cliprobe before | cliprobe after |
 |---|---|---|---|---|---|---|---|---|---|
 | packages (`go list -deps`) | 357 | **354** | 363 | 360 | 366 | 363 | 365 | 367 | 369 |
-| file | 14.781 | 14.767 | 17.783 | 17.771 | 18.255 | 18.242 | 18.197 | 18.265 | **18.684 (+0.42)** |
-| `.text` | 4.634 | 4.633 | 5.661 | 5.660 | 5.842 | 5.841 | 5.775 | 5.843 | 5.956 |
-| text symbols | 4.481 | 4.480 | 5.476 | 5.475 | 5.653 | 5.652 | 5.583 | 5.654 | 5.760 |
-| `.gopclntab` / debug | 3.528 / 3.687 | 3.528 / 3.685 | 4.310 / 4.344 | 4.310 / 4.344 | 4.424 / 4.436 | 4.424 / 4.436 | 4.425 / 4.419 | 4.427 / 4.441 | 4.540 / 4.518 |
-| kit's core | 0.421 | 0.421 | 0.988 | 0.988 | 0.989 | 0.989 | 0.995 | 0.989 | 0.995 |
+| file | 14.781 | 14.767 | 17.783 | 17.771 | 18.255 | 18.242 | 18.656 | 18.265 | **18.684 (+0.42)** |
+| `.text` | 4.634 | 4.633 | 5.661 | 5.660 | 5.842 | 5.841 | 5.911 | 5.843 | 5.956 |
+| text symbols | 4.481 | 4.480 | 5.476 | 5.475 | 5.653 | 5.652 | 5.714 | 5.654 | 5.760 |
+| `.gopclntab` / debug | 3.528 / 3.687 | 3.528 / 3.685 | 4.310 / 4.344 | 4.310 / 4.344 | 4.424 / 4.436 | 4.424 / 4.436 | 4.544 / 4.494 | 4.427 / 4.441 | 4.540 / 4.518 |
+| kit's core | 0.421 | 0.421 | 0.988 | 0.988 | 0.989 | 0.989 | 1.117 | 0.989 | 0.995 |
 | `workflowkit` | — | 0 | — | 0 | — | 0 | 0.010 | — | 0.010 |
-| SDK `statemachine` (core and service) | 0.001 (its inits) | **0** | 0.001 | **0** | 0.001 | **0** | 0.077 | 0.001 | 0.077 |
-| init lines / median of 50 (`inittrace`) | 145 / 0.82 ms | 144 / 0.70 ms | 149 / 0.78 ms | 148 / 0.76 ms | 151 / 0.80 ms | 150 / 0.80 ms | 151 / 0.79 ms | 152 / 0.78 ms | 154 / 0.85 ms |
+| SDK `statemachine` (core and service) | 0.001 (its inits) | **0** | 0.001 | **0** | 0.001 | **0** | 0.078 | 0.001 | 0.077 |
+| init lines / median of 50 (`inittrace`) | 145 / 0.82 ms | 144 / 0.70 ms | 149 / 0.78 ms | 148 / 0.76 ms | 151 / 0.80 ms | 150 / 0.80 ms | 151 / 0.82 ms | 152 / 0.78 ms | 154 / 0.85 ms |
 
 And a product that declares workflows — a throwaway one on the facade, built
 in both trees and not kept, declaring 1 or 11 workflows over stores of

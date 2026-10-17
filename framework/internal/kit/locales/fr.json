@@ -276,6 +276,7 @@
   "workflow.initial": "le workflow « {name} » n’a pas d’état initial : appelez Initial",
   "workflow.instant-nil": "workflow « {name} » : la transition minutée « {event} » n’a pas de fonction d’instant",
   "workflow.needs": "le workflow « {name} » demande un store et une fonction d’état",
+  "workflow.state-spelled-twice": "workflow « {name} » : deux états s’écrivent {state}, que le moteur prendrait pour un seul : donnez à chaque état sa propre écriture",
   "workflow.timer-nil-setting": "workflow « {name} » : la transition minutée « {event} » attend un réglage nil",
   "workflow.timer-positive": "workflow « {name} » : la transition minutée « {event} » demande une durée positive"
 }

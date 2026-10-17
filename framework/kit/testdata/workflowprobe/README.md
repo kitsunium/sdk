@@ -1,9 +1,10 @@
 # workflowprobe
 
-Command workflowprobe is coreprobe with the workflow subsystem imported: the
-same service and command on kit's core, and `framework/kit/workflow` — which
+Command workflowprobe is coreprobe with the workflow subsystem imported and
+two workflows declared over entities and states of distinct types: the same
+service and command on kit's core, and `framework/kit/workflow` — which
 imports `framework/kit/store` —, whose engine `framework/kit`'s initgraph test
-finds linked in it, instantiated once.
+finds linked in it, instantiated once whatever the types.
 
 A test fixture, not a package anything imports: it is a `main` under
 `testdata/`, so docs/api records no symbol of it and tools/genindex writes no

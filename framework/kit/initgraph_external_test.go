@@ -400,37 +400,56 @@ func TestAProductThatImportsTheQueuesLinksThem(t *testing.T) {
 }
 
 // The same half of §7 for step 5: testdata/workflowprobe, coreprobe with
-// framework/kit/workflow, links the workflow subsystem's engine — the SDK's
-// statemachine, instantiated once (ADR 0179 Q3) — and the store subsystem's
-// engines, since the workflow package imports the store package (Q4), and
-// nothing of the queues.
+// framework/kit/workflow and two workflows over entities and states of
+// distinct types, links the workflow subsystem's engine — the SDK's
+// statemachine, instantiated once (ADR 0179 Q3) whatever the types — and the
+// store subsystem's engines, since the workflow package imports the store
+// package (Q4), and nothing of the queues.
 func TestAProductThatImportsTheWorkflowsLinksThem(t *testing.T) {
 	goTool := goToList(t)
 	syms := textSymbols(t, goTool, "./testdata/workflowprobe")
 	linked := linkedSymbols(syms, owners())
-	for _, owner := range []string{"framework/kit/workflow", "pkg/v1/app/statemachine", "framework/kit/store", "pkg/v1/data/docstore"} {
-		if linked[owner] == 0 {
-			t.Errorf("a product that imports framework/kit/workflow links no text symbol of %s", owner)
+	type tc struct {
+		owner  string
+		linked bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if n := linked[c.owner]; (n > 0) != c.linked {
+			t.Errorf("a product that imports framework/kit/workflow links %d text symbols of %s, want linked %v", n, c.owner, c.linked)
 		}
 	}
-	if n := linked["framework/kit/queue"]; n > 0 {
-		t.Errorf("a product that imports framework/kit/workflow links %d text symbols of the queues' brokers", n)
+	for _, c := range []tc{
+		{"framework/kit/workflow", true},
+		{"pkg/v1/app/statemachine", true},
+		{"framework/kit/store", true},
+		{"pkg/v1/data/docstore", true},
+		{"framework/kit/queue", false},
+	} {
+		t.Run(c.owner, func(t *testing.T) { runCase(t, c) })
 	}
-	// One instantiation of the engine, whatever the product declares: the
-	// SDK's machine is instantiated at kit's entity and the state's
-	// spelling alone — its methods' wrappers name those types, its shaped
+	// The probe's two workflows are compiled — the facade at each of their
+	// types —, and the SDK's machine at kit's entity and the state's
+	// spelling alone: its methods' wrappers name no other type, its shaped
 	// bodies (go.shape.…) are compiled once for them.
-	var types []string
-	for s := range syms {
-		if rest, ok := strings.CutPrefix(s, sdk+"internal/service/app/statemachine.(*StateMachine["); ok && !strings.HasPrefix(rest, "go.shape.") {
-			args, _, _ := strings.Cut(rest, "]")
-			if !slices.Contains(types, args) {
-				types = append(types, args)
+	instantiated := func(prefix string) []string {
+		var types []string
+		for s := range syms {
+			if rest, ok := strings.CutPrefix(s, sdk+prefix); ok && !strings.HasPrefix(rest, "go.shape.") {
+				args, _, _ := strings.Cut(rest, "]")
+				if !slices.Contains(types, args) {
+					types = append(types, args)
+				}
 			}
 		}
+		slices.Sort(types)
+		return types
 	}
-	if want := sdk + "framework/internal/kit/plug.WorkflowEntityValue,string"; !slices.Equal(types, []string{want}) {
-		t.Errorf("the workflow engine is instantiated at %q, want once, at %s", types, want)
+	if got := instantiated("framework/internal/kit.(*WorkflowService["); len(got) < 2 {
+		t.Errorf("the probe's two workflows are not both compiled: the facade is instantiated at %q", got)
+	}
+	if got, want := instantiated("internal/service/app/statemachine.(*StateMachine["), sdk+"framework/internal/kit/plug.WorkflowEntityValue,string"; !slices.Equal(got, []string{want}) {
+		t.Errorf("the workflow engine is instantiated at %q, want once, at %s", got, want)
 	}
 }
 
