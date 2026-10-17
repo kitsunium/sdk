@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/app"
 	"github.com/kitsunium/sdk/framework/connectors/postgres"
-	"github.com/kitsunium/sdk/framework/kit"
 	"github.com/kitsunium/sdk/framework/model"
 )
 
@@ -26,22 +26,22 @@ type entry struct {
 
 // migrations are the product's: one DDL statement each, as MySQL wants it
 // too. Their tables have no IF NOT EXISTS: running one twice fails.
-var migrations = []kit.Migration{
-	{Version: 20260901120000, Name: "create entries", Up: kit.Statements("CREATE TABLE entries (id TEXT PRIMARY KEY)"), Down: kit.Statements("DROP TABLE entries")},
-	{Version: 20260902120000, Name: "create trail", Up: kit.Statements("CREATE TABLE trail (id TEXT PRIMARY KEY)"), Down: kit.Statements("DROP TABLE trail")},
+var migrations = []app.Migration{
+	{Version: 20260901120000, Name: "create entries", Up: app.Statements("CREATE TABLE entries (id TEXT PRIMARY KEY)"), Down: app.Statements("DROP TABLE entries")},
+	{Version: 20260902120000, Name: "create trail", Up: app.Statements("CREATE TABLE trail (id TEXT PRIMARY KEY)"), Down: app.Statements("DROP TABLE trail")},
 }
 
 // ledger is the product in production, its data in a directory of the
 // test's; its URL is the variable LEDGER_DATABASE_URL, which the caller
 // sets.
-func ledger(t *testing.T, logs io.Writer, opts ...kit.DatabaseOption) *kit.App {
+func ledger(t *testing.T, logs io.Writer, opts ...app.DatabaseOption) *app.App {
 	t.Helper()
 	t.Setenv("KIT_SECRETS", "memory")
-	books := kit.NewService("books", "The books.")
+	books := app.NewService("books", "The books.")
 	books.Store("entries", func(e entry) string { return e.ID })
-	return kit.NewApp("ledger", books).With(
-		kit.Database("database", postgres.Engine(), opts...),
-		kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvProduction), kit.DataDir(t.TempDir()), kit.Logs(logs),
+	return app.NewApp("ledger", books).With(
+		app.Database("database", postgres.Engine(), opts...),
+		app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.DataDir(t.TempDir()), app.Logs(logs),
 	)
 }
 
@@ -52,15 +52,15 @@ type lifecycle interface {
 }
 
 // run starts app and stops it with the test.
-func run(t *testing.T, app lifecycle) {
+func run(t *testing.T, a lifecycle) {
 	t.Helper()
-	if err := app.Start(t.Context()); err != nil {
+	if err := a.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := app.Stop(ctx); err != nil {
+		if err := a.Stop(ctx); err != nil {
 			t.Logf("stop: %v", err)
 		}
 	})

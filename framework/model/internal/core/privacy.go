@@ -21,7 +21,7 @@ const (
 
 // The gaps a register lists for a store that keeps personal data.
 const (
-	GapPurpose   = "purpose"   // no kit.Purpose
+	GapPurpose   = "purpose"   // no app.Purpose
 	GapRetention = "retention" // no retention, kit's or the product's: its personal data is kept forever
 	GapSubject   = "subject"   // no subject field: no person can have their records
 )
@@ -53,8 +53,8 @@ const SealedPlaceholder = "[sealed]"
 // The operations of the privacy journal.
 const (
 	JournalExport      = "export"       // a person's records exported
-	JournalRead        = "read"         // a record read by a module, through kit.Records
-	JournalList        = "list"         // a store's keys listed by a module that watches it, through kit.Records
+	JournalRead        = "read"         // a record read by a module, through app.Records
+	JournalList        = "list"         // a store's keys listed by a module that watches it, through app.Records
 	JournalErase       = "erase"        // a record's personal data cleared
 	JournalDelete      = "delete"       // a record removed
 	JournalEraseFields = "erase-fields" // some fields of a record cleared, by a module
@@ -63,13 +63,13 @@ const (
 	JournalShred       = "shred"        // a subject's data key destroyed (ADR 0006, step 3)
 )
 
-// Personal data (ADR 0006): what kit.Export gives a person, what kit.Erase
+// Personal data (ADR 0006): what app.Export gives a person, what app.Erase
 // did, and what a running app says of the personal data it keeps — the
 // register of processing, the legal holds and the privacy journal. The
 // Studio's Privacy page reads Privacy from GET /_kit/api/privacy, in dev;
 // `<product> privacy …` prints the same.
 
-// PersonalDataMessage is a person's data as kit.Export gives it (GDPR art. 15 and
+// PersonalDataMessage is a person's data as app.Export gives it (GDPR art. 15 and
 // 20): their records, store by store, with what art. 15(1) asks beside them.
 type PersonalDataMessage struct {
 	// Stores are the stores that keep records about the person.
@@ -77,7 +77,7 @@ type PersonalDataMessage struct {
 }
 
 // StoreDataMessage is one store's records about a person.
-// It is one part of what kit.Export gives a person about themselves.
+// It is one part of what app.Export gives a person about themselves.
 type StoreDataMessage struct {
 	// Store is the store's node ID.
 	Store string `json:"store"`
@@ -109,7 +109,7 @@ type ExportedVersionsMessage struct {
 	Versions []RecordVersionMessage `json:"versions"`
 }
 
-// ErasureMessage is what kit.Erase did, store by store.
+// ErasureMessage is what app.Erase did, store by store.
 // Stores lists, store by store, what the erasure did there.
 type ErasureMessage struct {
 	// Stores are the stores that kept records about the person.
@@ -185,7 +185,7 @@ type RegisterStoreMessage struct {
 	Delete    string `json:"delete,omitempty"`
 	HeldUntil string `json:"heldUntil,omitempty"`
 	// ByProduct is point (f) when the product keeps the store's retention
-	// itself (kit.RetentionByProduct), in its own words: no retention gap,
+	// itself (app.RetentionByProduct), in its own words: no retention gap,
 	// and no subject gap either.
 	ByProduct *ProductRetentionSpec `json:"byProduct,omitempty"`
 	// Security is point (g): the measures kit takes.

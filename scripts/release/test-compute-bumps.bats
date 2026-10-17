@@ -552,13 +552,13 @@ STUB
 # release also tags when it changed (cut-tags.sh). Either is the one token.
 
 @test "a change under framework/ emits the SDK module (.)" {
-  mkdir -p framework/kit
-  echo "package kit" > framework/kit/kit.go
+  mkdir -p framework/app
+  echo "package kit" > framework/app/kit.go
   g add -A
   g commit -q --no-verify -m "feat(framework): a declaration"
   run bash -c "'$SCRIPT' --explain 2>&1"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"rule 1: framework/kit/kit.go is an SDK-module change"* ]]
+  [[ "$output" == *"rule 1: framework/app/kit.go is an SDK-module change"* ]]
   [[ "$output" == *$'\n.'* ]]
 }
 

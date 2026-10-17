@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "jobsprobe_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/kitsunium/sdk/framework/app/testdata/jobsprobe",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/app/jobs",
+        "//framework/internal/app",
+    ],
+)
+
+go_binary(
+    name = "jobsprobe",
+    embed = [":jobsprobe_lib"],
+    visibility = ["//visibility:public"],
+)

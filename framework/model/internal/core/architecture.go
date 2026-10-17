@@ -8,16 +8,16 @@ const (
 	ContainerSPA     = "spa"     // a frontend: served by the process, run by a browser
 	ContainerVolume  = "volume"  // the data directory: store files, queue files
 	ContainerMemory  = "memory"  // data kept in the process's memory only
-	// ContainerDatabase is a database the app declares (kit.Database):
+	// ContainerDatabase is a database the app declares (app.Database):
 	// "container:database:<name>", drawn as a cylinder.
 	ContainerDatabase = "database"
 )
 
 // Whose a port is.
 const (
-	// PortOwnerKit is kit's own listener: the health probes, the Studio in
+	// PortOwnerApp is the framework's own listener: the health probes, the Studio in
 	// dev, and the product's HTTP when it declares any.
-	PortOwnerKit = "kit"
+	PortOwnerApp = "kit"
 )
 
 // What a port serves.
@@ -107,7 +107,7 @@ type ContainerMessage struct {
 	// Engine is a database's engine: "postgres", "mysql", "sqlite".
 	Engine string `json:"engine,omitempty"`
 	// Source is where the code declares the container, when it does: the
-	// app for the process, a frontend for its SPA, kit.Database for a
+	// app for the process, a frontend for its SPA, app.Database for a
 	// database. [GraphMessage.Files] allows it.
 	Source *SourceMessage `json:"source,omitempty"`
 }
@@ -119,7 +119,7 @@ type PortMessage struct {
 	// Address is the listen address: "127.0.0.1:4000", ":4000". Present in
 	// dev only, like every location.
 	Address string `json:"address,omitempty"`
-	// Owner is [PortOwnerKit], or the ID of the connector that opened it.
+	// Owner is [PortOwnerApp], or the ID of the connector that opened it.
 	Owner string `json:"owner"`
 	// Serves says what it answers: the Serves constants.
 	Serves []string `json:"serves"`

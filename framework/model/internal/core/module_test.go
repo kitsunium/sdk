@@ -86,7 +86,7 @@ func TestNormalizeSortsTheModules(t *testing.T) {
 	}
 }
 
-// A module mounted with kit.Only says the environments it is mounted in,
+// A module mounted with app.Only says the environments it is mounted in,
 // sorted, as "only"; one mounted everywhere says nothing, the field an older
 // reader skips (Version unchanged). Which environments is structure.
 func TestAModuleSaysTheEnvironmentsItIsMountedIn(t *testing.T) {

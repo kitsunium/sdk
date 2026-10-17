@@ -74,7 +74,7 @@ test:
 # GOWORK=off, as a product builds them: its packages in the SDK module
 # (./framework/..., which stops at the connector modules nested under it — ADR
 # 0162), then each connector module of the census, one at a time. It is the
-# gate of //framework/internal/kit:kit_test, `manual` under Bazel because the suite
+# gate of //framework/internal/app:app_test, `manual` under Bazel because the suite
 # reads its own sources and positions relative to the module root (rule 12,
 # ADR 0147).
 test-framework:

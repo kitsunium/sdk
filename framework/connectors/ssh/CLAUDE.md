@@ -23,7 +23,7 @@ until ADR 0158; the quarantine is the one ADR 0022/0034 (the HCL codec) and ADR
 0012 (the AWS writers) drew, now one module wide.
 
 Its production code imports `framework/entitlement` — the public package, the way
-the database engines import `framework/kit` — plus `internal/kernel/errs` for its
+the database engines import `framework/app` — plus `internal/kernel/errs` for its
 one sentinel and `x/crypto/ssh`. Its suite also reaches the engine's unexported
 surface (`framework/internal/service/entitlement`), which Go's `internal/` rule
 admits because this module's path is under `framework/`.

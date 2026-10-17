@@ -17,8 +17,8 @@ go_library(
     ],
     importpath = "github.com/kitsunium/sdk/framework/connectors/postgres",
     deps = [
-        "//framework/kit",
-        "//framework/kit/store",
+        "//framework/app",
+        "//framework/app/store",
         "//pkg/v1/errs",
         "//pkg/v1/security/secret",
         "@com_github_jackc_pgx_v5//:pgx",
@@ -44,9 +44,9 @@ go_test(
     ],
     deps = [
         ":postgres",
-        "//framework/kit",
-        "//framework/kit/server",
-        "//framework/kit/storetest",
+        "//framework/app",
+        "//framework/app/server",
+        "//framework/app/storetest",
         "//framework/model",
         "//pkg/v1/errs",
         "//pkg/v1/security/secret",

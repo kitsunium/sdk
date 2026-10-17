@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "queue",
+    srcs = ["queue.go"],
+    importpath = "github.com/kitsunium/sdk/framework/app/queue",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/app/store",
+        "//framework/internal/app/queueengine",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":queue",
+    visibility = ["//visibility:public"],
+)

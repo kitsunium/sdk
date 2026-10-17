@@ -405,12 +405,12 @@ codes:
       owner: framework/model/internal/core
       note: "ADR 0147: layer 4 is the framework's"
     - range: 0.4.2
-      owner: framework/internal/kit
+      owner: framework/internal/app
     - range: 0.4.3
       owner: framework/telemetry
       note: ADR 0149
     - range: 0.4.4
-      owner: framework/kit/storetest
+      owner: framework/app/storetest
     - range: 0.4.16
       owner: framework/connectors/postgres
     - range: 0.4.17

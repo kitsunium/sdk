@@ -189,7 +189,7 @@ The JSON shape is a contract: [Version](#Version) is bumped on any change an old
 const AccessAnyUser string = "any-user"
 ```
 
-AccessAnyUser is kit.AnyUser(): any signed-in user may run it — the operation asks for one.
+AccessAnyUser is app.AnyUser(): any signed-in user may run it — the operation asks for one.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.AccessAnyUser`.
 
@@ -198,7 +198,7 @@ Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.AccessA
 const AccessAnyone string = "anyone"
 ```
 
-AccessAnyone is kit.Anyone(): whoever reaches the route may run the operation.
+AccessAnyone is app.Anyone(): whoever reaches the route may run the operation.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.AccessAnyone`.
 
@@ -306,7 +306,7 @@ Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.BlockLo
 const BlockTransaction string = "transaction"
 ```
 
-BlockTransaction is the function a kit.Transact runs: its steps run in one transaction, and the effects they make leave at its commit.
+BlockTransaction is the function an app.Transact runs: its steps run in one transaction, and the effects they make leave at its commit.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.BlockTransaction`.
 
@@ -497,7 +497,7 @@ Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.Connect
 const ConnectorDatabase string = "database"
 ```
 
-ConnectorDatabase is brought by a store a database keeps (ADR 0004): kit.Database declares the database, an engine module reaches it.
+ConnectorDatabase is brought by a store a database keeps (ADR 0004): app.Database declares the database, an engine module reaches it.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ConnectorDatabase`.
 
@@ -560,7 +560,7 @@ Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.Connect
 const ContainerDatabase string = "database"
 ```
 
-ContainerDatabase is a database the app declares (kit.Database): "container:database:\<name>", drawn as a cylinder.
+ContainerDatabase is a database the app declares (app.Database): "container:database:\<name>", drawn as a cylinder.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ContainerDatabase`.
 
@@ -632,7 +632,7 @@ Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.Databas
 const DatabaseMemory string = "memory"
 ```
 
-DatabaseMemory: the app keeps its data in memory (kit.InMemory): nothing is opened, no URL is read.
+DatabaseMemory: the app keeps its data in memory (app.InMemory): nothing is opened, no URL is read.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.DatabaseMemory`.
 
@@ -1478,7 +1478,7 @@ Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.Measure
 const MockReplace string = "replace"
 ```
 
-MockReplace is the one mode a [Mock](#Mock) has: a test's kit.Replace, a typed function run in place of an operation's handler — or of what a port calls — while the rest of its pipeline still runs. The Studio sets none (D13): it shows the application, it does not act on it, so the respond, fail and delay modes of the platform's kit have no representation here.
+MockReplace is the one mode a [Mock](#Mock) has: a test's app.Replace, a typed function run in place of an operation's handler — or of what a port calls — while the rest of its pipeline still runs. The Studio sets none (D13): it shows the application, it does not act on it, so the respond, fail and delay modes of the platform's kit have no representation here.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.MockReplace`.
 
@@ -1487,7 +1487,7 @@ Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.MockRep
 const ModeQueued string = "queued"
 ```
 
-ModeQueued is sent to the background (kit.Queued): Dispatch returns once the command's own queue accepted it, and a consumer handles it, retried and dead-lettered.
+ModeQueued is sent to the background (app.Queued): Dispatch returns once the command's own queue accepted it, and a consumer handles it, retried and dead-lettered.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ModeQueued`.
 
@@ -1676,7 +1676,7 @@ Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.OpSend`
 const OpTransaction string = "transaction"
 ```
 
-OpTransaction is a unit of work (kit.Transact, a command's, a workflow's transition): its attrs say the database it belongs to — "database", and "backend" as a store says it —, its "outcome", the effects it held ("effects"), and "savepoint" for one nested in another.
+OpTransaction is a unit of work (app.Transact, a command's, a workflow's transition): its attrs say the database it belongs to — "database", and "backend" as a store says it —, its "outcome", the effects it held ("effects"), and "savepoint" for one nested in another.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.OpTransaction`.
 
@@ -1761,14 +1761,14 @@ Process phases, in the order a process goes through them.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.PhaseStopped`.
 
-<a name="PortOwnerKit"></a>
+<a name="PortOwnerApp"></a>
 ```go
-const PortOwnerKit string = "kit"
+const PortOwnerApp string = "kit"
 ```
 
-PortOwnerKit is kit's own listener: the health probes, the Studio in dev, and the product's HTTP when it declares any.
+PortOwnerApp is the framework's own listener: the health probes, the Studio in dev, and the product's HTTP when it declares any.
 
-Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.PortOwnerKit`.
+Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.PortOwnerApp`.
 
 <a name="ProfileCLI"></a>
 ```go
@@ -1815,14 +1815,14 @@ ProfileServer serves HTTP until it is stopped: the platform's kit product, and t
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ProfileServer`.
 
-<a name="ProvenanceKit"></a>
+<a name="ProvenanceApp"></a>
 ```go
-const ProvenanceKit string = "kit"
+const ProvenanceApp string = "kit"
 ```
 
-ProvenanceKit loops are written by kit for a declaration: a workflow's sweep, a declared loop's wake cycle.
+ProvenanceApp loops are written by the framework for a declaration: a workflow's sweep, a declared loop's wake cycle.
 
-Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ProvenanceKit`.
+Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ProvenanceApp`.
 
 <a name="ProvenanceLibrary"></a>
 ```go
@@ -2049,6 +2049,15 @@ What a port serves.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ServesStudio`.
 
+<a name="SettingAppDev"></a>
+```go
+const SettingAppDev string = "kitdev"
+```
+
+Where a setting's value comes from.
+
+Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.SettingAppDev`.
+
 <a name="SettingDefault"></a>
 ```go
 const SettingDefault string = "default"
@@ -2075,15 +2084,6 @@ const SettingFile string = "file"
 Where a setting's value comes from.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.SettingFile`.
-
-<a name="SettingKitDev"></a>
-```go
-const SettingKitDev string = "kitdev"
-```
-
-Where a setting's value comes from.
-
-Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.SettingKitDev`.
 
 <a name="SettingOption"></a>
 ```go
@@ -2285,7 +2285,7 @@ Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.VarTrus
 
 <a name="Version"></a>
 ```go
-const Version int = 5
+const Version int = 6
 ```
 
 Version is the schema version of every document in this package.
@@ -2298,6 +2298,8 @@ Version 4 is the one bump the decisions of issue #17 share. It adds the port kin
 
 Version 5 is the first the SDK's framework publishes (ADR 0147). It adds what a product is made of beyond its services: the binary ([KindBinary](#KindBinary)) and its process roles ([KindRole](#KindRole)), the short CLI command ([KindCLI](#KindCLI)), the listener that is not HTTP ([KindListener](#KindListener)), the library shared between components ([KindLibrary](#KindLibrary)) and the presentation ([KindPresentation](#KindPresentation)); the edge between two roles of a product, which carries a versioned contract ([EdgeContracts](#EdgeContracts), [Edge](#Edge).Contract); and the grammar every ID follows, written once ([ID](#ID), [ParseID](#ParseID)). It removes what the Studio no longer does (D13): the respond, fail and delay mock modes, the control event and its payload — a [Mock](#Mock) is a test's replacement only.
 
+Version 6 renames the runtime framework (ADR 0180): its packages are framework/app and framework/internal/app, so a source position the document gives in the framework's code names those paths, and the constants of the framework's own provenance, port owner and setting origin are [ProvenanceApp](#ProvenanceApp), [PortOwnerApp](#PortOwnerApp) and [SettingAppDev](#SettingAppDev). The values the graph spells after the framework follow with its runtime names (ADR 0180 step 4).
+
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.Version`.
 
 <a name="ViaBind"></a>
@@ -2305,7 +2307,7 @@ Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.Version
 const ViaBind string = "bind"
 ```
 
-ViaBind is the app's kit.Bind.
+ViaBind is the app's app.Bind.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ViaBind`.
 
@@ -2314,7 +2316,7 @@ Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ViaBind
 const ViaFallback string = "fallback"
 ```
 
-ViaFallback is the port's own kit.Fallback.
+ViaFallback is the port's own app.Fallback.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ViaFallback`.
 
@@ -2332,7 +2334,7 @@ Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ViaImpl
 const ViaReplace string = "replace"
 ```
 
-ViaReplace is a test's kit.Replace: a function answers in place of whatever the port would call, and nothing is bound.
+ViaReplace is a test's app.Replace: a function answers in place of whatever the port would call, and nothing is bound.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.ViaReplace`.
 
@@ -2677,7 +2679,7 @@ App is an alias of `github.com/kitsunium/sdk/framework/model/internal/core.AppMe
 
 ```go
 type App struct {
-	// Name is the product name given to kit.NewApp.
+	// Name is the product name given to app.NewApp.
 	Name      string        `json:"name"`
 	// Module is the Go module path of the product.
 	Module    string        `json:"module,omitempty"`
@@ -2745,7 +2747,7 @@ type AuthInfo struct {
 	// cookie:"…" or header:"…".
 	Credentials *SchemaMessage `json:"credentials,omitempty"`
 	// Data is the type of what the handler says about the caller, which
-	// endpoints read with kit.AuthData.
+	// endpoints read with app.AuthData.
 	Data        *SchemaMessage `json:"data,omitempty"`
 	// Endpoints counts the endpoints that ask for authentication.
 	Endpoints   int            `json:"endpoints"`
@@ -3233,7 +3235,7 @@ type Container struct {
 	// Engine is a database's engine: "postgres", "mysql", "sqlite".
 	Engine     string         `json:"engine,omitempty"`
 	// Source is where the code declares the container, when it does: the
-	// app for the process, a frontend for its SPA, kit.Database for a
+	// app for the process, a frontend for its SPA, app.Database for a
 	// database. [GraphMessage.Files] allows it.
 	Source     *SourceMessage `json:"source,omitempty"`
 }
@@ -3242,7 +3244,7 @@ type Container struct {
 <a name="Database"></a>
 ## type [Database](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go>)
 
-Database is one database the app declares (kit.Database), as the running process found it. Its URL is never shown: where it was found, the engine, the address and the TLS mode are.
+Database is one database the app declares (app.Database), as the running process found it. Its URL is never shown: where it was found, the engine, the address and the TLS mode are.
 
 ```go
 type Database = core.DatabaseMessage
@@ -3327,7 +3329,7 @@ type Diagnostic struct {
 	// Message says what is wrong and how to fix it, in English.
 	Message  string            `json:"message"`
 	// Texts is the message in each language kit speaks, by language: "en",
-	// and "fr" when the program imports framework/kit/studio. The Studio
+	// and "fr" when the program imports framework/app/studio. The Studio
 	// shows its reader's.
 	Texts    map[string]string `json:"texts,omitempty"`
 	// Node is the node concerned, when there is one.
@@ -3457,7 +3459,7 @@ type EndpointInfo struct {
 <a name="Erasure"></a>
 ## type [Erasure](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go>)
 
-Erasure is what kit.Erase did, store by store. Stores lists, store by store, what the erasure did there.
+Erasure is what app.Erase did, store by store. Stores lists, store by store, what the erasure did there.
 
 ```go
 type Erasure = core.ErasureMessage
@@ -3652,7 +3654,7 @@ type Former struct {
 	Value json.RawMessage `json:"value,omitempty" kit:"personal"`
 	// Until is when it was replaced, on the app's clock.
 	Until time.Time       `json:"until"`
-	// By is the user who replaced it — kit.UserID —, empty for a write
+	// By is the user who replaced it — app.UserID —, empty for a write
 	// with no user: a job's, a loop's, kit's own.
 	By    string          `json:"by,omitempty"`
 }
@@ -4178,7 +4180,7 @@ type ListenerInfo struct {
 <a name="LogRecord"></a>
 ## type [LogRecord](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go>)
 
-LogRecord is one log record written by product code through kit.Log, kept in dev so the Studio can show a request's logs beside its spans.
+LogRecord is one log record written by product code through app.Log, kept in dev so the Studio can show a request's logs beside its spans.
 
 ```go
 type LogRecord = core.LogRecordMessage
@@ -4435,7 +4437,7 @@ type Migration struct {
 <a name="MigrationSet"></a>
 ## type [MigrationSet](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go>)
 
-MigrationSet is one set of migrations on a database — kit's own, the product's (kit.Migrations), a module's — with its own version table, and so its own lock.
+MigrationSet is one set of migrations on a database — kit's own, the product's (app.Migrations), a module's — with its own version table, and so its own lock.
 
 ```go
 type MigrationSet = core.MigrationSetMessage
@@ -4493,7 +4495,7 @@ Module is an alias of `github.com/kitsunium/sdk/framework/model/internal/core.Mo
 
 ```go
 type Module struct {
-	// Name is the name kit.NewModule gives it.
+	// Name is the name app.NewModule gives it.
 	Name       string                `json:"name"`
 	// Doc is its description in the product's default language; Docs the
 	// same in other languages, by tag, as a node's.
@@ -4505,22 +4507,22 @@ type Module struct {
 	Build      *ModuleVersionMessage `json:"build,omitempty"`
 	// Services are its services' IDs, in the order it lists them.
 	Services   []string              `json:"services"`
-	// Requires are the modules it requires (kit.Requires), by name.
+	// Requires are the modules it requires (app.Requires), by name.
 	Requires   []string              `json:"requires,omitempty"`
 	// RequiredBy are the mounted modules that require it, by name, sorted.
 	RequiredBy []string              `json:"requiredBy,omitempty"`
 	// Prefix is where its routes are served: "/<name>/" unless the mount
-	// says otherwise (kit.Prefix); "/" shares the product's route space.
+	// says otherwise (app.Prefix); "/" shares the product's route space.
 	Prefix     string                `json:"prefix"`
-	// Source is where kit.NewModule declares it.
+	// Source is where app.NewModule declares it.
 	Source     *SourceMessage        `json:"source,omitempty"`
-	// Mount is where the app mounts it — App.With or kit.Mount —; absent
-	// when only another module's kit.Requires mounted it, at its defaults.
+	// Mount is where the app mounts it — App.With or app.Mount —; absent
+	// when only another module's app.Requires mounted it, at its defaults.
 	Mount      *SourceMessage        `json:"mount,omitempty"`
-	// Only are the environments its mounts hold in (kit.Only), sorted:
+	// Only are the environments its mounts hold in (app.Only), sorted:
 	// present when every mount the app gives it names its environments,
 	// absent when one holds in every environment, or when only another
-	// module's kit.Requires mounted it. Added at Version 5: a reader
+	// module's app.Requires mounted it. Added at Version 5: a reader
 	// that does not know it reads the graph as before.
 	Only       []string              `json:"only,omitempty"`
 }
@@ -4680,7 +4682,7 @@ type PasswordPolicy struct {
 	// NotReused is how many former passwords it refuses; zero when it
 	// refuses none.
 	NotReused int            `json:"notReused,omitempty"`
-	// NotCommon says it refuses the most common passwords (kit.NotCommon),
+	// NotCommon says it refuses the most common passwords (app.NotCommon),
 	// as every policy does.
 	NotCommon bool           `json:"notCommon,omitempty"`
 	// Source is where the policy is declared.
@@ -4755,7 +4757,7 @@ type Person struct {
 <a name="PersonalData"></a>
 ## type [PersonalData](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go>)
 
-PersonalData is a person's data as kit.Export gives it (GDPR art. 15 and 20): their records, store by store, with what art. 15(1) asks beside them.
+PersonalData is a person's data as app.Export gives it (GDPR art. 15 and 20): their records, store by store, with what art. 15(1) asks beside them.
 
 ```go
 type PersonalData = core.PersonalDataMessage
@@ -4838,7 +4840,7 @@ type Port struct {
 	// Address is the listen address: "127.0.0.1:4000", ":4000". Present in
 	// dev only, like every location.
 	Address  string   `json:"address,omitempty"`
-	// Owner is [PortOwnerKit], or the ID of the connector that opened it.
+	// Owner is [PortOwnerApp], or the ID of the connector that opened it.
 	Owner    string   `json:"owner"`
 	// Serves says what it answers: the Serves constants.
 	Serves   []string `json:"serves"`
@@ -4865,7 +4867,7 @@ type PortInfo struct {
 	// Response is the type it answers.
 	Response *SchemaMessage `json:"response,omitempty"`
 	// Fallback is the node ID of the operation the port declares for when
-	// the app binds nothing else (kit.Fallback).
+	// the app binds nothing else (app.Fallback).
 	Fallback string         `json:"fallback,omitempty"`
 	// Bound is the node ID of the operation the port calls, as the start
 	// chose it — on a static graph, as the analysis reads the same rule;
@@ -5113,7 +5115,7 @@ type RecordVersion struct {
 	Number  uint64          `json:"number"`
 	// At is when the write that made it ran, on the app's clock.
 	At      time.Time       `json:"at,omitzero"`
-	// By is the user who made it — kit.UserID —, empty for a write with no
+	// By is the user who made it — app.UserID —, empty for a write with no
 	// user.
 	By      string          `json:"by,omitempty"`
 	// Command is the node ID of the command that made it, empty outside
@@ -5207,7 +5209,7 @@ type RegisterStore struct {
 	Delete     string                `json:"delete,omitempty"`
 	HeldUntil  string                `json:"heldUntil,omitempty"`
 	// ByProduct is point (f) when the product keeps the store's retention
-	// itself (kit.RetentionByProduct), in its own words: no retention gap,
+	// itself (app.RetentionByProduct), in its own words: no retention gap,
 	// and no subject gap either.
 	ByProduct  *ProductRetentionSpec `json:"byProduct,omitempty"`
 	// Security is point (g): the measures kit takes.
@@ -5298,12 +5300,12 @@ type Runtime struct {
 	// daemon's own state machine, as it ran.
 	History    []PhaseChangeEvent `json:"history,omitempty"`
 	// Process is the Go process, sampled when the graph was built; nil when
-	// the product imports no framework/kit/server, which plugs the sampler
+	// the product imports no framework/app/server, which plugs the sampler
 	// in (ADR 0172).
 	Process    *ProcessSpec       `json:"process,omitempty"`
 	// HTTP is the product's HTTP server.
 	HTTP       *HTTPServer        `json:"http,omitempty"`
-	// Mocks are the replacements a test gave the app (kit.Replace).
+	// Mocks are the replacements a test gave the app (app.Replace).
 	Mocks      []MockMessage      `json:"mocks,omitempty"`
 	// Dev describes the build `kit dev` made of this process, when it did.
 	Dev        *DevBuildMessage   `json:"dev,omitempty"`
@@ -5383,7 +5385,7 @@ type SecretInfo struct {
 	// Keep is how many versions a rotation leaves, the new one included.
 	Keep         int        `json:"keep,omitempty"`
 	// Optional: a provided secret the product can do without
-	// (kit.Optional) — found nowhere, it is absent, and the start goes on.
+	// (app.Optional) — found nowhere, it is absent, and the start goes on.
 	Optional     bool       `json:"optional,omitempty"`
 	// From is where the running app found it: one of the SecretFrom
 	// constants, on a runtime graph. Empty when it is found nowhere — for an
@@ -5456,7 +5458,7 @@ type Setting struct {
 	Service  string `json:"service,omitempty"`
 	// Key is a declared setting's name, its key in a configuration file:
 	// "base-url". A module's is qualified with the module's name,
-	// "moderation.tdb-url": kit.Set's key, and in a file "tdb-url" under
+	// "moderation.tdb-url": app.Set's key, and in a file "tdb-url" under
 	// "moderation:" (ADR 0008).
 	Key      string `json:"key,omitempty"`
 	// Type is what a declared setting holds: text, bool, int, number,
@@ -5468,13 +5470,13 @@ type Setting struct {
 	// Secret: the value is withheld.
 	Secret   bool   `json:"secret,omitempty"`
 	// Option is the AppOption that sets it in code, when there is one:
-	// "kit.Listen". Code wins over the environment.
+	// "app.Listen". Code wins over the environment.
 	Option   string `json:"option,omitempty"`
 	// Flag is the kit dev flag that sets it in dev, when there is one:
 	// "-addr".
 	Flag     string `json:"flag,omitempty"`
 	// Database is the database the setting configures, when kit declares it
-	// for one (kit.Database): its URL, its pool, its timeouts.
+	// for one (app.Database): its URL, its pool, its timeouts.
 	Database string `json:"database,omitempty"`
 }
 ```
@@ -5670,7 +5672,7 @@ type Step struct {
 <a name="StoreData"></a>
 ## type [StoreData](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go>)
 
-StoreData is one store's records about a person. It is one part of what kit.Export gives a person about themselves.
+StoreData is one store's records about a person. It is one part of what app.Export gives a person about themselves.
 
 ```go
 type StoreData = core.StoreDataMessage
@@ -5739,7 +5741,7 @@ StoreHistory is an alias of `github.com/kitsunium/sdk/framework/model/internal/c
 ```go
 type StoreHistory struct {
 	// Revisions is how many former versions each record keeps
-	// (kit.Revisions, ADR 0007 §3); zero when it keeps none.
+	// (app.Revisions, ADR 0007 §3); zero when it keeps none.
 	Revisions    int                     `json:"revisions,omitempty"`
 	// Fields are the JSON pointers of the fields that keep their former
 	// values: tagged history=N — the schema's Field.History says how many —
@@ -5785,7 +5787,7 @@ type StoreInfo struct {
 	// directory.
 	Location  string               `json:"location,omitempty"`
 	// Database names the database that keeps the store, as the app declares
-	// it (kit.Database, kit.Keeps) — present even while the store's data
+	// it (app.Database, app.Keeps) — present even while the store's data
 	// stays in the data directory, in dev without the database's URL. Its
 	// container is "container:database:<name>".
 	Database  string               `json:"database,omitempty"`
@@ -5807,7 +5809,7 @@ type StoreInfo struct {
 	// fields that keep their former values, its password policies. Absent
 	// when it remembers nothing and has no policy.
 	History   *StoreHistoryMessage `json:"history,omitempty"`
-	// ReadModel is set on a store derived from others (kit.ReadModel):
+	// ReadModel is set on a store derived from others (app.ReadModel):
 	// written by projections — subscriptions —, read by queries.
 	ReadModel bool                 `json:"readModel,omitempty"`
 }
@@ -5829,24 +5831,24 @@ type StorePrivacy struct {
 	// Subject is the JSON pointer of the field that says whom each record is
 	// about: "/email". Empty when the entity has no subject field.
 	Subject         string                `json:"subject,omitempty"`
-	// Purpose is why the store keeps its records, as kit.Purpose says it.
+	// Purpose is why the store keeps its records, as app.Purpose says it.
 	Purpose         string                `json:"purpose,omitempty"`
 	// Erase says when kit clears a record's personal data; Delete when it
 	// removes the record.
 	Erase           *RetentionSpec        `json:"erase,omitempty"`
 	Delete          *RetentionSpec        `json:"delete,omitempty"`
 	// ByProduct is set when the product keeps the store's retention itself
-	// (kit.RetentionByProduct): kit runs none — Erase and Delete are then
+	// (app.RetentionByProduct): kit runs none — Erase and Delete are then
 	// absent — and asks for neither a retention nor a subject.
 	ByProduct       *ProductRetentionSpec `json:"byProduct,omitempty"`
 	// HeldUntil holds each record until an instant it carries: the law's
-	// own retention (kit.HeldUntil).
+	// own retention (app.HeldUntil).
 	HeldUntil       *HeldUntilSpec        `json:"heldUntil,omitempty"`
 	// Anonymise locates the function that says what an erased record keeps,
-	// generalised (kit.Anonymise).
+	// generalised (app.Anonymise).
 	Anonymise       *SourceMessage        `json:"anonymise,omitempty"`
 	// DeleteOnErasure: a person's erasure deletes the record instead of
-	// clearing it (kit.DeleteOnErasure).
+	// clearing it (app.DeleteOnErasure).
 	DeleteOnErasure bool                  `json:"deleteOnErasure,omitempty"`
 	// Held is how many records a hold keeps, on a runtime graph.
 	Held            *int                  `json:"held,omitempty"`
@@ -5900,7 +5902,7 @@ type SubscriptionInfo struct {
 	// "moderated", ADR 0006's marks. Empty for a subscription.
 	Mark          string   `json:"mark,omitempty"`
 	// OwnStores: the watch hears its own module's stores too — the
-	// product's own, for a watch of the product's (kit.OwnStores) —, never
+	// product's own, for a watch of the product's (app.OwnStores) —, never
 	// the writes its own handler makes.
 	OwnStores     bool     `json:"ownStores,omitempty"`
 	// Stores are the node IDs of the stores that feed a watch, sorted: those

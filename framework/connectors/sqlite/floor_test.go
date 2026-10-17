@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/app"
 	"github.com/kitsunium/sdk/framework/connectors/sqlite"
-	"github.com/kitsunium/sdk/framework/kit"
 )
 
 // SQLite's busy timeout against kit's call bound (ADR 0178 C2): kit gives
@@ -43,13 +43,13 @@ func TestAURLsBusyTimeoutStaysUnderTheCallsBound(t *testing.T) {
 	} {
 		t.Run(query, func(t *testing.T) {
 			t.Setenv("LEDGER_ARCHIVE_URL", "file:"+filepath.Join(t.TempDir(), "kept.sqlite")+"?"+query)
-			app := ledger(t, t.TempDir())
-			err := app.Start(t.Context())
+			a := ledger(t, t.TempDir())
+			err := a.Start(t.Context())
 			if !refused {
 				if err != nil {
 					t.Fatalf("a busy timeout under the bound: %v", err)
 				}
-				if err := app.Stop(context.Background()); err != nil {
+				if err := a.Stop(context.Background()); err != nil {
 					t.Logf("stop: %v", err)
 				}
 				return
@@ -69,14 +69,14 @@ func TestALostLockComesBackBeforeTheCallsDeadline(t *testing.T) {
 	t.Setenv("LEDGER_ARCHIVE_TIMEOUT", "2s")
 	t.Setenv("KIT_SECRETS", "memory")
 	dir := t.TempDir()
-	audit := kit.NewService("audit", "The audit trail.")
+	audit := app.NewService("audit", "The audit trail.")
 	store := audit.Store("trail", func(e entry) string { return e.ID })
-	app := kit.NewApp("ledger", audit).With(
-		kit.Database("archive", sqlite.Engine()),
-		kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvProduction), kit.DataDir(dir), kit.Logs(io.Discard),
+	a := app.NewApp("ledger", audit).With(
+		app.Database("archive", sqlite.Engine()),
+		app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.DataDir(dir), app.Logs(io.Discard),
 	)
-	run(t, app)
-	trail := app.Graph().Node("audit/store/trail")
+	run(t, a)
+	trail := a.Graph().Node("audit/store/trail")
 	if trail == nil || trail.Store.Backend != "sqlite" {
 		t.Fatalf("the store is not on the file: %+v", trail)
 	}

@@ -58,7 +58,7 @@ Two packages, one API:
 | `runtime.go` | `Runtime`, `Loop`, `Component`, live `Event`s (`LogRecord`, `MailSummary`), `Mock`, `Span` (its operations, `connect` and `cli` among them), `Trace`, `Database`, `Setting` |
 | `connector.go`, `architecture.go` | the connector table, the catalog's `Adapter`s (imports under `framework/connectors/`), the C4 `Container`s |
 | `graph.go` | `NodeID`, `EdgeID`, `Normalize`, `Revision`, `Merge`, `Files` |
-| `module.go` | `Module` (its `Only`: the environments its mounts name, `kit.Only`, sorted by `Normalize` — ADR 0178 Q3 amended on 2026-10-15), `QualifiedService`, `UnderPrefix`, `File` |
+| `module.go` | `Module` (its `Only`: the environments its mounts name, `app.Only`, sorted by `Normalize` — ADR 0178 Q3 amended on 2026-10-15), `QualifiedService`, `UnderPrefix`, `File` |
 | `mermaid.go` | the architecture as a Mermaid flowchart |
 | `table.go` | `TableName(service, node, suffix)` — the table a database keeps a kit table in: `<service>__<node><suffix>`, lower case, `-` and `.` written `_`; a name the rule cannot keep as it is (upper case, past `MaxTableLen`, three underscores in a row, SQLite's `sqlite_` prefix) is cut and ends with a digest of the whole — and `MaxTableLen` (58: the SQL document store's `___ix` index table must fit PostgreSQL's 63). The runtime and the analyzer both name tables with it |
 | `errors.go` | `0.4.1.*`: the codes and their sentinels |
@@ -99,5 +99,5 @@ Two packages, one API:
   (`serviceKinds`), or under a scope prefix (`binary:`, `library:`).
 - Quote the input in a refusal — `ParseID` is handed strings from design
   files, URLs and CLIs.
-- Import anything from the runtime (`framework/kit`) here: this package is
+- Import anything from the runtime (`framework/app`) here: this package is
   what a tool imports without linking a framework.

@@ -20,7 +20,7 @@ const (
 
 // The gaps a register lists for a store that keeps personal data.
 const (
-	GapPurpose   string = core.GapPurpose   // no kit.Purpose
+	GapPurpose   string = core.GapPurpose   // no app.Purpose
 	GapRetention string = core.GapRetention // no retention, kit's or the product's: its personal data is kept forever
 	GapSubject   string = core.GapSubject   // no subject field: no person can have their records
 )
@@ -52,8 +52,8 @@ const SealedPlaceholder string = core.SealedPlaceholder
 // The operations of the privacy journal.
 const (
 	JournalExport      string = core.JournalExport      // a person's records exported
-	JournalRead        string = core.JournalRead        // a record read by a module, through kit.Records
-	JournalList        string = core.JournalList        // a store's keys listed by a module that watches it, through kit.Records
+	JournalRead        string = core.JournalRead        // a record read by a module, through app.Records
+	JournalList        string = core.JournalList        // a store's keys listed by a module that watches it, through app.Records
 	JournalErase       string = core.JournalErase       // a record's personal data cleared
 	JournalDelete      string = core.JournalDelete      // a record removed
 	JournalEraseFields string = core.JournalEraseFields // some fields of a record cleared, by a module
@@ -63,19 +63,19 @@ const (
 )
 
 type (
-	// PersonalData is a person's data as kit.Export gives it (GDPR art. 15 and
+	// PersonalData is a person's data as app.Export gives it (GDPR art. 15 and
 	// 20): their records, store by store, with what art. 15(1) asks beside them.
 	PersonalData = core.PersonalDataMessage
 )
 
 type (
 	// StoreData is one store's records about a person.
-	// It is one part of what kit.Export gives a person about themselves.
+	// It is one part of what app.Export gives a person about themselves.
 	StoreData = core.StoreDataMessage
 )
 
 type (
-	// Erasure is what kit.Erase did, store by store.
+	// Erasure is what app.Erase did, store by store.
 	// Stores lists, store by store, what the erasure did there.
 	Erasure = core.ErasureMessage
 )

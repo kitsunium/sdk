@@ -5,7 +5,7 @@ The platform's ADR 0004: a store is the port, a database's engine the adapter th
 in. Each engine is its own Go module, requiring the root module (which holds
 kit — ADR 0171), the `pkg/v1` families and `internal` its build reaches, and one driver, and the only code of a product that imports
 that driver: a product's `main` imports one to call
-`kit.Database(name, <engine>.Engine())`. No module of the SDK imports a driver — a
+`app.Database(name, <engine>.Engine())`. No module of the SDK imports a driver — a
 driver its `go.mod` required would sit in every product's module graph and
 `go.sum`.
 
@@ -20,12 +20,12 @@ One connector is not a database engine: `ssh` (ADR 0158 §3) is the
 plus enrolment. It has the same shape for the same reason — the one vendor
 dependency (and the `golang.org/x/sys` it brings) in a module of its own, so the
 root module's `go.mod` never requires it — and the rules below that are about
-`kit.Engine`, URLs and drivers do not apply to it; its own CLAUDE.md has its
+`app.Engine`, URLs and drivers do not apply to it; its own CLAUDE.md has its
 rules. It was `third-party/entitlement`, in the root module.
 
 Rules:
 
-- An engine implements `kit.Engine` and nothing more: `Dialect`, `Describe`
+- An engine implements `app.Engine` and nothing more: `Dialect`, `Describe`
   (where the URL points, its TLS mode *as written* — never a user, never a
   password) and `Open` (a `*sql.DB`; before each new connection it asks
   `current` for the URL as it is now and takes its credentials).

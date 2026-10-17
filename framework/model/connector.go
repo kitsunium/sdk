@@ -31,7 +31,7 @@ const (
 	ConnectorStore string = core.ConnectorStore
 	ConnectorQueue string = core.ConnectorQueue
 	// ConnectorDatabase is brought by a store a database keeps (ADR 0004):
-	// kit.Database declares the database, an engine module reaches it.
+	// app.Database declares the database, an engine module reaches it.
 	ConnectorDatabase string = core.ConnectorDatabase
 )
 

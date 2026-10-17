@@ -10,7 +10,7 @@ import (
 
 // History (ADR 0007): what a store remembers of its records — the former
 // values of the fields tagged history=N, and the password policies that
-// read them — and a field's former values, as Store.Former and kit.Export
+// read them — and a field's former values, as Store.Former and app.Export
 // give them.
 
 // StoreHistoryMessage is what a store remembers of its records.
@@ -18,7 +18,7 @@ import (
 // them, and Versions, Trashed and VersionBytes weigh its records' versions.
 type StoreHistoryMessage struct {
 	// Revisions is how many former versions each record keeps
-	// (kit.Revisions, ADR 0007 §3); zero when it keeps none.
+	// (app.Revisions, ADR 0007 §3); zero when it keeps none.
 	Revisions int `json:"revisions,omitempty"`
 	// Fields are the JSON pointers of the fields that keep their former
 	// values: tagged history=N — the schema's Field.History says how many —
@@ -50,7 +50,7 @@ type PasswordPolicyMessage struct {
 	// NotReused is how many former passwords it refuses; zero when it
 	// refuses none.
 	NotReused int `json:"notReused,omitempty"`
-	// NotCommon says it refuses the most common passwords (kit.NotCommon),
+	// NotCommon says it refuses the most common passwords (app.NotCommon),
 	// as every policy does.
 	NotCommon bool `json:"notCommon,omitempty"`
 	// Source is where the policy is declared.
@@ -65,7 +65,7 @@ type FormerMessage struct {
 	Value json.RawMessage `json:"value,omitempty" kit:"personal"`
 	// Until is when it was replaced, on the app's clock.
 	Until time.Time `json:"until"`
-	// By is the user who replaced it — kit.UserID —, empty for a write
+	// By is the user who replaced it — app.UserID —, empty for a write
 	// with no user: a job's, a loop's, kit's own.
 	By string `json:"by,omitempty"`
 }
@@ -87,7 +87,7 @@ type RecordVersionMessage struct {
 	Number uint64 `json:"number"`
 	// At is when the write that made it ran, on the app's clock.
 	At time.Time `json:"at,omitzero"`
-	// By is the user who made it — kit.UserID —, empty for a write with no
+	// By is the user who made it — app.UserID —, empty for a write with no
 	// user.
 	By string `json:"by,omitempty"`
 	// Command is the node ID of the command that made it, empty outside

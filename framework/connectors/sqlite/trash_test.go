@@ -9,8 +9,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/kitsunium/sdk/framework/app"
 	"github.com/kitsunium/sdk/framework/connectors/sqlite"
-	"github.com/kitsunium/sdk/framework/kit"
 )
 
 // The trash on a SQLite file (ADR 0178 C4): a deletion by the product keeps
@@ -32,15 +32,15 @@ func TestAnErasureEmptiesTheTrashOnTheFile(t *testing.T) {
 	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
 	t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")
 	dir := t.TempDir()
-	svc := kit.NewService("wiki", "Editors' pages that keep their revisions and a trash, sealed; kit.Privacy on SQLite.")
-	editors := svc.Store("editors", func(e editor) string { return e.ID }, kit.Revisions(2), kit.Purpose("Show the editors' pages"))
-	erase := svc.Command("erase", func(ctx context.Context, in erasing) (kit.Erasure, error) {
-		return kit.Erase(ctx, "asked by the person", in.IDs...)
+	svc := app.NewService("wiki", "Editors' pages that keep their revisions and a trash, sealed; app.Privacy on SQLite.")
+	editors := svc.Store("editors", func(e editor) string { return e.ID }, app.Revisions(2), app.Purpose("Show the editors' pages"))
+	erase := svc.Command("erase", func(ctx context.Context, in erasing) (app.Erasure, error) {
+		return app.Erase(ctx, "asked by the person", in.IDs...)
 	})
-	app := kit.NewApp("wiki", svc).With(kit.Database("main", sqlite.Engine(), kit.Keeps(kit.Privacy, editors)),
-		kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvProduction), kit.DataDir(dir), kit.Logs(io.Discard))
-	run(t, app)
-	ctx := kit.WithUser(t.Context(), "u1", struct{}{})
+	a := app.NewApp("wiki", svc).With(app.Database("main", sqlite.Engine(), app.Keeps(app.Privacy, editors)),
+		app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.DataDir(dir), app.Logs(io.Discard))
+	run(t, a)
+	ctx := app.WithUser(t.Context(), "u1", struct{}{})
 
 	if err := editors.Insert(ctx, editor{ID: "e1", Email: "ann@wiki.test", Name: "Annabel Quist"}); err != nil {
 		t.Fatal(err)

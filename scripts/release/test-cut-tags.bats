@@ -237,8 +237,8 @@ add_all_vendors() {
       "$d" "$rel" >"$d/go.mod"
     echo "package p" >"$d/p.go"
   done
-  mkdir -p framework/kit pkg/v1/data/codec
-  echo "package kit" >framework/kit/kit.go
+  mkdir -p framework/app pkg/v1/data/codec
+  echo "package kit" >framework/app/kit.go
   echo "# framework/connectors" >framework/connectors/CLAUDE.md
   echo "package codec" >pkg/v1/data/codec/codec.go
   {
@@ -676,7 +676,7 @@ check_tombstone() {
   # a file of framework/ beside them goes with the rest of the framework.
   [ "$(g rev-parse 'framework/v0.18.0^{commit}:framework/connectors/postgres')" = "$(g rev-parse 'v0.18.0^{commit}:framework/connectors/postgres')" ]
   [[ "$(g show 'framework/v0.18.0:framework/connectors/postgres/go.mod')" == *"require github.com/kitsunium/sdk v0.18.0"* ]]
-  [ -z "$(g ls-tree --name-only 'framework/v0.18.0^{commit}' -- framework/connectors/CLAUDE.md framework/kit)" ]
+  [ -z "$(g ls-tree --name-only 'framework/v0.18.0^{commit}' -- framework/connectors/CLAUDE.md framework/app)" ]
   # main is untouched.
   [ "$(g rev-parse HEAD)" = "$head" ]
 }
@@ -1352,7 +1352,7 @@ commit_under() {
 @test "a label on a framework/-only merge sizes the release (ADR 0089, ADR 0147)" {
   need_toolchain
   tag_release v0.1.0
-  commit_under framework/kit 'feat(kit): a declaration'
+  commit_under framework/app 'feat(kit): a declaration'
   label_pr 124 release:minor
   run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]

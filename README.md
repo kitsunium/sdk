@@ -113,7 +113,7 @@ go get github.com/kitsunium/sdk/pkg/v1/data@latest github.com/kitsunium/sdk/pkg/
 ```
 
 then import the packages you use — `github.com/kitsunium/sdk/pkg/v1/data/codec`,
-`…/pkg/v1/errs` — or `github.com/kitsunium/sdk@latest` for `…/framework/kit`.
+`…/pkg/v1/errs` — or `github.com/kitsunium/sdk@latest` for `…/framework/app`.
 Importing them first and running `go mod tidy` works as well: Go resolves an
 import to the module with the longest path that provides it, which is the
 family's. A go.mod pinned to a root between v0.18.0 and v0.19.7, which held

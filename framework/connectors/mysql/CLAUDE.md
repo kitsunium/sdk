@@ -3,13 +3,13 @@
 
 The module `github.com/kitsunium/sdk/framework/connectors/mysql`: the one a
 product's `main` imports to keep a database on MySQL or MariaDB
-(`kit.Database(name, mysql.Engine())`), and the only code of the product
+(`app.Database(name, mysql.Engine())`), and the only code of the product
 that links a MySQL driver — go-sql-driver/mysql, through `database/sql`.
 `connectors/CLAUDE.md` holds the rules every engine follows.
 
 | File | Holds |
 |---|---|
-| `mysql.go` | `Engine()`: `Dialect` (`kit.DialectMySQL`, kit's own type — ADR 0179 Q5); the blank import of `framework/kit/store`, the stores a database keeps (ADR 0179 §4); `Describe` — the address (TCP, or a socket), the database, and the `tls` as the URL writes it, never a user or a password —; `Open` — the driver's connector, with a `BeforeConnect` that reads the URL again (`current`) —; `config` and `parse`, which read a `mysql://` or `mariadb://` URL (its query holds the driver's parameters; port 3306 when left out) or the driver's own DSN, drop the TLS configuration the DSN parser built for another address, and silence the driver's logger (`quiet`); `errMalformed`, which quotes nothing |
+| `mysql.go` | `Engine()`: `Dialect` (`app.DialectMySQL`, kit's own type — ADR 0179 Q5); the blank import of `framework/app/store`, the stores a database keeps (ADR 0179 §4); `Describe` — the address (TCP, or a socket), the database, and the `tls` as the URL writes it, never a user or a password —; `Open` — the driver's connector, with a `BeforeConnect` that reads the URL again (`current`) —; `config` and `parse`, which read a `mysql://` or `mariadb://` URL (its query holds the driver's parameters; port 3306 when left out) or the driver's own DSN, drop the TLS configuration the DSN parser built for another address, and silence the driver's logger (`quiet`); `errMalformed`, which quotes nothing |
 | `credentials.go` | `withCredentials`: the user and the password of the URL as it is now, given to the connection the driver is about to make |
 
 Rules:
@@ -30,7 +30,7 @@ Rules:
 ## Test
 
 `go test -race ./...` here (`subsystems_test.go` imports
-`framework/kit/server`: the suite's apps are servers). `mysql_test.go` always runs: `Describe` over
+`framework/app/server`: the suite's apps are servers). `mysql_test.go` always runs: `Describe` over
 URLs, a DSN and a socket, and malformed ones that leak nothing. The
 end-to-end tests skip unless `KIT_TEST_MYSQL_URL` names a server where they
 may create and drop the database `kit_test` and a user — an administrator's
