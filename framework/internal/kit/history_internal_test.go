@@ -79,7 +79,7 @@ func TestAValueIsPushedOnce(t *testing.T) {
 		return out
 	}
 	// A store that seals nothing keeps its former values as they are.
-	h := &historied[struct{}]{}
+	h := &historied{}
 	pushed := func(list []formerEntry, was memberValue) []formerEntry {
 		out, err := h.pushed(t.Context(), formerAt{key: "k", pointer: "/x"}, list, was, formerEntry{Until: at})
 		if err != nil {

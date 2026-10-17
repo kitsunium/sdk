@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
@@ -51,26 +52,10 @@ type TombstoneEvent struct {
 	PurgeAt time.Time
 }
 
-// trasher is an engine that keeps a trash: the SDK's document store opened
-// with versions, in memory, in files or over SQL — and the engines that wrap
-// one, which hand the calls on. A sibling of the port (store_engine.go).
-type trasher interface {
-	// trash moves the record under key to the trash: gone from every read,
-	// its index keys freed, its versions kept.
-	trash(ctx context.Context, key string) error
-	// untrash brings the record trashed under key back as it was.
-	untrash(ctx context.Context, key string) error
-	// purge empties the trash of the record trashed under key, its versions
-	// with it.
-	purge(ctx context.Context, key string) error
-	// tombstones are every record in the trash, in key order.
-	tombstones(ctx context.Context) ([]docstore.Tombstone, error)
-}
-
 // declareTrash declares the store's trash setting, <store>-trash: a store
 // with revisions keeps what the product deletes that long. The name is the
 // store's in a setting's grammar — lower case, dashes for its other marks.
-func (s *StoreService[T]) declareTrash(svc *Service) {
+func (s *storeCore) declareTrash(svc *Service) {
 	name := trashSettingName(s.name)
 	if secret.ValidateName(name) != nil {
 		svc.problem(s.decl, s.id, "store.trash-name", "store", s.name, "setting", name, "max", secret.MaxNameLen)
@@ -108,7 +93,7 @@ func trashSettingName(store string) string {
 
 // trashLength is how long the store keeps what the product deletes, in the
 // app that runs it: none for a store without revisions.
-func (s *StoreService[T]) trashLength() time.Duration {
+func (s *storeCore) trashLength() time.Duration {
 	if s.revisions == 0 || s.trashFor == nil {
 		return 0
 	}
@@ -121,18 +106,18 @@ func (s *StoreService[T]) trashes() bool {
 	if s.trashLength() == 0 {
 		return false
 	}
-	_, ok := s.engine().(trasher)
+	_, ok := s.engine().(plug.Trasher)
 	return ok
 }
 
 // trashKeeper is the engine that keeps the store's trash: an [Invalid] for
 // a store without revisions, which keeps none.
-func (s *StoreService[T]) trashKeeper() (trasher, error) {
+func (s *storeCore) trashKeeper() (plug.Trasher, error) {
 	eng := s.engine()
 	if eng == nil {
 		return nil, notRunning(&s.nodeBase)
 	}
-	tr, ok := eng.(trasher)
+	tr, ok := eng.(plug.Trasher)
 	if s.revisions == 0 || !ok {
 		return nil, Invalid(fmt.Sprintf("%s keeps no trash: declare it with kit.Revisions(n)", s.name))
 	}
@@ -185,7 +170,7 @@ func (s *StoreService[T]) untrash(ctx context.Context, key string) (T, error) {
 		return zero, err
 	}
 	ctx = s.outside(ctx)
-	if err := s.trashSaid(tr.untrash(ctx, key), key); err != nil {
+	if err := s.trashSaid(tr.Untrash(ctx, key), key); err != nil {
 		return zero, err
 	}
 	// The agenda keeps its entry: a rollback puts the record back in the
@@ -200,7 +185,7 @@ func (s *StoreService[T]) trashed(ctx context.Context, a *App) ([]TombstoneEvent
 	if err != nil {
 		return nil, err
 	}
-	stones, err := tr.tombstones(s.outside(ctx))
+	stones, err := tr.Tombstones(s.outside(ctx))
 	if err != nil {
 		return nil, s.trashSaid(err, "")
 	}
@@ -214,19 +199,19 @@ func (s *StoreService[T]) trashed(ctx context.Context, a *App) ([]TombstoneEvent
 // trashRecord moves the record under key to the trash: Store.Delete's,
 // on a store that keeps one. A funnel: the store's watches hear of a
 // deletion, and the trash's agenda of the record.
-func (s *StoreService[T]) trashRecord(ctx context.Context, tr trasher, key string) error {
+func (s *StoreService[T]) trashRecord(ctx context.Context, tr plug.Trasher, key string) error {
 	ctx, release, err := s.turn(ctx)
 	defer release()
 	if err != nil {
 		return err
 	}
 	ctx = s.outside(ctx)
-	if err := s.said(tr.trash(ctx, key), key, ""); err != nil {
+	if err := s.said(tr.Trash(ctx, key), key, ""); err != nil {
 		return err
 	}
 	s.notify(ctx, key, true)
 	if a := s.app(); a != nil {
-		s.trashPlanned(ctx, a, docstore.Tombstone{Key: key, At: a.clock.Now()})
+		s.trashPlanned(ctx, a, plug.TombstoneValue{Key: key, At: a.clock.Now()})
 	}
 	return nil
 }
@@ -235,7 +220,7 @@ func (s *StoreService[T]) trashRecord(ctx context.Context, tr trasher, key strin
 // a store that keeps one, at once otherwise.
 func (s *StoreService[T]) discard(ctx context.Context, key string) error {
 	if s.trashes() {
-		if tr, ok := s.engine().(trasher); ok {
+		if tr, ok := s.engine().(plug.Trasher); ok {
 			return s.trashRecord(ctx, tr, key)
 		}
 	}
@@ -286,19 +271,19 @@ func (s *StoreService[T]) purgeTrashed(ctx context.Context, a *App, key string, 
 // purged in one transaction on a database, under the writer turn elsewhere:
 // a restoration and a new deletion since make a tombstone the agenda did not
 // name, which waits for its own instant. DocumentNotTrashed when none is.
-func (s *StoreService[T]) purgeScheduled(ctx context.Context, a *App, tr trasher, key string, scheduled time.Time) error {
+func (s *StoreService[T]) purgeScheduled(ctx context.Context, a *App, tr plug.Trasher, key string, scheduled time.Time) error {
 	purge := func(ctx context.Context) error {
 		if !scheduled.IsZero() {
-			stones, err := tr.tombstones(ctx)
+			stones, err := tr.Tombstones(ctx)
 			if err != nil {
 				return err
 			}
-			i := slices.IndexFunc(stones, func(st docstore.Tombstone) bool { return st.Key == key })
+			i := slices.IndexFunc(stones, func(st plug.TombstoneValue) bool { return st.Key == key })
 			if i < 0 || stones[i].At.After(scheduled) {
 				return docstore.DocumentNotTrashed
 			}
 		}
-		return tr.purge(ctx, key)
+		return tr.Purge(ctx, key)
 	}
 	if scheduled.IsZero() || s.local() || unitOf(ctx) != nil {
 		return purge(ctx)
@@ -312,11 +297,11 @@ func (s *StoreService[T]) purgeScheduled(ctx context.Context, a *App, tr trasher
 // A record no data key opens any more is not theirs to judge: its subject
 // cannot be read, and it is left for its purge — what sealed it is gone.
 func (s *StoreService[T]) eraseTrashed(ctx context.Context, a *App, ids []string, reason string) ([]string, error) {
-	tr, ok := s.engine().(trasher)
+	tr, ok := s.engine().(plug.Trasher)
 	if s.revisions == 0 || !ok || s.plan().subject == nil {
 		return nil, nil
 	}
-	stones, err := tr.tombstones(s.outside(ctx))
+	stones, err := tr.Tombstones(s.outside(ctx))
 	if err != nil {
 		return nil, s.trashFailure(err)
 	}
@@ -391,7 +376,7 @@ func (s *StoreService[T]) trashedSubject(ctx context.Context, a *App, key string
 
 // purgeAt is when kit purges a record of the trash: its trash's length
 // after its deletion, or its retention's instant when that comes first.
-func (s *StoreService[T]) purgeAt(ctx context.Context, a *App, st docstore.Tombstone) time.Time {
+func (s *StoreService[T]) purgeAt(ctx context.Context, a *App, st plug.TombstoneValue) time.Time {
 	at := st.At.Add(s.trashLength())
 	if !s.retains() {
 		return at
@@ -408,7 +393,7 @@ func (s *StoreService[T]) purgeAt(ctx context.Context, a *App, st docstore.Tombs
 
 // trashSaid is a refusal of the trash in kit's words: nothing in the trash
 // under key is a [NotFound], a store without one an [Invalid].
-func (s *StoreService[T]) trashSaid(err error, key string) error {
+func (s *storeCore) trashSaid(err error, key string) error {
 	switch {
 	case err == nil:
 		return nil
@@ -421,7 +406,7 @@ func (s *StoreService[T]) trashSaid(err error, key string) error {
 }
 
 // trashFailure is the trash's own failure: it could not be read or emptied.
-func (s *StoreService[T]) trashFailure(err error) error {
+func (s *storeCore) trashFailure(err error) error {
 	// Already kit's word — a refusal said — it is returned as said.
 	if ke, ok := errors.AsType[*Error](err); ok && ke != nil {
 		return err
@@ -431,9 +416,22 @@ func (s *StoreService[T]) trashFailure(err error) error {
 
 // The engines ---------------------------------------------------------------------
 
-// trash moves the document key to the trash. In a transaction of the data's,
+// pluggedTombstones are the SDK's tombstones as the store's engine hands
+// them on.
+func pluggedTombstones(stones []docstore.Tombstone) []plug.TombstoneValue {
+	if stones == nil {
+		return nil
+	}
+	out := make([]plug.TombstoneValue, len(stones))
+	for i, st := range stones {
+		out[i] = plug.TombstoneValue{Key: st.Key, At: st.At}
+	}
+	return out
+}
+
+// Trash moves the document key to the trash. In a transaction of the data's,
 // a rollback brings it back, its versions with it.
-func (e *docEngine[T]) trash(ctx context.Context, key string) error {
+func (e *docEngine) Trash(ctx context.Context, key string) error {
 	var undo func(context.Context) error
 	if key != "" && inLocal(ctx) {
 		undo = func(context.Context) error { return e.unconfirmed(e.ds.Restore(key), key, false) }
@@ -443,9 +441,9 @@ func (e *docEngine[T]) trash(ctx context.Context, key string) error {
 	return err
 }
 
-// untrash brings the document key back from the trash. In a transaction of
+// Untrash brings the document key back from the trash. In a transaction of
 // the data's, a rollback trashes it again.
-func (e *docEngine[T]) untrash(ctx context.Context, key string) error {
+func (e *docEngine) Untrash(ctx context.Context, key string) error {
 	var undo func(context.Context) error
 	if key != "" && inLocal(ctx) {
 		undo = func(context.Context) error { return e.unconfirmed(e.ds.Trash(key), key, true) }
@@ -455,21 +453,22 @@ func (e *docEngine[T]) untrash(ctx context.Context, key string) error {
 	return err
 }
 
-// purge empties the trash of the document key: no rollback brings it back.
+// Purge empties the trash of the document key: no rollback brings it back.
 //
-//ktn:allow-unused-param: the trasher interface passes a context the local document store does not take
-func (e *docEngine[T]) purge(_ context.Context, key string) error { return e.ds.Purge(key) }
+//ktn:allow-unused-param: the Trasher interface passes a context the local document store does not take
+func (e *docEngine) Purge(_ context.Context, key string) error { return e.ds.Purge(key) }
 
-// tombstones are the documents in the trash.
+// Tombstones are the documents in the trash.
 //
-//ktn:allow-unused-param: the trasher interface passes a context the local document store does not take
-func (e *docEngine[T]) tombstones(_ context.Context) ([]docstore.Tombstone, error) {
-	return e.ds.Tombstones()
+//ktn:allow-unused-param: the Trasher interface passes a context the local document store does not take
+func (e *docEngine) Tombstones(_ context.Context) ([]plug.TombstoneValue, error) {
+	stones, err := e.ds.Tombstones()
+	return pluggedTombstones(stones), err
 }
 
 // unconfirmed tells the store's hooks of a rollback's write back of key, and
 // returns its error but an unconfirmed write, which stands.
-func (e *docEngine[T]) unconfirmed(err error, key string, deleted bool) error {
+func (e *docEngine) unconfirmed(err error, key string, deleted bool) error {
 	e.tell(key, deleted, err)
 	if err != nil && !errors.Is(err, docstore.WriteUnconfirmed) {
 		return err
@@ -479,7 +478,7 @@ func (e *docEngine[T]) unconfirmed(err error, key string, deleted bool) error {
 
 // trashedNow reports whether a document is in the trash under key: its
 // versions read while no document is stored.
-func (e *docEngine[T]) trashedNow(key string) bool {
+func (e *docEngine) trashedNow(key string) bool {
 	if e.keep == 0 {
 		return false
 	}
@@ -487,8 +486,8 @@ func (e *docEngine[T]) trashedNow(key string) bool {
 	return err == nil
 }
 
-// trash moves the record key to the trash, in the transaction ctx carries.
-func (e *sqlEngine[T]) trash(ctx context.Context, key string) error {
+// Trash moves the record key to the trash, in the transaction ctx carries.
+func (e *sqlEngine) Trash(ctx context.Context, key string) error {
 	c, done, err := e.call(ctx, true)
 	if err != nil {
 		return err
@@ -501,9 +500,9 @@ func (e *sqlEngine[T]) trash(ctx context.Context, key string) error {
 	return err
 }
 
-// untrash brings the record key back from the trash, in the transaction ctx
+// Untrash brings the record key back from the trash, in the transaction ctx
 // carries.
-func (e *sqlEngine[T]) untrash(ctx context.Context, key string) error {
+func (e *sqlEngine) Untrash(ctx context.Context, key string) error {
 	c, done, err := e.call(ctx, true)
 	if err != nil {
 		return err
@@ -516,8 +515,8 @@ func (e *sqlEngine[T]) untrash(ctx context.Context, key string) error {
 	return err
 }
 
-// purge empties the trash of the record key, in the transaction ctx carries.
-func (e *sqlEngine[T]) purge(ctx context.Context, key string) error {
+// Purge empties the trash of the record key, in the transaction ctx carries.
+func (e *sqlEngine) Purge(ctx context.Context, key string) error {
 	c, done, err := e.call(ctx, true)
 	if err != nil {
 		return err
@@ -526,44 +525,51 @@ func (e *sqlEngine[T]) purge(ctx context.Context, key string) error {
 	return e.ds.Purge(c, key)
 }
 
-// tombstones are the records in the trash.
-func (e *sqlEngine[T]) tombstones(ctx context.Context) ([]docstore.Tombstone, error) {
+// Tombstones are the records in the trash.
+func (e *sqlEngine) Tombstones(ctx context.Context) ([]plug.TombstoneValue, error) {
 	c, done, err := e.call(ctx, false)
 	if err != nil {
 		return nil, err
 	}
 	defer done()
-	return e.ds.Tombstones(c)
+	stones, err := e.ds.Tombstones(c)
+	return pluggedTombstones(stones), err
 }
 
-// trash moves the record key to the trash; its former values stay, for a
+// trashOf is the trash eng keeps, false for an engine that keeps none.
+func trashOf(eng plug.StoreEngine) (plug.Trasher, bool) {
+	tr, ok := eng.(plug.Trasher)
+	return tr, ok
+}
+
+// Trash moves the record key to the trash; its former values stay, for a
 // restoration.
-func (h *historied[T]) trash(ctx context.Context, key string) error {
-	tr, ok := h.storeEngine.(trasher)
+func (h *historied) Trash(ctx context.Context, key string) error {
+	tr, ok := trashOf(h.StoreEngine)
 	if !ok {
 		return docstore.VersionsNotKept
 	}
-	return tr.trash(ctx, key)
+	return tr.Trash(ctx, key)
 }
 
-// untrash brings the record key back, its former values with it.
-func (h *historied[T]) untrash(ctx context.Context, key string) error {
-	tr, ok := h.storeEngine.(trasher)
+// Untrash brings the record key back, its former values with it.
+func (h *historied) Untrash(ctx context.Context, key string) error {
+	tr, ok := trashOf(h.StoreEngine)
 	if !ok {
 		return docstore.VersionsNotKept
 	}
-	return tr.untrash(ctx, key)
+	return tr.Untrash(ctx, key)
 }
 
-// purge empties the trash of the record key, then removes its former
+// Purge empties the trash of the record key, then removes its former
 // values, in one transaction on a database.
-func (h *historied[T]) purge(ctx context.Context, key string) error {
-	tr, ok := h.storeEngine.(trasher)
+func (h *historied) Purge(ctx context.Context, key string) error {
+	tr, ok := trashOf(h.StoreEngine)
 	if !ok {
 		return docstore.VersionsNotKept
 	}
 	return h.inOne(ctx, func(ctx context.Context) error {
-		err := tr.purge(ctx, key)
+		err := tr.Purge(ctx, key)
 		if h.hist == nil || (err != nil && !errors.Is(err, docstore.WriteUnconfirmed)) {
 			return err
 		}
@@ -571,42 +577,42 @@ func (h *historied[T]) purge(ctx context.Context, key string) error {
 	})
 }
 
-// tombstones are the records in the trash.
-func (h *historied[T]) tombstones(ctx context.Context) ([]docstore.Tombstone, error) {
-	tr, ok := h.storeEngine.(trasher)
+// Tombstones are the records in the trash.
+func (h *historied) Tombstones(ctx context.Context) ([]plug.TombstoneValue, error) {
+	tr, ok := trashOf(h.StoreEngine)
 	if !ok {
 		return nil, docstore.VersionsNotKept
 	}
-	return tr.tombstones(ctx)
+	return tr.Tombstones(ctx)
 }
 
-// trash moves the record key to the trash, sealed as it rests: its own data
+// Trash moves the record key to the trash, sealed as it rests: its own data
 // key stays, for a restoration.
-func (e *sealedEngine[T]) trash(ctx context.Context, key string) error {
-	tr, ok := e.inner.(trasher)
+func (e *sealedEngine) Trash(ctx context.Context, key string) error {
+	tr, ok := trashOf(e.inner)
 	if !ok {
 		return docstore.VersionsNotKept
 	}
-	return tr.trash(ctx, key)
+	return tr.Trash(ctx, key)
 }
 
-// untrash brings the record key back, sealed as it rested.
-func (e *sealedEngine[T]) untrash(ctx context.Context, key string) error {
-	tr, ok := e.inner.(trasher)
+// Untrash brings the record key back, sealed as it rested.
+func (e *sealedEngine) Untrash(ctx context.Context, key string) error {
+	tr, ok := trashOf(e.inner)
 	if !ok {
 		return docstore.VersionsNotKept
 	}
-	return tr.untrash(ctx, key)
+	return tr.Untrash(ctx, key)
 }
 
-// purge empties the trash of the record key, then destroys its own data
+// Purge empties the trash of the record key, then destroys its own data
 // key, when it had one — at the commit, in a transaction —, as Delete does.
-func (e *sealedEngine[T]) purge(ctx context.Context, key string) error {
-	tr, ok := e.inner.(trasher)
+func (e *sealedEngine) Purge(ctx context.Context, key string) error {
+	tr, ok := trashOf(e.inner)
 	if !ok {
 		return docstore.VersionsNotKept
 	}
-	err := tr.purge(ctx, key)
+	err := tr.Purge(ctx, key)
 	if (err != nil && !errors.Is(err, docstore.WriteUnconfirmed)) || !e.s.plan().sealsAny() {
 		return err
 	}
@@ -614,11 +620,11 @@ func (e *sealedEngine[T]) purge(ctx context.Context, key string) error {
 	return err
 }
 
-// tombstones are the records in the trash.
-func (e *sealedEngine[T]) tombstones(ctx context.Context) ([]docstore.Tombstone, error) {
-	tr, ok := e.inner.(trasher)
+// Tombstones are the records in the trash.
+func (e *sealedEngine) Tombstones(ctx context.Context) ([]plug.TombstoneValue, error) {
+	tr, ok := trashOf(e.inner)
 	if !ok {
 		return nil, docstore.VersionsNotKept
 	}
-	return tr.tombstones(ctx)
+	return tr.Tombstones(ctx)
 }

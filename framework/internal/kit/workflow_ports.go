@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/statemachine"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
@@ -42,7 +43,9 @@ func (p storePort[E]) Get(ctx context.Context, key string) (E, bool, error) {
 	var e E
 	var err error
 	if trace.SpanContextFromContext(ctx).IsValid() {
-		e, err = p.s.get(ctx, key, model.EdgePersists)
+		var v any
+		v, err = p.s.storeCore.get(ctx, key, model.EdgePersists)
+		e = as[E](v)
 	} else {
 		e, err = p.s.read(ctx, key)
 	}
@@ -91,7 +94,7 @@ func (p storePort[E]) All(ctx context.Context) iter.Seq2[E, error] {
 // keeps revisions, a replacement that changes only the entity's state —
 // the member state names — makes no version: the workflow's journal
 // records it (ADR 0007 §3).
-func (s *StoreService[T]) transitionWrite(ctx context.Context, v T, mode writeMode, state string) (stored bool, err error) {
+func (s *storeCore) transitionWrite(ctx context.Context, v any, mode plug.WriteMode, state string) (stored bool, err error) {
 	a := s.app()
 	if a == nil {
 		return false, notRunning(&s.nodeBase)
@@ -125,18 +128,22 @@ func (s *StoreService[T]) transitionWrite(ctx context.Context, v T, mode writeMo
 
 // writeTransition writes a transition's entity v in mode: in place when it
 // changes only the state and the store keeps revisions, else as any write.
-func (s *StoreService[T]) writeTransition(ctx context.Context, eng storeEngine[T], v T, mode writeMode, state string) error {
+func (s *storeCore) writeTransition(ctx context.Context, eng plug.StoreEngine, v any, mode plug.WriteMode, state string) error {
 	if mode == replaceOnly && state != "" && s.revisions > 0 {
 		if err := s.stateOnly(ctx, eng, s.keyOf(v), v, state); !errors.Is(err, errNotInPlace) {
 			return err
 		}
 	}
-	return eng.Write(ctx, v, mode)
+	d, err := s.docOf(v)
+	if err != nil {
+		return err
+	}
+	return eng.Write(ctx, d, mode)
 }
 
 // transitionStored is a transition's write as the engine answers it: a key
 // taken, or an entity gone, is stored false, not an error.
-func transitionStored(mode writeMode, raw, err error) (bool, error) {
+func transitionStored(mode plug.WriteMode, raw, err error) (bool, error) {
 	switch {
 	case mode == insertOnly && errors.Is(raw, docstore.DocumentExists),
 		mode == replaceOnly && errors.Is(raw, docstore.DocumentNotFound):
@@ -153,12 +160,12 @@ func transitionStored(mode writeMode, raw, err error) (bool, error) {
 // OnEnter hooks wrote and its record commit together.
 type sqlJournal[E any, S comparable] struct {
 	w   *WorkflowService[E, S]
-	eng *sqlEngine[model.Instance]
+	eng *sqlEngine
 }
 
 // Load reads every record of the workflow's journal.
 func (j *sqlJournal[E, S]) Load(ctx context.Context) ([]statemachine.Record[S], error) {
-	all, err := j.eng.List(ctx)
+	all, err := instancesOf(j.eng.List(ctx))
 	if err != nil {
 		return nil, failure(CodeWorkflowLoad, "WORKFLOW_LOAD", "the workflow's records cannot be read from its database", err,
 			errs.String("workflow", j.w.id))
@@ -176,7 +183,11 @@ func (j *sqlJournal[E, S]) Load(ctx context.Context) ([]statemachine.Record[S], 
 // Save writes records, in the transaction the context carries.
 func (j *sqlJournal[E, S]) Save(ctx context.Context, records ...statemachine.Record[S]) error {
 	for _, rec := range records {
-		if err := j.eng.Write(ctx, instanceOf(rec), upsert); err != nil {
+		d, err := instanceDoc(instanceOf(rec))
+		if err != nil {
+			return err
+		}
+		if err := j.eng.Write(ctx, d, upsert); err != nil {
 			return err
 		}
 	}
@@ -193,8 +204,50 @@ func (j *sqlJournal[E, S]) Delete(ctx context.Context, keys ...string) error {
 	return nil
 }
 
-// instanceKey is a record's key in the journal's table: its entity's.
-func instanceKey(inst model.Instance) string { return inst.ID }
+// instanceConfig is the engine of a workflow's journal on a database: its
+// records, keyed by their entity's key.
+var instanceConfig = &engineConfig{
+	key: func(d plug.DocumentValue) string {
+		inst, _ := d.Value.(model.Instance)
+		return inst.ID
+	},
+	decode: func(raw json.RawMessage) (any, error) {
+		var inst model.Instance
+		if err := json.Unmarshal(raw, &inst); err != nil {
+			return nil, undecodable("workflow", err)
+		}
+		return inst, nil
+	},
+}
+
+// instancesOf are the journal's records ds hold.
+func instancesOf(ds []plug.DocumentValue, err error) ([]model.Instance, error) {
+	if err != nil {
+		return nil, err
+	}
+	out := make([]model.Instance, 0, len(ds))
+	for _, d := range ds {
+		inst, ok := d.Value.(model.Instance)
+		if !ok {
+			v, err := instanceConfig.decode(d.JSON)
+			if err != nil {
+				return nil, err
+			}
+			inst, _ = v.(model.Instance)
+		}
+		out = append(out, inst)
+	}
+	return out, nil
+}
+
+// instanceDoc is inst as the journal's engine keeps it.
+func instanceDoc(inst model.Instance) (plug.DocumentValue, error) {
+	raw, err := json.Marshal(inst)
+	if err != nil {
+		return plug.DocumentValue{}, unencodable("workflow", err)
+	}
+	return plug.DocumentValue{JSON: raw, Value: inst}, nil
+}
 
 // journalTable is the table of the workflow's journal, on the database
 // that keeps its store.
@@ -222,15 +275,12 @@ type journaled interface {
 
 // openSQLJournal opens the workflow's journal on r.
 func (w *WorkflowService[E, S]) openSQLJournal(a *App, r *databaseRun) (*sqlJournal[E, S], error) {
-	ds, err := docstore.OpenSQL(docstore.SQLConfig[model.Instance]{
-		Key: instanceKey, Transactor: r.transactor(),
-		Dialect: r.d.dialect(), Table: w.journalTable(),
-	})
+	eng, err := openSQLEngine(a, sqlTable{run: r, table: w.journalTable(), store: w.id}, instanceConfig)
 	if err != nil {
 		return nil, failure(CodeWorkflowLoad, "WORKFLOW_OPEN", "the workflow's records cannot be opened on its database", err,
 			errs.String("workflow", w.id), errs.String("database", r.d.name))
 	}
-	return &sqlJournal[E, S]{w: w, eng: &sqlEngine[model.Instance]{ds: ds, key: instanceKey, run: r, a: a, store: w.id}}, nil
+	return &sqlJournal[E, S]{w: w, eng: eng}, nil
 }
 
 // workflowJournal keeps the engine's records in the workflow's file,
@@ -395,17 +445,21 @@ var errNotInPlace = errs.New(CodeWorkflowNotInPlace, "WORKFLOW_NOT_IN_PLACE", "t
 // it changes nothing but the member state names, checked under the store's
 // writers' lock against the record as it is: errNotInPlace otherwise, and
 // nothing written.
-func (s *StoreService[T]) stateOnly(ctx context.Context, eng storeEngine[T], key string, v T, state string) error {
-	next, err := json.Marshal(v)
+func (s *storeCore) stateOnly(ctx context.Context, eng plug.StoreEngine, key string, v any, state string) error {
+	next, err := s.docOf(v)
 	if err != nil {
 		return errNotInPlace // the engine says why
 	}
-	_, err = eng.Update(withInPlace(ctx), key, func(cur *T) error {
-		was, err := json.Marshal(*cur)
-		if err != nil || !sameBut(was, next, state) {
+	_, err = eng.Update(withInPlace(ctx), key, func(cur *plug.DocumentValue) error {
+		cv, err := s.valueOf(*cur)
+		if err != nil {
+			return err
+		}
+		was, err := json.Marshal(cv)
+		if err != nil || !sameBut(was, next.JSON, state) {
 			return errNotInPlace
 		}
-		*cur = v
+		*cur = next
 		return nil
 	})
 	return err

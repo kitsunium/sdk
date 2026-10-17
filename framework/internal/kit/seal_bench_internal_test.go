@@ -7,7 +7,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
+
 	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 )
 
@@ -46,17 +47,17 @@ func benchRecord(i int) benchPatient {
 //
 // IFACE-OPAQUE: the benchmark measures the port, whichever engine is behind
 // it.
-func benchEngines(b *testing.B) (plain storeEngine[benchPatient], sealed storeEngine[benchPatient]) {
+func benchEngines(b *testing.B) (st *StoreService[benchPatient], plain, sealed plug.StoreEngine) {
 	b.Helper()
 	pinDataKeyWithoutFileStore(b)
 	svc := NewService("bench", "Records a benchmark seals.")
-	st := svc.Store("patients", func(p benchPatient) string { return p.ID })
+	st = svc.Store("patients", func(p benchPatient) string { return p.ID })
 	app := NewApp("bench", svc).With(DataDir(b.TempDir()), Listen("127.0.0.1:0"), Env(EnvProduction), Logs(io.Discard))
 	if err := app.Start(b.Context()); err != nil {
 		b.Fatal(err)
 	}
 	stopAtCleanup(b, app)
-	p, err := openDocEngine(st.key, storeFS{fs: vfs.NewMem(), path: "bench/plain.json"}, nil, versionsOn{})
+	p, err := openDocEngine(st.engineConfig(nil), storeFS{fs: vfs.NewMem(), path: "bench/plain.json"}, versionsOn{})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -64,8 +65,8 @@ func benchEngines(b *testing.B) (plain storeEngine[benchPatient], sealed storeEn
 	if err != nil {
 		b.Fatal(err)
 	}
-	s, err := openSealedEngine(st, app, z, nil, func(key func(sealedDoc) string, specs []docstore.IndexSpec[sealedDoc]) (storeEngine[sealedDoc], error) {
-		return openDocEngine(key, storeFS{fs: vfs.NewMem(), path: "bench/sealed.json"}, specs, versionsOn{})
+	s, err := openSealedEngine(&st.storeCore, app, z, nil, func(cfg *engineConfig) (plug.StoreEngine, error) {
+		return openDocEngine(cfg, storeFS{fs: vfs.NewMem(), path: "bench/sealed.json"}, versionsOn{})
 	})
 	if err != nil {
 		b.Fatal(err)
@@ -75,26 +76,36 @@ func benchEngines(b *testing.B) (plain storeEngine[benchPatient], sealed storeEn
 			b.Errorf("close: %v", err)
 		}
 	})
-	return p, s
+	return st, p, s
+}
+
+// benchDoc is p as the store's engine takes it.
+func benchDoc(b *testing.B, st *StoreService[benchPatient], p benchPatient) plug.DocumentValue {
+	b.Helper()
+	d, err := st.docOf(p)
+	if err != nil {
+		b.Fatal(err)
+	}
+	return d
 }
 
 func BenchmarkSealing(b *testing.B) {
-	plain, sealed := benchEngines(b)
+	st, plain, sealed := benchEngines(b)
 	ctx := context.Background()
 	for _, e := range []struct {
 		name string
-		eng  storeEngine[benchPatient]
+		eng  plug.StoreEngine
 	}{{"plain", plain}, {"sealed", sealed}} {
 		// A hundred people, a key each, opened once before the clock runs.
 		for i := range 100 {
-			if err := e.eng.Write(ctx, benchRecord(i), upsert); err != nil {
+			if err := e.eng.Write(ctx, benchDoc(b, st, benchRecord(i)), upsert); err != nil {
 				b.Fatal(err)
 			}
 		}
 		b.Run("write/"+e.name, func(b *testing.B) {
 			i := 0
 			for b.Loop() {
-				if err := e.eng.Write(ctx, benchRecord(i%1000), upsert); err != nil {
+				if err := e.eng.Write(ctx, benchDoc(b, st, benchRecord(i%1000)), upsert); err != nil {
 					b.Fatal(err)
 				}
 				i++

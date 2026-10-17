@@ -41,7 +41,7 @@ func (s *StoreService[T]) historyInfo(a *App) *model.StoreHistory {
 
 // weigh is how many former values the store keeps, and what its histories
 // weigh as kept.
-func (h *historied[T]) weigh(ctx context.Context) (kept int, size int64) {
+func (h *historied) weigh(ctx context.Context) (kept int, size int64) {
 	if h.hist == nil {
 		return 0, 0
 	}

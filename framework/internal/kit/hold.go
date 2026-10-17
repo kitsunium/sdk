@@ -325,7 +325,7 @@ func (s *StoreService[T]) subjectAt(ctx context.Context, a *App, key string) (su
 }
 
 // heldCount is how many of the store's records a hold keeps, for the graph.
-func (s *StoreService[T]) heldCount(a *App) int {
+func (s *storeCore) heldCount(a *App) int {
 	all, err := a.allHolds(context.Background())
 	if err != nil {
 		return 0

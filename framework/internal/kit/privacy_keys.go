@@ -7,11 +7,12 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/crypto/kdf"
 	"github.com/kitsunium/sdk/pkg/v1/crypto/mac"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
@@ -214,22 +215,37 @@ func (k *referenceKeys) ref(key mac.Key, text string) string {
 
 // A store's part --------------------------------------------------------------
 
-// plan is the classification of the store's entity type.
-func (s *StoreService[T]) plan() *classPlan { return planFor[T]() }
-
 // privacyDeclared reports whether the store declares a privacy option.
 func (s *StoreService[T]) privacyDeclared() bool { return s.privacy != nil }
 
-// subjectOf is v's subject, as written; "" when it has none.
-func (s *StoreService[T]) subjectOf(v T) string {
-	id, _ := s.plan().subjectOf(reflect.ValueOf(v))
-	return id
+// heldUntil is the instant the store's HeldUntil holds v until, when it
+// declares one and v gives one.
+func (s *storeCore) heldUntil(v any) (until time.Time, held bool) {
+	if s.heldFor == nil {
+		return time.Time{}, false
+	}
+	defer func() {
+		if recover() != nil {
+			// A function that panics holds the record: kept, never lost.
+			until, held = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC), true
+		}
+	}()
+	return s.heldFor(v)
+}
+
+// heldAt says whether a hold, or the store's HeldUntil, keeps v at now.
+func (s *storeCore) heldAt(ctx context.Context, a *App, key string, v any, now time.Time) (bool, error) {
+	if _, held, err := a.holdOf(ctx, s.id, key); held || err != nil {
+		return held, err
+	}
+	until, held := s.heldUntil(v)
+	return held && until.After(now), nil
 }
 
 // kitIndexes are the indexes kit adds to the store: its subject's, when its
 // entity has one. They are kept by the SDK's document store with the
 // product's own, in the same write, and rebuilt at every start.
-func (s *StoreService[T]) kitIndexes(ctx context.Context, a *App) ([]docstore.IndexSpec[T], error) {
+func (s *storeCore) kitIndexes(ctx context.Context, a *App) ([]plug.IndexSpec, error) {
 	plan := s.plan()
 	if plan.subject == nil || kitOwn(s.svc) {
 		return nil, nil
@@ -238,17 +254,20 @@ func (s *StoreService[T]) kitIndexes(ctx context.Context, a *App) ([]docstore.In
 	if err != nil {
 		return nil, err
 	}
-	return []docstore.IndexSpec[T]{docstore.Index(subjectIndex, func(v T) []string {
-		if id, ok := plan.subjectOf(reflect.ValueOf(v)); ok && id != "" {
+	return []plug.IndexSpec{{Name: subjectIndex, Keys: func(d plug.DocumentValue) []string {
+		if d.Value == nil {
+			return nil
+		}
+		if id, ok := plan.subjectOf(reflect.ValueOf(d.Value)); ok && id != "" {
 			return []string{keys.subjectRef(id)}
 		}
 		return nil
-	})}, nil
+	}}}, nil
 }
 
 // subjectKeys are the keys of the records whose subject is one of ids, in
 // key order.
-func (s *StoreService[T]) subjectKeys(ctx context.Context, a *App, ids []string) ([]string, error) {
+func (s *storeCore) subjectKeys(ctx context.Context, a *App, ids []string) ([]string, error) {
 	eng := s.engine()
 	if eng == nil {
 		return nil, notRunning(&s.nodeBase)
@@ -263,11 +282,16 @@ func (s *StoreService[T]) subjectKeys(ctx context.Context, a *App, ids []string)
 	seen := map[string]bool{}
 	for _, id := range ids {
 		found, err := eng.Find(ctx, subjectIndex, keys.subjectRef(id))
+		if err == nil {
+			var vs []any
+			if vs, err = s.valuesOf(found); err == nil {
+				for _, v := range vs {
+					seen[s.keyOf(v)] = true
+				}
+			}
+		}
 		if err != nil {
 			return nil, s.said(err, "", subjectIndex)
-		}
-		for _, v := range found {
-			seen[s.keyOf(v)] = true
 		}
 	}
 	delete(seen, "")

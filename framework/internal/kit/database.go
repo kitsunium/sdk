@@ -129,7 +129,7 @@ func (f databaseOption) databaseConfigure(o *databaseOptions) { f(o) }
 func (s *Service) keep() kept { return kept{svc: s} }
 
 // keep names the store as what kit.Keeps keeps.
-func (s *StoreService[T]) keep() kept { return kept{store: &s.nodeBase} }
+func (s *storeCore) keep() kept { return kept{store: &s.nodeBase} }
 
 // Keeps says what the database keeps: a service's stores, a store, a
 // module's stores. The most precise wins: a store kept by name, then its

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iter"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
@@ -22,16 +23,10 @@ import (
 // call the timeout ends halfway.
 const sqlKeysChunk int = 256
 
-// keyser is an engine that lists the keys of its records, in key order,
-// above after: both of the SDK's document stores do. A sibling of the port.
-type keyser interface {
-	Keys(ctx context.Context, after string) iter.Seq2[string, error]
-}
-
 // engineKeys are the keys eng lists above after, or its refusal: an engine
 // that lists none says so once.
-func engineKeys[T any](ctx context.Context, eng storeEngine[T], after string) iter.Seq2[string, error] {
-	if k, ok := eng.(keyser); ok {
+func engineKeys(ctx context.Context, eng plug.StoreEngine, after string) iter.Seq2[string, error] {
+	if k, ok := eng.(plug.Keyser); ok {
 		return k.Keys(ctx, after)
 	}
 	return func(yield func(string, error) bool) {
@@ -58,14 +53,14 @@ func yieldKeys(yield func(string, error) bool, keys []string, failure error) boo
 // document copied.
 //
 //ktn:allow-unused-param: the keyser port passes a context the local document store does not take
-func (e *docEngine[T]) Keys(_ context.Context, after string) iter.Seq2[string, error] {
+func (e *docEngine) Keys(_ context.Context, after string) iter.Seq2[string, error] {
 	return e.ds.Keys(after)
 }
 
 // Keys lists the table's keys above after, sqlKeysChunk at a time, each
 // chunk one call on the transaction ctx carries for the database, else on
 // the pool, within the database's timeout.
-func (e *sqlEngine[T]) Keys(ctx context.Context, after string) iter.Seq2[string, error] {
+func (e *sqlEngine) Keys(ctx context.Context, after string) iter.Seq2[string, error] {
 	return func(yield func(string, error) bool) {
 		for {
 			chunk, err := e.keysChunk(ctx, after)
@@ -78,7 +73,7 @@ func (e *sqlEngine[T]) Keys(ctx context.Context, after string) iter.Seq2[string,
 }
 
 // keysChunk is at most sqlKeysChunk keys above after, read in one call.
-func (e *sqlEngine[T]) keysChunk(ctx context.Context, after string) ([]string, error) {
+func (e *sqlEngine) keysChunk(ctx context.Context, after string) ([]string, error) {
 	c, done, err := e.call(ctx, false)
 	if err != nil {
 		return nil, err
@@ -99,18 +94,18 @@ func (e *sqlEngine[T]) keysChunk(ctx context.Context, after string) ([]string, e
 
 // Keys lists the keys of the records the sealing engine keeps: its inner
 // engine's, which keys a record by its clear members.
-func (e *sealedEngine[T]) Keys(ctx context.Context, after string) iter.Seq2[string, error] {
+func (e *sealedEngine) Keys(ctx context.Context, after string) iter.Seq2[string, error] {
 	return engineKeys(ctx, e.inner, after)
 }
 
 // Keys lists the keys of the engine under the store's history.
-func (h *historied[T]) Keys(ctx context.Context, after string) iter.Seq2[string, error] {
-	return engineKeys(ctx, h.storeEngine, after)
+func (h *historied) Keys(ctx context.Context, after string) iter.Seq2[string, error] {
+	return engineKeys(ctx, h.StoreEngine, after)
 }
 
 // keys are every key the store holds, in key order, its engine's refusals
 // worded as the store words them.
-func (s *StoreService[T]) keys(ctx context.Context) iter.Seq2[string, error] {
+func (s *storeCore) keys(ctx context.Context) iter.Seq2[string, error] {
 	return func(yield func(string, error) bool) {
 		eng := s.engine()
 		if eng == nil {
@@ -131,7 +126,7 @@ func (s *StoreService[T]) keys(ctx context.Context) iter.Seq2[string, error] {
 
 // recordKeys lists the store's keys for a module that watches it: refused to
 // any other caller, inside the listing's span, and journaled once.
-func (s *StoreService[T]) recordKeys(ctx context.Context) iter.Seq2[string, error] {
+func (s *storeCore) recordKeys(ctx context.Context) iter.Seq2[string, error] {
 	return func(yield func(string, error) bool) {
 		a := s.app()
 		if a == nil {
@@ -157,7 +152,7 @@ func (s *StoreService[T]) recordKeys(ctx context.Context) iter.Seq2[string, erro
 // keysTo yields the store's keys until the caller stops, and returns the
 // failure that ended the listing, unyielded; nil once every key went, or the
 // caller stopped.
-func (s *StoreService[T]) keysTo(ctx context.Context, yield func(string, error) bool) error {
+func (s *storeCore) keysTo(ctx context.Context, yield func(string, error) bool) error {
 	for key, err := range s.keys(ctx) {
 		if err != nil {
 			return err
@@ -172,7 +167,7 @@ func (s *StoreService[T]) keysTo(ctx context.Context, yield func(string, error) 
 // listedBy refuses the listing of the store's keys to a caller none of whose
 // module's watches the store feeds: the node ctx runs inside names the
 // caller, and code that runs inside none is refused too.
-func (s *StoreService[T]) listedBy(ctx context.Context, a *App) error {
+func (s *storeCore) listedBy(ctx context.Context, a *App) error {
 	caller := currentNode(ctx)
 	if n := a.findNode(caller); n != nil && n.base().svc != nil && a.watchedBy(n.base().svc.module, s.id) {
 		return nil

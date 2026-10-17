@@ -206,7 +206,7 @@ func (s *StoreService[T]) eraseFields(ctx context.Context, a *App, key, reason s
 
 // membersAt are the store's classified members at paths; a path that names
 // none is an [Invalid] error.
-func (s *StoreService[T]) membersAt(paths []string) ([]*member, error) {
+func (s *storeCore) membersAt(paths []string) ([]*member, error) {
 	if len(paths) == 0 {
 		return nil, Invalid("EraseFields names at least one field")
 	}

@@ -63,7 +63,7 @@ func (s *StoreService[T]) trashShown(ctx context.Context, offset, limit int) (mo
 	if err != nil {
 		return out, err
 	}
-	stones, err := tr.tombstones(s.outside(ctx))
+	stones, err := tr.Tombstones(s.outside(ctx))
 	if err != nil {
 		return out, s.trashFailure(s.trashSaid(err, ""))
 	}

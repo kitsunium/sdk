@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
@@ -62,7 +62,7 @@ type trashRunner interface {
 }
 
 // keepsTrash reports whether the store keeps a trash: it has revisions.
-func (s *StoreService[T]) keepsTrash() bool { return s.revisions > 0 && s.trashFor != nil }
+func (s *storeCore) keepsTrash() bool { return s.revisions > 0 && s.trashFor != nil }
 
 // addTrash registers the component that empties the stores' trash: at
 // start, what is past due, then each record at its instant.
@@ -106,7 +106,7 @@ func (s *StoreService[T]) startTrash(ctx context.Context, a *App) error {
 		return err
 	}
 	r := &trashRun[T]{s: s, a: a, agenda: map[string]trashEntry{}, wake: make(chan struct{}, 1), done: make(chan struct{})}
-	stones, err := tr.tombstones(s.outside(ctx))
+	stones, err := tr.Tombstones(s.outside(ctx))
 	if err != nil {
 		return s.trashFailure(err)
 	}
@@ -148,7 +148,7 @@ func (s *StoreService[T]) stopTrash(ctx context.Context) error {
 }
 
 // trashPlanned puts a record the product trashed on the agenda.
-func (s *StoreService[T]) trashPlanned(ctx context.Context, a *App, st docstore.Tombstone) {
+func (s *StoreService[T]) trashPlanned(ctx context.Context, a *App, st plug.TombstoneValue) {
 	r := s.bin.Load()
 	if r == nil {
 		return

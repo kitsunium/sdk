@@ -3,6 +3,7 @@ package kit
 import (
 	"context"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 )
@@ -14,57 +15,56 @@ import (
 // aggregate statement over the versions' table. A sealing store's versions
 // weigh what they rest as — sealed.
 
-// versionWeighter is an engine that says what its records' versions weigh:
-// the SDK's document store opened with Versions, and the engines that wrap
-// one. A sibling of the port (store_engine.go).
-type versionWeighter interface {
-	versionWeight(ctx context.Context) (docstore.VersionWeight, error)
+// pluggedWeight is the SDK's weight of a store's versions as its engine
+// hands it on.
+func pluggedWeight(w docstore.VersionWeight, err error) (plug.VersionWeightValue, error) {
+	return plug.VersionWeightValue{Former: w.Former, Trashed: w.Trashed, Bytes: w.Bytes}, err
 }
 
-// versionWeight is what the document store's versions weigh, from the
+// VersionWeight is what the document store's versions weigh, from the
 // counter its writes move.
 //
-//ktn:allow-unused-param: the versionWeighter port passes a context the local document store does not take
-func (e *docEngine[T]) versionWeight(_ context.Context) (docstore.VersionWeight, error) {
-	return e.ds.VersionWeight()
+//ktn:allow-unused-param: the VersionWeighter interface passes a context the local document store does not take
+func (e *docEngine) VersionWeight(_ context.Context) (plug.VersionWeightValue, error) {
+	return pluggedWeight(e.ds.VersionWeight())
 }
 
-// versionWeight is what the table's versions weigh, in one statement on the
+// VersionWeight is what the table's versions weigh, in one statement on the
 // transaction ctx carries for the database, else on the pool, within the
 // database's timeout.
-func (e *sqlEngine[T]) versionWeight(ctx context.Context) (docstore.VersionWeight, error) {
+func (e *sqlEngine) VersionWeight(ctx context.Context) (plug.VersionWeightValue, error) {
 	c, done, err := e.call(ctx, false)
 	if err != nil {
-		return docstore.VersionWeight{}, err
+		return plug.VersionWeightValue{}, err
 	}
 	defer done()
-	return e.ds.VersionWeight(c)
+	return pluggedWeight(e.ds.VersionWeight(c))
 }
 
-// versionWeight is what the versions of the engine a history wraps weigh.
-func (h *historied[T]) versionWeight(ctx context.Context) (docstore.VersionWeight, error) {
-	return engineVersionWeight(ctx, h.storeEngine)
+// VersionWeight is what the versions of the engine a history wraps weigh.
+func (h *historied) VersionWeight(ctx context.Context) (plug.VersionWeightValue, error) {
+	return engineVersionWeight(ctx, h.StoreEngine)
 }
 
-// versionWeight is what a sealing store's versions weigh as they rest.
-func (e *sealedEngine[T]) versionWeight(ctx context.Context) (docstore.VersionWeight, error) {
+// VersionWeight is what a sealing store's versions weigh as they rest.
+func (e *sealedEngine) VersionWeight(ctx context.Context) (plug.VersionWeightValue, error) {
 	return engineVersionWeight(ctx, e.inner)
 }
 
 // engineVersionWeight is what eng's versions weigh, or VersionsNotKept for
 // an engine that keeps none.
-func engineVersionWeight[T any](ctx context.Context, eng storeEngine[T]) (docstore.VersionWeight, error) {
-	if vw, ok := eng.(versionWeighter); ok {
-		return vw.versionWeight(ctx)
+func engineVersionWeight(ctx context.Context, eng plug.StoreEngine) (plug.VersionWeightValue, error) {
+	if vw, ok := eng.(plug.VersionWeighter); ok {
+		return vw.VersionWeight(ctx)
 	}
-	return docstore.VersionWeight{}, docstore.VersionsNotKept
+	return plug.VersionWeightValue{}, docstore.VersionsNotKept
 }
 
 // weighVersions sets on info what the store's versions weigh, on a running
 // product, when the store keeps revisions and its engine says: nothing when
 // it cannot — the Studio then shows how many versions a store keeps, as
 // before.
-func (s *StoreService[T]) weighVersions(a *App, info *model.StoreHistory) {
+func (s *storeCore) weighVersions(a *App, info *model.StoreHistory) {
 	if s.revisions == 0 || a == nil || !a.running() {
 		return
 	}

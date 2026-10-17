@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
@@ -280,7 +281,11 @@ func (s *StoreService[T]) moveOwn(ctx context.Context, a *App, key string) error
 	if eng == nil || se == nil {
 		return nil
 	}
-	v, err := eng.Update(ctx, key, func(*T) error { return nil })
+	d, err := eng.Update(ctx, key, func(*plug.DocumentValue) error { return nil })
+	var v any
+	if err == nil {
+		v, err = s.valueOf(d)
+	}
 	switch {
 	case errors.Is(err, docstore.DocumentNotFound):
 		return nil
@@ -329,7 +334,7 @@ func (s *StoreService[T]) fold(ctx context.Context) error {
 	if eng == nil {
 		return notRunning(&s.nodeBase)
 	}
-	if f, ok := eng.(folder); ok {
+	if f, ok := eng.(plug.Folder); ok {
 		return s.said(f.Fold(ctx), "", "")
 	}
 	return nil

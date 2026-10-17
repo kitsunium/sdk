@@ -202,31 +202,6 @@ func dueBy[T any](rule *retentionRule[T], v T, now time.Time) (bool, error) {
 	return ok && !at.After(now), err
 }
 
-// heldAt says whether a hold, or the store's HeldUntil, keeps v at now.
-func (s *StoreService[T]) heldAt(ctx context.Context, a *App, key string, v T, now time.Time) (bool, error) {
-	if _, held, err := a.holdOf(ctx, s.id, key); held || err != nil {
-		return held, err
-	}
-	until, held := s.heldUntil(v)
-	return held && until.After(now), nil
-}
-
-// heldUntil is the instant the store's HeldUntil holds v until, when it
-// declares one and v gives one.
-func (s *StoreService[T]) heldUntil(v T) (until time.Time, held bool) {
-	p := s.privacy
-	if p == nil || p.heldUntil == nil {
-		return time.Time{}, false
-	}
-	defer func() {
-		if recover() != nil {
-			// A function that panics holds the record: kept, never lost.
-			until, held = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC), true
-		}
-	}()
-	return p.heldUntil(v)
-}
-
 // retentionText says a rule in words, for the register and an export:
 // "90 days after Closed", "at Report.EraseAt".
 func retentionText[T any](a *App, r *retentionRule[T]) (string, bool) {

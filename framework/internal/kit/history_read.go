@@ -39,12 +39,12 @@ func (s *StoreService[T]) Former(ctx context.Context, key, pointer string) ([]Fo
 }
 
 // former reads the former values of one field, a secret's without them.
-func (s *StoreService[T]) former(ctx context.Context, key, pointer string) ([]Former, error) {
+func (s *storeCore) former(ctx context.Context, key, pointer string) ([]Former, error) {
 	eng := s.engine()
 	if eng == nil {
 		return nil, notRunning(&s.nodeBase)
 	}
-	h, _ := eng.(*historied[T])
+	h, _ := eng.(*historied)
 	if h == nil || h.keeps[pointer] == 0 {
 		return nil, Invalid(fmt.Sprintf("%s keeps no former values of %q: tag the field history=N", s.name, clip(pointer)))
 	}
@@ -66,8 +66,8 @@ func (s *StoreService[T]) former(ctx context.Context, key, pointer string) ([]Fo
 
 // historied is the store's history, nil while the store does not run or
 // when it remembers nothing.
-func (s *StoreService[T]) historied() *historied[T] {
-	h, _ := s.engine().(*historied[T])
+func (s *storeCore) historied() *historied {
+	h, _ := s.engine().(*historied)
 	return h
 }
 
@@ -77,8 +77,12 @@ func (s *StoreService[T]) historied() *historied[T] {
 // write that did not stand. Read in this order, the answer is the record's
 // past as of the value read, never that value: a write meanwhile puts it at
 // the head. A former value whose data key is destroyed is gone.
-func (h *historied[T]) formerAll(ctx context.Context, key string) (map[string][]formerEntry, error) {
-	v, err := h.Get(ctx, key)
+func (h *historied) formerAll(ctx context.Context, key string) (map[string][]formerEntry, error) {
+	d, err := h.Get(ctx, key)
+	var v any
+	if err == nil {
+		v, err = h.s.valueOf(d)
+	}
 	if err != nil {
 		return nil, h.s.said(err, key, "")
 	}
@@ -108,7 +112,7 @@ func (h *historied[T]) formerAll(ctx context.Context, key string) (map[string][]
 
 // opened is the former values of the field at pointer, opened: those whose
 // data key is destroyed left out.
-func (h *historied[T]) opened(ctx context.Context, key, pointer string, list []formerEntry) ([]formerEntry, error) {
+func (h *historied) opened(ctx context.Context, key, pointer string, list []formerEntry) ([]formerEntry, error) {
 	out := make([]formerEntry, 0, len(list))
 	for _, e := range list {
 		v, err := h.fromHistory(ctx, key, pointer, e.Value)
@@ -236,7 +240,7 @@ func (s *StoreService[T]) keepsErasable(ctx context.Context, key string) bool {
 
 // erasing is ctx for an erasure's write: the former values of the fields it
 // clears go with them.
-func (s *StoreService[T]) erasing(ctx context.Context, members []*member) context.Context {
+func (s *storeCore) erasing(ctx context.Context, members []*member) context.Context {
 	if members == nil {
 		return withIntent(ctx, historyIntent{erases: s.plan().erasesSensitive})
 	}

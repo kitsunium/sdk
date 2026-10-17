@@ -290,6 +290,7 @@ func (d *privacyDecl[T]) held(o *privacyOption) {
 		return
 	}
 	d.p.heldUntil, d.p.heldReason = fn, strings.TrimSpace(o.text)
+	d.s.heldFor = func(v any) (time.Time, bool) { return fn(as[T](v)) }
 	if at, _ := funcInfo(fn); at.file() != "" {
 		d.p.heldAt = &at
 	}

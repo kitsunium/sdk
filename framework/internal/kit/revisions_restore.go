@@ -58,7 +58,7 @@ func (s *StoreService[T]) restore(ctx context.Context, key string, number uint64
 // keptOnRestore are the members a restore keeps as the record holds them:
 // every secret member — a collection that holds one, whole — and the state
 // of every workflow over the store.
-func (s *StoreService[T]) keptOnRestore() []string {
+func (s *storeCore) keptOnRestore() []string {
 	var out []string
 	for _, m := range s.plan().members {
 		if m.tag.effective() != model.ClassSecret {

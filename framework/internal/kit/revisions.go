@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
@@ -78,7 +79,7 @@ func Revisions(n int) StoreConfigurer { return revisionsOption{n: n} }
 
 // declareRevisions takes what the store's options say of its versions, and
 // says what they get wrong.
-func (s *StoreService[T]) declareRevisions(svc *Service, o storeOptions) {
+func (s *storeCore) declareRevisions(svc *Service, o storeOptions) {
 	if !o.revisionsSet {
 		return
 	}
@@ -207,7 +208,7 @@ func (s *StoreService[T]) revisionOne(ctx context.Context, key string, number ui
 
 // revisionOf is a version as the product reads it: decoded, its secret
 // members zeroed.
-func (s *StoreService[T]) revisionOf(key string, v docstore.Version) (RevisionEvent[T], error) {
+func (s *StoreService[T]) revisionOf(key string, v plug.VersionValue) (RevisionEvent[T], error) {
 	var value T
 	if err := json.Unmarshal(v.JSON, &value); err != nil {
 		return RevisionEvent[T]{}, s.versionDecodeFailure(key, v.Number, err)
@@ -218,7 +219,7 @@ func (s *StoreService[T]) revisionOf(key string, v docstore.Version) (RevisionEv
 
 // versionDecodeFailure reports a version that no longer fits its type: the
 // type changed since the version was made.
-func (s *StoreService[T]) versionDecodeFailure(key string, number uint64, err error) error {
+func (s *storeCore) versionDecodeFailure(key string, number uint64, err error) error {
 	return failure(CodeRevisionDecode, "REVISION_DECODE", "a version of a record does not match its type", err,
 		errs.String("store", s.id), errs.String("key", key), errs.String("number", strconv.FormatUint(number, 10)))
 }
@@ -240,7 +241,7 @@ func (p *classPlan) zeroSecrets(v reflect.Value) {
 // openedVersions reads every version the store keeps of the record under
 // key, newest first, as JSON — opened, for a store that seals: a member
 // whose data key is destroyed is left out.
-func (s *StoreService[T]) openedVersions(ctx context.Context, key string) ([]docstore.Version, error) {
+func (s *StoreService[T]) openedVersions(ctx context.Context, key string) ([]plug.VersionValue, error) {
 	all, err := s.restingVersions(ctx, key)
 	if err != nil {
 		return nil, err
@@ -260,27 +261,27 @@ func (s *StoreService[T]) openedVersions(ctx context.Context, key string) ([]doc
 }
 
 // openedVersion reads the version numbered number of the record under key.
-func (s *StoreService[T]) openedVersion(ctx context.Context, key string, number uint64) (docstore.Version, error) {
+func (s *StoreService[T]) openedVersion(ctx context.Context, key string, number uint64) (plug.VersionValue, error) {
 	all, err := s.openedVersions(ctx, key)
 	if err != nil {
-		return docstore.Version{}, err
+		return plug.VersionValue{}, err
 	}
 	for _, v := range all {
 		if v.Number == number {
 			return v, nil
 		}
 	}
-	return docstore.Version{}, s.noVersion(key, number)
+	return plug.VersionValue{}, s.noVersion(key, number)
 }
 
 // restingVersions reads every version of the record under key as the store
 // keeps it — a sealing store's members as boxes.
-func (s *StoreService[T]) restingVersions(ctx context.Context, key string) ([]docstore.Version, error) {
+func (s *StoreService[T]) restingVersions(ctx context.Context, key string) ([]plug.VersionValue, error) {
 	vk, err := s.keeper()
 	if err != nil {
 		return nil, err
 	}
-	all, err := vk.storedVersions(ctx, key)
+	all, err := vk.StoredVersions(ctx, key)
 	if err != nil {
 		return nil, s.versionsSaid(err, key)
 	}
@@ -289,12 +290,12 @@ func (s *StoreService[T]) restingVersions(ctx context.Context, key string) ([]do
 
 // keeper is the engine that keeps the store's versions, as they rest: an
 // [Invalid] for a store that keeps none.
-func (s *StoreService[T]) keeper() (versionKeeper, error) {
+func (s *StoreService[T]) keeper() (plug.VersionKeeper, error) {
 	eng := s.engine()
 	if eng == nil {
 		return nil, notRunning(&s.nodeBase)
 	}
-	vk, ok := eng.(versionKeeper)
+	vk, ok := eng.(plug.VersionKeeper)
 	if s.revisions == 0 || !ok {
 		return nil, Invalid(fmt.Sprintf("%s keeps no revisions: declare it with kit.Revisions(n)", s.name))
 	}
@@ -302,12 +303,12 @@ func (s *StoreService[T]) keeper() (versionKeeper, error) {
 }
 
 // noVersion is the NotFound of a version the record does not keep.
-func (s *StoreService[T]) noVersion(key string, number uint64) error {
+func (s *storeCore) noVersion(key string, number uint64) error {
 	return NotFound(fmt.Sprintf("%s: the record %q keeps no version %d: never made, or pruned", s.name, clip(key), number))
 }
 
 // versionsSaid is a refusal of the engine's versions in kit's words.
-func (s *StoreService[T]) versionsSaid(err error, key string) error {
+func (s *storeCore) versionsSaid(err error, key string) error {
 	switch {
 	case errors.Is(err, docstore.VersionsNotKept):
 		return Invalid(fmt.Sprintf("%s keeps no revisions: declare it with kit.Revisions(n)", s.name))
@@ -315,21 +316,6 @@ func (s *StoreService[T]) versionsSaid(err error, key string) error {
 		return failure(CodeRevisionWrite, "REVISIONS_REWRITE", "a record's versions could not be rewritten", err, errs.String("store", s.id))
 	}
 	return s.said(err, key, "")
-}
-
-// versionKeeper is an engine that keeps its records' versions: the SDK's
-// document store opened with Versions, in memory, in files or over SQL —
-// and the engines that wrap one, which hand its versions on as they rest. A
-// sibling of the port (store_engine.go).
-type versionKeeper interface {
-	// storedVersions are the versions of the record under key, newest
-	// first, the current one first, as the engine keeps them.
-	storedVersions(ctx context.Context, key string) ([]docstore.Version, error)
-	// rewriteVersions rewrites the former versions of the record under key
-	// as fn returns them, under the engine's writers' lock or in one
-	// transaction (docstore's RewriteVersions): fn may drop a version or
-	// change what one holds, never add or renumber one.
-	rewriteVersions(ctx context.Context, key string, fn func([]docstore.Version) ([]docstore.Version, error)) error
 }
 
 // What a write says about the version it makes ----------------------------------

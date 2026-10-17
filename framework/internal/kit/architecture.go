@@ -29,7 +29,7 @@ const (
 
 // memoryOnly reports whether the store keeps its data in memory whatever
 // the app's data directory.
-func (s *StoreService[T]) memoryOnly() bool { return s.inMemory }
+func (s *storeCore) memoryOnly() bool { return s.inMemory }
 
 // architecture derives the architecture of g, the graph App.Graph built.
 func (a *App) architecture(g *model.Graph) *model.Architecture {

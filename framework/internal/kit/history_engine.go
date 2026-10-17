@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
@@ -26,42 +27,42 @@ const writeAttempts int = 3
 // together, and the history's statements run in the record's transaction
 // rather than wait for its locks on the pool. On the data directory and in
 // memory the write runs as it is.
-func (h *historied[T]) inOne(ctx context.Context, write func(context.Context) error) error {
+func (h *historied) inOne(ctx context.Context, write func(context.Context) error) error {
 	if h.hist == nil || h.onDatabase() == nil || unitOf(ctx) != nil {
 		return write(ctx)
 	}
 	return transact(ctx, h.s.app(), write)
 }
 
-// Write stores v as mode says, in one transaction on a database.
-func (h *historied[T]) Write(ctx context.Context, v T, mode writeMode) error {
-	return h.inOne(ctx, func(ctx context.Context) error { return h.write(ctx, v, mode) })
+// Write stores d as mode says, in one transaction on a database.
+func (h *historied) Write(ctx context.Context, d plug.DocumentValue, mode plug.WriteMode) error {
+	return h.inOne(ctx, func(ctx context.Context) error { return h.write(ctx, d, mode) })
 }
 
-// write stores v as mode says. A write that may replace a record goes
+// write stores d as mode says. A write that may replace a record goes
 // through Update, which sees the value it replaces — the field's former
 // value, the hash a policy's check compares: a Put whose key is new
 // inserts, and becomes an update again when another writer inserted it
 // meanwhile. A record the type no longer decodes is overwritten as before,
 // remembering nothing of it.
-func (h *historied[T]) write(ctx context.Context, v T, mode writeMode) error {
-	key := h.s.keyOf(v)
+func (h *historied) write(ctx context.Context, d plug.DocumentValue, mode plug.WriteMode) error {
+	key := h.s.keyOf(d.Value)
 	if key == "" {
-		return h.storeEngine.Write(ctx, v, mode) // the engine says why
+		return h.StoreEngine.Write(ctx, d, mode) // the engine says why
 	}
 	if mode == insertOnly {
-		return h.insert(ctx, key, v)
+		return h.insert(ctx, key, d)
 	}
 	var err error
 	for range writeAttempts {
-		_, err = h.update(ctx, key, func(cur *T) error { *cur = v; return nil })
+		_, err = h.update(ctx, key, func(cur *plug.DocumentValue) error { *cur = d; return nil })
 		switch {
 		case errors.Is(err, docstore.DocumentUndecodable):
-			return h.overwrite(ctx, v, mode)
+			return h.overwrite(ctx, d, mode)
 		case mode == replaceOnly || !errors.Is(err, docstore.DocumentNotFound):
 			return err
 		}
-		if err = h.insert(ctx, key, v); !errors.Is(err, docstore.DocumentExists) {
+		if err = h.insert(ctx, key, d); !errors.Is(err, docstore.DocumentExists) {
 			return err
 		}
 	}
@@ -70,8 +71,8 @@ func (h *historied[T]) write(ctx context.Context, v T, mode writeMode) error {
 
 // insert stores a new record, which starts with no history: one left under
 // its key by a record whose deletion failed half-way is removed first.
-func (h *historied[T]) insert(ctx context.Context, key string, v T) error {
-	if err := h.checkPasswords(nil, v); err != nil {
+func (h *historied) insert(ctx context.Context, key string, d plug.DocumentValue) error {
+	if err := h.s.checkPasswords(nil, d.Value); err != nil {
 		return err
 	}
 	if h.hist != nil {
@@ -81,58 +82,58 @@ func (h *historied[T]) insert(ctx context.Context, key string, v T) error {
 			}
 		}
 	}
-	return h.storeEngine.Write(ctx, v, insertOnly)
+	return h.StoreEngine.Write(ctx, d, insertOnly)
 }
 
-// overwrite stores v over a record the type no longer decodes: its former
+// overwrite stores d over a record the type no longer decodes: its former
 // values cannot be read, so the write records none.
-func (h *historied[T]) overwrite(ctx context.Context, v T, mode writeMode) error {
-	if err := h.checkPasswords(nil, v); err != nil {
+func (h *historied) overwrite(ctx context.Context, d plug.DocumentValue, mode plug.WriteMode) error {
+	if err := h.s.checkPasswords(nil, d.Value); err != nil {
 		return err
 	}
-	return h.storeEngine.Write(ctx, v, mode)
+	return h.StoreEngine.Write(ctx, d, mode)
 }
 
 // Update applies fn to the record under key and stores the result, in one
 // transaction on a database.
-func (h *historied[T]) Update(ctx context.Context, key string, fn func(*T) error) (T, error) {
-	var v T
+func (h *historied) Update(ctx context.Context, key string, fn func(d *plug.DocumentValue) error) (plug.DocumentValue, error) {
+	var d plug.DocumentValue
 	err := h.inOne(ctx, func(ctx context.Context) error {
 		var err error
-		v, err = h.update(ctx, key, fn)
+		d, err = h.update(ctx, key, fn)
 		return err
 	})
-	return v, err
+	return d, err
 }
 
 // update applies fn to the record under key and stores the result, its
 // history first: the former values of the fields fn changed, written inside
 // the engine's update. When the engine then refuses the record, the history
 // is put back — on a database, the transaction undoes it.
-func (h *historied[T]) update(ctx context.Context, key string, fn func(*T) error) (T, error) {
+func (h *historied) update(ctx context.Context, key string, fn func(d *plug.DocumentValue) error) (plug.DocumentValue, error) {
 	var w historyWrite
-	v, err := h.storeEngine.Update(ctx, key, func(v *T) error {
-		return h.updating(ctx, key, v, fn, &w)
+	d, err := h.StoreEngine.Update(ctx, key, func(d *plug.DocumentValue) error {
+		return h.updating(ctx, key, d, fn, &w)
 	})
 	switch {
 	case err == nil && w.unconfirmed != nil:
-		return v, w.unconfirmed
+		return d, w.unconfirmed
 	case err != nil && !errors.Is(err, docstore.WriteUnconfirmed):
 		h.undo(ctx, key, &w)
 	}
-	return v, err
+	return d, err
 }
 
 // Delete removes the record under key, then its history, in one
 // transaction on a database: in files, a crash between the two leaves a
 // history whose record is gone, which the next start removes.
-func (h *historied[T]) Delete(ctx context.Context, key string) error {
+func (h *historied) Delete(ctx context.Context, key string) error {
 	return h.inOne(ctx, func(ctx context.Context) error { return h.delete(ctx, key) })
 }
 
 // delete removes the record under key, then its history.
-func (h *historied[T]) delete(ctx context.Context, key string) error {
-	err := h.storeEngine.Delete(ctx, key)
+func (h *historied) delete(ctx context.Context, key string) error {
+	err := h.StoreEngine.Delete(ctx, key)
 	if h.hist == nil || (err != nil && !errors.Is(err, docstore.WriteUnconfirmed)) {
 		return err
 	}
@@ -143,7 +144,7 @@ func (h *historied[T]) delete(ctx context.Context, key string) error {
 }
 
 // remove removes the history under key; none is no error.
-func (h *historied[T]) remove(ctx context.Context, key string) error {
+func (h *historied) remove(ctx context.Context, key string) error {
 	err := h.hist.Delete(ctx, key)
 	switch {
 	case err == nil, errors.Is(err, docstore.DocumentNotFound):
@@ -163,7 +164,7 @@ var errHistoryMoved = errs.New(CodeHistoryMoved, "HISTORY_MOVED", "the history c
 // made is put back empty rather than removed, which only a check outside
 // the history's lock could do: an empty history reads as none, and the next
 // start removes it.
-func (h *historied[T]) undo(ctx context.Context, key string, w *historyWrite) {
+func (h *historied) undo(ctx context.Context, key string, w *historyWrite) {
 	if !w.stored {
 		return
 	}
@@ -171,14 +172,22 @@ func (h *historied[T]) undo(ctx context.Context, key string, w *historyWrite) {
 	if len(w.after.Fields) == 0 {
 		// The refused write removed the history: it comes back, unless
 		// another write made a new one meanwhile.
-		err = h.hist.Write(ctx, w.before, insertOnly)
+		var d plug.DocumentValue
+		if d, err = historyDoc(w.before); err == nil {
+			err = h.hist.Write(ctx, d, insertOnly)
+		}
 	} else {
-		_, err = h.hist.Update(ctx, key, func(cur *historyRecord) error {
-			if !sameHistory(*cur, w.after) {
+		_, err = h.hist.Update(ctx, key, func(d *plug.DocumentValue) error {
+			cur, err := historyOf(*d)
+			if err != nil {
+				return err
+			}
+			if !sameHistory(cur, w.after) {
 				return errHistoryMoved
 			}
-			*cur = historyRecord{Key: key, Fields: w.before.Fields}
-			return nil
+			next, err := historyDoc(historyRecord{Key: key, Fields: w.before.Fields})
+			*d = next
+			return err
 		})
 	}
 	switch {
