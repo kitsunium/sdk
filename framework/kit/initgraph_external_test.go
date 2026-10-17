@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -217,6 +218,10 @@ func textSymbols(t *testing.T, goTool, dir string) (map[string]bool, []byte) {
 func buildProbe(t *testing.T, goTool, dir string) (map[string]bool, []byte, string) {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), filepath.Base(dir))
+	if runtime.GOOS == "windows" {
+		// Windows runs a program by its extension.
+		bin += ".exe"
+	}
 	build := exec.Command(goTool, "build", "-o", bin, dir)
 	build.Env = append(os.Environ(), "GOWORK=off")
 	if out, err := build.CombinedOutput(); err != nil {
