@@ -238,7 +238,7 @@ add_all_vendors() {
     echo "package p" >"$d/p.go"
   done
   mkdir -p framework/app pkg/v1/data/codec
-  echo "package kit" >framework/app/kit.go
+  echo "package app" >framework/app/app.go
   echo "# framework/connectors" >framework/connectors/CLAUDE.md
   echo "package codec" >pkg/v1/data/codec/codec.go
   {

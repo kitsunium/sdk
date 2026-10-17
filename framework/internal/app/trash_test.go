@@ -19,7 +19,7 @@ import (
 // trash leaves it at its retention's instant when that comes first; and
 // <store>-trash set to 0 deletes at once. The trash's own contract — every
 // engine, a store without revisions — is the conformance suite's
-// (kit/storetest, "trash").
+// (app/storetest, "trash").
 
 // trashDays is how long a store with revisions keeps what the product
 // deletes, unless its setting says otherwise.

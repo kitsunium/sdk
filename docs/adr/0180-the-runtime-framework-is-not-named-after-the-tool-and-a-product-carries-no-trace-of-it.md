@@ -235,6 +235,12 @@ not be replaced" — the overlay adds a file to the product's own directory,
 never to the module cache. A product's tests never link the Studio, as
 today.
 
+*Found by the platform at step 2 (2026-10-18, kitsunium/platform#100):* `kit
+dev` builds with a copy of the product's `go.mod` and `go.sum` outside the
+tree (`go build -modfile`), because a product's `go.mod` does not always list
+what the Studio needs (`pkg/v1/net`, for one) — the build list can grow, which
+the overlay alone could not allow; the product's `go.mod` stays unchanged.
+
 ### 5. What the tool leaves in a product's tree carries no tool name
 
 These are the platform's to implement, in an ADR of its own; this record
@@ -303,7 +309,7 @@ nothing.
 | 0 | — | Done on 2026-10-17: the owner answered the twelve questions, and this record is accepted with its answers |
 | 1 | SDK | The Studio's routes, handlers, capture view and tool variables move from the core into the Studio subsystem; the core keeps the probes (non-breaking: a product that imports `framework/kit/studio` keeps its Studio) — done (2026-10-17, §Step 1, done) |
 | 2 | platform | `kit dev` injects the hook by overlay; the generator stops writing `dev_gen.go`; `kit check` refuses a product's import of the Studio subsystem; the todo deletes `kitdev.go`, moderation its import |
-| 3 | SDK | The rename of §1, a design edit first (ADR 0163, 0167, 0168): `design/framework/app.yaml`, `kit gen`, `make api`, `make docs-readme`; the facade's and implementation's paths; `model` `Version` 6; the scripts, `BUILD.bazel`, `//:audit_sources`, `tools/alloc-lane-targets.txt` and `codes.ranges` owners re-pointed; the three database connectors follow; the texts of §2 reworded |
+| 3 | SDK | The rename of §1, a design edit first (ADR 0163, 0167, 0168): `design/framework/app.yaml`, `kit gen`, `make api`, `make docs-readme`; the facade's and implementation's paths; `model` `Version` 6; the scripts, `BUILD.bazel`, `//:audit_sources`, `tools/alloc-lane-targets.txt` and `codes.ranges` owners re-pointed; the three database connectors follow; the texts of §2 reworded — done (2026-10-18, §Step 3, done) |
 | 4 | SDK | The runtime names of §3: the prefix, the routes, the tag key, the graph values, the telemetry name; the refusals of an old name at the start (§3, Q12) |
 | 5 | SDK | The names at rest (Q5, Q6): the tables, the migration set, the secret prefix, the dev data directory — renamed by a framework migration —, the domain-separation labels re-sealed under new ones, the old ones removed in a later minor (Q6) |
 | 6 | SDK | `TestAProductCarriesNoTraceOfTheTool`, with an empty allow-list; it can land earlier with an allow-list shrinking step by step, as ADR 0179's `stillInCore` did |
@@ -422,6 +428,71 @@ stream and profiler without their former hooks. Not measured: the latency
 of a fresh process, which nothing here moves.
 
 
+### Step 3, done (2026-10-18)
+
+The rename of §1, the design first: `design/framework/kit.yaml` is
+`design/framework/app.yaml`, every package it declares at its new path, and
+`design/sdk.yaml`'s `codes.ranges` re-point their owners — `0.4.2` at
+`framework/internal/app`, `0.4.4` at `framework/app/storetest` — with every
+value unchanged (ADR 0160 §3: `docs/error-codes.yaml` lists the same 790
+codes under the new paths). `kit gen` (rc.9, the pin) wrote the pins, the
+codes, the doc slots and `internal/kernel/errs/codes_gen_test.go`; `make api`
+wrote `docs/api` and `docs/error-codes.yaml`; `make docs-readme` the
+READMEs.
+
+| Was | Is |
+|---|---|
+| `framework/kit` (package `kit`) | `framework/app` (package `app`) |
+| `framework/kit/{store,queue,workflow,mail,jobs,server,studio,config/yaml,config/toml,storetest}` | `framework/app/…`, the same leaves |
+| `framework/kit/kittest` | `framework/app/apptest` |
+| `framework/kit/testdata/*probe` | `framework/app/testdata/*probe` |
+| `framework/internal/kit` (package `kit`) | `framework/internal/app` (package `app`; the facade imports it as `iapp`, which was `ikit`) |
+| `framework/internal/kit/{storekit,queuekit,workflowkit,mailkit,jobkit,serverkit,studiokit}` | `framework/internal/app/{storeengine,queueengine,workflowengine,mailengine,jobengine,serverengine,studioengine}` — the role the package plays (ADR 0179: an engine under a facade), so no path segment ends in `kit` |
+| `framework/internal/kit/plug` | `framework/internal/app/plug` |
+| `model.ProvenanceKit`, `model.PortOwnerKit`, `model.SettingKitDev` (and their core twins) | `model.ProvenanceApp`, `model.PortOwnerApp`, `model.SettingAppDev` |
+| `model.Version` 5 | 6 |
+
+Every identifier of the facade keeps its name: `kit.Store[Order]` is
+`app.Store[Order]`, `kit.App` is `app.App`. The step changes 686 files, 527
+of them moves: the packages and their tests, the connectors' imports, the
+BUILD files (sorted as gazelle sorts them), `//:audit_sources`,
+`.ktn-linter.yaml`'s paths, the release scripts' tests and the docs. No
+`framework/kit` is left: a product that still imports it fails to build,
+the break Q2 chose over an alias.
+
+**`Version` 6 before its values.** The graph's version moves here, as the
+migration table says, because a source position in the framework's code
+names `framework/app` and `framework/internal/app` from this step on; the
+values §3 renames — `"kit"` as a provenance, a port owner, a reserved
+module, the `kitdev` setting origin — keep their spelling until step 4, under
+the same version.
+
+**The texts of §2.** Every string the core compiles names the framework or
+the product: the Private prefix `kit: ` is `app: `; the word kit in a Public
+or Private text, a log message, a refusal, the English catalogue (and its
+French twin) is "the framework"; the help's first line is the product's name
+alone; "a secret kit generates" is "a secret the product generates"; the dev
+announcement no longer names `kit dev`. The design's doc comments of
+`framework/app` and of its implementation speak of the framework by its name,
+naming the tool only where they describe the contract with it. What is left
+is §3's and step 4's — `KIT_*`, `/_kit/`, the `kit` tag key, the graph's
+`"kit"` values, the checks and the module named `kit`, the `config`
+command's owner column — and step 5's — the `kit_*` tables, the `kit` set,
+the `kit-` secret prefix, `.kit/data`, the `kit/v1` and `kit:` labels; and
+the Studio subsystem's own sentence about the tool, which §6's literal check
+leaves out.
+
+**A local `app` in the SDK's tests.** Where a test declared a variable `app`
+in a file that now imports package `app`, the variable is `a` (`prod` where
+`a` was taken), in every such test file and in the conformance suite. An example in a
+doc comment declares `a := app.NewApp(…)`.
+
+**Verified.** `GOWORK=off go test -race ./...` in the root module and in the
+four connector modules (`postgres` and `mysql` also against servers in
+Docker), `kit gen -check`, genindex `-check-api -markers -digests`, the
+guards of `scripts/pre-commit/`, `make guard`, `make doclinks`, `gofumpt -l`
+and `make lint-ktn-check`.
+
 ### Impact
 
 - **The SDK.** Under `framework/`, 694 Go files mention the word (7 012
@@ -466,6 +537,36 @@ each refused or answered as §3 and Q12 say rather than ignored. The graph's
 changes only by a migration the framework runs: the tables, the migration
 set, the secret prefix and the dev data directory renamed (Q5), the sealed
 data re-sealed under the new labels (Q6).
+
+**Step 3, landed (2026-10-18).** `framework/kit` and everything beneath it
+are gone, with no alias (Q2); `framework/internal/kit`'s engines are renamed;
+`model.ProvenanceKit`, `PortOwnerKit` and `SettingKitDev` are
+`ProvenanceApp`, `PortOwnerApp` and `SettingAppDev`, and `model.Version` is 6.
+A minor of the root module and of each connector module (`release:minor`).
+A product migrates with a rewrite of the import path and of the qualifier,
+then the files where a local `app` shadows the package:
+
+```sh
+grep -rlZ --include='*.go' 'github.com/kitsunium/sdk/framework/kit' . | xargs -0 sed -i -E \
+  -e 's#github.com/kitsunium/sdk/framework/kit/kittest#github.com/kitsunium/sdk/framework/app/apptest#g' \
+  -e 's#github.com/kitsunium/sdk/framework/kit#github.com/kitsunium/sdk/framework/app#g' \
+  -e 's/\bkittest\./apptest./g' \
+  -e 's/\bkit\.([A-Z])/app.\1/g'
+go get github.com/kitsunium/sdk@<the release> && go mod tidy
+go vet ./...
+```
+
+The rewrite only touches `kit.` followed by an exported name, so a variable
+named `kit` (`kit.Name` on a local) needs the same look as a shadowing `app`.
+`go vet` then names each file where a local `app` — a variable, a parameter, a
+receiver — hides the package: `app.X undefined (type *app.App has no field or
+method X)`, or `app.X is not a type`. Rename the local (`a`, `prod`) from its
+declaration on, or import the package under another name; the fourteen such
+files of the three products are step 8's. A product that names
+`model.ProvenanceKit`, `PortOwnerKit` or `SettingKitDev` takes the new names;
+one that compares a graph's version with 5 reads 6. The runtime names do not
+move at this step: the variables, the probes' paths, the struct tag key, the
+tables and what is sealed stay as they are until steps 4 and 5.
 
 ## Alternatives considered
 
@@ -574,6 +675,7 @@ clear, and accepting both keeps the old names longer.
 | Proposed | 2026-10-17 | The design, the measured inventory, twelve questions for the owner |
 | Accepted | the owner's decision, 2026-10-17 | Q1 answered `framework/app`, the recommendation of Q2 to Q12 retained as written; each question replaced by its *Decision* line; the status, the header (*Accepted*, *Amends*), the placeholder name replaced by `app`, and the passages that depended on an open question (§1's table, §4's hook, §5, migration step 0 and 5, the cost, §Breaking changes, §Deferred) updated. No other text changed |
 | Accepted, step 1 done | 2026-10-17 | The migration table marks step 1 done; §Step 1, done records the Studio's routes, guard and handlers in `studiokit` behind `plug.Studio` (`StudioDriverConfig`: `Env`, `Settings`, `Forced`, `DevBuild`, `Mount`), reading the app through `plug.StudioHost`, which the core implements and only `EnableStudio` reaches; the event stream and the profiler `studiokit`'s own, their hooks gone; the tool's nine variables read by `studiokit` alone; the probes, the reserved `/_kit/`, the captured mail's header (shared with `Mailer.Captured`) and the dev announcement kept in the core for step 4; the initgraph test's `studioCode` and `toolVariables`; and the measure — the smallest product 2.1 kB of code and 4.0 kB of file less, none of the tool's names, and §Context's "compiled into every production binary" corrected: the handlers were already unlinked without the Studio. No decision changed |
+| Accepted, step 3 done | 2026-10-18 | The migration table marks step 3 done; §Step 3, done records the rename — `framework/app`, `apptest`, `framework/internal/app` and its engines `storeengine`, `queueengine`, `workflowengine`, `mailengine`, `jobengine`, `serverengine`, `studioengine`, `design/framework/app.yaml`, the codes at their values under re-pointed owners, `model.Version` 6 with `ProvenanceApp`, `PortOwnerApp` and `SettingAppDev` —, the texts of §2 and what they leave to steps 4 and 5; §Breaking changes gives a product's migration, a rewrite of the import path and the qualifier then the shadowing files; §4 records what the platform found at step 2, `kit dev` building with a `go.mod` outside the tree (`-modfile`). No decision changed |
 
 ## Deferred
 

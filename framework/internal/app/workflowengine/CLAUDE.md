@@ -34,5 +34,5 @@ at the start for a workflow it declares (`CodeSubsystemMissing`).
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go vet ./internal/kit/workflowengine/ && GOWORK=off go test -race ./internal/kit/ ./kit/ -run 'Workflow|Timer|Deadline|Guard|Transition|Census|ImportsThe|TheSmallest|TheCore'
+cd framework && GOWORK=off go vet ./internal/app/workflowengine/ && GOWORK=off go test -race ./internal/app/ ./app/ -run 'Workflow|Timer|Deadline|Guard|Transition|Census|ImportsThe|TheSmallest|TheCore'
 ```

@@ -71,7 +71,7 @@ URL says —, its migrations and its store in the file, a store that seals —
 its row holds boxes, reads back after a restart, and an erasure's committed
 transaction destroys the key a backup's row was sealed under, one taken
 back destroys nothing —, and the stores' conformance suite
-(`kit/storetest`). `keys_test.go` puts `app.Keeps(app.Privacy)` on the file:
+(`app/storetest`). `keys_test.go` puts `app.Keeps(app.Privacy)` on the file:
 the keys in the data directory, and each data key made without waiting for
 the file's writer — a hold of a sealed record and a write of it, in their
 own transactions; inside `app.Transact` on the file a case written and

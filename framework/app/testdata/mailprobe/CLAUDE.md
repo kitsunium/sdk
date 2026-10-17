@@ -31,5 +31,5 @@ are `framework/app/studio`'s (step 8, `linksNoWords`).
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go test ./kit/ -run 'ImportsTheMail' -v
+cd framework && GOWORK=off go test ./app/ -run 'ImportsTheMail' -v
 ```

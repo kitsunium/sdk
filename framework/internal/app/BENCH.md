@@ -1,4 +1,4 @@
-<!-- generated from framework/internal/app/startup_bench_test.go — run `cd framework && GOWORK=off go test -run='^$' -bench=MainRunsADefaultCommand -benchtime=300x -count=3 ./internal/kit/` to refresh -->
+<!-- generated from framework/internal/app/startup_bench_test.go — run `cd framework && GOWORK=off go test -run='^$' -bench=MainRunsADefaultCommand -benchtime=300x -count=3 ./internal/app/` to refresh -->
 # Benchmarks — `framework/internal/app`
 
 **The conclusion first: a warm `Main` that starts an app in the CLI

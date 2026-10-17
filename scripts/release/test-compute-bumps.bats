@@ -553,12 +553,12 @@ STUB
 
 @test "a change under framework/ emits the SDK module (.)" {
   mkdir -p framework/app
-  echo "package kit" > framework/app/kit.go
+  echo "package app" > framework/app/app.go
   g add -A
   g commit -q --no-verify -m "feat(framework): a declaration"
   run bash -c "'$SCRIPT' --explain 2>&1"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"rule 1: framework/app/kit.go is an SDK-module change"* ]]
+  [[ "$output" == *"rule 1: framework/app/app.go is an SDK-module change"* ]]
   [[ "$output" == *$'\n.'* ]]
 }
 

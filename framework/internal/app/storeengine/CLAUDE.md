@@ -33,5 +33,5 @@ at the start for a store or a database it declares (`CodeSubsystemMissing`).
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go vet ./internal/kit/storeengine/ && GOWORK=off go test -race ./internal/kit/ ./kit/ -run 'Store|Database|Transact|DataCopy|Revision|Trash|Initgraph|TheCore|TheSmallest|ImportsTheStores'
+cd framework && GOWORK=off go vet ./internal/app/storeengine/ && GOWORK=off go test -race ./internal/app/ ./app/ -run 'Store|Database|Transact|DataCopy|Revision|Trash|Initgraph|TheCore|TheSmallest|ImportsTheStores'
 ```

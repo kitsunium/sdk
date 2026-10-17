@@ -44,4 +44,4 @@ the default database, and a proxy a test takes away and brings back;
 an unreachable server, credentials that never leak, a rotated credential
 reaching the next connection — the two roles may create in `kit_test`'s
 schema, where kit makes the store's table —, and the stores' conformance
-suite (`kit/storetest`).
+suite (`app/storetest`).

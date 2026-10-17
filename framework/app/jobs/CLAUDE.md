@@ -39,5 +39,5 @@ declaration, which a package's init may run before this package's.
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go vet ./kit/jobs/ && GOWORK=off go test ./kit/ -run 'ImportsTheJobs|TheSmallestProduct' && GOWORK=off go test ./internal/kit/ -run 'AJob|Scheduler'
+cd framework && GOWORK=off go vet ./app/jobs/ && GOWORK=off go test ./app/ -run 'ImportsTheJobs|TheSmallestProduct' && GOWORK=off go test ./internal/app/ -run 'AJob|Scheduler'
 ```

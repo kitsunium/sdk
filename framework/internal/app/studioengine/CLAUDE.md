@@ -61,5 +61,5 @@ speaks English alone.
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go test ./internal/kit/studioengine/ ./internal/kit/ && GOWORK=off go test ./kit/ -run 'TheSmallestProduct|ImportsTheStudio'
+cd framework && GOWORK=off go test ./internal/app/studioengine/ ./internal/app/ && GOWORK=off go test ./app/ -run 'TheSmallestProduct|ImportsTheStudio'
 ```

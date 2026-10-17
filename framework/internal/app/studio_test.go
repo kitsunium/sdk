@@ -86,7 +86,7 @@ func TestSourceServesOnlyTheGraphsFiles(t *testing.T) {
 	}
 	for _, file := range []string{
 		"../../../../etc/passwd", "/etc/passwd", "go.mod", ".git/config", ".kit/data/shop/items.json",
-		"framework/internal/app/app.go", "framework/internal/app/product_test.go\x00", "framework/internal/app/../kit/product_test.go", `framework\internal\kit\product_test.go`,
+		"framework/internal/app/app.go", "framework/internal/app/product_test.go\x00", "framework/internal/app/../app/product_test.go", `framework\internal\app\product_test.go`,
 	} {
 		r := call(t, a, "GET /_kit/api/source?file="+urlEscape(file)+"&line=1", noBody)
 		if r.status != http.StatusNotFound {

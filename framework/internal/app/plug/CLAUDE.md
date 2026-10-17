@@ -111,5 +111,5 @@ their own until then (`OpenEventStream`, `StudioProfiler`), are
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go vet ./internal/kit/plug/ && GOWORK=off go test ./kit/ -run 'TheCoreImportsOnly|TheSmallestProduct|ImportsThe'
+cd framework && GOWORK=off go vet ./internal/app/plug/ && GOWORK=off go test ./app/ -run 'TheCoreImportsOnly|TheSmallestProduct|ImportsThe'
 ```

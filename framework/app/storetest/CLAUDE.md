@@ -26,5 +26,5 @@ product tested in memory sees what its database does.
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go test -race -run TestStoresConform ./internal/kit/ && (cd connectors/sqlite && GOWORK=off go test -race -run TestStoresConform ./...)
+cd framework && GOWORK=off go test -race -run TestStoresConform ./internal/app/ && (cd connectors/sqlite && GOWORK=off go test -race -run TestStoresConform ./...)
 ```

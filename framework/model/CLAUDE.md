@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-18T00:00:00Z -->
 # framework/model — the Product Graph
 
 ## Purpose
@@ -85,6 +85,12 @@ Two packages, one API:
 - Bump `Version` for any change an older reader would misread. A field
   added with `omitempty` that a reader may ignore is not one: the store's
   versions' weight and `Module.Only` came at `Version` 5.
+  `Version` 6 is ADR 0180's rename: the framework's packages are
+  `framework/app` and `framework/internal/app`, so a source position in the
+  framework's code names those paths, and `ProvenanceKit`, `PortOwnerKit`
+  and `SettingKitDev` are `ProvenanceApp`, `PortOwnerApp` and
+  `SettingAppDev`; their values (`"kit"`, `"kitdev"`) are the runtime names
+  ADR 0180's step 4 renames.
 - `NodeKind`, `EdgeKind` and `EventType` stay strings under
   `//ktn:wire-format`: not an exclusion, the declaration KTN-CONST-STRENUM
   provides for an enumeration that is a wire format — the graph's JSON and

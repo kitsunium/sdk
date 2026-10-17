@@ -43,4 +43,4 @@ takes no parameter in a `CREATE USER` —, never written; `app_test.go` the
 —, two processes migrating once, `migrate` status, up and down, readiness,
 an unreachable server, credentials that never leak, a rotated password
 reaching the next connection, and the stores' conformance suite
-(`kit/storetest`).
+(`app/storetest`).

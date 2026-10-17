@@ -42,5 +42,5 @@ data keys kept in a store). It runs a product's migrations, `app.Migration`s
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go vet ./kit/store/ && GOWORK=off go test ./kit/ -run 'ImportsTheStores|TheSmallestProduct' && GOWORK=off go test ./internal/kit/ -run 'WithoutItsSubsystem|WithItsSubsystem'
+cd framework && GOWORK=off go vet ./app/store/ && GOWORK=off go test ./app/ -run 'ImportsTheStores|TheSmallestProduct' && GOWORK=off go test ./internal/app/ -run 'WithoutItsSubsystem|WithItsSubsystem'
 ```

@@ -31,5 +31,5 @@ and is refused at the start for a job it declares (`CodeSubsystemMissing`).
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go vet ./internal/kit/jobengine/ && GOWORK=off go test -race ./internal/kit/jobengine/ && GOWORK=off go test -race ./internal/kit/ -run 'Job|Scheduler|Runtime|Loop|DeclarationProblems'
+cd framework && GOWORK=off go vet ./internal/app/jobengine/ && GOWORK=off go test -race ./internal/app/jobengine/ && GOWORK=off go test -race ./internal/app/ -run 'Job|Scheduler|Runtime|Loop|DeclarationProblems'
 ```

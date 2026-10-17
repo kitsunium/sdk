@@ -19,7 +19,7 @@ import (
 // the trash at once — no row of them is left — and leaves another person's,
 // which comes back as it was. The trash's own contract on SQLite — the purge
 // 30 days after on the app's clock, a store without revisions — is the
-// conformance suite's (kit/storetest, "trash", TestStoresConform).
+// conformance suite's (app/storetest, "trash", TestStoresConform).
 
 // erasing names the people an erasure is for.
 type erasing struct {

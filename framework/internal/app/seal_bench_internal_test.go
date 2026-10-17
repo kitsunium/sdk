@@ -18,7 +18,7 @@ import (
 // kit's: the JSON walk, one seal per member, the key's check. The data keys
 // are kit's own store's, on disk, and cached once opened.
 //
-//	go test -run '^$' -bench Sealing -benchmem ./kit/
+//	go test -run '^$' -bench Sealing -benchmem ./app/
 
 // benchPatient is a record with five members kit seals and three it does
 // not.

@@ -37,5 +37,5 @@ compiles none of it, and this package needs no `Enable` of the core's
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go vet ./kit/workflow/ && GOWORK=off go test ./kit/ -run 'ImportsTheWorkflows|TheSmallestProduct' && GOWORK=off go test ./internal/kit/ -run 'AWorkflow'
+cd framework && GOWORK=off go vet ./app/workflow/ && GOWORK=off go test ./app/ -run 'ImportsTheWorkflows|TheSmallestProduct' && GOWORK=off go test ./internal/app/ -run 'AWorkflow'
 ```

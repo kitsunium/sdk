@@ -22,5 +22,5 @@ and initialises none of them.
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go vet ./internal/kit/serverengine/ && GOWORK=off go test ./internal/kit/serverengine/ && GOWORK=off go test ./internal/kit/ -run 'Listener|Static|Frontend|NoSamplerNoProcess'
+cd framework && GOWORK=off go vet ./internal/app/serverengine/ && GOWORK=off go test ./internal/app/serverengine/ && GOWORK=off go test ./internal/app/ -run 'Listener|Static|Frontend|NoSamplerNoProcess'
 ```

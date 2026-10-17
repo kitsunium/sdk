@@ -44,5 +44,5 @@ package needs no `Enable` of the core's (unlike `framework/app/store`'s
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go vet ./kit/queue/ && GOWORK=off go test ./kit/ -run 'ImportsTheQueues|TheSmallestProduct' && GOWORK=off go test ./internal/kit/ -run 'AQueue'
+cd framework && GOWORK=off go vet ./app/queue/ && GOWORK=off go test ./app/ -run 'ImportsTheQueues|TheSmallestProduct' && GOWORK=off go test ./internal/app/ -run 'AQueue'
 ```

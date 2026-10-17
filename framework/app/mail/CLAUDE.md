@@ -42,5 +42,5 @@ no `Enable` of the core's (unlike `framework/app/store`'s `EnableStores`).
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go vet ./kit/mail/ && GOWORK=off go test ./kit/ -run 'ImportsTheMail|TheSmallestProduct' && GOWORK=off go test ./internal/kit/ -run 'AMailer'
+cd framework && GOWORK=off go vet ./app/mail/ && GOWORK=off go test ./app/ -run 'ImportsTheMail|TheSmallestProduct' && GOWORK=off go test ./internal/app/ -run 'AMailer'
 ```

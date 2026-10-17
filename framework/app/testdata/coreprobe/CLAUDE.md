@@ -39,5 +39,5 @@ are `framework/app/studio`'s (step 8). There is no allow-list.
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go test ./kit/ -run 'TheSmallestProduct' -v
+cd framework && GOWORK=off go test ./app/ -run 'TheSmallestProduct' -v
 ```

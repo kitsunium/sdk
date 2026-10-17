@@ -28,5 +28,5 @@ nothing of the stores' code linked.
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go test ./kit/ -run 'WithoutItsImport' -v
+cd framework && GOWORK=off go test ./app/ -run 'WithoutItsImport' -v
 ```

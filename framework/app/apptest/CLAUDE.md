@@ -24,5 +24,5 @@ restart reading everything back (ADR 0175, ported from kitsunium/platform
 ## Verify
 
 ```sh
-cd framework && go test -race ./kit/apptest/
+cd framework && go test -race ./app/apptest/
 ```

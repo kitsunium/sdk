@@ -8,7 +8,7 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
-// The stores' conformance suite (kit/storetest) on memory, on the data
+// The stores' conformance suite (app/storetest) on memory, on the data
 // directory, and on kit's fake database; each engine module runs it on its
 // engine.
 func TestStoresConform(t *testing.T) {

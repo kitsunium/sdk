@@ -33,5 +33,5 @@ outbox on a database it declares (`CodeSubsystemMissing`).
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go vet ./internal/kit/queueengine/ && GOWORK=off go test -race ./internal/kit/ ./kit/ -run 'Queue|Topic|Subscri|Watch|Queued|Consumer|Mail|DataCopy|Initgraph|TheCore|TheSmallest|ImportsThe'
+cd framework && GOWORK=off go vet ./internal/app/queueengine/ && GOWORK=off go test -race ./internal/app/ ./app/ -run 'Queue|Topic|Subscri|Watch|Queued|Consumer|Mail|DataCopy|Initgraph|TheCore|TheSmallest|ImportsThe'
 ```

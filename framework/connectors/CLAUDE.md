@@ -51,7 +51,7 @@ engine: migrations — kit's own set first, which makes the store's table —,
 two processes migrating together, `migrate` status, up and down, readiness
 through a proxy taken away and back, credentials that never leak, a rotated
 credential used by the next connection once `<name>-max-lifetime` retires
-the old one, and `kit/storetest`, the stores' conformance suite, each case
+the old one, and `app/storetest`, the stores' conformance suite, each case
 on a fresh `kit_test`) run when `KIT_TEST_POSTGRES_URL`
 or `KIT_TEST_MYSQL_URL` names a server they may create and drop a database
 and users on — CI's service containers. Every statement they send, and

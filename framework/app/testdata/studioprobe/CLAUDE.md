@@ -28,5 +28,5 @@ nor the French catalogue (`linksNoWords`).
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go test ./kit/ -run 'ImportsTheStudio' -v
+cd framework && GOWORK=off go test ./app/ -run 'ImportsTheStudio' -v
 ```

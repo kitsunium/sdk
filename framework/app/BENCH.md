@@ -1,4 +1,4 @@
-<!-- generated from framework/app/fresh_process_bench_test.go — run `cd framework && GOWORK=off go test -run='^$' -bench=FreshProcess -benchtime=200x -count=3 ./kit/` to refresh -->
+<!-- generated from framework/app/fresh_process_bench_test.go — run `cd framework && GOWORK=off go test -run='^$' -bench=FreshProcess -benchtime=200x -count=3 ./app/` to refresh -->
 # Benchmarks — `framework/app`
 
 **The conclusion first: a fresh process of the smallest kit product
@@ -58,7 +58,7 @@ anything finer on this machine. `kit startup` (kitsunium/platform#80) builds
 both trees `-trimpath` and measures a third binary beside them — the working
 tree's, copied byte for byte — so the noise floor is printed with the delta.
 Three runs of `kit startup -base b02d9574 -rounds 8 -runs 200
-./kit/testdata/cliprobe`:
+./app/testdata/cliprobe`:
 
 | Run | deps | inits | init ms (base → tree) | wall p50 ms (base → tree) | delta | noise (control − tree) |
 |---|---|---|---|---|---|---|

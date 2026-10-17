@@ -1,10 +1,12 @@
-<!-- updated: 2026-10-17T23:30:00Z -->
+<!-- updated: 2026-10-18T00:00:00Z -->
 # framework/internal/app — the implementation of framework/app
 
 Declarations (`NewService`, the generic methods of `*Service`), the runtime
 (`App`), and the product's self-description (`App.Graph`, the read-only
 `/_kit/api` surface). Moved from `kitsunium/platform/kit` into the SDK's
-framework (ADR 0147), a part of the SDK module since ADR 0162: the platform keeps a deprecated facade of aliases
+framework (ADR 0147), a part of the SDK module since ADR 0162, and named
+`framework/internal/app` since ADR 0180 step 3 (`framework/internal/kit`
+before it, its engines `<name>kit`): the platform keeps a deprecated facade of aliases
 over the SDK's, and the tools a product runs but does not link — the
 Studio's pages, the analyzer, the generator. The platform's root `CLAUDE.md`
 holds the invariants; this file maps them to files. Every one still holds
@@ -486,7 +488,7 @@ has the map): before writing something generic here, look for it there.
 
 ## Test
 
-`go test -race ./kit/` — the product under test is `product_test.go` (a shop,
+`go test -race ./app/` — the product under test is `product_test.go` (a shop,
 an audit service, and `members`: indexed accounts and sessions, the `session`
 auth handler, a mailer, a generated secret, a declared loop and a
 hand-written one; the shop's `quote` port falls back to its list price, and
@@ -561,7 +563,7 @@ rollback, a savepoint, a panic, a command's transaction and
 one database, the writer turn, the span; `store_sql_test.go` a store on the
 fake database — its index keys hashed, its history, a workflow's journal
 there —, a workflow's hooks and a watch's notice after the commit;
-`storetest_test.go` the conformance suite, `kit/storetest` — revisions
+`storetest_test.go` the conformance suite, `app/storetest` — revisions
 included —, on the three (the fake database keeps the versions' table);
 `transact_warn_internal_test.go` the two-databases warning.
 `privacy_test.go` declares `vigie`, a desk of reports and people's customers
@@ -604,7 +606,7 @@ erasure empties theirs, a trashed record keeps its person's key until its
 purge, a retention's instant comes first, `<store>-trash` at 0, the
 setting, an untrash rolled back keeping its purge, and the versions a deletion keeps — the one test that reads only
 the API before the trash. The trash's contract itself is
-`kit/storetest`'s `trash` case. `trash_view_test.go` lists the trash as the
+`app/storetest`'s `trash` case. `trash_view_test.go` lists the trash as the
 Studio does — the folk's keys in order, a page at a time, the `bin`'s passes
 keyed by their subject hidden, and the refusals —, and
 `trash_view_internal_test.go` the refusals' `CodeTrashList`.
@@ -664,7 +666,9 @@ the shop, and `subscribe`/`awaitEvent` read the live stream.
   holding a `T`, never a `*T` — `addressable` is the settable copy
   reflection changes.
 
-- **An in-package test says so in its name**: a test file that reaches kit's
-  unexported names is `package kit` and ends in `_internal_test.go`; every
-  other one is `package app_test`, which sees kit as a product does (41 and
-  65 files).
+- **An in-package test says so in its name**: a test file that reaches the
+  package's unexported names is `package app` and ends in `_internal_test.go`;
+  every other one is `package app_test`, which sees the package as a product
+  does (41 and 65 files). In an external test the package is `app`, so a
+  local variable never takes that name: the running app is `a` (or `prod`
+  where `a` is taken), as ADR 0180 step 3 renamed every one.

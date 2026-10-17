@@ -23,5 +23,5 @@ naming the import.
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go vet ./kit/config/toml/ && GOWORK=off go test ./internal/kit/ -run 'NotImportedIsRefused|WithoutItsPackageIsRefused'
+cd framework && GOWORK=off go vet ./app/config/toml/ && GOWORK=off go test ./internal/app/ -run 'NotImportedIsRefused|WithoutItsPackageIsRefused'
 ```

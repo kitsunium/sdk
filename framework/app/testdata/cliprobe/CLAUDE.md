@@ -18,12 +18,12 @@ linked: it is the measure of that ADR (its §Step 10, done).
 
 ## Rules
 
-- It stays minimal: it imports none of the subsystems (`kit/store`, `kit/queue`, `kit/workflow`, `kit/mail`, `kit/jobs`, `kit/server`, `kit/studio`, `kit/config/*`), since it declares none.
+- It stays minimal: it imports none of the subsystems (`app/store`, `app/queue`, `app/workflow`, `app/mail`, `app/jobs`, `app/server`, `app/studio`, `app/config/*`), since it declares none.
 - Its README is written by hand and says what its package comment says: an edit of one is an edit of the other.
 
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go test ./kit/ -run '^$' -bench AFreshProcess -benchtime 1x
-cd framework && GOWORK=off go test ./kit/ -run 'TheSmallestProduct' -v
+cd framework && GOWORK=off go test ./app/ -run '^$' -bench AFreshProcess -benchtime 1x
+cd framework && GOWORK=off go test ./app/ -run 'TheSmallestProduct' -v
 ```

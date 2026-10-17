@@ -42,5 +42,5 @@ held as `any`, which this package asserts back.
 ## Verify
 
 ```sh
-cd framework && GOWORK=off go vet ./internal/kit/mailengine/ && GOWORK=off go test -race ./internal/kit/mailengine/ ./internal/kit/ ./kit/ -run 'Mail|Outbox|SMTP|Transact|Subsystem|TheCore|TheSmallest|ImportsThe'
+cd framework && GOWORK=off go vet ./internal/app/mailengine/ && GOWORK=off go test -race ./internal/app/mailengine/ ./internal/app/ ./app/ -run 'Mail|Outbox|SMTP|Transact|Subsystem|TheCore|TheSmallest|ImportsThe'
 ```
