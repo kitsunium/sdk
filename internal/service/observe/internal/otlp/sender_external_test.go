@@ -7,6 +7,7 @@ package otlp_test
 import (
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -213,20 +214,53 @@ func TestAnUnusableEndpointIsRefusedAtConstruction(t *testing.T) {
 	}
 }
 
+// hungUpCollector returns the address of a collector that accepts every
+// connection and closes it before reading a byte: a request sent there never
+// gets an answer.
+//
+// It is not a closed httptest.Server: closing one frees its port, and the
+// kernel may hand that port to the next listener asked for — any parallel
+// test's server, in this process or in another the build runs beside it —
+// which then answers the request. A 200 from such a stranger made the
+// transport-fault test see a success (CI, run 39059364311). This listener
+// holds its port until the test ends, so the address cannot be anyone else's.
+func hungUpCollector(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				//: the listener was closed by the cleanup — the only way out.
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = listener.Close()
+		<-done
+	})
+	return "http://" + listener.Addr().String()
+}
+
 // TestATransportFaultIsTheTransientVerdict pins the verdict for a request that
 // never got an answer: the caller's TransportFault wrap, which carries the
 // Unavailable code a retry classifier reads.
 func TestATransportFaultIsTheTransientVerdict(t *testing.T) {
 	t.Parallel()
-	server := collector(t, http.StatusOK, nil, "")
-	endpoint := server.URL + testPath
-	server.Close()
+	endpoint := hungUpCollector(t) + testPath
 	sender, err := otlp.NewSender(&otlp.HTTPConfig{Endpoint: endpoint}, specFor(0xF1))
 	if err != nil {
 		t.Fatalf("NewSender: %v", err)
 	}
 	if verdict := sender.Post([]byte(`{}`)); !errs.HasCode(verdict, errs.Pack(0, 3, 0xF1, 3)) {
-		t.Errorf("Post to a closed collector = %v, want the caller's transient code", verdict)
+		t.Errorf("Post to a collector that hangs up = %v, want the caller's transient code", verdict)
 	}
 }
 
