@@ -24,7 +24,7 @@ const (
 	dbMigrate      = "migrate"
 )
 
-// The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+// The SQL dialects an [Engine] speaks: the framework's own names (ADR 0179 Q5), which
 // the store subsystem maps onto the SDK's.
 const (
 	// DialectPostgres is PostgreSQL.
@@ -146,7 +146,7 @@ func (s *storeCore) keep() kept { return kept{store: &s.nodeBase} }
 // module's stores. The most precise wins: a store kept by name, then its
 // service, then its module, then the default database — the one declared
 // without Keeps —, then the data directory, then memory. [InMemory] wins
-// over all of them, on the app as on a store. kit's data keys never live on
+// over all of them, on the app as on a store. The framework's data keys never live on
 // SQLite: Keeps(app.Privacy) there keeps its holds and its journal
 // ([Privacy]).
 func Keeps(things ...Keeper) DatabaseConfigurer {
@@ -156,13 +156,13 @@ func Keeps(things ...Keeper) DatabaseConfigurer {
 }
 
 // Dialect is the SQL an [Engine] speaks: [DialectPostgres], [DialectMySQL] or
-// [DialectSQLite], kit's own names (ADR 0179 Q5) — the graph names the
+// [DialectSQLite], the framework's own names (ADR 0179 Q5) — the graph names the
 // engine by it.
 type Dialect string
 
-// Migrations are migrations, kit's own [MigrationValue]s (ADR 0179 step
+// Migrations are migrations, the framework's own [MigrationValue]s (ADR 0179 step
 // 10), run when the database starts (<name>-migrate: start) or by
-// `<product> migrate up`, kit's own first, each set under its own version
+// `<product> migrate up`, the framework's own first, each set under its own version
 // table — and so its own lock. On MySQL a DDL statement commits by itself:
 // write one per migration. The store subsystem runs them: a program that
 // declares a database imports framework/app/store, as its engine module
@@ -170,7 +170,7 @@ type Dialect string
 //
 // Given to [Database], they are the product's, under schema_migrations.
 // Given to [NewModule], they are the module's (ADR 0008), for the data it
-// keeps outside kit's stores: run on the database that keeps the module,
+// keeps outside the framework's stores: run on the database that keeps the module,
 // under <module>_migrations.
 func Migrations(m ...MigrationValue) interface {
 	DatabaseConfigurer

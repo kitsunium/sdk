@@ -103,7 +103,7 @@ var (
 	epoch = time.Date(2026, time.October, 1, 9, 0, 0, 0, time.UTC)
 )
 
-// BackendConfig is where Run runs kit's stores: a name for the subtests and
+// BackendConfig is where Run runs the framework's stores: a name for the subtests and
 // the options that place the stores there.
 type BackendConfig struct {
 	// Name names the backend in the subtests.
@@ -179,7 +179,7 @@ func open(t *testing.T, b BackendConfig, name string, clocked bool) *suite {
 	t.Setenv("KIT_SMTP_URL", "")
 	t.Setenv("KIT_SECRETS", "memory")
 	t.Setenv("STORETEST_DATABASE_TIMEOUT", "1m")
-	svc := app.NewService("st-"+name, "A case of kit's store conformance suite.")
+	svc := app.NewService("st-"+name, "A case of the framework's store conformance suite.")
 	docs := svc.Store("docs", doc.key,
 		app.Unique("email", func(d doc) string { return d.Email }),
 		app.Index("team", func(d doc) []string { return d.Teams }))

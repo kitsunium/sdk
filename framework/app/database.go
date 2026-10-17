@@ -6,7 +6,7 @@ import (
 	iapp "github.com/kitsunium/sdk/framework/internal/app"
 )
 
-// The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+// The SQL dialects an [Engine] speaks: the framework's own names (ADR 0179 Q5), which
 // the store subsystem maps onto the SDK's.
 const (
 	// DialectPostgres is PostgreSQL.
@@ -18,7 +18,7 @@ const (
 )
 
 // Dialect is the SQL an [Engine] speaks: [DialectPostgres], [DialectMySQL] or
-// [DialectSQLite], kit's own names (ADR 0179 Q5) — the graph names the
+// [DialectSQLite], the framework's own names (ADR 0179 Q5) — the graph names the
 // engine by it.
 type Dialect = iapp.Dialect
 
@@ -28,7 +28,7 @@ type Dialect = iapp.Dialect
 type DatabaseURL = iapp.DatabaseURLValue
 
 // Migration is one versioned change of a database's schema and its
-// reversal, kit's own (ADR 0179 step 10): the shape the SDK's sql runs,
+// reversal, the framework's own (ADR 0179 step 10): the shape the SDK's sql runs,
 // which the store subsystem hands it.
 //
 //	app.Migration{
@@ -58,9 +58,9 @@ func Keeps(things ...Keepable) DatabaseOption {
 	return iapp.Keeps(things...)
 }
 
-// Migrations are migrations, kit's own [Migration]s (ADR 0179 step 10),
+// Migrations are migrations, the framework's own [Migration]s (ADR 0179 step 10),
 // run when the database starts (<name>-migrate: start) or by
-// `<product> migrate up`, kit's own first, each set under its own version
+// `<product> migrate up`, the framework's own first, each set under its own version
 // table — and so its own lock. On MySQL a DDL statement commits by itself:
 // write one per migration. The store subsystem runs them: a program that
 // declares a database imports framework/app/store, as its engine module
@@ -68,7 +68,7 @@ func Keeps(things ...Keepable) DatabaseOption {
 //
 // Given to [Database], they are the product's, under schema_migrations.
 // Given to [NewModule], they are the module's (ADR 0008), for the data it
-// keeps outside kit's stores: run on the database that keeps the module,
+// keeps outside the framework's stores: run on the database that keeps the module,
 // under <module>_migrations.
 func Migrations(m ...Migration) interface {
 	DatabaseOption

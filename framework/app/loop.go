@@ -7,9 +7,9 @@ import (
 	iapp "github.com/kitsunium/sdk/framework/internal/app"
 )
 
-// Loop is a declared loop of the daemon: kit owns the wait, the product owns
+// Loop is a declared loop of the daemon: the framework owns the wait, the product owns
 // the work. Its wake sources — a period, a deadline the product computes, a
-// topic — are data, so the diagram draws exactly what wakes it; kit runs it on
+// topic — are data, so the diagram draws exactly what wakes it; the framework runs it on
 // its own goroutine, one run at a time, observes every run, and restarts it
 // after a panic.
 type Loop = iapp.Loop
@@ -24,7 +24,7 @@ type Wake = iapp.WakeEvent
 type LoopOption = iapp.LoopConfigurer
 
 // Routine is a loop written by hand: a function that runs until its context
-// ends. kit starts it with the app, cancels its context on shutdown and waits
+// ends. The framework starts it with the app, cancels its context on shutdown and waits
 // for it, restarts it after an error or a panic — backing off from one second
 // to one minute — and reads its select statements to draw what it waits on.
 type Routine = iapp.Routine

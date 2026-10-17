@@ -67,7 +67,7 @@ type WrittenEvent struct {
 }
 
 // Watch is a subscription fed by stores instead of a topic: its handler is
-// told of every write kit confirms on a store whose entity holds a field
+// told of every write the framework confirms on a store whose entity holds a field
 // with its mark. [Service.Watch] declares one.
 type Watch struct {
 	nodeBase
@@ -86,7 +86,7 @@ type Watch struct {
 // marks are the marks a watch may hear.
 var marks = []Mark{Personal, Special, Moderated}
 
-// Watch declares a watch of the service: handler is told of every write kit
+// Watch declares a watch of the service: handler is told of every write the framework
 // confirms on a store whose entity holds a field that carries mark — the
 // product's stores and the other modules', never those of the module the
 // service belongs to (for a service of the product's, never the product's

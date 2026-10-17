@@ -19,7 +19,7 @@ import (
 // in studio_interface.go.
 
 // Studio is the Studio subsystem: the tool's variables and the Studio's
-// routes; nil until framework/app/studio is imported, and kit then reads
+// routes; nil until framework/app/studio is imported, and the framework then reads
 // none of the tool's variables and serves no route of the Studio.
 var Studio atomic.Pointer[StudioDriverConfig]
 
@@ -30,10 +30,10 @@ type StudioDriverConfig struct {
 	Env func(getenv func(string) string) StudioEnvValue
 	// Settings are the tool's variables as the settings of a run show them,
 	// in order, each with its value as the run resolved it and where it
-	// came from: the product's code, the environment, or kit's default.
+	// came from: the product's code, the environment, or the framework's default.
 	Settings func(getenv func(string) string, state StudioStateValue) []model.Setting
 	// Forced are the variables kit dev says it set itself for this launch,
-	// as it names them; kit labels only those it lets kit dev set.
+	// as it names them; the framework labels only those it lets kit dev set.
 	Forced func(getenv func(string) string) []string
 	// DevBuild is what kit dev said about the build it launched, nil when
 	// the process was not started by kit dev.

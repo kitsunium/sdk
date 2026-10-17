@@ -16,9 +16,9 @@ import (
 // plug names none. The values are here, the spool and the transport in
 // mail_interface.go.
 
-// The spool's refusals kit tells apart, which it words for the product.
+// The spool's refusals the framework tells apart, which it words for the product.
 const (
-	// MailRefusalNone is no refusal kit words.
+	// MailRefusalNone is no refusal the framework words.
 	MailRefusalNone MailRefusal = iota
 	// MailRefusalClosed is a spool that is closed: its mailer is not
 	// running.
@@ -32,7 +32,7 @@ const (
 
 // What a spool reports of a mail.
 const (
-	// MailEventOther is an event of the spool kit shows nothing of.
+	// MailEventOther is an event of the spool the framework shows nothing of.
 	MailEventOther MailEvent = iota
 	// MailEventQueued is a mail put in the outbox.
 	MailEventQueued
@@ -46,7 +46,7 @@ const (
 	MailEventDuplicate
 )
 
-// Mail is the mail subsystem: the outbox kit's mailers keep and the
+// Mail is the mail subsystem: the outbox the framework's mailers keep and the
 // transports that empty it; nil until framework/app/mail is imported. A
 // product that declares a mailer without it is refused at the start (ADR
 // 0179 §6).
@@ -54,7 +54,7 @@ var Mail atomic.Pointer[MailDriverConfig]
 
 // MailDriverConfig is what framework/app/mail plugs into kit: how a
 // mailer's outbox opens, the SDK's verdict on a mail, the transports a
-// mailer hands its mail to, and how kit tells the spool's refusals apart.
+// mailer hands its mail to, and how the framework tells the spool's refusals apart.
 type MailDriverConfig struct {
 	// Open opens one mailer's outbox as cfg says, closed until it runs.
 	Open func(cfg *MailSpoolConfig) (MailSpool, error)
@@ -77,14 +77,14 @@ type MailDriverConfig struct {
 	Refused func(err error, kind MailRefusal) bool
 }
 
-// MailRefusal is a refusal of the mail subsystem, as kit words it.
+// MailRefusal is a refusal of the mail subsystem, as the framework words it.
 type MailRefusal uint8
 
 // MailEvent is what a spool reports of a mail.
 type MailEvent uint8
 
 // MailSpoolConfig is one mailer's outbox: the transport each attempt runs,
-// the app's clock, what kit hears of its mails, its retries, and where it
+// the app's clock, what the framework hears of its mails, its retries, and where it
 // keeps them — a queue on the database that keeps the mailer's service, a
 // directory, or memory.
 type MailSpoolConfig struct {
@@ -130,7 +130,7 @@ type MailSpoolConfig struct {
 }
 
 // MailValue is a value of the SDK's mail package as it crosses the
-// contract: a mail.Message, or a sender's mail.Address, held as any — kit's
+// contract: a mail.Message, or a sender's mail.Address, held as any — the framework's
 // core names the SDK's mail types, plug names none.
 type MailValue struct {
 	// Value is the SDK's mail value.

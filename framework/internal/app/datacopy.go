@@ -348,7 +348,7 @@ func (c *dataCopy) verifyAll(ctx context.Context) error {
 			continue
 		}
 		if err := p.sample(ctx); err != nil {
-			return failure(CodeDataCopyDiverged, "DATA_COPY_DIVERGED", "a record copied does not open through kit", err, errs.String("table", p.name))
+			return failure(CodeDataCopyDiverged, "DATA_COPY_DIVERGED", "a record copied does not open through the framework", err, errs.String("table", p.name))
 		}
 	}
 	for i := range c.queues {

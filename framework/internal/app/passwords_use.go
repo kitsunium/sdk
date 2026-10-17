@@ -49,7 +49,7 @@ var (
 
 	// errPasswordMoved ends a write whose hash another write changed since it
 	// was read.
-	errPasswordMoved = errs.New(CodePasswordMoved, "PASSWORD_MOVED", "the password changed meanwhile", "kit: a password write found the hash changed by another write")
+	errPasswordMoved = errs.New(CodePasswordMoved, "PASSWORD_MOVED", "the password changed meanwhile", "app: a password write found the hash changed by another write")
 
 	// needsRehash is the SDK's NeedsRehash: the tests replace the hashes.
 	needsRehash = password.NeedsRehash
@@ -97,7 +97,7 @@ func (p *PasswordPolicyService[T]) Change(ctx context.Context, key string, curre
 
 // Verify reports whether password is the one of the record under key, for
 // a login, with the SDK's constant-time Verify. When the stored hash is
-// weaker than the SDK's policy now (password.NeedsRehash), kit stores it
+// weaker than the SDK's policy now (password.NeedsRehash), the framework stores it
 // again, hashed anew: the same password, so no former value. A key with no
 // record — or a record with no password yet — costs what a wrong password
 // costs, and answers false.

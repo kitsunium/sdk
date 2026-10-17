@@ -52,7 +52,7 @@ Package app — databases: the SQL engines a store can be kept on.
 
 Package app — the start's judgement of the declared databases.
 
-Package app — the interfaces of databases: the engine a connector gives, and what kit asks of it.
+Package app — the interfaces of databases: the engine a connector gives, and what the framework asks of it.
 
 Package app — the migrations a database runs, and their lock.
 
@@ -88,7 +88,7 @@ Package app — reading a record's former values.
 
 Package app — the history as the graph and the Studio show it.
 
-Package app — what kit's own writes mean to the history.
+Package app — what the framework's own writes mean to the history.
 
 Package app — legal holds: records kept whatever their retention says.
 
@@ -104,7 +104,7 @@ Package app — how the source endpoint opens a file on Windows: the link itself
 
 Package app — jobs: scheduled work run by the daemon's loop.
 
-Package app — the privacy journal: what kit did to personal data, and why.
+Package app — the privacy journal: what the framework did to personal data, and why.
 
 Package app — idempotency keys and their leases.
 
@@ -152,11 +152,11 @@ Package app — the warnings for endpoints that set passwords outside a policy.
 
 Package app — ports: an operation a service needs and does not implement.
 
-Package app — privacy: kit's own service for holds and the journal.
+Package app — privacy: the framework's own service for holds and the journal.
 
 Package app — erasure: a record's personal data removed as its retention would.
 
-Package app — export: a person's data as kit gives it back.
+Package app — export: a person's data as the framework gives it back.
 
 Package app — a store's personal data as the graph shows it.
 
@@ -220,7 +220,7 @@ Package app — the current user outside Windows: the process's UID, read from t
 
 Package app — the current user on Windows: its SID, from os/user, which reads the process token there without cgo.
 
-Package app — sealing at rest: members sealed where kit keeps them.
+Package app — sealing at rest: members sealed where the framework keeps them.
 
 Package app — where the data keys are, against what they seal.
 
@@ -232,7 +232,7 @@ Package app — messages at rest: a queue's members sealed.
 
 Package app — a store that seals: its records as they rest.
 
-Package app — a store that seals, as kit's port sees it.
+Package app — a store that seals, as the framework's port sees it.
 
 Package app — secrets: the values the product declares and the operator provides.
 
@@ -244,7 +244,7 @@ Package app — services: a bounded context and the building blocks it owns.
 
 Package app — settings: a value the environment gives a service.
 
-Package app — the interfaces of settings: the values a setting holds, and what kit reads of a declaration.
+Package app — the interfaces of settings: the values a setting holds, and what the framework reads of a declaration.
 
 Package app — frontends: static assets the product serves.
 
@@ -254,7 +254,7 @@ Package app — the engines a store runs on: memory, files or a database.
 
 Package app — stores on SQL: the SDK's document store over a database.
 
-Package app — kit's own migrations on a database.
+Package app — the framework's own migrations on a database.
 
 Package app — telemetry: the numbers a product reports, exported on a private socket when the deployment asks for them (ADR 0149).
 
@@ -272,7 +272,7 @@ Package app — watches: how a module hears the writes of a product's marked fie
 
 Package app — a watch in a running app: its queue and its consumer.
 
-Package app — the sentences kit says: English from its own table, the languages after it from framework/app/studio's catalogues.
+Package app — the sentences the framework says: English from its own table, the languages after it from framework/app/studio's catalogues.
 
 Package app — workflows: a state machine over the entities of one store.
 
@@ -705,7 +705,7 @@ Code `0.4.2.79`
 const CodeDataCopyDiverged errs.Code = 262736
 ```
 
-CodeDataCopyDiverged reports a data copy whose fingerprints differ on both sides of a table, or whose records do not open through kit once copied: the copy's transaction is rolled back, and the first key that differs is named.
+CodeDataCopyDiverged reports a data copy whose fingerprints differ on both sides of a table, or whose records do not open through the framework once copied: the copy's transaction is rolled back, and the first key that differs is named.
 
 Code `0.4.2.80`
 
@@ -885,7 +885,7 @@ Code `0.4.2.21`
 const CodeMailUndecodable errs.Code = 262678
 ```
 
-Deprecated: kit no longer returns it. The outbox is the SDK's mail spool, which dead-letters a record that does not decode itself (MessageUndecodable, in pkg/v1/app/mail/spool).
+Deprecated: the framework no longer returns it. The outbox is the SDK's mail spool, which dead-letters a record that does not decode itself (MessageUndecodable, in pkg/v1/app/mail/spool).
 
 Code `0.4.2.22`
 
@@ -1083,7 +1083,7 @@ Code `0.4.2.60`
 const CodeSealErased errs.Code = 262726
 ```
 
-The signals kit ends one of its own steps with and catches itself — a caller never receives one —, typed when the SDK made rule 2 a gate (make guard), where they had been stdlib errors.
+The signals the framework ends one of its own steps with and catches itself — a caller never receives one —, typed when the SDK made rule 2 a gate (make guard), where they had been stdlib errors.
 
 Code `0.4.2.70`
 
@@ -1434,84 +1434,84 @@ Special marks a field of GDPR art. 9(1) or art. 10.
 const WireCanceled = "canceled"
 ```
 
-The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
+The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
 
 <a name="WireConflict"></a>
 ```go
 const WireConflict = "conflict"
 ```
 
-The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
+The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
 
 <a name="WireForbidden"></a>
 ```go
 const WireForbidden = "permission_denied"
 ```
 
-The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
+The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
 
 <a name="WireInternal"></a>
 ```go
 const WireInternal = "internal"
 ```
 
-The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
+The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
 
 <a name="WireInvalid"></a>
 ```go
 const WireInvalid = "invalid_argument"
 ```
 
-The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
+The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
 
 <a name="WireNotFound"></a>
 ```go
 const WireNotFound = "not_found"
 ```
 
-The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
+The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
 
 <a name="WireRateLimited"></a>
 ```go
 const WireRateLimited = "rate_limited"
 ```
 
-The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
+The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
 
 <a name="WireTimeout"></a>
 ```go
 const WireTimeout = "deadline_exceeded"
 ```
 
-The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
+The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
 
 <a name="WireTooLarge"></a>
 ```go
 const WireTooLarge = "too_large"
 ```
 
-The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
+The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
 
 <a name="WireUnauth"></a>
 ```go
 const WireUnauth = "unauthenticated"
 ```
 
-The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
+The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
 
 <a name="WireUnavailable"></a>
 ```go
 const WireUnavailable = "unavailable"
 ```
 
-The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
+The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
 
 <a name="WireUnsupported"></a>
 ```go
 const WireUnsupported = "unsupported_media_type"
 ```
 
-The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
+The wire codes a caller branches on: an [Error](#Error)'s Code, snake\_case, kept byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire\*, not Code\*, because Code\* names a dotted-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
 
 ## Variables
 
@@ -1541,7 +1541,7 @@ PerUID is the current user: one process per user of the machine (its UID on Unix
 var Privacy *Service
 ```
 
-Privacy is kit's own service: the data keys, the legal holds and the privacy journal of an app that keeps personal data or seals what it keeps. kit mounts a copy of it — named kit.privacy, a name no service of a product can take — in every app whose stores keep personal data or declare a retention, or that keeps sealed values at rest, before the product's services. Its stores stay in the data directory unless the product places them (ADR 0004): app.Keeps(app.Privacy). On a SQLite database its data keys stay in the data directory all the same — a key is written apart from every transaction, and the file's one writer may be held by the transaction of the write that needs it —; its holds and its journal go there. A product never mounts it itself.
+Privacy is the framework's own service: the data keys, the legal holds and the privacy journal of an app that keeps personal data or seals what it keeps. The framework mounts a copy of it — named kit.privacy, a name no service of a product can take — in every app whose stores keep personal data or declare a retention, or that keeps sealed values at rest, before the product's services. Its stores stay in the data directory unless the product places them (ADR 0004): app.Keeps(app.Privacy). On a SQLite database its data keys stay in the data directory all the same — a key is written apart from every transaction, and the file's one writer may be held by the transaction of the write that needs it —; its holds and its journal go there. A product never mounts it itself.
 
 <a name="After"></a>
 ## func [After](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/request.go>)
@@ -1588,7 +1588,7 @@ Analyzer runs fn in the background once the product serves, in dev and when KIT\
 func Anonymise[T any](fn func(*T)) StoreConfigurer
 ```
 
-Anonymise says what an erased record keeps: fn runs first, and generalises into unclassified fields — a birth date to its year, an address to its region; then kit clears the rest. kit cannot prove that what remains identifies no one: by declaring the function, the product asserts it.
+Anonymise says what an erased record keeps: fn runs first, and generalises into unclassified fields — a birth date to its year, an address to its region; then the framework clears the rest. The framework cannot prove that what remains identifies no one: by declaring the function, the product asserts it.
 
 <a name="AnyUser"></a>
 ## func [AnyUser](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/expose.go>)
@@ -1688,7 +1688,7 @@ IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller 
 func Catalog() []model.Mechanic
 ```
 
-Catalog lists the generic mechanics kit offers: the building blocks a node composes rather than implements, each one backed by an SDK package. It is part of every graph, so the Studio — and an AI agent reading the graph — knows what can be added to a product and the exact code that adds it.
+Catalog lists the generic mechanics the framework offers: the building blocks a node composes rather than implements, each one backed by an SDK package. It is part of every graph, so the Studio — and an AI agent reading the graph — knows what can be added to a product and the exact code that adds it.
 
 <a name="ClearCookie"></a>
 ## func [ClearCookie](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/request.go>)
@@ -1724,7 +1724,7 @@ Clock makes the app read and wait on c instead of the system clock: a test drive
 func ConfigFiles(fsys fs.FS) AppConfigurer
 ```
 
-ConfigFiles gives kit the product's configuration files: config/config.\<ext>, which every environment reads, and config/\<env>.\<ext>, the environment's own — \<env> being KIT\_ENV as written, dev when kit dev runs the product — in JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of the settings to their values; it never holds a secret, and a key no service declares stops the start. The files belong in the binary:
+ConfigFiles gives the framework the product's configuration files: config/config.\<ext>, which every environment reads, and config/\<env>.\<ext>, the environment's own — \<env> being KIT\_ENV as written, dev when kit dev runs the product — in JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of the settings to their values; it never holds a secret, and a key no service declares stops the start. The files belong in the binary:
 
 ```
 //go:embed config
@@ -1839,7 +1839,7 @@ EnableServer makes an app in the server profile serve HTTP. framework/app/server
 func EnableStores()
 ```
 
-EnableStores makes kit's own store code reachable: what kit mounts, starts and answers for the stores and databases a product declares. framework/app/store calls it as it is imported; a product never does.
+EnableStores makes the framework's own store code reachable: what the framework mounts, starts and answers for the stores and databases a product declares. framework/app/store calls it as it is imported; a product never does.
 
 <a name="EnableStudio"></a>
 ## func [EnableStudio](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/introspect.go>)
@@ -1868,7 +1868,7 @@ func Erase(ctx context.Context, reason string, ids ...string) (Erasure, error)
 
 Erase erases every record whose subject is one of ids, in every store of the app, as its retention would — or deletes it where the store says app.DeleteOnErasure — and folds the stores it wrote, so that what it overwrote leaves their files. A held record is left in place, and the result says so: it lists, per store, what was erased, deleted and held. Telling the recipients (GDPR art. 19) is the product's job; the register lists them. reason is journaled.
 
-What kit seals at rest, it erases cryptographically too (ADR 0006 §4): a held record is moved under a data key of its own, then the data key of each identity, and every data key the erased records were sealed under, is destroyed — every copy of what they sealed stops opening: a store's former values, a dead letter, a backup. An erasure that failed in a store destroys nothing: its retry does.
+What the framework seals at rest, it erases cryptographically too (ADR 0006 §4): a held record is moved under a data key of its own, then the data key of each identity, and every data key the erased records were sealed under, is destroyed — every copy of what they sealed stops opening: a store's former values, a dead letter, a backup. An erasure that failed in a store destroys nothing: its retry does.
 
 <a name="EraseAfter"></a>
 ## func [EraseAfter](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/retention.go>)
@@ -1952,7 +1952,7 @@ IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller 
 func Generated(bytes int) SecretConfigurer
 ```
 
-Generated makes the secret kit's to make: versions of bytes random bytes — 32 for a key — the first made on the first start, a new one every 30 days, the last 3 kept, unless [RotateEvery](#RotateEvery) and [KeepVersions](#KeepVersions) say otherwise.
+Generated makes the secret the framework's to make: versions of bytes random bytes — 32 for a key — the first made on the first start, a new one every 30 days, the last 3 kept, unless [RotateEvery](#RotateEvery) and [KeepVersions](#KeepVersions) say otherwise.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -2037,7 +2037,7 @@ IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller 
 func Keeps(things ...Keeper) DatabaseConfigurer
 ```
 
-Keeps says what the database keeps: a service's stores, a store, a module's stores. The most precise wins: a store kept by name, then its service, then its module, then the default database — the one declared without Keeps —, then the data directory, then memory. [InMemory](#InMemory) wins over all of them, on the app as on a store. kit's data keys never live on SQLite: Keeps(app.Privacy) there keeps its holds and its journal ([Privacy](#Privacy)).
+Keeps says what the database keeps: a service's stores, a store, a module's stores. The most precise wins: a store kept by name, then its service, then its module, then the default database — the one declared without Keeps —, then the data directory, then memory. [InMemory](#InMemory) wins over all of them, on the app as on a store. The framework's data keys never live on SQLite: Keeps(app.Privacy) there keeps its holds and its journal ([Privacy](#Privacy)).
 
 <a name="Listen"></a>
 ## func [Listen](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/config.go>)
@@ -2104,9 +2104,9 @@ IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller 
 func Migrations(m ...MigrationValue) interface{DatabaseConfigurer; ModuleConfigurer}
 ```
 
-Migrations are migrations, kit's own \[MigrationValue]s (ADR 0179 step 10), run when the database starts (\<name>-migrate: start) or by \`\<product> migrate up\`, kit's own first, each set under its own version table — and so its own lock. On MySQL a DDL statement commits by itself: write one per migration. The store subsystem runs them: a program that declares a database imports framework/app/store, as its engine module does.
+Migrations are migrations, the framework's own \[MigrationValue]s (ADR 0179 step 10), run when the database starts (\<name>-migrate: start) or by \`\<product> migrate up\`, the framework's own first, each set under its own version table — and so its own lock. On MySQL a DDL statement commits by itself: write one per migration. The store subsystem runs them: a program that declares a database imports framework/app/store, as its engine module does.
 
-Given to [Database](#Database), they are the product's, under schema\_migrations. Given to [NewModule](#NewModule), they are the module's (ADR 0008), for the data it keeps outside kit's stores: run on the database that keeps the module, under \<module>\_migrations.
+Given to [Database](#Database), they are the product's, under schema\_migrations. Given to [NewModule](#NewModule), they are the module's (ADR 0008), for the data it keeps outside the framework's stores: run on the database that keeps the module, under \<module>\_migrations.
 
 <a name="MinLength"></a>
 ## func [MinLength](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/passwords.go>)
@@ -2232,7 +2232,7 @@ NewMailer is a mailer no service declares yet, with the default attempts: [Servi
 func NewModule(name string, doc string, parts ...ModuleConfigurer) *Module
 ```
 
-NewModule declares a module named name — lower-case letters, digits and dashes, starting with a letter; "kit", "external" and "schema" are kit's — that doc describes, made of parts: its services, which it adopts, the modules it requires ([Requires](#Requires)), and the migrations of the data it keeps outside kit's stores ([Migrations](#Migrations)), run on the database that keeps it. Declare it as a package-level variable of the one package a product imports:
+NewModule declares a module named name — lower-case letters, digits and dashes, starting with a letter; "kit", "external" and "schema" are the framework's — that doc describes, made of parts: its services, which it adopts, the modules it requires ([Requires](#Requires)), and the migrations of the data it keeps outside the framework's stores ([Migrations](#Migrations)), run on the database that keeps it. Declare it as a package-level variable of the one package a product imports:
 
 ```
 var Module = app.NewModule("moderation",
@@ -2312,7 +2312,7 @@ NewStoreService is a store no service declares yet, keying its entities with key
 func NewTicker(ctx context.Context, d time.Duration) clock.Ticker
 ```
 
-NewTicker is a ticker of period d on the app's clock, for a loop written by hand ([Service.Go](#Service.Go)): a test's manual clock drives it like every timer kit runs itself, where a time.Ticker would tick on the wall clock whatever the test does. It panics on a non-positive d, as time.NewTicker does.
+NewTicker is a ticker of period d on the app's clock, for a loop written by hand ([Service.Go](#Service.Go)): a test's manual clock drives it like every timer the framework runs itself, where a time.Ticker would tick on the wall clock whatever the test does. It panics on a non-positive d, as time.NewTicker does.
 
 <a name="NewTopicService"></a>
 ## func [NewTopicService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/topic.go>)
@@ -2368,7 +2368,7 @@ NotFound reports that the addressed resource does not exist (404).
 func NotReused(n int) PasswordConfigurer
 ```
 
-NotReused refuses a password that the current hash, or any of the n former ones, verifies — n from 1 to 100. It is a compliance policy, off by default: PCI DSS asks for it, OWASP ASVS 4.0.3 asks most products not to impose it. kit keeps the field's last n hashes, so it implies history=n, and a tag whose history is smaller than n is refused.
+NotReused refuses a password that the current hash, or any of the n former ones, verifies — n from 1 to 100. It is a compliance policy, off by default: PCI DSS asks for it, OWASP ASVS 4.0.3 asks most products not to impose it. The framework keeps the field's last n hashes, so it implies history=n, and a tag whose history is smaller than n is refused.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -2404,7 +2404,7 @@ Elsewhere the mount is as if it had not been given, its [Prefix](#Prefix) and it
 func Optional() SecretConfigurer
 ```
 
-Optional makes a provided secret one the product can do without — the key of a feature that stays off while nobody gives it. A start where it is set nowhere goes on; [Secret.Present](#Secret.Present) says whether it is set now, and a use of it while it is absent — [Secret.Value](#Secret.Value), Seal, Open, Sign or Verify — answers an error errs.HasCode matches with [CodeSecretMissing](#CodeSecretMissing). It is read where it lives at every use, as every provided secret is: given later — \`secrets set\` in the environment's store, a new content in the file its \_FILE variable names —, it is found at its next use. A generated secret is kit's to make and never absent: Optional with [Generated](#Generated) is refused.
+Optional makes a provided secret one the product can do without — the key of a feature that stays off while nobody gives it. A start where it is set nowhere goes on; [Secret.Present](#Secret.Present) says whether it is set now, and a use of it while it is absent — [Secret.Value](#Secret.Value), Seal, Open, Sign or Verify — answers an error errs.HasCode matches with [CodeSecretMissing](#CodeSecretMissing). It is read where it lives at every use, as every provided secret is: given later — \`secrets set\` in the environment's store, a new content in the file its \_FILE variable names —, it is found at its next use. A generated secret is the framework's to make and never absent: Optional with [Generated](#Generated) is refused.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -2506,7 +2506,7 @@ IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller 
 func ReadModel() StoreConfigurer
 ```
 
-ReadModel marks a store as derived from others (ADR 0005): written by projections — the subscriptions that keep it from the write side's events —, read by queries. It changes nothing of how the store runs; the diagram draws it on its domain's read side, and the static analysis warns of a read model written by anything but a subscription. kit's topics are queues, not logs: a read model cannot be replayed from its events, and one fed by a topic lags the commands that feed it — a query that must read its own writes reads the write side.
+ReadModel marks a store as derived from others (ADR 0005): written by projections — the subscriptions that keep it from the write side's events —, read by queries. It changes nothing of how the store runs; the diagram draws it on its domain's read side, and the static analysis warns of a read model written by anything but a subscription. The framework's topics are queues, not logs: a read model cannot be replayed from its events, and one fed by a topic lags the commands that feed it — a query that must read its own writes reads the write side.
 
 ```
 var Summaries = Service.Store("summaries", Summary.Key, app.ReadModel())
@@ -2581,9 +2581,9 @@ Requires says the module needs other: an app that mounts the module and not othe
 func RetentionByProduct(limits string) StoreConfigurer
 ```
 
-RetentionByProduct says the product keeps the store's retention itself: its own code erases and deletes what it no longer needs — a record whose life the product's own rules end, a lifecycle kit cannot read from the entity. limits says, in the product's words, for how long and how, which the register publishes as the store's time limits (GDPR art. 30(1)(f)); "" says only that the product keeps them.
+RetentionByProduct says the product keeps the store's retention itself: its own code erases and deletes what it no longer needs — a record whose life the product's own rules end, a lifecycle the framework cannot read from the entity. limits says, in the product's words, for how long and how, which the register publishes as the store's time limits (GDPR art. 30(1)(f)); "" says only that the product keeps them.
 
-kit then runs no retention for the store, and warns of neither a missing retention nor a missing subject. Its classified fields keep every other promise: sealed at rest, never shown, exported with their person — when the store names one — and erased by app.Erase and Store.Erase. It goes with app.Purpose, app.HeldUntil, app.Anonymise and app.DeleteOnErasure; with app.EraseAfter, app.EraseAt, app.DeleteAfter or app.DeleteAt it is refused: a store's retention is kit's or the product's, never both.
+The framework then runs no retention for the store, and warns of neither a missing retention nor a missing subject. Its classified fields keep every other promise: sealed at rest, never shown, exported with their person — when the store names one — and erased by app.Erase and Store.Erase. It goes with app.Purpose, app.HeldUntil, app.Anonymise and app.DeleteOnErasure; with app.EraseAfter, app.EraseAt, app.DeleteAfter or app.DeleteAt it is refused: a store's retention is the framework's or the product's, never both.
 
 <a name="Revisions"></a>
 ## func [Revisions](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/revisions.go>)
@@ -2603,7 +2603,7 @@ page, err := Pages.Restore(ctx, id, revs[3].Number)              // a new versio
 page, err = Pages.Restore(ctx, id, revs[3].Number, "/title")     // the title only
 ```
 
-A store with Revisions(n) holds up to n+1 times its records: in memory with the store in the data directory, in the table \<table>\_\_\_vs on a database, which kit's migrations create.
+A store with Revisions(n) holds up to n+1 times its records: in memory with the store in the data directory, in the table \<table>\_\_\_vs on a database, which the framework's migrations create.
 
 <a name="Root"></a>
 ## func [Root](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/static.go>)
@@ -2623,7 +2623,7 @@ IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller 
 func RotateEvery(d time.Duration) SecretConfigurer
 ```
 
-RotateEvery is how often kit makes a new version of a generated secret.
+RotateEvery is how often the framework makes a new version of a generated secret.
 
 IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
@@ -2661,9 +2661,9 @@ Set gives the setting name a value in code, over the environment and the files: 
 func SetCookie(ctx context.Context, c *http.Cookie)
 ```
 
-SetCookie adds a Set-Cookie header to the HTTP response of the endpoint ctx serves. kit fills what a cookie left zero with safe defaults — Path "/", HttpOnly, SameSite Lax, and Secure outside dev — so a session cookie is hardened unless the code says otherwise. In an in-process [EndpointService.Call](#EndpointService.Call) there is no response: the cookie is dropped.
+SetCookie adds a Set-Cookie header to the HTTP response of the endpoint ctx serves. The framework fills what a cookie left zero with safe defaults — Path "/", HttpOnly, SameSite Lax, and Secure outside dev — so a session cookie is hardened unless the code says otherwise. In an in-process [EndpointService.Call](#EndpointService.Call) there is no response: the cookie is dropped.
 
-HttpOnly is always set, and Secure always outside dev (and in dev for SameSite=None, which browsers require): a boolean has no "unset" a default could fill, and kit chooses the hardened reading. A cookie set more than once in one response keeps its last value, and cookies set before an error are sent with the error — clearing a stale session on a 401 works.
+HttpOnly is always set, and Secure always outside dev (and in dev for SameSite=None, which browsers require): a boolean has no "unset" a default could fill, and the framework chooses the hardened reading. A cookie set more than once in one response keeps its last value, and cookies set before an error are sent with the error — clearing a stale session on a 401 works.
 
 <a name="Singleton"></a>
 ## func [Singleton](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/app_profiles.go>)
@@ -2784,9 +2784,9 @@ err := app.Transact(ctx, func(ctx context.Context) error {
 
 A transaction belongs to one database: the one its first store call reaches — at its first call on a database, at its first write on the data directory, which counts as one, memory with it. Inside it, a store of another database is read as usual; writing one is refused ([Invalid](#Invalid), [CodeTransactionSpan](#CodeTransactionSpan)). A Transact inside another is a savepoint: its failure undoes its own writes, and the outer transaction goes on if its caller handles the error.
 
-What leaves the process waits for the outermost commit: a topic's publish, a queued command's dispatch, a mail — whose outbox ID [Mailer.Send](#Mailer.Send) returns at once —, a watch's notice, the store's write hooks that wake workflows and loops, a workflow's OnTransition hooks. Each is checked when it is made, so a caller's mistake returns to the caller; a rollback drops them, and a savepoint's rollback its own. A publish, a dispatch, a mail or a notice whose queue lives on the transaction's database — the one that keeps the service of its subscription, command, mailer or watch, by a store's rules — is written in the transaction, just before it commits, a mail sealed under kit's data-key: a queue that refuses it fails the transaction, every write undone, and Transact returns the refusal. Every other one leaves after the commit: one a queue refuses then is logged and reported, and the commit stands; a process that dies between the commit and the release loses what was held.
+What leaves the process waits for the outermost commit: a topic's publish, a queued command's dispatch, a mail — whose outbox ID [Mailer.Send](#Mailer.Send) returns at once —, a watch's notice, the store's write hooks that wake workflows and loops, a workflow's OnTransition hooks. Each is checked when it is made, so a caller's mistake returns to the caller; a rollback drops them, and a savepoint's rollback its own. A publish, a dispatch, a mail or a notice whose queue lives on the transaction's database — the one that keeps the service of its subscription, command, mailer or watch, by a store's rules — is written in the transaction, just before it commits, a mail sealed under the framework's data-key: a queue that refuses it fails the transaction, every write undone, and Transact returns the refusal. Every other one leaves after the commit: one a queue refuses then is logged and reported, and the commit stands; a process that dies between the commit and the release loses what was held.
 
-On a database the transaction is the database's own, at its default isolation. On the data directory and in memory kit keeps its own: it takes the data's writer turn — one transaction at a time; a write outside any waits for it, and such writes share the turn among themselves —, its writes land at once, and an error writes each entity's previous value back, newest first. It is atomic against an error, not against a crash, and a reader may see a write before its commit. A store kept in memory by [InMemory](#InMemory) — a cache — is in no transaction: its writes land and stay.
+On a database the transaction is the database's own, at its default isolation. On the data directory and in memory the framework keeps its own: it takes the data's writer turn — one transaction at a time; a write outside any waits for it, and such writes share the turn among themselves —, its writes land at once, and an error writes each entity's previous value back, newest first. It is atomic against an error, not against a crash, and a reader may see a write before its commit. A store kept in memory by [InMemory](#InMemory) — a cache — is in no transaction: its writes land and stay.
 
 A command's handler runs in one already ([NoTransaction](#NoTransaction) opts out), and so does a workflow's transition.
 
@@ -2894,7 +2894,7 @@ type ActivityHandler struct{}
 <a name="AnalyzeFunc"></a>
 ## type [AnalyzeFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/app_analysis.go>)
 
-AnalyzeFunc reads the product's source — the Go module rooted at dir, and the packages that declare the modules it mounts — into a graph the runtime merges into its own: the edges found in handler bodies, each function's steps. The framework links no analyzer (ADR 0147 §1): the platform's kit tool gives one, in dev, through [Analyzer](#Analyzer).
+AnalyzeFunc reads the product's source — the Go module rooted at dir, and the packages that declare the modules it mounts — into a graph the runtime merges into its own: the edges found in handler bodies, each function's steps. The framework links no analyzer (ADR 0147 §1): the platform's former runtime tool gives one, in dev, through [Analyzer](#Analyzer).
 
 ```go
 type AnalyzeFunc func(ctx context.Context, dir string, modules []string) (*model.Graph, error)
@@ -2949,7 +2949,7 @@ Main is the whole main function of a product:
 func main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }
 ```
 
-It understands ten commands, so every kit binary can describe itself, be probed, say its configuration, manage its secrets, migrate its databases, answer for the personal data it keeps, replay what its watches hear and copy its data directory into a database without a shell or another tool in its image:
+It understands ten commands, so every binary of the framework can describe itself, be probed, say its configuration, manage its secrets, migrate its databases, answer for the personal data it keeps, replay what its watches hear and copy its data directory into a database without a shell or another tool in its image:
 
 ```
 serve        run the product (the default)
@@ -2986,7 +2986,7 @@ Name returns the product name.
 func (*App) Records(store string) (RecordsService, error)
 ```
 
-Records returns the untyped port to the records of the store whose node ID is store: what kit's export and erasure run on, and what a module reads and erases through. A store the app does not mount is a [NotFound](#NotFound) error.
+Records returns the untyped port to the records of the store whose node ID is store: what the framework's export and erasure run on, and what a module reads and erases through. A store the app does not mount is a [NotFound](#NotFound) error.
 
 <a name="App.Run"></a>
 ### func \(App\) [Run](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/app.go>)
@@ -3057,7 +3057,7 @@ type Me struct{ Roles []string }
 func (m Me) Attrs() []authz.Attr { return []authz.Attr{authz.AttrStrings("roles", m.Roles...)} }
 ```
 
-kit calls the caller a principal: in kit, a subject is the person personal data is about (ADR 0006).
+The framework calls the caller a principal: in the framework, a subject is the person personal data is about (ADR 0006).
 
 ```go
 type AttrsProvider interface {
@@ -3352,12 +3352,12 @@ Error lists every problem the start found, one per line.
 func (*DiagnosticsError) Unwrap() error
 ```
 
-Unwrap is what the refusal is, when kit has a code for it: with packages in Missing, an error carrying [CodeSubsystemMissing](#CodeSubsystemMissing) (ADR 0179 §6), which errs.HasCode reads through the refusal; nil otherwise.
+Unwrap is what the refusal is, when the framework has a code for it: with packages in Missing, an error carrying [CodeSubsystemMissing](#CodeSubsystemMissing) (ADR 0179 §6), which errs.HasCode reads through the refusal; nil otherwise.
 
 <a name="Dialect"></a>
 ## type [Dialect](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/database.go>)
 
-Dialect is the SQL an [Engine](#Engine) speaks: [DialectPostgres](#DialectPostgres), [DialectMySQL](#DialectMySQL) or [DialectSQLite](#DialectSQLite), kit's own names (ADR 0179 Q5) — the graph names the engine by it.
+Dialect is the SQL an [Engine](#Engine) speaks: [DialectPostgres](#DialectPostgres), [DialectMySQL](#DialectMySQL) or [DialectSQLite](#DialectSQLite), the framework's own names (ADR 0179 Q5) — the graph names the engine by it.
 
 ```go
 type Dialect string
@@ -3425,7 +3425,7 @@ Call runs the endpoint in-process, from another building block: the same validat
 <a name="Engine"></a>
 ## type [Engine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/database_interface.go>)
 
-Engine is an SQL engine a database runs on. An engine module returns one — github.com/kitsunium/sdk/framework/connectors/postgres, …/mysql, …/sqlite —; kit calls it when the database starts. Like an SDK port, it grows by sibling interfaces, never by a method.
+Engine is an SQL engine a database runs on. An engine module returns one — github.com/kitsunium/sdk/framework/connectors/postgres, …/mysql, …/sqlite —; the framework calls it when the database starts. Like an SDK port, it grows by sibling interfaces, never by a method.
 
 ```go
 type Engine interface {
@@ -3686,7 +3686,7 @@ type ListenerConfigurer interface {
 <a name="LockWaiter"></a>
 ## type [LockWaiter](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/database_interface.go>)
 
-LockWaiter is an [Engine](#Engine) whose connections wait a bounded time for a lock another connection holds — SQLite's busy timeout —, a sibling of Engine (ADR 0178 C2). kit opens such an engine's pool with OpenWaiting instead of Open, and gives it a wait under \<name>-timeout, so that a lost race on the lock comes back as the engine's refusal before the call's own deadline. An engine that does not implement it keeps its own wait.
+LockWaiter is an [Engine](#Engine) whose connections wait a bounded time for a lock another connection holds — SQLite's busy timeout —, a sibling of Engine (ADR 0178 C2). The framework opens such an engine's pool with OpenWaiting instead of Open, and gives it a wait under \<name>-timeout, so that a lost race on the lock comes back as the engine's refusal before the call's own deadline. An engine that does not implement it keeps its own wait.
 
 ```go
 type LockWaiter interface {
@@ -3708,7 +3708,7 @@ OpenWaiting opens the pool url names, as Open does, its connections waiting wait
 <a name="Loop"></a>
 ## type [Loop](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/loop.go>)
 
-Loop is a declared loop of the daemon: kit owns the wait, the product owns the work. Its wake sources — a period, a deadline the product computes, a topic — are data, so the diagram draws exactly what wakes it; kit runs it on its own goroutine, one run at a time, observes every run, and restarts it after a panic.
+Loop is a declared loop of the daemon: the framework owns the wait, the product owns the work. Its wake sources — a period, a deadline the product computes, a topic — are data, so the diagram draws exactly what wakes it; the framework runs it on its own goroutine, one run at a time, observes every run, and restarts it after a panic.
 
 ```go
 type Loop struct{}
@@ -3840,7 +3840,7 @@ type MigrationStep func(ctx context.Context, ex MigrationExecutor) error
 <a name="MigrationValue"></a>
 ## type [MigrationValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/migration.go>)
 
-MigrationValue is one versioned change of a database's schema and its reversal, kit's own (ADR 0179 step 10): the shape the SDK's sql runs, which the store subsystem hands it.
+MigrationValue is one versioned change of a database's schema and its reversal, the framework's own (ADR 0179 step 10): the shape the SDK's sql runs, which the store subsystem hands it.
 
 ```
 app.Migration{
@@ -3896,7 +3896,7 @@ Prefix is where the app running the module serves its routes — "/\<name>/" unl
 <a name="ModuleConfigurer"></a>
 ## type [ModuleConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/module.go>)
 
-ModuleConfigurer is what a module is made of: its services, the modules it requires ([Requires](#Requires)), and the migrations of the data it keeps outside kit's stores ([Migrations](#Migrations)).
+ModuleConfigurer is what a module is made of: its services, the modules it requires ([Requires](#Requires)), and the migrations of the data it keeps outside the framework's stores ([Migrations](#Migrations)).
 
 ```go
 type ModuleConfigurer interface {
@@ -3918,7 +3918,7 @@ type MountConfigurer interface {
 <a name="Operation"></a>
 ## type [Operation](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/operation.go>)
 
-Operation takes a typed request and answers a typed response: an endpoint, a port — and, with ADR 0005, a command or a query. It is what [Fallback](#Fallback) and [Bind](#Bind) give a port, and what [Replace](#Replace) replaces in a test; a request or a response of other types does not compile. Its methods are unexported: only kit implements it.
+Operation takes a typed request and answers a typed response: an endpoint, a port — and, with ADR 0005, a command or a query. It is what [Fallback](#Fallback) and [Bind](#Bind) give a port, and what [Replace](#Replace) replaces in a test; a request or a response of other types does not compile. Its methods are unexported: only the framework implements it.
 
 Every operation is a node of the graph, and runs in a span of its own through its whole pipeline — authentication, validation, policies, the Studio's mocks — whoever calls it.
 
@@ -3988,7 +3988,7 @@ Set sets the password of the record under key — a reset flow, behind a reset t
 func (*PasswordPolicyService) Verify(ctx context.Context, key string, password []byte) (bool, error)
 ```
 
-Verify reports whether password is the one of the record under key, for a login, with the SDK's constant-time Verify. When the stored hash is weaker than the SDK's policy now (password.NeedsRehash), kit stores it again, hashed anew: the same password, so no former value. A key with no record — or a record with no password yet — costs what a wrong password costs, and answers false.
+Verify reports whether password is the one of the record under key, for a login, with the SDK's constant-time Verify. When the stored hash is weaker than the SDK's policy now (password.NeedsRehash), the framework stores it again, hashed anew: the same password, so no former value. A key with no record — or a record with no password yet — costs what a wrong password costs, and answers false.
 
 <a name="PersonalData"></a>
 ## type [PersonalData](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/privacy_export.go>)
@@ -4164,7 +4164,7 @@ type RevisionEvent[T any] struct {
 <a name="Routine"></a>
 ## type [Routine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/loop.go>)
 
-Routine is a loop written by hand: a function that runs until its context ends. kit starts it with the app, cancels its context on shutdown and waits for it, restarts it after an error or a panic — backing off from one second to one minute — and reads its select statements to draw what it waits on.
+Routine is a loop written by hand: a function that runs until its context ends. The framework starts it with the app, cancels its context on shutdown and waits for it, restarts it after an error or a panic — backing off from one second to one minute — and reads its select statements to draw what it waits on.
 
 ```go
 type Routine struct{}
@@ -4182,7 +4182,7 @@ type ScopeValue struct{}
 <a name="Secret"></a>
 ## type [Secret](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/secret.go>)
 
-Secret is a secret the product declares: provided by the operator — an SMTP URL, an API token — or generated by kit — a signing or sealing key — and rotated on its schedule.
+Secret is a secret the product declares: provided by the operator — an SMTP URL, an API token — or generated by the framework — a signing or sealing key — and rotated on its schedule.
 
 ```go
 type Secret struct{}
@@ -4364,7 +4364,7 @@ func (*Service) Go(name string, run func(context.Context) error) *Routine
 
 Go declares a hand-written loop. run must return when ctx ends; returning earlier, with or without an error, restarts it after a backoff.
 
-Everything run does is drawn from the loop's node: a store it reads, a topic it publishes on. kit has no span around it — a run lasts as long as the app — so each of those calls starts a trace of its own.
+Everything run does is drawn from the loop's node: a store it reads, a topic it publishes on. The framework has no span around it — a run lasts as long as the app — so each of those calls starts a trace of its own.
 
 <a name="Service.Implement"></a>
 ### func \(Service\) [Implement](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/endpoint.go>)
@@ -4448,11 +4448,11 @@ func (*Service) Secret(name string, opts ...SecretConfigurer) *Secret
 
 Secret declares a secret the product needs.
 
-Without an option it is provided: the operator gives it in the environment — the variable \<APP>\_\<NAME>, TODO\_STRIPE\_KEY for the secret "stripe-key" of the app "todo", or TODO\_STRIPE\_KEY\_FILE naming a file that holds it, the Docker and Kubernetes way — or in the environment's store, with \`kit secrets set\`. It is read at every use, so replacing it where it lives takes effect without a restart, and a start without it fails, naming the variable to set.
+Without an option it is provided: the operator gives it in the environment — the variable \<APP>\_\<NAME>, TODO\_STRIPE\_KEY for the secret "stripe-key" of the app "todo", or TODO\_STRIPE\_KEY\_FILE naming a file that holds it, the Docker and Kubernetes way — or in the environment's store, with \`the framework secrets set\`. It is read at every use, so replacing it where it lives takes effect without a restart, and a start without it fails, naming the variable to set.
 
 With [Optional](#Optional), a start without it goes on: the product asks [Secret.Present](#Secret.Present) before it uses the secret.
 
-With [Generated](#Generated), kit makes it: version 1 on the first start, a new version on its schedule, the previous ones kept so that what they sealed or signed still opens and verifies. It lives in the store the environment keeps — an encrypted file store in dev, KIT\_SECRETS elsewhere. Its variable pins it: kit then uses the value as it is and does not rotate it.
+With [Generated](#Generated), the framework makes it: version 1 on the first start, a new version on its schedule, the previous ones kept so that what they sealed or signed still opens and verifies. It lives in the store the environment keeps — an encrypted file store in dev, KIT\_SECRETS elsewhere. Its variable pins it: the framework then uses the value as it is and does not rotate it.
 
 name is 1 to 63 lower-case letters, digits and dashes, starting and ending with a letter or a digit — one grammar for a file name and a variable — and unique in the app.
 
@@ -4474,7 +4474,7 @@ name follows the secrets' grammar — 1 to 63 lower-case letters, digits and das
 func (*Service) Static(name string, prefix string, fsys fs.FS, opts ...StaticConfigurer) *Frontend
 ```
 
-Static declares a frontend serving fsys under prefix, which must end with '/'. A path with no file extension that matches no file serves index.html, so client-side routing works; a missing file with an extension — a script, a stylesheet — stays a 404. A directory is never listed. The SDK's static handler serves it; kit draws it and observes every request.
+Static declares a frontend serving fsys under prefix, which must end with '/'. A path with no file extension that matches no file serves index.html, so client-side routing works; a missing file with an extension — a script, a stylesheet — stays a 404. A directory is never listed. The SDK's static handler serves it; the framework draws it and observes every request.
 
 <a name="Service.Store"></a>
 ### func \(Service\) [Store](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/store.go>)
@@ -4492,7 +4492,7 @@ Store declares a store of entities of type T, keyed by key.
 func (*Service) Subscribe[T any](name string, topic *TopicService[T], handler func(context.Context, T) error, opts ...SubscriptionConfigurer) *SubscriptionWorker[T]
 ```
 
-Subscribe declares a subscription of the service to topic. Delivery is at least once: handler must be idempotent, which is the one thing the SDK's queue cannot check and kit therefore asks you to promise here.
+Subscribe declares a subscription of the service to topic. Delivery is at least once: handler must be idempotent, which is the one thing the SDK's queue cannot check and the framework therefore asks you to promise here.
 
 <a name="Service.Topic"></a>
 ### func \(Service\) [Topic](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/topic.go>)
@@ -4510,7 +4510,7 @@ Topic declares a topic carrying messages of type T.
 func (*Service) Watch(name string, mark Mark, handler func(context.Context, WrittenEvent) error, opts ...SubscriptionConfigurer) *Watch
 ```
 
-Watch declares a watch of the service: handler is told of every write kit confirms on a store whose entity holds a field that carries mark — the product's stores and the other modules', never those of the module the service belongs to (for a service of the product's, never the product's own) unless [OwnStores](#OwnStores) says so. The notice says which store, which record and whether it was deleted; the handler reads the record itself ([RecordsOf](#RecordsOf)). Delivery is at least once and in no set order, retried and dead-lettered after [MaxDeliveries](#MaxDeliveries) attempts: handler must be idempotent, and it hears the writes it makes itself on another's store — with OwnStores, never a write its own handler makes. After a stop that was not clean — the process died with the watch running —, its next start queues a notice for every record of every store that feeds it, so that no write a crash took the notice of goes unheard; a deletion whose notice was lost is not among them. The mark that says a watch runs is kept in the data directory: an app without one does not catch up (ADR 0178 C6).
+Watch declares a watch of the service: handler is told of every write the framework confirms on a store whose entity holds a field that carries mark — the product's stores and the other modules', never those of the module the service belongs to (for a service of the product's, never the product's own) unless [OwnStores](#OwnStores) says so. The notice says which store, which record and whether it was deleted; the handler reads the record itself ([RecordsOf](#RecordsOf)). Delivery is at least once and in no set order, retried and dead-lettered after [MaxDeliveries](#MaxDeliveries) attempts: handler must be idempotent, and it hears the writes it makes itself on another's store — with OwnStores, never a write its own handler makes. After a stop that was not clean — the process died with the watch running —, its next start queues a notice for every record of every store that feeds it, so that no write a crash took the notice of goes unheard; a deletion whose notice was lost is not among them. The mark that says a watch runs is kept in the data directory: an app without one does not catch up (ADR 0178 C6).
 
 ```
 var Content = Service.Watch("content", app.Moderated, Screen)
@@ -4620,7 +4620,7 @@ type StoreConfigurer interface {
 
 StoreService is a typed, keyed collection of entities. Every read returns a copy and every write stores one: an entity is kept as its JSON encoding, so what a handler holds can never alias what the store holds, and the memory and file backends behave identically.
 
-With a data directory (KIT\_DATA\_DIR; ".kit/data" in dev) the store persists every write before returning, atomically — a crash never leaves a torn file — and a write costs one entity, whatever the store holds. Without one, it lives in memory. A store a database keeps ([Database](#Database), [Keeps](#Keeps)) lives in a table of it, and every call is a round trip. A store is a port (ADR 0004): what it runs on is its engine (store\_engine.go) — the SDK's document store, in memory, in files or over SQL —; kit makes it a node of the graph, observes every call, and speaks for its refusals. Its writes join the transaction their context carries ([Transact](#Transact)).
+With a data directory (KIT\_DATA\_DIR; ".kit/data" in dev) the store persists every write before returning, atomically — a crash never leaves a torn file — and a write costs one entity, whatever the store holds. Without one, it lives in memory. A store a database keeps ([Database](#Database), [Keeps](#Keeps)) lives in a table of it, and every call is a round trip. A store is a port (ADR 0004): what it runs on is its engine (store\_engine.go) — the SDK's document store, in memory, in files or over SQL —; the framework makes it a node of the graph, observes every call, and speaks for its refusals. Its writes join the transaction their context carries ([Transact](#Transact)).
 
 ```go
 type StoreService[T any] struct{}
@@ -4642,7 +4642,7 @@ Count returns how many entities the store holds.
 func (*StoreService) Delete(ctx context.Context, key string) error
 ```
 
-Delete removes the entity with the given key, or returns a [NotFound](#NotFound) error. On a store with [Revisions](#Revisions) it moves the entity to the store's trash instead, for \<store>-trash — 30 days unless that setting says otherwise, 0 deleting at once —: gone from every read, its unique keys free, its versions kept, [StoreService.Untrash](#StoreService.Untrash) brings it back, and kit purges it once its time is up. When the store seals at rest and the entity was its person's last record, their data key goes with it, as with an erasure — at the commit, in a [Transact](#Transact) —, once nothing kit keeps still needs it: a held record, a record in the trash, or a former value or version sealed under it, keeps the key.
+Delete removes the entity with the given key, or returns a [NotFound](#NotFound) error. On a store with [Revisions](#Revisions) it moves the entity to the store's trash instead, for \<store>-trash — 30 days unless that setting says otherwise, 0 deleting at once —: gone from every read, its unique keys free, its versions kept, [StoreService.Untrash](#StoreService.Untrash) brings it back, and the framework purges it once its time is up. When the store seals at rest and the entity was its person's last record, their data key goes with it, as with an erasure — at the commit, in a [Transact](#Transact) —, once nothing the framework keeps still needs it: a held record, a record in the trash, or a former value or version sealed under it, keeps the key.
 
 <a name="StoreService.Diff"></a>
 ### func \(StoreService\) [Diff](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/revisions.go>)
@@ -4741,7 +4741,7 @@ Lookup returns the entity whose key in the unique index is key, or a [NotFound](
 func (*StoreService) Passwords(field func(*T) *string, opts ...PasswordConfigurer) *PasswordPolicyService[T]
 ```
 
-Passwords declares the password policy of one secret field of the store's entity; field names it — kit calls it on a zero entity to find which. The field then only ever holds the password's hash, a PHC string, or nothing before a first password; a write that puts anything else in it is refused. A field that is not secret refuses the start, as does a second policy on the same field.
+Passwords declares the password policy of one secret field of the store's entity; field names it — the framework calls it on a zero entity to find which. The field then only ever holds the password's hash, a PHC string, or nothing before a first password; a write that puts anything else in it is refused. A field that is not secret refuses the start, as does a second policy on the same field.
 
 <a name="StoreService.Put"></a>
 ### func \(StoreService\) [Put](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/store.go>)
@@ -4795,7 +4795,7 @@ Revisions returns the versions the store keeps of the record under key, newest f
 func (*StoreService) Trashed(ctx context.Context) ([]TombstoneEvent, error)
 ```
 
-Trashed returns the records in the store's trash, in key order: each one's key, when the product deleted it, and when kit purges it. A store without [Revisions](#Revisions) keeps no trash: an [Invalid](#Invalid).
+Trashed returns the records in the store's trash, in key order: each one's key, when the product deleted it, and when the framework purges it. A store without [Revisions](#Revisions) keeps no trash: an [Invalid](#Invalid).
 
 <a name="StoreService.Untrash"></a>
 ### func \(StoreService\) [Untrash](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/trash.go>)
@@ -4840,7 +4840,7 @@ type SubscriptionWorker[T any] struct{}
 <a name="TombstoneEvent"></a>
 ## type [TombstoneEvent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/trash.go>)
 
-TombstoneEvent is one record in a store's trash: its key, when the product deleted it, on the app's clock, and when kit purges it — its trash's length after the deletion, or sooner when its retention says so.
+TombstoneEvent is one record in a store's trash: its key, when the product deleted it, on the app's clock, and when the framework purges it — its trash's length after the deletion, or sooner when its retention says so.
 
 ```go
 type TombstoneEvent struct {
@@ -4922,7 +4922,7 @@ type WakeEvent struct {
 <a name="Watch"></a>
 ## type [Watch](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/watch.go>)
 
-Watch is a subscription fed by stores instead of a topic: its handler is told of every write kit confirms on a store whose entity holds a field with its mark. [Service.Watch](#Service.Watch) declares one.
+Watch is a subscription fed by stores instead of a topic: its handler is told of every write the framework confirms on a store whose entity holds a field with its mark. [Service.Watch](#Service.Watch) declares one.
 
 ```go
 type Watch struct{}
@@ -4962,7 +4962,7 @@ After declares a timer transition: an entity that has spent d in state from move
 func (*WorkflowService) At(event string, from S, to S, instant func(E) (time.Time, bool)) *WorkflowService[E, S]
 ```
 
-At declares a timer transition at an instant the entity carries — a due date, a deadline: an entity in state from moves to state to once the time instant returns has come; false means no instant for now. kit asks again each time the entity is written, and the workflow's own loop sleeps until the earliest instant.
+At declares a timer transition at an instant the entity carries — a due date, a deadline: an entity in state from moves to state to once the time instant returns has come; false means no instant for now. The framework asks again each time the entity is written, and the workflow's own loop sleeps until the earliest instant.
 
 <a name="WorkflowService.Can"></a>
 ### func \(WorkflowService\) [Can](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/workflow.go>)
@@ -5043,7 +5043,7 @@ Start enters a new entity into the workflow: it sets the initial state, runs the
 func (*WorkflowService) When(event string, from S, to S, guard func(E) bool) *WorkflowService[E, S]
 ```
 
-When declares a guard transition: an entity in state from moves to state to as soon as guard holds. The guard sees the entity only: kit checks it each time the entity is written, never on a clock — a condition that depends on the time is an instant, declared with [WorkflowService.At](#WorkflowService.At).
+When declares a guard transition: an entity in state from moves to state to as soon as guard holds. The guard sees the entity only: the framework checks it each time the entity is written, never on a clock — a condition that depends on the time is an instant, declared with [WorkflowService.At](#WorkflowService.At).
 
 <a name="WrittenEvent"></a>
 ## type [WrittenEvent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/watch.go>)

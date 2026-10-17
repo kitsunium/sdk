@@ -210,7 +210,7 @@ func TestTheSecretsCommandListsKitsIndexKey(t *testing.T) {
 	t.Setenv("KIT_SECRETS_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
 	t.Setenv("KIT_INDEX_KEY", "")
 	t.Setenv("KIT_INDEX_KEY_FILE", "")
-	svc := NewService("cmd-people", "People's cards, whose subject kit references.")
+	svc := NewService("cmd-people", "People's cards, whose subject the framework references.")
 	svc.Store("cards", func(c card) string { return c.ID })
 	app := NewApp("vault", svc).With(Env(EnvProduction), Logs(io.Discard))
 	line := func(out string) string {
@@ -247,6 +247,6 @@ func TestTheSecretsCommandListsKitsIndexKey(t *testing.T) {
 	}
 	// An app that references nothing lists no index key of kit's.
 	if _, out := secretsOf(t, NewApp("vault", cmdSecrets).With(Env(EnvProduction), Logs(io.Discard)), "", "list"); line(out) != "" {
-		t.Errorf("an app that references nothing lists kit's index key:\n%s", out)
+		t.Errorf("an app that references nothing lists the framework's index key:\n%s", out)
 	}
 }

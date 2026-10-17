@@ -117,7 +117,7 @@ func (s *storeCore) startTrash(ctx context.Context, a *App) error {
 		// What could not be purged stays in the trash and on the agenda: the
 		// loop tries again after its backoff, or the next start does when no
 		// loop runs (CodeTrash). The app starts.
-		logger.Warn(ctx, a.log, "a store's trash could not be emptied at start; kit tries again",
+		logger.Warn(ctx, a.log, "a store's trash could not be emptied at start; the framework tries again",
 			logger.String("node", s.id), logger.String("error", describeText(err)))
 	}
 	if s.trashLength() == 0 {
@@ -273,7 +273,7 @@ func (r *trashRun) runOnce(ctx context.Context, reason string, now time.Time, b 
 	if err != nil && ctx.Err() == nil {
 		b.failures++
 		b.floor = ended.Add(backoff(b.failures))
-		logger.Warn(ctx, r.a.log, "a store's trash could not be emptied; kit tries again", logger.String("node", r.s.id),
+		logger.Warn(ctx, r.a.log, "a store's trash could not be emptied; the framework tries again", logger.String("node", r.s.id),
 			logger.String("after", backoff(b.failures).String()), logger.String("error", describeText(err)))
 	} else {
 		b.failures, b.floor = 0, time.Time{}

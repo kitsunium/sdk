@@ -12,18 +12,18 @@ import "sync/atomic"
 // rendered through the hook, opened once with the English table. The value is
 // here, the catalogues in words_interface.go.
 
-// Words is kit's sentences in the languages after English, the catalogues
+// Words is the framework's sentences in the languages after English, the catalogues
 // the Studio shows its reader's language from; nil until
-// framework/app/studio is imported, and kit then speaks English alone.
+// framework/app/studio is imported, and the framework then speaks English alone.
 // The terminal, the logs and an error read English whatever a program
 // imports (ADR 0179 Q6).
 var Words atomic.Pointer[WordsConfig]
 
-// WordsConfig is what framework/app/studio plugs into kit: how kit's
+// WordsConfig is what framework/app/studio plugs into kit: how the framework's
 // catalogues in the languages after English open.
 type WordsConfig struct {
 	// Open reads and compiles the catalogue of every language after
-	// English, each falling back to english — kit's own sentences, by
+	// English, each falling back to english — the framework's own sentences, by
 	// key, as its core holds them; a catalogue that does not decode or
 	// does not compile is refused.
 	Open func(english map[string]string) (Translator, error)

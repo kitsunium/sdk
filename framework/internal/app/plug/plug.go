@@ -31,7 +31,7 @@ var (
 	SampleProcess atomic.Pointer[func() *model.Process]
 )
 
-// HTTPConfig is what kit asks of the HTTP engine: where to listen, its one
+// HTTPConfig is what the framework asks of the HTTP engine: where to listen, its one
 // socket, its bounds, and the handler.
 type HTTPConfig struct {
 	// Addr is where to listen, "host:port".
@@ -59,7 +59,7 @@ type HTTPState struct {
 	Total, Rejected uint64
 }
 
-// HTTPServer is the HTTP engine kit starts, reads and stops.
+// HTTPServer is the HTTP engine the framework starts, reads and stops.
 type HTTPServer interface {
 	// Start binds the address and serves, returning once bound.
 	Start(ctx context.Context) error

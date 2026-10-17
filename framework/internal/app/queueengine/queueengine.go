@@ -11,7 +11,7 @@ import (
 )
 
 // Enable plugs the queues' brokers, their consumer and the migration of a
-// queue's table into kit.
+// queue's table into the framework.
 func Enable() {
 	plug.Queues.Store(&plug.QueueDriverConfig{
 		Open: open, TableMigration: tableMigration,

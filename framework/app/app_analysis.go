@@ -7,7 +7,7 @@ import (
 // AnalyzeFunc reads the product's source — the Go module rooted at dir, and
 // the packages that declare the modules it mounts — into a graph the runtime
 // merges into its own: the edges found in handler bodies, each function's
-// steps. The framework links no analyzer (ADR 0147 §1): the platform's kit
+// steps. The framework links no analyzer (ADR 0147 §1): the platform's former runtime
 // tool gives one, in dev, through [Analyzer].
 type AnalyzeFunc = iapp.AnalyzeFunc
 

@@ -10,14 +10,14 @@ type Module = iapp.Module
 
 // ModulePart is what a module is made of: its services, the modules it
 // requires ([Requires]), and the migrations of the data it keeps outside
-// kit's stores ([Migrations]).
+// the framework's stores ([Migrations]).
 type ModulePart = iapp.ModuleConfigurer
 
 // NewModule declares a module named name — lower-case letters, digits and
-// dashes, starting with a letter; "kit", "external" and "schema" are kit's — that doc
+// dashes, starting with a letter; "kit", "external" and "schema" are the framework's — that doc
 // describes, made of parts: its services, which it adopts, the modules it
 // requires ([Requires]), and the migrations of the data it keeps outside
-// kit's stores ([Migrations]), run on the database that keeps it. Declare it
+// the framework's stores ([Migrations]), run on the database that keeps it. Declare it
 // as a package-level variable of the one package a product imports:
 //
 //	var Module = app.NewModule("moderation",

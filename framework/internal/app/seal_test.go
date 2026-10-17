@@ -261,7 +261,7 @@ func TestNothingPersonalRestsInClear(t *testing.T) {
 	// stays.
 	for _, word := range []string{"annie-q", "ward-east", "acct-7", "recall"} {
 		if len(clinicFiles(t, dir, word)) == 0 {
-			t.Errorf("%q, which kit does not seal, is nowhere in clear", word)
+			t.Errorf("%q, which the framework does not seal, is nowhere in clear", word)
 		}
 	}
 	must(t, a.Start(ctx))
@@ -382,7 +382,7 @@ func checkErasedCopy(t *testing.T, key string) {
 		t.Errorf("ann's %s, from a copy taken before her erasure: %+v, %v", key, p, err)
 	}
 	if p.Ward != "ward-east" || p.Visits[0].Day != "monday" {
-		t.Errorf("ann's %s lost what kit does not seal: %+v", key, p)
+		t.Errorf("ann's %s lost what the framework does not seal: %+v", key, p)
 	}
 	if former, err := Patients.Former(ctx, key, "/notes"); err != nil || len(former) != 0 {
 		t.Errorf("ann's former values of %s, from a copy taken before her erasure: %+v, %v", key, former, err)

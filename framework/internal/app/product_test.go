@@ -105,7 +105,7 @@ var tallies = struct {
 	counts []int
 }{}
 
-var Members = app.NewService("members", "Accounts, sessions and mail, for the tests of kit v2.")
+var Members = app.NewService("members", "Accounts, sessions and mail, for the tests of the framework.")
 
 var Accounts = Members.Store("accounts", func(a Account) string { return a.ID },
 	app.Unique("email", func(a Account) string { return a.Email }),

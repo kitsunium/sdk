@@ -13,6 +13,6 @@ import (
 //
 //	func (m Me) Attrs() []authz.Attr { return []authz.Attr{authz.AttrStrings("roles", m.Roles...)} }
 //
-// kit calls the caller a principal: in kit, a subject is the person
+// The framework calls the caller a principal: in the framework, a subject is the person
 // personal data is about (ADR 0006).
 type Principal = iapp.AttrsProvider

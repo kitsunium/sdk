@@ -33,15 +33,15 @@ Environment:
                      (unset: a key file beside the store, made on first use)
   KIT_TRUST_PROXY    on: app.ClientIP reads the last X-Forwarded-For address
   KIT_RETENTION      what the stores' retention does: on (default), dry-run or off
-  KIT_INDEX_KEY      pins kit's index key, which references a person's records
+  KIT_INDEX_KEY      pins the framework's index key, which references a person's records
                      (unset: made on first use and kept with the secrets; kept in memory
                      while the data persists, it is warned of at every start)
-  KIT_DATA_KEY       pins kit's data-key, which wraps the keys personal data is sealed under
+  KIT_DATA_KEY       pins the framework's data-key, which wraps the keys personal data is sealed under
                      at rest: 32 bytes (unset: made on first use, kept with the secrets, rotated)
 `
 
 // usageFormat is Main's usage; %[1]s is the product's name.
-const usageFormat string = `%[1]s — a product built with kit.
+const usageFormat string = `%[1]s
 
 Usage:
   %[1]s [serve]                       run the product
@@ -50,7 +50,7 @@ Usage:
   %[1]s config                        every setting: its value and where it comes from
   %[1]s secrets [list]                every secret: where it is found, its version
   %[1]s secrets set NAME < file       a new version of NAME, read from standard input
-  %[1]s secrets rotate NAME|-all      a new version of a secret kit generates, now
+  %[1]s secrets rotate NAME|-all      a new version of a secret the product generates, now
   %[1]s migrate [status]              every migration of the databases: applied or pending
   %[1]s migrate up                    apply every pending migration
   %[1]s migrate down SET VERSION      reverse SET's migrations above VERSION
@@ -66,7 +66,7 @@ Usage:
 //
 //	func main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }
 //
-// It understands ten commands, so every kit binary can describe itself, be
+// It understands ten commands, so every binary of the framework can describe itself, be
 // probed, say its configuration, manage its secrets, migrate its databases,
 // answer for the personal data it keeps, replay what its watches hear and
 // copy its data directory into a database without a shell or another tool in

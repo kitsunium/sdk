@@ -75,7 +75,7 @@ func TestTheSchedulerFiresOnTheAppsClock(t *testing.T) {
 	mc.Advance(time.Minute)
 	r := <-results
 	if r.Name != "tally" || r.Skipped || r.Started.IsZero() || !errors.Is(r.Err, boom) {
-		t.Errorf("the run kit hears: %+v", r)
+		t.Errorf("the run the framework hears: %+v", r)
 	}
 	if want := time.Date(2026, 10, 17, 8, 1, 0, 0, time.UTC); !r.Scheduled.Equal(want) {
 		t.Errorf("scheduled at %v, want %v", r.Scheduled, want)

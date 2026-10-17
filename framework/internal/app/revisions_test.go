@@ -342,7 +342,7 @@ func TestARollbackLeavesNoVersion(t *testing.T) {
 		revs, err := Pages.Revisions(ctx, "p1")
 		must(t, err)
 		if revs[0].Value.Title != "t2" || revs[0].By != "" || revs[len(revs)-1].Value.Title != "t1" {
-			t.Errorf("versions %q: the rollback writes t2 back as kit's version, and prunes nothing", titles(t, "p1"))
+			t.Errorf("versions %q: the rollback writes t2 back as the framework's version, and prunes nothing", titles(t, "p1"))
 		}
 	})
 }
@@ -351,7 +351,7 @@ func TestARollbackLeavesNoVersion(t *testing.T) {
 // start, naming the store.
 func TestRevisionsOutOfRangeRefuseTheStart(t *testing.T) {
 	for _, n := range []int{0, -1, 101} {
-		svc := app.NewService("press-bad", "A store with a number of versions kit refuses.")
+		svc := app.NewService("press-bad", "A store with a number of versions the framework refuses.")
 		svc.Store("pages", Page.Key, app.Revisions(n))
 		a := app.NewApp("press-bad", svc).With(app.InMemory(), app.Listen("127.0.0.1:0"), app.Env(app.EnvDev),
 			app.Analyze(false), app.Logs(io.Discard))

@@ -108,7 +108,7 @@ const (
 	// CodeMailQueue is CodeMailQueue.
 	CodeMailQueue errs.Code = iapp.CodeMailQueue
 
-	// Deprecated: kit no longer returns it. The outbox is the SDK's mail
+	// Deprecated: the framework no longer returns it. The outbox is the SDK's mail
 	// spool, which dead-letters a record that does not decode itself
 	// (MessageUndecodable, in pkg/v1/app/mail/spool).
 	CodeMailUndecodable errs.Code = iapp.CodeMailUndecodable
@@ -150,7 +150,7 @@ const (
 	CodeDatabaseConfig errs.Code = iapp.CodeDatabaseConfig
 
 	// CodeDatabaseVersion refuses the start of a database whose server is below
-	// kit's floor: MySQL 8.0.1 or MariaDB 10.6, which lease with SKIP LOCKED.
+	// the framework's floor: MySQL 8.0.1 or MariaDB 10.6, which lease with SKIP LOCKED.
 	CodeDatabaseVersion errs.Code = iapp.CodeDatabaseVersion
 
 	// CodeTransactionSpan is CodeTransactionSpan.
@@ -286,7 +286,7 @@ const (
 	// forward migration, never by migrate down.
 	CodeMigrationIrreversible errs.Code = iapp.CodeMigrationIrreversible
 
-	// The signals kit ends one of its own steps with and catches itself — a
+	// The signals the framework ends one of its own steps with and catches itself — a
 	// caller never receives one —, typed when the SDK made rule 2 a gate.
 	CodeSealErased errs.Code = iapp.CodeSealErased
 

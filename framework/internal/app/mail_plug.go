@@ -21,7 +21,7 @@ const mailPackage = "github.com/kitsunium/sdk/framework/app/mail"
 // the mail subsystem.
 func mailsMissing() error {
 	return errs.New(CodeSubsystemMissing, "SUBSYSTEM_NOT_IMPORTED", subsystemPublic,
-		"kit: a mailer needs the mail subsystem, which the program does not import: "+mailPackage,
+		"app: a mailer needs the mail subsystem, which the program does not import: "+mailPackage,
 		errs.String("packages", mailPackage))
 }
 

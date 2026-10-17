@@ -42,7 +42,7 @@ const trashDefault time.Duration = 30 * 24 * time.Hour
 const untrashLabel = "untrash"
 
 // TombstoneEvent is one record in a store's trash: its key, when the product
-// deleted it, on the app's clock, and when kit purges it — its trash's
+// deleted it, on the app's clock, and when the framework purges it — its trash's
 // length after the deletion, or sooner when its retention says so.
 type TombstoneEvent struct {
 	Key     string
@@ -141,7 +141,7 @@ func (s *StoreService[T]) Untrash(ctx context.Context, key string) (T, error) {
 }
 
 // Trashed returns the records in the store's trash, in key order: each
-// one's key, when the product deleted it, and when kit purges it. A store
+// one's key, when the product deleted it, and when the framework purges it. A store
 // without [Revisions] keeps no trash: an [Invalid].
 func (s *StoreService[T]) Trashed(ctx context.Context) ([]TombstoneEvent, error) {
 	a := s.app()

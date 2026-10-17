@@ -15,7 +15,7 @@ import (
 // which the mailer reads at once — the mailbox keeps what the Studio shows.
 const capturedMails int = 1
 
-// Enable plugs the mailers' outbox and their transports into kit.
+// Enable plugs the mailers' outbox and their transports into the framework.
 func Enable() {
 	plug.Mail.Store(&plug.MailDriverConfig{
 		Open: open, Validate: validate, Capture: capture,

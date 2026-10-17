@@ -231,7 +231,7 @@ func (w *WorkflowService[E, S]) After[D Delay](event string, d D, from, to S) *W
 
 // At declares a timer transition at an instant the entity carries — a due
 // date, a deadline: an entity in state from moves to state to once the time
-// instant returns has come; false means no instant for now. kit asks again
+// instant returns has come; false means no instant for now. The framework asks again
 // each time the entity is written, and the workflow's own loop sleeps until
 // the earliest instant.
 //
@@ -248,7 +248,7 @@ func (w *WorkflowService[E, S]) At(event string, from, to S, instant func(E) (ti
 }
 
 // When declares a guard transition: an entity in state from moves to state to
-// as soon as guard holds. The guard sees the entity only: kit checks it each
+// as soon as guard holds. The guard sees the entity only: the framework checks it each
 // time the entity is written, never on a clock — a condition that depends on
 // the time is an instant, declared with [WorkflowService.At].
 //

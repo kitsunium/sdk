@@ -87,7 +87,7 @@ func MinLength(n int) PasswordConfigurer {
 // NotReused refuses a password that the current hash, or any of the n
 // former ones, verifies — n from 1 to 100. It is a compliance policy, off by
 // default: PCI DSS asks for it, OWASP ASVS 4.0.3 asks most products not to
-// impose it. kit keeps the field's last n hashes, so it implies history=n,
+// impose it. The framework keeps the field's last n hashes, so it implies history=n,
 // and a tag whose history is smaller than n is refused.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
@@ -111,7 +111,7 @@ func NotCommon() PasswordConfigurer {
 }
 
 // Passwords declares the password policy of one secret field of the store's
-// entity; field names it — kit calls it on a zero entity to find which. The
+// entity; field names it — the framework calls it on a zero entity to find which. The
 // field then only ever holds the password's hash, a PHC string, or nothing
 // before a first password; a write that puts anything else in it is
 // refused. A field that is not secret refuses the start, as does a second

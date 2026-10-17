@@ -30,7 +30,7 @@
 // Package app — databases: the SQL engines a store can be kept on.
 //
 // Package app — the interfaces of databases: the engine a connector gives, and
-// what kit asks of it.
+// what the framework asks of it.
 //
 // Package app — the decoding of a request into its typed value.
 //
@@ -186,12 +186,12 @@
 //
 // Package app — ports: an operation a service needs and does not implement.
 //
-// Package app — privacy: kit's own service for holds and the journal.
+// Package app — privacy: the framework's own service for holds and the journal.
 //
 // Package app — erasure: a record's personal data removed as its retention
 // would.
 //
-// Package app — export: a person's data as kit gives it back.
+// Package app — export: a person's data as the framework gives it back.
 //
 // Package app — CPU profiles of the running process, for the Studio.
 //
@@ -229,7 +229,7 @@
 // Package app — settings: a value the environment gives a service.
 //
 // Package app — the interfaces of settings: the values a setting holds, and
-// what kit reads of a declaration.
+// what the framework reads of a declaration.
 //
 // Package app — frontends: static assets the product serves.
 //

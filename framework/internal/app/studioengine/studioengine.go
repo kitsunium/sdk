@@ -13,7 +13,7 @@ var driver = plug.StudioDriverConfig{
 }
 
 // Enable plugs the Studio into kit: the tool's variables, the Studio's
-// routes — with its event stream and its profiler — and kit's catalogues
+// routes — with its event stream and its profiler — and the framework's catalogues
 // after English.
 func Enable() {
 	plug.Studio.Store(&driver)

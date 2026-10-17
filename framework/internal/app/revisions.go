@@ -72,7 +72,7 @@ func (o revisionsOption) storeConfigure(so *storeOptions) { so.revisions, so.rev
 //
 // A store with Revisions(n) holds up to n+1 times its records: in memory
 // with the store in the data directory, in the table <table>___vs on a
-// database, which kit's migrations create.
+// database, which the framework's migrations create.
 func Revisions(n int) StoreConfigurer { return revisionsOption{n: n} }
 
 // declareRevisions takes what the store's options say of its versions, and

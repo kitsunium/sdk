@@ -240,7 +240,7 @@ func (a *App) setSecret(ctx context.Context, all []managedSecret, name string, s
 		return 1
 	}
 	if _, err := st.kept.Get(ctx, managed.stored); managed.index && err == nil {
-		fmt.Fprintf(stderr, "%s is made once and never replaced: every reference kit keeps — a person's records, the holds, the journal, the data keys' names, a database's index rows — is made under it; set it only where the store holds none, to bring back the one a lost store held\n", managed.name)
+		fmt.Fprintf(stderr, "%s is made once and never replaced: every reference the framework keeps — a person's records, the holds, the journal, the data keys' names, a database's index rows — is made under it; set it only where the store holds none, to bring back the one a lost store held\n", managed.name)
 		return 2
 	}
 	if f, ok := stdin.(*os.File); ok {
@@ -286,7 +286,7 @@ func (a *App) rotateSecrets(ctx context.Context, all []managedSecret, name strin
 	}
 	st := a.secretsNow()
 	if st.kept == nil {
-		fmt.Fprintln(stderr, "KIT_SECRETS=env keeps no store kit can write")
+		fmt.Fprintln(stderr, "KIT_SECRETS=env keeps no store the framework can write")
 		return 1
 	}
 	for i := range targets {
@@ -326,10 +326,10 @@ func (a *App) rotationTargets(all []managedSecret, name string, stderr io.Writer
 		fmt.Fprintf(stderr, "no secret named %q: %s secrets lists them\n", name, a.name)
 		return nil, 2
 	case !m.generated():
-		fmt.Fprintf(stderr, "%s is given by the operator, not made by kit: %s secrets set %s\n", name, a.name, name)
+		fmt.Fprintf(stderr, "%s is given by the operator, not made by the framework: %s secrets set %s\n", name, a.name, name)
 		return nil, 2
 	case m.index:
-		fmt.Fprintf(stderr, "%s is never rotated: another would make every reference kit keeps under it unrecognisable — a person's records, the holds, the journal, the data keys' names\n", name)
+		fmt.Fprintf(stderr, "%s is never rotated: another would make every reference the framework keeps under it unrecognisable — a person's records, the holds, the journal, the data keys' names\n", name)
 		return nil, 2
 	case m.kitOwn():
 		fmt.Fprintf(stderr, "%s is rotated by the running product, which keeps every version a data key is wrapped under and re-wraps them after: it is not rotated here\n", name)

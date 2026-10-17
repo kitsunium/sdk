@@ -1,8 +1,8 @@
 // Package apptest runs a product in its own tests as production runs it: on
-// a data directory, where kit seals what it keeps at rest, a transaction
+// a data directory, where the framework seals what it keeps at rest, a transaction
 // writes files and a rollback writes them back, a store's retention erases
 // and folds what it overwrote, and a restart reads everything back — none
-// of which a product kept in memory (app.InMemory) ever meets: kit seals
+// of which a product kept in memory (app.InMemory) ever meets: the framework seals
 // nothing in memory.
 //
 // A suite keeps most of its tests in memory, fast and hermetic, and runs on

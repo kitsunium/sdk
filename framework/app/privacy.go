@@ -4,8 +4,8 @@ import (
 	iapp "github.com/kitsunium/sdk/framework/internal/app"
 )
 
-// Privacy is kit's own service: the legal holds and the privacy journal of
-// an app that keeps personal data. kit mounts a copy of it — named
+// Privacy is the framework's own service: the legal holds and the privacy journal of
+// an app that keeps personal data. The framework mounts a copy of it — named
 // kit.privacy, a name no service of a product can take — in every app whose
 // stores keep personal data or declare a retention, before the product's
 // services. Its stores stay in the data directory unless the product places

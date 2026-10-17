@@ -36,14 +36,14 @@ import (
 // notice whose queue lives on the transaction's database — the one that
 // keeps the service of its subscription, command, mailer or watch, by a
 // store's rules — is written in the transaction, just before it commits, a
-// mail sealed under kit's data-key: a queue that refuses
+// mail sealed under the framework's data-key: a queue that refuses
 // it fails the transaction, every write undone, and Transact returns the
 // refusal. Every other one leaves after the commit: one a queue refuses then
 // is logged and reported, and the commit stands; a process that dies
 // between the commit and the release loses what was held.
 //
 // On a database the transaction is the database's own, at its default
-// isolation. On the data directory and in memory kit keeps its own: it takes
+// isolation. On the data directory and in memory the framework keeps its own: it takes
 // the data's writer turn — one transaction at a time; a write outside any
 // waits for it, and such writes share the turn among themselves —, its
 // writes land at once, and an error writes each entity's previous value

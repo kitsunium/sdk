@@ -8,7 +8,7 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/app/scheduler"
 )
 
-// Enable plugs the jobs' scheduler and their schedules into kit.
+// Enable plugs the jobs' scheduler and their schedules into the framework.
 func Enable() {
 	plug.Jobs.Store(&plug.JobDriverConfig{Every: every, Cron: cron, Open: open})
 }

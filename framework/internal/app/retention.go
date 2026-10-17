@@ -182,7 +182,7 @@ func DeleteAt[T any](at func(T) (time.Time, bool)) StoreConfigurer {
 
 // Anonymise says what an erased record keeps: fn runs first, and generalises
 // into unclassified fields — a birth date to its year, an address to its
-// region; then kit clears the rest. kit cannot prove that what remains
+// region; then the framework clears the rest. The framework cannot prove that what remains
 // identifies no one: by declaring the function, the product asserts it.
 func Anonymise[T any](fn func(*T)) StoreConfigurer {
 	return &privacyOption{kind: optionAnonymise, fn: fn}
@@ -210,18 +210,18 @@ func DeleteOnErasure() StoreConfigurer {
 
 // RetentionByProduct says the product keeps the store's retention itself:
 // its own code erases and deletes what it no longer needs — a record whose
-// life the product's own rules end, a lifecycle kit cannot read from the
+// life the product's own rules end, a lifecycle the framework cannot read from the
 // entity. limits says, in the product's words, for how long and how, which
 // the register publishes as the store's time limits (GDPR art. 30(1)(f));
 // "" says only that the product keeps them.
 //
-// kit then runs no retention for the store, and warns of neither a missing
+// The framework then runs no retention for the store, and warns of neither a missing
 // retention nor a missing subject. Its classified fields keep every other
 // promise: sealed at rest, never shown, exported with their person — when
 // the store names one — and erased by app.Erase and Store.Erase. It goes
 // with app.Purpose, app.HeldUntil, app.Anonymise and app.DeleteOnErasure;
 // with app.EraseAfter, app.EraseAt, app.DeleteAfter or app.DeleteAt it is
-// refused: a store's retention is kit's or the product's, never both.
+// refused: a store's retention is the framework's or the product's, never both.
 func RetentionByProduct(limits string) StoreConfigurer {
 	return &privacyOption{kind: optionByProduct, text: limits}
 }

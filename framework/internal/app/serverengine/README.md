@@ -6,9 +6,9 @@
 import "github.com/kitsunium/sdk/framework/internal/app/serverengine"
 ```
 
-Package serverengine is what framework/app/server plugs into kit: the HTTP engine an app in the server profile serves on (the SDK's net/server), the frontends' file server (the SDK's net/static), and the process sampler of the runtime graph a serving app answers (the SDK's proc/process, and through it runtime/metrics and the spawn engine). kit imports none of them: a daemon or a CLI neither links nor initialises them (ADR 0172).
+Package serverengine is what framework/app/server plugs into kit: the HTTP engine an app in the server profile serves on (the SDK's net/server), the frontends' file server (the SDK's net/static), and the process sampler of the runtime graph a serving app answers (the SDK's proc/process, and through it runtime/metrics and the spawn engine). The framework imports none of them: a daemon or a CLI neither links nor initialises them (ADR 0172).
 
-Package serverengine — the compile-time proof that the engine is kit's.
+Package serverengine — the compile-time proof that the engine is the framework's.
 
 ## Index
 
@@ -21,6 +21,6 @@ Package serverengine — the compile-time proof that the engine is kit's.
 func Enable()
 ```
 
-Enable plugs the HTTP engine, the frontends' file server and the process sampler into kit.
+Enable plugs the HTTP engine, the frontends' file server and the process sampler into the framework.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

@@ -40,7 +40,7 @@ type deliveryHandler = func(ctx context.Context, d plug.DeliveryValue) error
 // program that does not import it.
 func queuesMissing() error {
 	return errs.New(CodeSubsystemMissing, "SUBSYSTEM_NOT_IMPORTED", subsystemPublic,
-		"kit: a topic, a subscription, a watch, a queued command or an outbox on a database needs the queue subsystem, which the program does not import: "+queuePackage,
+		"app: a topic, a subscription, a watch, a queued command or an outbox on a database needs the queue subsystem, which the program does not import: "+queuePackage,
 		errs.String("packages", queuePackage))
 }
 

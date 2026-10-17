@@ -11,7 +11,7 @@ import (
 const migrationIrreversiblePublic = "the migration cannot be reversed: undo it with a new forward migration"
 
 // MigrationValue is one versioned change of a database's schema and its
-// reversal, kit's own (ADR 0179 step 10): the shape the SDK's sql runs,
+// reversal, the framework's own (ADR 0179 step 10): the shape the SDK's sql runs,
 // which the store subsystem hands it.
 //
 //	app.Migration{
@@ -62,7 +62,7 @@ func Irreversible(ctx context.Context, ex MigrationExecutor) error {
 	//: MigrationStep's.
 	_, _ = ctx, ex
 	return errs.New(CodeMigrationIrreversible, "MIGRATION_IRREVERSIBLE", migrationIrreversiblePublic,
-		"kit: the migration's Down is app.Irreversible: reversing it takes a new forward migration")
+		"app: the migration's Down is app.Irreversible: reversing it takes a new forward migration")
 }
 
 // pluggedMigrations are ms as the store subsystem runs them: the same

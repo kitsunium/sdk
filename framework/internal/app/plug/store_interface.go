@@ -14,7 +14,7 @@ import (
 // its migrations; and kit's transaction, which the core implements for the
 // engines to take part in.
 
-// Database is kit's scope on one database (ADR 0179 §2): the transactions
+// Database is the framework's scope on one database (ADR 0179 §2): the transactions
 // app.Transact opens on it, their savepoints, and the functions held until
 // their end. The core knows a database only through it; the store package
 // implements it over the SDK's sql. It grows by the siblings below.
@@ -71,7 +71,7 @@ type Executor interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// Transaction is kit's transaction as a store's engine takes part in it
+// Transaction is the framework's transaction as a store's engine takes part in it
 // (ADR 0139, ADR 0178): the core implements it, an engine calls it with its
 // caller's context.
 type Transaction interface {
@@ -92,7 +92,7 @@ type Transaction interface {
 }
 
 // StoreEngine is what a store runs on, over documents (ADR 0179 §2): the
-// non-generic engine under Store[T]. Its refusals are kit's ([Refusal]): the
+// non-generic engine under Store[T]. Its refusals are the framework's ([Refusal]): the
 // engine translates the SDK's before they reach the core. Every call takes
 // the caller's context, which carries the transaction the call joins. It
 // grows by the sibling interfaces below, never by a method (the SDK's ADR

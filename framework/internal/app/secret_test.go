@@ -329,7 +329,7 @@ func TestAGeneratedSecretNeedsAStoreKitCanWrite(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err == nil || !strings.Contains(err.Error(), "KIT_SECRETS=env keeps nothing kit can write") {
+	if err == nil || !strings.Contains(err.Error(), "KIT_SECRETS=env keeps nothing the framework can write") {
 		t.Fatalf("Start = %v", err)
 	}
 }

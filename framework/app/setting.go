@@ -28,7 +28,7 @@ func Set[V any](name string, value V) AppOption {
 	return iapp.Set(name, value)
 }
 
-// ConfigFiles gives kit the product's configuration files: config/config.<ext>,
+// ConfigFiles gives the framework the product's configuration files: config/config.<ext>,
 // which every environment reads, and config/<env>.<ext>, the environment's
 // own — <env> being KIT_ENV as written, dev when kit dev runs the product —
 // in JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of

@@ -6,7 +6,7 @@
 import "github.com/kitsunium/sdk/framework/app/storetest"
 ```
 
-Package storetest is the conformance suite of kit's stores (ADR 0004): what a store does on every backend — in memory, in the data directory, on each database engine —, run by kit's tests on memory, files and kit's fake database, and by each engine module's tests on its engine. It is what keeps the test double honest: a product tested in memory sees what its database does.
+Package storetest is the conformance suite of the framework's stores (ADR 0004): what a store does on every backend — in memory, in the data directory, on each database engine —, run by the framework's tests on memory, files and the framework's fake database, and by each engine module's tests on its engine. It is what keeps the test double honest: a product tested in memory sees what its database does.
 
 ```
 func TestConformance(t *testing.T) {
@@ -54,7 +54,7 @@ Run runs every case of the suite on b.
 <a name="BackendConfig"></a>
 ## type [BackendConfig](<https://github.com/kitsunium/sdk/blob/main/framework/app/storetest/storetest.go>)
 
-BackendConfig is where Run runs kit's stores: a name for the subtests and the options that place the stores there.
+BackendConfig is where Run runs the framework's stores: a name for the subtests and the options that place the stores there.
 
 ```go
 type BackendConfig struct {

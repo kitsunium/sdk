@@ -108,7 +108,7 @@ func openEngine(sc plug.StoreConfig) (plug.StoreEngine, error) {
 // program that does not import it.
 func storesMissing() error {
 	return errs.New(CodeSubsystemMissing, "SUBSYSTEM_NOT_IMPORTED", subsystemPublic,
-		"kit: a store or a database needs the store subsystem, which the program does not import: "+storePackage,
+		"app: a store or a database needs the store subsystem, which the program does not import: "+storePackage,
 		errs.String("packages", storePackage))
 }
 

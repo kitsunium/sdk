@@ -50,7 +50,7 @@ type storeCmd func(a *App, ctx context.Context, args []string, stdout, stderr io
 // imported.
 var storeCode atomic.Pointer[storeHooks]
 
-// EnableStores makes kit's own store code reachable: what kit mounts, starts
+// EnableStores makes the framework's own store code reachable: what the framework mounts, starts
 // and answers for the stores and databases a product declares.
 // framework/app/store calls it as it is imported; a product never does.
 func EnableStores() {

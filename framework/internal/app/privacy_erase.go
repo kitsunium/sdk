@@ -25,8 +25,8 @@ const (
 
 // errNothingToErase and errRekeyed end an erasure's update without writing.
 var (
-	errNothingToErase = errs.New(CodeNothingToErase, "NOTHING_TO_ERASE", "nothing to erase", "kit: an erasure's update found no personal value left")
-	errRekeyed        = errs.New(CodeKeyRekeyed, "KEY_REKEYED", "the key depends on personal data", "kit: an erasure's update would change the record's key")
+	errNothingToErase = errs.New(CodeNothingToErase, "NOTHING_TO_ERASE", "nothing to erase", "app: an erasure's update found no personal value left")
+	errRekeyed        = errs.New(CodeKeyRekeyed, "KEY_REKEYED", "the key depends on personal data", "app: an erasure's update would change the record's key")
 )
 
 // erasureOutcome is what a person's erasure did with one record.
@@ -348,7 +348,7 @@ func (s *storeCore) fold(ctx context.Context) error {
 // Telling the recipients (GDPR art. 19) is the product's job; the register
 // lists them. reason is journaled.
 //
-// What kit seals at rest, it erases cryptographically too (ADR 0006 §4): a
+// What the framework seals at rest, it erases cryptographically too (ADR 0006 §4): a
 // held record is moved under a data key of its own, then the data key of
 // each identity, and every data key the erased records were sealed under,
 // is destroyed — every copy of what they sealed stops opening: a store's

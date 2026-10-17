@@ -23,7 +23,7 @@ const jobsPackage = "github.com/kitsunium/sdk/framework/app/jobs"
 // jobs subsystem.
 func jobsMissing() error {
 	return errs.New(CodeSubsystemMissing, "SUBSYSTEM_NOT_IMPORTED", subsystemPublic,
-		"kit: a job needs the jobs subsystem, which the program does not import: "+jobsPackage,
+		"app: a job needs the jobs subsystem, which the program does not import: "+jobsPackage,
 		errs.String("packages", jobsPackage))
 }
 

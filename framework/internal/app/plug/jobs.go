@@ -16,7 +16,7 @@ import (
 // with a JobSchedulerConfig and held as a JobScheduler. The values are here,
 // the scheduler in jobs_interface.go.
 
-// Jobs is the jobs subsystem: the schedules of kit's jobs and the scheduler
+// Jobs is the jobs subsystem: the schedules of the framework's jobs and the scheduler
 // that fires them; nil until framework/app/jobs is imported. A product that
 // declares a job without it is refused at the start (ADR 0179 §6).
 var Jobs atomic.Pointer[JobDriverConfig]
@@ -42,7 +42,7 @@ type JobDriverConfig struct {
 type JobScheduleFunc func(after time.Time) (next time.Time, ok bool)
 
 // JobSchedulerConfig is the scheduler the app's jobs run on: the app's clock
-// and what kit hears of each fire.
+// and what the framework hears of each fire.
 type JobSchedulerConfig struct {
 	// Clock is the app's clock, which the scheduler stamps and waits on.
 	Clock Clock

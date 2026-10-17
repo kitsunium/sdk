@@ -45,12 +45,12 @@ func TestAProductWithoutHTTP(t *testing.T) {
 		t.Errorf("the process is drawn as an HTTP server: %q", proc.Technology)
 	}
 	if len(proc.Ports) != 1 {
-		t.Fatalf("ports %+v, want kit's one", proc.Ports)
+		t.Fatalf("ports %+v, want the framework's one", proc.Ports)
 	}
 	port := proc.Ports[0]
 	if port.Owner != model.PortOwnerApp || port.Address != strings.TrimPrefix(a.URL(), "http://") ||
 		slices.Contains(port.Serves, model.ServesHTTP) || !slices.Contains(port.Serves, model.ServesHealth) {
-		t.Errorf("kit's port %+v", port)
+		t.Errorf("the framework's port %+v", port)
 	}
 }
 

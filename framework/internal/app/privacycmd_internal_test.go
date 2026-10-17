@@ -194,7 +194,7 @@ func TestWhatKitCannotReadStopsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := cmdLetters.Delete(t.Context(), "l1"); err == nil || isConflict(err) {
-		t.Errorf("a deletion kit cannot check = %v", err)
+		t.Errorf("a deletion the framework cannot check = %v", err)
 	}
 	if _, err := cmdLetters.Get(t.Context(), "l1"); err != nil {
 		t.Errorf("the letter is gone: %v", err)
@@ -203,7 +203,7 @@ func TestWhatKitCannotReadStopsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := app.privacyView(t.Context()); err == nil {
-		t.Error("the Privacy page reads a journal kit cannot read")
+		t.Error("the Privacy page reads a journal the framework cannot read")
 	}
 }
 

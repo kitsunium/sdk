@@ -9,7 +9,7 @@ import (
 // framework/internal/app/queueengine implements over the SDK's queue, and the
 // app's clock as a queue stamps and waits on it, which the core implements.
 
-// Broker is one queue as kit's core uses it: a publication, the consumer
+// Broker is one queue as the framework's core uses it: a publication, the consumer
 // that delivers it, and its dead letters. It grows by the sibling below.
 type Broker interface {
 	// Publish puts payload in the queue: in the transaction ctx carries for
@@ -38,7 +38,7 @@ type MessageMover interface {
 	PutDeadLetter(ctx context.Context, dead DeadLetterValue) (string, error)
 }
 
-// Clock is the app's clock as a queue stamps and waits on it: kit's core
+// Clock is the app's clock as a queue stamps and waits on it: the framework's core
 // hands the one its app runs on, a test's manual clock included.
 type Clock interface {
 	// Now is the clock's instant.

@@ -195,7 +195,7 @@ var (
 	measureWords = map[string]string{
 		model.MeasureRedacted:  "never shown in the Studio, the spans or the logs",
 		model.MeasureHolds:     "legal holds stop erasure and deletion",
-		model.MeasureJournal:   "every export, erasure and hold, and every deletion kit makes — retention, a person's erasure —, journaled and hash-chained",
+		model.MeasureJournal:   "every export, erasure and hold, and every deletion the framework makes — retention, a person's erasure —, journaled and hash-chained",
 		model.MeasureNotSealed: "in clear: the store is kept in memory, where nothing is at rest, or its fields are tagged plain",
 		model.MeasureSealed:    "sealed at rest, AES-256-GCM, under one data key per person that their erasure destroys",
 	}

@@ -60,7 +60,7 @@ func Root(dir string) StaticConfigurer {
 // '/'. A path with no file extension that matches no file serves index.html,
 // so client-side routing works; a missing file with an extension — a script,
 // a stylesheet — stays a 404. A directory is never listed. The SDK's static
-// handler serves it; kit draws it and observes every request.
+// handler serves it; the framework draws it and observes every request.
 //
 //go:noinline
 func (s *Service) Static(name, prefix string, fsys fs.FS, opts ...StaticConfigurer) *Frontend {

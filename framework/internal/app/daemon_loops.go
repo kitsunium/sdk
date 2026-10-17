@@ -17,7 +17,7 @@ import (
 // errOverlapped is what a scheduled job returns instead of running when a
 // run the Studio started is still going: the fire is skipped, like one that
 // overlaps a scheduled run.
-var errOverlapped = errs.New(CodeJobOverlapped, "JOB_OVERLAPPED", "a run of this job is already going", "kit: the scheduler skipped a run whose previous run had not ended")
+var errOverlapped = errs.New(CodeJobOverlapped, "JOB_OVERLAPPED", "a run of this job is already going", "app: the scheduler skipped a run whose previous run had not ended")
 
 // schedRunner runs the app's one scheduler, which fires the jobs — the
 // SDK's, through the jobs subsystem —, and counts its turns on the

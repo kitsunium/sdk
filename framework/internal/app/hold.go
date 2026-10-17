@@ -206,7 +206,7 @@ func (s *storeCore) release(ctx context.Context, a *App, key string) error {
 // noPrivacy is the answer of a hold asked of an app that keeps no personal
 // data: kit keeps no holds for it.
 func noPrivacy() error {
-	return Unavailable("this app keeps no personal data, so kit keeps no holds for it: classify the fields that hold some (ADR 0006)")
+	return Unavailable("this app keeps no personal data, so the framework keeps no holds for it: classify the fields that hold some (ADR 0006)")
 }
 
 // lockHolds takes the store's hold lock, and returns what releases it. An

@@ -375,7 +375,7 @@ func (e *sealedEngine) learn(pointers []string) {
 			fields = "a member inside a list or a map"
 		}
 		e.a.problem(e.s.id, say("seal.key-reads", "store", e.s.id, "fields", fields))
-		logger.Warn(context.Background(), e.a.log, "a store's key reads a member kit seals: kept in clear at rest",
+		logger.Warn(context.Background(), e.a.log, "a store's key reads a member the framework seals: kept in clear at rest",
 			logger.String("store", e.s.id), logger.String("fields", fields))
 	}
 }

@@ -155,7 +155,7 @@ func (h *historied) remove(ctx context.Context, key string) error {
 }
 
 // errHistoryMoved ends an undo: another write changed the history since.
-var errHistoryMoved = errs.New(CodeHistoryMoved, "HISTORY_MOVED", "the history changed since", "kit: an undo found the history changed by another write")
+var errHistoryMoved = errs.New(CodeHistoryMoved, "HISTORY_MOVED", "the history changed since", "app: an undo found the history changed by another write")
 
 // undo puts a record's history back when the engine refused the record
 // after its history was written — unless a write since changed it, which

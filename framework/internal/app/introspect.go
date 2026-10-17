@@ -22,7 +22,7 @@ const sourceMaxBytes = 2 << 20
 var (
 	// errNotSource is readSource's refusal: the name holds no regular file
 	// within sourceMaxBytes, or no longer holds the one it looked at.
-	errNotSource = errs.New(CodeNotSource, "NOT_SOURCE", "not a regular source file", "kit: the source endpoint refused a name that holds no regular file")
+	errNotSource = errs.New(CodeNotSource, "NOT_SOURCE", "not a regular source file", "app: the source endpoint refused a name that holds no regular file")
 
 	// studioMount mounts the Studio's routes — framework/app/studio's, over a
 	// host of the app (studio_host.go) — once framework/app/studio is

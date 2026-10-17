@@ -9,7 +9,7 @@ package plug
 
 // The kinds of refusal.
 const (
-	// RefusalNone is no refusal kit words.
+	// RefusalNone is no refusal the framework words.
 	RefusalNone Refusal = iota
 	// RefusalNotFound is no document under the key, or under the index's
 	// key.
@@ -66,16 +66,16 @@ const (
 	RefusalOutOfOrder
 )
 
-// Refusal is a kind of refusal of a store's engine or a database, as kit
+// Refusal is a kind of refusal of a store's engine or a database, as the framework
 // words it.
 type Refusal uint8
 
 // RefusalError is an engine's refusal of one kind: the error it met, and
-// the kind kit words it by.
+// the kind the framework words it by.
 type RefusalError struct {
 	// Err is what the engine met.
 	Err error
-	// Kind is how kit words it.
+	// Kind is how the framework words it.
 	Kind Refusal
 }
 
@@ -110,7 +110,7 @@ func Refused(err error, kind Refusal) bool {
 // Error is what the engine met's.
 func (e *RefusalError) Error() string {
 	if e.Err == nil {
-		return "kit: a store's engine refused the call"
+		return "app: a store's engine refused the call"
 	}
 	return e.Err.Error()
 }

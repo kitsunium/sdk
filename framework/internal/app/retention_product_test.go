@@ -95,12 +95,12 @@ func TestTheProductKeepsItsRetention(t *testing.T) {
 	said := strings.Join(warned, "\n")
 	for _, store := range []string{"lounge/store/stays", "lounge/store/doodles"} {
 		if strings.Contains(said, store) {
-			t.Errorf("kit warns of %s, whose product keeps its retention:\n%s", store, said)
+			t.Errorf("the framework warns of %s, whose product keeps its retention:\n%s", store, said)
 		}
 	}
 	for _, want := range []string{"lounge/store/guestbook keeps personal data but says nowhere for how long", "lounge/store/guestbook keeps personal data, but no field tagged subject"} {
 		if !strings.Contains(said, want) {
-			t.Errorf("kit does not warn %q:\n%s", want, said)
+			t.Errorf("the framework does not warn %q:\n%s", want, said)
 		}
 	}
 	p := g.Node("lounge/store/stays").Store.Privacy
@@ -112,7 +112,7 @@ func TestTheProductKeepsItsRetention(t *testing.T) {
 	}
 	for _, l := range g.Runtime.Loops {
 		if l.Kind == model.LoopRetention {
-			t.Errorf("kit runs a retention in the lounge: %+v", l)
+			t.Errorf("the framework runs a retention in the lounge: %+v", l)
 		}
 	}
 }
@@ -185,7 +185,7 @@ func TestTheProductsRetentionIsItsAlone(t *testing.T) {
 		t.Fatalf("Start = %v", err)
 	}
 	for _, want := range []string{
-		`store "reports" says the product keeps its retention (app.RetentionByProduct) and gives kit one`,
+		`store "reports" says the product keeps its retention (app.RetentionByProduct) and gives the framework one`,
 		`store "twice" declares app.RetentionByProduct twice`,
 	} {
 		if !strings.Contains(err.Error(), want) {

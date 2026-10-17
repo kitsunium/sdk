@@ -399,14 +399,14 @@ func linksNoSubsystem(t *testing.T, goTool, dir string) {
 	// kit speaks English from its own table, and no other language: the
 	// catalogues after English are the Studio's (ADR 0179 step 8, Q6).
 	if !bytes.Contains(image, []byte(englishSentence)) {
-		t.Errorf("the smallest product does not hold kit's English table (%q)", englishSentence)
+		t.Errorf("the smallest product does not hold the framework's English table (%q)", englishSentence)
 	}
 	if bytes.Contains(image, []byte(frenchSentence)) {
-		t.Errorf("a product that does not import framework/app/studio holds kit's French catalogue (%q)", frenchSentence)
+		t.Errorf("a product that does not import framework/app/studio holds the framework's French catalogue (%q)", frenchSentence)
 	}
 	for _, fn := range kitStoreCode {
 		if syms[kitStoreSymbol(fn)] {
-			t.Errorf("a product that does not import framework/app/store links kit's own store code: %s", fn)
+			t.Errorf("a product that does not import framework/app/store links the framework's own store code: %s", fn)
 		}
 	}
 	linksNoStudio(t, "framework/app", syms, image)
@@ -473,7 +473,7 @@ func TestAProductThatImportsTheStoresLinksThem(t *testing.T) {
 	}
 	for _, fn := range kitStoreCode {
 		if !syms[kitStoreSymbol(fn)] {
-			t.Errorf("a product that imports framework/app/store does not link kit's own store code: %s", fn)
+			t.Errorf("a product that imports framework/app/store does not link the framework's own store code: %s", fn)
 		}
 	}
 	// The stores do not bring the queues (ADR 0179 Q4: the queue package
@@ -510,7 +510,7 @@ func linksNoWords(t *testing.T, by string, image []byte, linked map[string]int) 
 		}
 	}
 	if bytes.Contains(image, []byte(frenchSentence)) {
-		t.Errorf("a product that imports %s and not framework/app/studio holds kit's French catalogue", by)
+		t.Errorf("a product that imports %s and not framework/app/studio holds the framework's French catalogue", by)
 	}
 }
 
@@ -714,7 +714,7 @@ func TestAProductThatImportsTheJobsLinksThem(t *testing.T) {
 	}
 	for _, fn := range kitStoreCode {
 		if syms[kitStoreSymbol(fn)] {
-			t.Errorf("a product that imports framework/app/jobs alone links kit's own store code: %s", fn)
+			t.Errorf("a product that imports framework/app/jobs alone links the framework's own store code: %s", fn)
 		}
 	}
 	linksNoWords(t, "framework/app/jobs", image, linked)
@@ -760,16 +760,16 @@ func TestAProductThatImportsTheStudioLinksItsLanguages(t *testing.T) {
 		t.Run(c.owner, func(t *testing.T) { runCase(t, c) })
 	}
 	if !syms[sdk+studioKit+"openWords"] {
-		t.Error("a product that imports framework/app/studio does not link the opening of kit's catalogues after English")
+		t.Error("a product that imports framework/app/studio does not link the opening of the framework's catalogues after English")
 	}
 	if code := beyondInits(syms, owners()["pkg/v1/app/i18n"]); len(code) == 0 {
 		t.Error("a product that imports framework/app/studio links nothing of the SDK's i18n beyond its inits")
 	}
 	if !bytes.Contains(image, []byte(frenchSentence)) {
-		t.Errorf("a product that imports framework/app/studio does not hold kit's French catalogue (%q)", frenchSentence)
+		t.Errorf("a product that imports framework/app/studio does not hold the framework's French catalogue (%q)", frenchSentence)
 	}
 	if !bytes.Contains(image, []byte(englishSentence)) {
-		t.Errorf("a product that imports framework/app/studio does not hold kit's English table (%q)", englishSentence)
+		t.Errorf("a product that imports framework/app/studio does not hold the framework's English table (%q)", englishSentence)
 	}
 	// It links the Studio's routes and the reading of the tool's variables
 	// (ADR 0180 step 1), which no other probe links.

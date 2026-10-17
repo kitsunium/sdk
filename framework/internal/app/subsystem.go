@@ -189,7 +189,7 @@ func (a *App) missingPackages() []string {
 	return slices.Compact(pkgs)
 }
 
-// Unwrap is what the refusal is, when kit has a code for it: with
+// Unwrap is what the refusal is, when the framework has a code for it: with
 // packages in Missing, an error carrying [CodeSubsystemMissing] (ADR
 // 0179 §6), which errs.HasCode reads through the refusal; nil
 // otherwise.
@@ -199,6 +199,6 @@ func (e *DiagnosticsError) Unwrap() error {
 	}
 	list := strings.Join(e.Missing, ", ")
 	return errs.New(CodeSubsystemMissing, "SUBSYSTEM_NOT_IMPORTED", subsystemPublic,
-		"kit: the product declares what needs a subsystem whose registration package the program does not import: "+list,
+		"app: the product declares what needs a subsystem whose registration package the program does not import: "+list,
 		errs.String("packages", list))
 }

@@ -17,7 +17,7 @@ type legacyPage struct {
 	Body  string `json:"body" kit:"personal"`
 }
 
-var legacyPagesSvc = NewService("legacy-pages", "Pages whose versions were written before kit sealed them, for the revisions tests.")
+var legacyPagesSvc = NewService("legacy-pages", "Pages whose versions were written before the framework sealed them, for the revisions tests.")
 
 var legacyPages = legacyPagesSvc.Store("pages", func(p legacyPage) string { return p.ID }, Revisions(2))
 

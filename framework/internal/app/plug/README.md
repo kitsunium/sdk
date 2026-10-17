@@ -6,11 +6,11 @@
 import "github.com/kitsunium/sdk/framework/internal/app/plug"
 ```
 
-Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/app/server), the Studio — the tool's variables, its routes and kit's sentences in the languages after English (framework/app/studio) —, the stores and the databases (framework/app/store), the queues (framework/app/queue), the workflows (framework/app/workflow), the mailers (framework/app/mail), the jobs (framework/app/jobs). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
+Package plug is where the framework's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/app/server), the Studio — the tool's variables, its routes and the framework's sentences in the languages after English (framework/app/studio) —, the stores and the databases (framework/app/store), the queues (framework/app/queue), the workflows (framework/app/workflow), the mailers (framework/app/mail), the jobs (framework/app/jobs). The framework reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
 
-It is also the contract between kit's core and the subsystems ADR 0179 takes out of it, as database/sql/driver is between database/sql and a driver: the store subsystem's engine over documents, its siblings, kit's scope on a database and its migrations ([Stores](#Stores)), which framework/app/store sets; the refusals an engine says in kit's terms ([Refusal](#Refusal)); what kit's transactions offer an engine that takes part in them ([Transaction](#Transaction)); the queue subsystem's brokers and their consumer ([Queues](#Queues)), which framework/app/queue sets; the workflow subsystem's engine and the ports it runs on ([Workflows](#Workflows)), which framework/app/workflow sets; the mail subsystem's outbox and transports ([Mail](#Mail)), which framework/app/mail sets; the jobs subsystem's schedules and scheduler ([Jobs](#Jobs)), which framework/app/jobs sets; kit's catalogues in the languages after English ([Words](#Words)), and the Studio's routes and the tool's variables ([Studio](#Studio), ADR 0180 step 1), which framework/app/studio sets, the routes reading the running app through a [StudioHost](#StudioHost) kit gives.
+It is also the contract between the framework's core and the subsystems ADR 0179 takes out of it, as database/sql/driver is between database/sql and a driver: the store subsystem's engine over documents, its siblings, the framework's scope on a database and its migrations ([Stores](#Stores)), which framework/app/store sets; the refusals an engine says in the framework's terms ([Refusal](#Refusal)); what the framework's transactions offer an engine that takes part in them ([Transaction](#Transaction)); the queue subsystem's brokers and their consumer ([Queues](#Queues)), which framework/app/queue sets; the workflow subsystem's engine and the ports it runs on ([Workflows](#Workflows)), which framework/app/workflow sets; the mail subsystem's outbox and transports ([Mail](#Mail)), which framework/app/mail sets; the jobs subsystem's schedules and scheduler ([Jobs](#Jobs)), which framework/app/jobs sets; the framework's catalogues in the languages after English ([Words](#Words)), and the Studio's routes and the tool's variables ([Studio](#Studio), ADR 0180 step 1), which framework/app/studio sets, the routes reading the running app through a [StudioHost](#StudioHost) the framework gives.
 
-The package imports the standard library and the framework's model only, so that kit and every subsystem can import it.
+The package imports the standard library and the framework's model only, so that the framework and every subsystem can import it.
 
 ## Index
 
@@ -269,7 +269,7 @@ MailEventDuplicate is a redelivery of a mail already sent, dropped.
 const MailEventOther MailEvent = 0
 ```
 
-MailEventOther is an event of the spool kit shows nothing of.
+MailEventOther is an event of the spool the framework shows nothing of.
 
 <a name="MailEventQueued"></a>
 ```go
@@ -311,7 +311,7 @@ MailRefusalInvalidURL is an SMTP URL that is not one of the form smtp://user:pas
 const MailRefusalNone MailRefusal = 0
 ```
 
-MailRefusalNone is no refusal kit words.
+MailRefusalNone is no refusal the framework words.
 
 <a name="MailRefusalUnencodable"></a>
 ```go
@@ -388,7 +388,7 @@ RefusalLoad is a store that could not be loaded; its "problem" field says why.
 const RefusalNone Refusal = 0
 ```
 
-RefusalNone is no refusal kit words.
+RefusalNone is no refusal the framework words.
 
 <a name="RefusalNotFound"></a>
 ```go
@@ -507,7 +507,7 @@ WorkflowEntityMissing is no entity under the key.
 const WorkflowFailureNone WorkflowFailure = 0
 ```
 
-WorkflowFailureNone is no failure kit words.
+WorkflowFailureNone is no failure the framework words.
 
 <a name="WorkflowFunctionPanicked"></a>
 ```go
@@ -563,7 +563,7 @@ WorkflowKeyEmpty is an entity whose key is empty.
 const WorkflowLoopOther WorkflowLoopEvent = 0
 ```
 
-WorkflowLoopOther is an event of the loop kit shows nothing of.
+WorkflowLoopOther is an event of the loop the framework shows nothing of.
 
 <a name="WorkflowLoopPanicked"></a>
 ```go
@@ -705,14 +705,14 @@ WriteUpsert writes whatever the key holds: a creation or a replacement.
 var Jobs atomic.Pointer[JobDriverConfig]
 ```
 
-Jobs is the jobs subsystem: the schedules of kit's jobs and the scheduler that fires them; nil until framework/app/jobs is imported. A product that declares a job without it is refused at the start (ADR 0179 §6).
+Jobs is the jobs subsystem: the schedules of the framework's jobs and the scheduler that fires them; nil until framework/app/jobs is imported. A product that declares a job without it is refused at the start (ADR 0179 §6).
 
 <a name="Mail"></a>
 ```go
 var Mail atomic.Pointer[MailDriverConfig]
 ```
 
-Mail is the mail subsystem: the outbox kit's mailers keep and the transports that empty it; nil until framework/app/mail is imported. A product that declares a mailer without it is refused at the start (ADR 0179 §6).
+Mail is the mail subsystem: the outbox the framework's mailers keep and the transports that empty it; nil until framework/app/mail is imported. A product that declares a mailer without it is refused at the start (ADR 0179 §6).
 
 <a name="NewHTTPServer"></a>
 ```go
@@ -733,7 +733,7 @@ NewStaticFiles builds the file server of a frontend's tree; nil until framework/
 var Queues atomic.Pointer[QueueDriverConfig]
 ```
 
-Queues is the queue subsystem: the brokers kit's consumers' queues run on and the migration of a queue's table on a database; nil until framework/app/queue is imported. A product that declares a topic, a subscription, a watch, a queued command or a mailer whose outbox is on a database without it is refused at the start (ADR 0179 §6).
+Queues is the queue subsystem: the brokers the framework's consumers' queues run on and the migration of a queue's table on a database; nil until framework/app/queue is imported. A product that declares a topic, a subscription, a watch, a queued command or a mailer whose outbox is on a database without it is refused at the start (ADR 0179 §6).
 
 <a name="SampleProcess"></a>
 ```go
@@ -747,28 +747,28 @@ SampleProcess samples the running process — its heap, goroutines, collections 
 var Stores atomic.Pointer[StoreDriverConfig]
 ```
 
-Stores is the store subsystem: the engines kit's stores run on, kit's scope on a database and the migrations of kit's tables; nil until framework/app/store is imported. A product that declares a store or a database without it is refused at the start (ADR 0179 §6).
+Stores is the store subsystem: the engines the framework's stores run on, the framework's scope on a database and the migrations of the framework's tables; nil until framework/app/store is imported. A product that declares a store or a database without it is refused at the start (ADR 0179 §6).
 
 <a name="Studio"></a>
 ```go
 var Studio atomic.Pointer[StudioDriverConfig]
 ```
 
-Studio is the Studio subsystem: the tool's variables and the Studio's routes; nil until framework/app/studio is imported, and kit then reads none of the tool's variables and serves no route of the Studio.
+Studio is the Studio subsystem: the tool's variables and the Studio's routes; nil until framework/app/studio is imported, and the framework then reads none of the tool's variables and serves no route of the Studio.
 
 <a name="Words"></a>
 ```go
 var Words atomic.Pointer[WordsConfig]
 ```
 
-Words is kit's sentences in the languages after English, the catalogues the Studio shows its reader's language from; nil until framework/app/studio is imported, and kit then speaks English alone. The terminal, the logs and an error read English whatever a program imports (ADR 0179 Q6).
+Words is the framework's sentences in the languages after English, the catalogues the Studio shows its reader's language from; nil until framework/app/studio is imported, and the framework then speaks English alone. The terminal, the logs and an error read English whatever a program imports (ADR 0179 Q6).
 
 <a name="Workflows"></a>
 ```go
 var Workflows atomic.Pointer[WorkflowDriverConfig]
 ```
 
-Workflows is the workflow subsystem: the engine kit's workflows run on; nil until framework/app/workflow is imported. A product that declares a workflow without it is refused at the start (ADR 0179 §6).
+Workflows is the workflow subsystem: the engine the framework's workflows run on; nil until framework/app/workflow is imported. A product that declares a workflow without it is refused at the start (ADR 0179 §6).
 
 <a name="Refuse"></a>
 ## func [Refuse](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store_refusal.go>)
@@ -791,7 +791,7 @@ Refused reports whether err, or an error it wraps, is a refusal of kind.
 <a name="Broker"></a>
 ## type [Broker](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue_interface.go>)
 
-Broker is one queue as kit's core uses it: a publication, the consumer that delivers it, and its dead letters. It grows by the sibling below.
+Broker is one queue as the framework's core uses it: a publication, the consumer that delivers it, and its dead letters. It grows by the sibling below.
 
 ```go
 type Broker interface {
@@ -858,7 +858,7 @@ Check asks the database whether it answers, within its check timeout.
 <a name="Clock"></a>
 ## type [Clock](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue_interface.go>)
 
-Clock is the app's clock as a queue stamps and waits on it: kit's core hands the one its app runs on, a test's manual clock included.
+Clock is the app's clock as a queue stamps and waits on it: the framework's core hands the one its app runs on, a test's manual clock included.
 
 ```go
 type Clock interface {
@@ -940,7 +940,7 @@ ConsumeConfig is how a queue's consumer runs: its handler, how long it waits idl
 type ConsumeConfig struct {
 	// Handler handles one delivery: nil acknowledges it, an error has it
 	// retried or, through DoNotRetry, dead-lettered at once. Every handler
-	// kit runs tolerates a redelivery.
+	// the framework runs tolerates a redelivery.
 	Handler      func(ctx context.Context, d DeliveryValue) error
 	// PollInterval bounds an idle wait.
 	PollInterval time.Duration
@@ -954,7 +954,7 @@ type ConsumeConfig struct {
 <a name="Database"></a>
 ## type [Database](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store_interface.go>)
 
-Database is kit's scope on one database (ADR 0179 §2): the transactions app.Transact opens on it, their savepoints, and the functions held until their end. The core knows a database only through it; the store package implements it over the SDK's sql. It grows by the siblings below.
+Database is the framework's scope on one database (ADR 0179 §2): the transactions app.Transact opens on it, their savepoints, and the functions held until their end. The core knows a database only through it; the store package implements it over the SDK's sql. It grows by the siblings below.
 
 ```go
 type Database interface {
@@ -1015,7 +1015,7 @@ Transact runs fn in a transaction of the database, or in a savepoint of the one 
 <a name="DatabaseConfig"></a>
 ## type [DatabaseConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store.go>)
 
-DatabaseConfig is one database a product declares, as kit opened it: its pool, its dialect, its tuning and the timeout of each call.
+DatabaseConfig is one database a product declares, as the framework opened it: its pool, its dialect, its tuning and the timeout of each call.
 
 ```go
 type DatabaseConfig struct {
@@ -1026,7 +1026,7 @@ type DatabaseConfig struct {
 	// Dialect is the engine's SQL dialect: "postgres", "mysql" or
 	// "sqlite".
 	Dialect      string
-	// Timeout bounds each call kit makes on the database.
+	// Timeout bounds each call the framework makes on the database.
 	Timeout      time.Duration
 	// MaxOpen and MaxIdle bound the pool's connections.
 	MaxOpen      int
@@ -1136,7 +1136,7 @@ Documents is the document store the engine runs on, and whether there is one.
 <a name="DocumentValue"></a>
 ## type [DocumentValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store.go>)
 
-DocumentValue is a record as a store's engine holds it (ADR 0179 §2): its JSON as it rests, byte for byte what kit encodes, and the entity once decoded, kept beside it so that a read, an index or a privacy walk does not decode it twice.
+DocumentValue is a record as a store's engine holds it (ADR 0179 §2): its JSON as it rests, byte for byte what the framework encodes, and the entity once decoded, kept beside it so that a read, an index or a privacy walk does not decode it twice.
 
 ```go
 type DocumentValue struct {
@@ -1331,7 +1331,7 @@ Fold rewrites the store's data with only what it holds now.
 <a name="HTTPConfig"></a>
 ## type [HTTPConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/plug.go>)
 
-HTTPConfig is what kit asks of the HTTP engine: where to listen, its one socket, its bounds, and the handler.
+HTTPConfig is what the framework asks of the HTTP engine: where to listen, its one socket, its bounds, and the handler.
 
 ```go
 type HTTPConfig struct {
@@ -1357,7 +1357,7 @@ type HTTPConfig struct {
 <a name="HTTPServer"></a>
 ## type [HTTPServer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/plug.go>)
 
-HTTPServer is the HTTP engine kit starts, reads and stops.
+HTTPServer is the HTTP engine the framework starts, reads and stops.
 
 ```go
 type HTTPServer interface {
@@ -1539,7 +1539,7 @@ Run fires the jobs until ctx ends, then waits for the runs going.
 <a name="JobSchedulerConfig"></a>
 ## type [JobSchedulerConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/jobs.go>)
 
-JobSchedulerConfig is the scheduler the app's jobs run on: the app's clock and what kit hears of each fire.
+JobSchedulerConfig is the scheduler the app's jobs run on: the app's clock and what the framework hears of each fire.
 
 ```go
 type JobSchedulerConfig struct {
@@ -1632,7 +1632,7 @@ Composed is the last message the transport composed, nil for none.
 <a name="MailDriverConfig"></a>
 ## type [MailDriverConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/mail.go>)
 
-MailDriverConfig is what framework/app/mail plugs into kit: how a mailer's outbox opens, the SDK's verdict on a mail, the transports a mailer hands its mail to, and how kit tells the spool's refusals apart.
+MailDriverConfig is what framework/app/mail plugs into kit: how a mailer's outbox opens, the SDK's verdict on a mail, the transports a mailer hands its mail to, and how the framework tells the spool's refusals apart.
 
 ```go
 type MailDriverConfig struct {
@@ -1696,7 +1696,7 @@ type MailEventValue struct {
 <a name="MailRefusal"></a>
 ## type [MailRefusal](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/mail.go>)
 
-MailRefusal is a refusal of the mail subsystem, as kit words it.
+MailRefusal is a refusal of the mail subsystem, as the framework words it.
 
 ```go
 type MailRefusal uint8
@@ -1742,7 +1742,7 @@ Send delivers msg.
 <a name="MailSpool"></a>
 ## type [MailSpool](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/mail_interface.go>)
 
-MailSpool is one mailer's outbox as kit's core uses it: a mail put in it at once or under an ID kit minted, the loop that hands each mail to the transport, and its dead letters.
+MailSpool is one mailer's outbox as the framework's core uses it: a mail put in it at once or under an ID the framework minted, the loop that hands each mail to the transport, and its dead letters.
 
 ```go
 type MailSpool interface {
@@ -1756,7 +1756,7 @@ type MailSpool interface {
 	// Send puts msg in the outbox — in the transaction ctx carries for its
 	// database, when it lives on one — and returns its outbox ID.
 	Send(ctx context.Context, msg MailValue) (string, error)
-	// SendWithID puts msg in the outbox under id, minted by kit.
+	// SendWithID puts msg in the outbox under id, minted by the framework.
 	SendWithID(ctx context.Context, id string, msg MailValue) error
 }
 ```
@@ -1804,12 +1804,12 @@ Send puts msg in the outbox — in the transaction ctx carries for its database,
 func (MailSpool) SendWithID(ctx context.Context, id string, msg MailValue) error
 ```
 
-SendWithID puts msg in the outbox under id, minted by kit.
+SendWithID puts msg in the outbox under id, minted by the framework.
 
 <a name="MailSpoolConfig"></a>
 ## type [MailSpoolConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/mail.go>)
 
-MailSpoolConfig is one mailer's outbox: the transport each attempt runs, the app's clock, what kit hears of its mails, its retries, and where it keeps them — a queue on the database that keeps the mailer's service, a directory, or memory.
+MailSpoolConfig is one mailer's outbox: the transport each attempt runs, the app's clock, what the framework hears of its mails, its retries, and where it keeps them — a queue on the database that keeps the mailer's service, a directory, or memory.
 
 ```go
 type MailSpoolConfig struct {
@@ -1858,7 +1858,7 @@ type MailSpoolConfig struct {
 <a name="MailValue"></a>
 ## type [MailValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/mail.go>)
 
-MailValue is a value of the SDK's mail package as it crosses the contract: a mail.Message, or a sender's mail.Address, held as any — kit's core names the SDK's mail types, plug names none.
+MailValue is a value of the SDK's mail package as it crosses the contract: a mail.Message, or a sender's mail.Address, held as any — the framework's core names the SDK's mail types, plug names none.
 
 ```go
 type MailValue struct {
@@ -1916,7 +1916,7 @@ PutMessage writes live under an identifier of the queue's own, and returns it.
 <a name="MessageValue"></a>
 ## type [MessageValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue.go>)
 
-MessageValue is one message of a queue: its identifier, its payload as kit encoded it, and when it was published.
+MessageValue is one message of a queue: its identifier, its payload as the framework encoded it, and when it was published.
 
 ```go
 type MessageValue struct {
@@ -1924,7 +1924,7 @@ type MessageValue struct {
 	EnqueuedAt time.Time
 	// ID identifies the message in its queue.
 	ID         string
-	// Payload is the message as kit encoded it.
+	// Payload is the message as the framework encoded it.
 	Payload    []byte
 }
 ```
@@ -1932,7 +1932,7 @@ type MessageValue struct {
 <a name="MigrationValue"></a>
 ## type [MigrationValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store.go>)
 
-MigrationValue is one versioned change of a database's schema and its reversal, as the core hands it to the store subsystem: a product's app.Migration, or one of kit's own, its steps on the standard library's types.
+MigrationValue is one versioned change of a database's schema and its reversal, as the core hands it to the store subsystem: a product's app.Migration, or one of the framework's own, its steps on the standard library's types.
 
 ```go
 type MigrationValue struct {
@@ -2014,7 +2014,7 @@ Migrator is the set ms, under the version table table.
 <a name="QueueConfig"></a>
 ## type [QueueConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue.go>)
 
-QueueConfig is what kit asks of one queue: where it lies, its policy, the app's clock, and for a mailer's outbox the sealing of what it keeps.
+QueueConfig is what the framework asks of one queue: where it lies, its policy, the app's clock, and for a mailer's outbox the sealing of what it keeps.
 
 ```go
 type QueueConfig struct {
@@ -2045,7 +2045,7 @@ type QueueConfig struct {
 	MaxPayload int
 	// Wrap, when a test sets it, stands in front of the queue the subsystem
 	// opens: a func(queue.Broker) queue.Broker of the SDK's queue, which
-	// kit's core does not name. Nil in every app a product builds.
+	// the framework's core does not name. Nil in every app a product builds.
 	Wrap       any
 }
 ```
@@ -2075,7 +2075,7 @@ type QueueDriverConfig struct {
 <a name="QueuePolicyValue"></a>
 ## type [QueuePolicyValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/queue.go>)
 
-QueuePolicyValue is how a queue leases, retries and bounds its messages: the SDK's queue policy, in kit's terms.
+QueuePolicyValue is how a queue leases, retries and bounds its messages: the SDK's queue policy, in the framework's terms.
 
 ```go
 type QueuePolicyValue struct {
@@ -2097,7 +2097,7 @@ type QueuePolicyValue struct {
 <a name="Refusal"></a>
 ## type [Refusal](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store_refusal.go>)
 
-Refusal is a kind of refusal of a store's engine or a database, as kit words it.
+Refusal is a kind of refusal of a store's engine or a database, as the framework words it.
 
 ```go
 type Refusal uint8
@@ -2106,13 +2106,13 @@ type Refusal uint8
 <a name="RefusalError"></a>
 ## type [RefusalError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store_refusal.go>)
 
-RefusalError is an engine's refusal of one kind: the error it met, and the kind kit words it by.
+RefusalError is an engine's refusal of one kind: the error it met, and the kind the framework words it by.
 
 ```go
 type RefusalError struct {
 	// Err is what the engine met.
 	Err  error
-	// Kind is how kit words it.
+	// Kind is how the framework words it.
 	Kind Refusal
 }
 ```
@@ -2182,7 +2182,7 @@ type Step func(ctx context.Context, ex Executor) error
 <a name="StoreConfig"></a>
 ## type [StoreConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store.go>)
 
-StoreConfig is what kit asks of one store's engine: the store, its key and its indexes over documents, where it rests and what it keeps, and how its writes take part in kit's transactions.
+StoreConfig is what the framework asks of one store's engine: the store, its key and its indexes over documents, where it rests and what it keeps, and how its writes take part in the framework's transactions.
 
 ```go
 type StoreConfig struct {
@@ -2229,7 +2229,7 @@ type StoreConfig struct {
 	Held        func(ctx context.Context, key string) bool
 	// Stamp is what a write under ctx says about the version it makes.
 	Stamp       func(ctx context.Context) StampValue
-	// Transaction is kit's transaction, which the engine's writes take part
+	// Transaction is the framework's transaction, which the engine's writes take part
 	// in.
 	Transaction Transaction
 }
@@ -2238,14 +2238,14 @@ type StoreConfig struct {
 <a name="StoreDriverConfig"></a>
 ## type [StoreDriverConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store.go>)
 
-StoreDriverConfig is what framework/app/store plugs into kit: how a store's engine opens, how kit opens its scope on a database, and the migration that makes one of kit's tables.
+StoreDriverConfig is what framework/app/store plugs into kit: how a store's engine opens, how the framework opens its scope on a database, and the migration that makes one of the framework's tables.
 
 ```go
 type StoreDriverConfig struct {
 	// Open opens the engine of one store, as cfg places it: loaded from the
 	// data directory, empty in memory, or on a database.
 	Open           func(cfg StoreConfig) (StoreEngine, error)
-	// Database opens kit's scope on one database's pool.
+	// Database opens the framework's scope on one database's pool.
 	Database       func(cfg DatabaseConfig) (Database, error)
 	// TableMigration is the migration that makes the table t on a database
 	// of the dialect named, at version.
@@ -2256,7 +2256,7 @@ type StoreDriverConfig struct {
 <a name="StoreEngine"></a>
 ## type [StoreEngine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store_interface.go>)
 
-StoreEngine is what a store runs on, over documents (ADR 0179 §2): the non-generic engine under Store\[T]. Its refusals are kit's ([Refusal](#Refusal)): the engine translates the SDK's before they reach the core. Every call takes the caller's context, which carries the transaction the call joins. It grows by the sibling interfaces below, never by a method (the SDK's ADR 0039).
+StoreEngine is what a store runs on, over documents (ADR 0179 §2): the non-generic engine under Store\[T]. Its refusals are the framework's ([Refusal](#Refusal)): the engine translates the SDK's before they reach the core. Every call takes the caller's context, which carries the transaction the call joins. It grows by the sibling interfaces below, never by a method (the SDK's ADR 0039).
 
 ```go
 type StoreEngine interface {
@@ -2409,10 +2409,10 @@ type StudioDriverConfig struct {
 	Env      func(getenv func(string) string) StudioEnvValue
 	// Settings are the tool's variables as the settings of a run show them,
 	// in order, each with its value as the run resolved it and where it
-	// came from: the product's code, the environment, or kit's default.
+	// came from: the product's code, the environment, or the framework's default.
 	Settings func(getenv func(string) string, state StudioStateValue) []model.Setting
 	// Forced are the variables kit dev says it set itself for this launch,
-	// as it names them; kit labels only those it lets kit dev set.
+	// as it names them; the framework labels only those it lets kit dev set.
 	Forced   func(getenv func(string) string) []string
 	// DevBuild is what kit dev said about the build it launched, nil when
 	// the process was not started by kit dev.
@@ -2469,7 +2469,7 @@ type StudioHost interface {
 	// Instances are a workflow's entities and where each is; false for no
 	// such workflow.
 	Instances(workflow string) ([]model.Instance, bool)
-	// Invalid is kit's answer to a request the caller must change, saying
+	// Invalid is the framework's answer to a request the caller must change, saying
 	// message.
 	Invalid(message string) error
 	// Items are a store's latest entities, redacted as payloads are; false
@@ -2487,7 +2487,7 @@ type StudioHost interface {
 	Mail(id string) (model.MailMessage, bool)
 	// Mails are every mailer's latest mails, at most limit of each.
 	Mails(limit int) []model.MailSummary
-	// NotFound is kit's answer to a request for what does not exist,
+	// NotFound is the framework's answer to a request for what does not exist,
 	// saying message.
 	NotFound(message string) error
 	// Now is the time on the app's clock.
@@ -2496,13 +2496,13 @@ type StudioHost interface {
 	Phase() string
 	// Privacy is what the Studio's Privacy page shows.
 	Privacy(ctx context.Context) (model.Privacy, error)
-	// ProfileUnreadable is kit's refusal of a profile the process could
+	// ProfileUnreadable is the framework's refusal of a profile the process could
 	// not read: public says which, cause why, for the logs.
 	ProfileUnreadable(public string, cause error) error
 	// Remote reports whether the Studio answers a client that is not on
 	// this machine.
 	Remote() bool
-	// Reply answers r with body, a JSON document, or with err as kit
+	// Reply answers r with body, a JSON document, or with err as the framework
 	// answers an error.
 	Reply(w http.ResponseWriter, r *http.Request, body json.RawMessage, err error)
 	// Revisions are the versions of the record under key in store, and
@@ -2609,7 +2609,7 @@ Instances are a workflow's entities and where each is; false for no such workflo
 func (StudioHost) Invalid(message string) error
 ```
 
-Invalid is kit's answer to a request the caller must change, saying message.
+Invalid is the framework's answer to a request the caller must change, saying message.
 
 <a name="StudioHost.Items"></a>
 ### func \(StudioHost\) [Items](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/studio_interface.go>)
@@ -2663,7 +2663,7 @@ Mails are every mailer's latest mails, at most limit of each.
 func (StudioHost) NotFound(message string) error
 ```
 
-NotFound is kit's answer to a request for what does not exist, saying message.
+NotFound is the framework's answer to a request for what does not exist, saying message.
 
 <a name="StudioHost.Now"></a>
 ### func \(StudioHost\) [Now](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/studio_interface.go>)
@@ -2699,7 +2699,7 @@ Privacy is what the Studio's Privacy page shows.
 func (StudioHost) ProfileUnreadable(public string, cause error) error
 ```
 
-ProfileUnreadable is kit's refusal of a profile the process could not read: public says which, cause why, for the logs.
+ProfileUnreadable is the framework's refusal of a profile the process could not read: public says which, cause why, for the logs.
 
 <a name="StudioHost.Remote"></a>
 ### func \(StudioHost\) [Remote](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/studio_interface.go>)
@@ -2717,7 +2717,7 @@ Remote reports whether the Studio answers a client that is not on this machine.
 func (StudioHost) Reply(w http.ResponseWriter, r *http.Request, body json.RawMessage, err error)
 ```
 
-Reply answers r with body, a JSON document, or with err as kit answers an error.
+Reply answers r with body, a JSON document, or with err as the framework answers an error.
 
 <a name="StudioHost.Revisions"></a>
 ### func \(StudioHost\) [Revisions](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/studio_interface.go>)
@@ -2821,7 +2821,7 @@ type StudioStateValue struct {
 <a name="TableSpec"></a>
 ## type [TableSpec](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store.go>)
 
-TableSpec is one of kit's tables on a database, as the store subsystem's migration makes it: a store's, or a store's versions beside the store's table VersionsOf. A consumer's queue's table is the queue subsystem's (QueueDriverConfig's TableMigration).
+TableSpec is one of the framework's tables on a database, as the store subsystem's migration makes it: a store's, or a store's versions beside the store's table VersionsOf. A consumer's queue's table is the queue subsystem's (QueueDriverConfig's TableMigration).
 
 ```go
 type TableSpec struct {
@@ -2937,7 +2937,7 @@ type TombstoneValue struct {
 <a name="Transaction"></a>
 ## type [Transaction](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/store_interface.go>)
 
-Transaction is kit's transaction as a store's engine takes part in it (ADR 0139, ADR 0178): the core implements it, an engine calls it with its caller's context.
+Transaction is the framework's transaction as a store's engine takes part in it (ADR 0139, ADR 0178): the core implements it, an engine calls it with its caller's context.
 
 ```go
 type Transaction interface {
@@ -3023,7 +3023,7 @@ type TransitionSpec struct {
 <a name="Translator"></a>
 ## type [Translator](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/words_interface.go>)
 
-Translator says kit's sentences in the languages after English, which only the Studio shows, in its reader's language.
+Translator says the framework's sentences in the languages after English, which only the Studio shows, in its reader's language.
 
 ```go
 type Translator interface {
@@ -3215,12 +3215,12 @@ VersionWeight is what the store's versions and trash weigh.
 <a name="WordsConfig"></a>
 ## type [WordsConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/words.go>)
 
-WordsConfig is what framework/app/studio plugs into kit: how kit's catalogues in the languages after English open.
+WordsConfig is what framework/app/studio plugs into kit: how the framework's catalogues in the languages after English open.
 
 ```go
 type WordsConfig struct {
 	// Open reads and compiles the catalogue of every language after
-	// English, each falling back to english — kit's own sentences, by
+	// English, each falling back to english — the framework's own sentences, by
 	// key, as its core holds them; a catalogue that does not decode or
 	// does not compile is refused.
 	Open func(english map[string]string) (Translator, error)
@@ -3304,7 +3304,7 @@ type WorkflowConfig struct {
 <a name="WorkflowDriverConfig"></a>
 ## type [WorkflowDriverConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/workflow.go>)
 
-WorkflowDriverConfig is what framework/app/workflow plugs into kit: how a workflow's engine opens, and how kit tells the engine's failures apart.
+WorkflowDriverConfig is what framework/app/workflow plugs into kit: how a workflow's engine opens, and how the framework tells the engine's failures apart.
 
 ```go
 type WorkflowDriverConfig struct {
@@ -3321,7 +3321,7 @@ type WorkflowDriverConfig struct {
 <a name="WorkflowEngine"></a>
 ## type [WorkflowEngine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/workflow_interface.go>)
 
-WorkflowEngine is one workflow's engine as kit's core uses it: the transitions code fires, what a write of the store tells it, what it counts and records, and its loop.
+WorkflowEngine is one workflow's engine as the framework's core uses it: the transitions code fires, what a write of the store tells it, what it counts and records, and its loop.
 
 ```go
 type WorkflowEngine interface {
@@ -3425,7 +3425,7 @@ type WorkflowEntityValue struct {
 <a name="WorkflowFailure"></a>
 ## type [WorkflowFailure](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/plug/workflow.go>)
 
-WorkflowFailure is a failure of a workflow's engine, as kit words it.
+WorkflowFailure is a failure of a workflow's engine, as the framework words it.
 
 ```go
 type WorkflowFailure uint8

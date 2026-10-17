@@ -100,7 +100,7 @@ func (a *App) failReason(err error) string {
 func mustSignal(name string) signal.Signal {
 	s, err := signal.Parse(name)
 	if err != nil {
-		panic("kit: " + name + " is not a signal: " + err.Error())
+		panic("app: " + name + " is not a signal: " + err.Error())
 	}
 	return s
 }

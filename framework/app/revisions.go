@@ -20,7 +20,7 @@ import (
 //
 // A store with Revisions(n) holds up to n+1 times its records: in memory
 // with the store in the data directory, in the table <table>___vs on a
-// database, which kit's migrations create.
+// database, which the framework's migrations create.
 func Revisions(n int) StoreOption {
 	//: the implementation is framework/internal/app's; this facade only forwards.
 	return iapp.Revisions(n)
@@ -35,7 +35,7 @@ func Revisions(n int) StoreOption {
 type Revision[T any] = iapp.RevisionEvent[T]
 
 // Tombstone is one record in a store's trash: its key, when the product
-// deleted it, on the app's clock, and when kit purges it — its trash's
+// deleted it, on the app's clock, and when the framework purges it — its trash's
 // length after the deletion, or sooner when its retention says so.
 type Tombstone = iapp.TombstoneEvent
 

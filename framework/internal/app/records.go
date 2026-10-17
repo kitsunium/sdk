@@ -52,7 +52,7 @@ func marked(t *fieldTag, m Mark) bool {
 }
 
 // Records returns the untyped port to the records of the store whose node ID
-// is store: what kit's export and erasure run on, and what a module reads
+// is store: what the framework's export and erasure run on, and what a module reads
 // and erases through. A store the app does not mount is a [NotFound] error.
 func (a *App) Records(store string) (RecordsService, error) {
 	st, ok := a.findNode(store).(privacyStore)

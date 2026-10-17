@@ -283,7 +283,7 @@ func (r *retentionRun) runOnce(ctx context.Context, reason string, b *retentionB
 	if err != nil && ctx.Err() == nil {
 		b.failures++
 		b.floor = ended.Add(backoff(b.failures))
-		logger.Warn(ctx, a.log, "a store's retention failed; kit tries again", logger.String("node", r.s.id),
+		logger.Warn(ctx, a.log, "a store's retention failed; the framework tries again", logger.String("node", r.s.id),
 			logger.String("after", backoff(b.failures).String()), logger.String("error", describeText(err)))
 	} else {
 		b.failures, b.floor = 0, ended.Add(minDeadlineGap)

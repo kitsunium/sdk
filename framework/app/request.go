@@ -11,14 +11,14 @@ import (
 )
 
 // SetCookie adds a Set-Cookie header to the HTTP response of the endpoint
-// ctx serves. kit fills what a cookie left zero with safe defaults — Path
+// ctx serves. The framework fills what a cookie left zero with safe defaults — Path
 // "/", HttpOnly, SameSite Lax, and Secure outside dev — so a session cookie
 // is hardened unless the code says otherwise. In an in-process
 // [Endpoint].Call there is no response: the cookie is dropped.
 //
 // HttpOnly is always set, and Secure always outside dev (and in dev for
 // SameSite=None, which browsers require): a boolean has no "unset" a default
-// could fill, and kit chooses the hardened reading. A cookie set more than
+// could fill, and the framework chooses the hardened reading. A cookie set more than
 // once in one response keeps its last value, and cookies set before an error
 // are sent with the error — clearing a stale session on a 401 works.
 func SetCookie(ctx context.Context, c *http.Cookie) {
@@ -55,7 +55,7 @@ func Now(ctx context.Context) time.Time {
 }
 
 // NewTicker is a ticker of period d on the app's clock, for a loop written by
-// hand ([Service].Go): a test's manual clock drives it like every timer kit
+// hand ([Service].Go): a test's manual clock drives it like every timer the framework
 // runs itself, where a time.Ticker would tick on the wall clock whatever the
 // test does. It panics on a non-positive d, as time.NewTicker does.
 func NewTicker(ctx context.Context, d time.Duration) clock.Ticker {

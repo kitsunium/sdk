@@ -19,7 +19,7 @@ type Erasure = iapp.Erasure
 //
 // Once sealing lands (ADR 0006, step 3), an erasure also moves the held
 // records under keys of their own and destroys the subject's data key, so
-// that it reaches every copy kit sealed.
+// that it reaches every copy the framework sealed.
 func Erase(ctx context.Context, reason string, ids ...string) (Erasure, error) {
 	//: the implementation is framework/internal/app's; this facade only forwards.
 	return iapp.Erase(ctx, reason, ids...)

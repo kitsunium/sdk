@@ -13,7 +13,7 @@ import (
 // instantiated at (ADR 0179 Q3), whatever the product's entity and state.
 type entity = plug.WorkflowEntityValue
 
-// Enable plugs the workflows' engine into kit.
+// Enable plugs the workflows' engine into the framework.
 func Enable() {
 	plug.Workflows.Store(&plug.WorkflowDriverConfig{Open: open, Failed: failed})
 }

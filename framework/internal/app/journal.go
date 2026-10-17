@@ -144,11 +144,11 @@ func chainHash(prev string, e journalRecord) string {
 	e.Hash = ""
 	raw, err := json.Marshal(e)
 	if err != nil {
-		panic("kit: a journal entry does not encode: " + err.Error()) // an entry is strings, numbers and a time
+		panic("app: a journal entry does not encode: " + err.Error()) // an entry is strings, numbers and a time
 	}
 	sum, err := hash.SumHex(hash.SHA256, append([]byte(prev+"\n"), raw...))
 	if err != nil {
-		panic("kit: SHA-256 is not registered: " + err.Error()) // the SDK registers it
+		panic("app: SHA-256 is not registered: " + err.Error()) // the SDK registers it
 	}
 	return sum
 }

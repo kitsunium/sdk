@@ -343,7 +343,7 @@ func guardSecretsDir(dir string) error {
 	}
 	ignore := filepath.Join(dir, ".gitignore")
 	if _, err := os.Stat(ignore); errors.Is(err, fs.ErrNotExist) {
-		return os.WriteFile(ignore, []byte("# kit's secrets and their key: never committed.\n*\n"), 0o600)
+		return os.WriteFile(ignore, []byte("# the product's secrets and their key: never committed.\n*\n"), 0o600)
 	}
 	return nil
 }
@@ -368,7 +368,7 @@ func (st *secretStores) resolve(ctx context.Context, a *App, s *Secret) (*secret
 	case s.opts.generated && st.kept != nil:
 		return &secretRun{app: a, store: st.kept, name: s.keptName(), from: st.from}, nil
 	case s.opts.generated:
-		return nil, failure(CodeSecretStore, "SECRET_NOT_KEPT", "a generated secret needs a store kit can write: KIT_SECRETS=file:<dir> or memory, or its variable to pin it", nil,
+		return nil, failure(CodeSecretStore, "SECRET_NOT_KEPT", "a generated secret needs a store the framework can write: KIT_SECRETS=file:<dir> or memory, or its variable to pin it", nil,
 			errs.String("secret", s.id), errs.String("variable", variable))
 	}
 	return nil, failure(CodeSecretMissing, "SECRET_MISSING", "a provided secret is not set", nil, errs.String("secret", s.id), errs.String("variable", variable))

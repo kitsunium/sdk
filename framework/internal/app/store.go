@@ -25,7 +25,7 @@ import (
 // it lives in memory. A store a database keeps ([Database], [Keeps]) lives
 // in a table of it, and every call is a round trip. A store is a port (ADR
 // 0004): what it runs on is its engine (store_engine.go) — the SDK's
-// document store, in memory, in files or over SQL —; kit makes it a node of
+// document store, in memory, in files or over SQL —; the framework makes it a node of
 // the graph, observes every call, and speaks for its refusals. Its writes
 // join the transaction their context carries ([Transact]).
 type StoreService[T any] struct {
@@ -100,7 +100,7 @@ func (readModelOption) storeConfigure(o *storeOptions) { o.readModel = true }
 // projections — the subscriptions that keep it from the write side's
 // events —, read by queries. It changes nothing of how the store runs; the
 // diagram draws it on its domain's read side, and the static analysis warns
-// of a read model written by anything but a subscription. kit's topics are
+// of a read model written by anything but a subscription. The framework's topics are
 // queues, not logs: a read model cannot be replayed from its events, and one
 // fed by a topic lags the commands that feed it — a query that must read its
 // own writes reads the write side.
@@ -192,10 +192,10 @@ func (s *StoreService[T]) Update(ctx context.Context, key string, fn func(*T) er
 // On a store with [Revisions] it moves the entity to the store's trash
 // instead, for <store>-trash — 30 days unless that setting says otherwise, 0
 // deleting at once —: gone from every read, its unique keys free, its
-// versions kept, [StoreService.Untrash] brings it back, and kit purges it
+// versions kept, [StoreService.Untrash] brings it back, and the framework purges it
 // once its time is up. When the store seals at rest and the entity was its
 // person's last record, their data key goes with it, as with an erasure —
-// at the commit, in a [Transact] —, once nothing kit keeps still needs it: a
+// at the commit, in a [Transact] —, once nothing the framework keeps still needs it: a
 // held record, a record in the trash, or a former value or version sealed
 // under it, keeps the key.
 func (s *StoreService[T]) Delete(ctx context.Context, key string) error {

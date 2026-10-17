@@ -424,7 +424,7 @@ func diagnosticOf(severity, node string, at *model.Source, p phrase) model.Diagn
 // Error lists every problem the start found, one per line.
 func (e *DiagnosticsError) Error() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "kit: the product has %d problem(s):", len(e.Diagnostics))
+	fmt.Fprintf(&b, "app: the product has %d problem(s):", len(e.Diagnostics))
 	for _, d := range e.Diagnostics {
 		b.WriteString("\n  ")
 		if d.Source != nil {
@@ -625,7 +625,7 @@ func (a *App) announce(ctx context.Context) {
 	if a.cfg.studio.on {
 		// The Studio is kit's own process (ADR 0010, D8): the product says
 		// where its read routes are, and who shows them.
-		logger.Info(ctx, a.log, "the product, as a diagram: kit dev prints the Studio's link", logger.String("api", a.URL()+"/_kit/api/"))
+		logger.Info(ctx, a.log, "the product, as a diagram: the Studio reads it from its API", logger.String("api", a.URL()+"/_kit/api/"))
 	}
 	for _, d := range a.declarationProblems() {
 		logger.Warn(ctx, a.log, d.Message, logger.String("node", d.Node))

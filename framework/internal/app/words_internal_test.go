@@ -41,7 +41,7 @@ func TestKitSpeaksEveryLanguage(t *testing.T) {
 	}
 	langs := kitLanguages()
 	if len(langs) < 2 || langs[0] != "en" {
-		t.Fatalf("kit speaks %v: English first, then the Studio's languages", langs)
+		t.Fatalf("the framework speaks %v: English first, then the Studio's languages", langs)
 	}
 	catalogues := map[string]map[string]string{}
 	for _, lang := range langs {
@@ -140,7 +140,7 @@ func TestKitSpeaksEveryLanguage(t *testing.T) {
 	}
 	for key := range catalogues["en"] {
 		if !used[key] && !slices.Contains([]string{"list.and", "list.comma"}, key) {
-			t.Errorf("the catalogues hold %q, which kit never says", key)
+			t.Errorf("the catalogues hold %q, which the framework never says", key)
 		}
 	}
 }
@@ -184,7 +184,7 @@ func TestAPhraseSpeaksEachLanguage(t *testing.T) {
 		t.Errorf("a list of three: %s", got)
 	}
 	if got := p.in("de"); got != p.String() {
-		t.Errorf("a language kit does not speak reads English: %s", got)
+		t.Errorf("a language the framework does not speak reads English: %s", got)
 	}
 }
 
@@ -224,13 +224,13 @@ func TestKitsEnglishIsTheSDKsEnglish(t *testing.T) {
 		got, ok := table.render(key, args)
 		want, wantErr := printer.Render(i18n.Key(key), i18n.Args(args))
 		if !ok || wantErr != nil || got != want {
-			t.Errorf("%q: kit says %q (%v), the SDK's i18n %q (%v)", key, got, ok, want, wantErr)
+			t.Errorf("%q: the framework says %q (%v), the SDK's i18n %q (%v)", key, got, ok, want, wantErr)
 		}
 		for name := range names {
 			short := maps.Clone(args)
 			delete(short, name)
 			if _, ok := table.render(key, short); ok {
-				t.Errorf("%q: kit renders it without {%s}", key, name)
+				t.Errorf("%q: the framework renders it without {%s}", key, name)
 			}
 			if _, err := printer.Render(i18n.Key(key), i18n.Args(short)); err == nil {
 				t.Errorf("%q: the SDK's i18n renders it without {%s}", key, name)
@@ -238,7 +238,7 @@ func TestKitsEnglishIsTheSDKsEnglish(t *testing.T) {
 		}
 	}
 	if _, ok := table.render("no.such.sentence", nil); ok {
-		t.Error("kit renders a key its table lacks")
+		t.Error("the framework renders a key its table lacks")
 	}
 	if got, want := say("no.such.sentence", "a", 1).String(), "no.such.sentence map[a:1]"; got != want {
 		t.Errorf("a key the table lacks is said %q, want %q", got, want)
@@ -247,7 +247,7 @@ func TestKitsEnglishIsTheSDKsEnglish(t *testing.T) {
 		_, problem := compileSentence(text)
 		_, err := i18n.NewMessage(text)
 		if (problem == "") != (err == nil) {
-			t.Errorf("%q: kit's verdict %q, the SDK's i18n %v", text, problem, err)
+			t.Errorf("%q: the framework's verdict %q, the SDK's i18n %v", text, problem, err)
 		}
 	}
 }
@@ -267,7 +267,7 @@ func TestKitSpeaksEnglishAloneWithoutTheStudio(t *testing.T) {
 		t.Errorf("en: %s", got)
 	}
 	if got := kitLanguages(); !slices.Equal(got, []string{"en"}) {
-		t.Errorf("kit speaks %v without the Studio", got)
+		t.Errorf("the framework speaks %v without the Studio", got)
 	}
 	if msg, got := p.spoken(); msg != english || !maps.Equal(got, map[string]string{"en": english}) {
 		t.Errorf("a diagnostic carries %v without the Studio", got)

@@ -107,7 +107,7 @@ packages:
             name: CodeMailQueue
             value: "0x00_04_02_15"
           - doc: |-
-              Deprecated: kit no longer returns it. The outbox is the SDK's mail
+              Deprecated: the framework no longer returns it. The outbox is the SDK's mail
               spool, which dead-letters a record that does not decode itself
               (MessageUndecodable, in pkg/v1/app/mail/spool).
             name: CodeMailUndecodable
@@ -151,7 +151,7 @@ packages:
           - comment: 0.4.2.34 — a database's URL or tuning cannot be used
             name: CodeDatabaseConfig
             value: "0x00_04_02_22"
-          - comment: "0.4.2.76 — a database's server is below kit's floor: MySQL 8.0.1, MariaDB 10.6"
+          - comment: "0.4.2.76 — a database's server is below the framework's floor: MySQL 8.0.1, MariaDB 10.6"
             name: CodeDatabaseVersion
             value: "0x00_04_02_4C"
           - doc: |-
@@ -159,7 +159,7 @@ packages:
               belongs to — the data directory counting as one: refused, Invalid.
             name: CodeTransactionSpan
             value: "0x00_04_02_42"
-          - comment: 0.4.2.35 — kit's index key cannot be read, made or derived
+          - comment: 0.4.2.35 — the framework's index key cannot be read, made or derived
             doc: Privacy (ADR 0006).
             name: CodePrivacyKey
             value: "0x00_04_02_23"
@@ -208,7 +208,7 @@ packages:
           - comment: "0.4.2.81 — `watch replay` names no watch of the product: refused, NotFound"
             name: CodeWatchReplay
             value: "0x00_04_02_51"
-          - comment: "0.4.2.61 — kit's data keys cannot be reached: data-key, or kit's own store of data keys"
+          - comment: "0.4.2.61 — the framework's data keys cannot be reached: data-key, or the framework's own store of data keys"
             doc: Sealing at rest (ADR 0006, step 3).
             name: CodeSealKey
             value: "0x00_04_02_3D"
@@ -271,9 +271,9 @@ packages:
           - comment: 0.4.2.57 — a store's retention function panicked
             name: CodeRetentionPanic
             value: "0x00_04_02_39"
-          - comment: "0.4.2.70 — a sealed value's data key is destroyed: kit reads the value as its zero value"
+          - comment: "0.4.2.70 — a sealed value's data key is destroyed: the framework reads the value as its zero value"
             doc: |-
-              The signals kit ends one of its own steps with and catches itself — a
+              The signals the framework ends one of its own steps with and catches itself — a
               caller never receives one —, typed when the SDK made rule 2 a gate
               (make guard), where they had been stdlib errors.
             name: CodeSealErased
@@ -334,7 +334,7 @@ packages:
           - comment: "0.4.2.80 — a data copy's fingerprints differ: the copy is rolled back, the first key that differs named"
             doc: |-
               CodeDataCopyDiverged reports a data copy whose fingerprints differ on
-              both sides of a table, or whose records do not open through kit once
+              both sides of a table, or whose records do not open through the framework once
               copied: the copy's transaction is rolled back, and the first key that
               differs is named.
             name: CodeDataCopyDiverged
@@ -373,21 +373,21 @@ packages:
         name: EnvProduction
         value: "\"production\""
       - blockDoc: |-
-          The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+          The SQL dialects an [Engine] speaks: the framework's own names (ADR 0179 Q5), which
           the store subsystem maps onto the SDK's.
         doc: DialectPostgres is PostgreSQL.
         name: DialectPostgres
         type: Dialect
         value: "\"postgres\""
       - blockDoc: |-
-          The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+          The SQL dialects an [Engine] speaks: the framework's own names (ADR 0179 Q5), which
           the store subsystem maps onto the SDK's.
         doc: DialectMySQL is MySQL or MariaDB.
         name: DialectMySQL
         type: Dialect
         value: "\"mysql\""
       - blockDoc: |-
-          The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+          The SQL dialects an [Engine] speaks: the framework's own names (ADR 0179 Q5), which
           the store subsystem maps onto the SDK's.
         doc: DialectSQLite is SQLite.
         name: DialectSQLite
@@ -401,84 +401,84 @@ packages:
         value: 1 << 20
       - blockDoc: |-
           The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
-          byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire*,
+          byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
           not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
           registry audit holds every Code* constant to that.
         name: WireInvalid
         value: "\"invalid_argument\""
       - blockDoc: |-
           The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
-          byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire*,
+          byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
           not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
           registry audit holds every Code* constant to that.
         name: WireNotFound
         value: "\"not_found\""
       - blockDoc: |-
           The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
-          byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire*,
+          byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
           not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
           registry audit holds every Code* constant to that.
         name: WireConflict
         value: "\"conflict\""
       - blockDoc: |-
           The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
-          byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire*,
+          byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
           not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
           registry audit holds every Code* constant to that.
         name: WireUnauth
         value: "\"unauthenticated\""
       - blockDoc: |-
           The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
-          byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire*,
+          byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
           not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
           registry audit holds every Code* constant to that.
         name: WireForbidden
         value: "\"permission_denied\""
       - blockDoc: |-
           The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
-          byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire*,
+          byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
           not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
           registry audit holds every Code* constant to that.
         name: WireTooLarge
         value: "\"too_large\""
       - blockDoc: |-
           The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
-          byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire*,
+          byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
           not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
           registry audit holds every Code* constant to that.
         name: WireUnsupported
         value: "\"unsupported_media_type\""
       - blockDoc: |-
           The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
-          byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire*,
+          byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
           not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
           registry audit holds every Code* constant to that.
         name: WireRateLimited
         value: "\"rate_limited\""
       - blockDoc: |-
           The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
-          byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire*,
+          byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
           not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
           registry audit holds every Code* constant to that.
         name: WireUnavailable
         value: "\"unavailable\""
       - blockDoc: |-
           The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
-          byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire*,
+          byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
           not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
           registry audit holds every Code* constant to that.
         name: WireTimeout
         value: "\"deadline_exceeded\""
       - blockDoc: |-
           The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
-          byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire*,
+          byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
           not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
           registry audit holds every Code* constant to that.
         name: WireCanceled
         value: "\"canceled\""
       - blockDoc: |-
           The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
-          byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire*,
+          byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
           not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
           registry audit holds every Code* constant to that.
         name: WireInternal
@@ -566,7 +566,7 @@ packages:
       Package app — the start's judgement of the declared databases.
 
       Package app — the interfaces of databases: the engine a connector gives, and
-      what kit asks of it.
+      what the framework asks of it.
 
       Package app — the migrations a database runs, and their lock.
 
@@ -608,7 +608,7 @@ packages:
 
       Package app — the history as the graph and the Studio show it.
 
-      Package app — what kit's own writes mean to the history.
+      Package app — what the framework's own writes mean to the history.
 
       Package app — legal holds: records kept whatever their retention says.
 
@@ -625,7 +625,7 @@ packages:
 
       Package app — jobs: scheduled work run by the daemon's loop.
 
-      Package app — the privacy journal: what kit did to personal data, and why.
+      Package app — the privacy journal: what the framework did to personal data, and why.
 
       Package app — idempotency keys and their leases.
 
@@ -677,12 +677,12 @@ packages:
 
       Package app — ports: an operation a service needs and does not implement.
 
-      Package app — privacy: kit's own service for holds and the journal.
+      Package app — privacy: the framework's own service for holds and the journal.
 
       Package app — erasure: a record's personal data removed as its retention
       would.
 
-      Package app — export: a person's data as kit gives it back.
+      Package app — export: a person's data as the framework gives it back.
 
       Package app — a store's personal data as the graph shows it.
 
@@ -756,7 +756,7 @@ packages:
       Package app — the current user on Windows: its SID, from os/user, which
       reads the process token there without cgo.
 
-      Package app — sealing at rest: members sealed where kit keeps them.
+      Package app — sealing at rest: members sealed where the framework keeps them.
 
       Package app — where the data keys are, against what they seal.
 
@@ -768,7 +768,7 @@ packages:
 
       Package app — a store that seals: its records as they rest.
 
-      Package app — a store that seals, as kit's port sees it.
+      Package app — a store that seals, as the framework's port sees it.
 
       Package app — secrets: the values the product declares and the operator
       provides.
@@ -782,7 +782,7 @@ packages:
       Package app — settings: a value the environment gives a service.
 
       Package app — the interfaces of settings: the values a setting holds, and
-      what kit reads of a declaration.
+      what the framework reads of a declaration.
 
       Package app — frontends: static assets the product serves.
 
@@ -792,7 +792,7 @@ packages:
 
       Package app — stores on SQL: the SDK's document store over a database.
 
-      Package app — kit's own migrations on a database.
+      Package app — the framework's own migrations on a database.
 
       Package app — telemetry: the numbers a product reports, exported on a
       private socket when the deployment asks for them (ADR 0149).
@@ -812,7 +812,7 @@ packages:
 
       Package app — a watch in a running app: its queue and its consumer.
 
-      Package app — the sentences kit says: English from its own table, the
+      Package app — the sentences the framework says: English from its own table, the
       languages after it from framework/app/studio's catalogues.
 
       Package app — workflows: a state machine over the entities of one store.
@@ -836,7 +836,7 @@ packages:
           framework/app/server calls it as it is imported; a product never does.
         name: EnableServer
       - doc: |-
-          EnableStores makes kit's own store code reachable: what kit mounts, starts
+          EnableStores makes the framework's own store code reachable: what the framework mounts, starts
           and answers for the stores and databases a product declares.
           framework/app/store calls it as it is imported; a product never does.
         name: EnableStores
@@ -971,7 +971,7 @@ packages:
           - constraint: any
             name: D
       - doc: |-
-          Catalog lists the generic mechanics kit offers: the building blocks a node
+          Catalog lists the generic mechanics the framework offers: the building blocks a node
           composes rather than implements, each one backed by an SDK package. It is
           part of every graph, so the Studio — and an AI agent reading the graph —
           knows what can be added to a product and the exact code that adds it.
@@ -1122,7 +1122,7 @@ packages:
           module's stores. The most precise wins: a store kept by name, then its
           service, then its module, then the default database — the one declared
           without Keeps —, then the data directory, then memory. [InMemory] wins
-          over all of them, on the app as on a store. kit's data keys never live on
+          over all of them, on the app as on a store. The framework's data keys never live on
           SQLite: Keeps(app.Privacy) there keeps its holds and its journal
           ([Privacy]).
         in:
@@ -1133,9 +1133,9 @@ packages:
           - type: DatabaseConfigurer
         variadic: true
       - doc: |-
-          Migrations are migrations, kit's own [MigrationValue]s (ADR 0179 step
+          Migrations are migrations, the framework's own [MigrationValue]s (ADR 0179 step
           10), run when the database starts (<name>-migrate: start) or by
-          `<product> migrate up`, kit's own first, each set under its own version
+          `<product> migrate up`, the framework's own first, each set under its own version
           table — and so its own lock. On MySQL a DDL statement commits by itself:
           write one per migration. The store subsystem runs them: a program that
           declares a database imports framework/app/store, as its engine module
@@ -1143,7 +1143,7 @@ packages:
 
           Given to [Database], they are the product's, under schema_migrations.
           Given to [NewModule], they are the module's (ADR 0008), for the data it
-          keeps outside kit's stores: run on the database that keeps the module,
+          keeps outside the framework's stores: run on the database that keeps the module,
           under <module>_migrations.
         in:
           - name: m
@@ -1571,10 +1571,10 @@ packages:
           - type: "*Mailer"
       - doc: |-
           NewModule declares a module named name — lower-case letters, digits and
-          dashes, starting with a letter; "kit", "external" and "schema" are kit's — that doc
+          dashes, starting with a letter; "kit", "external" and "schema" are the framework's — that doc
           describes, made of parts: its services, which it adopts, the modules it
           requires ([Requires]), and the migrations of the data it keeps outside
-          kit's stores ([Migrations]), run on the database that keeps it. Declare it
+          the framework's stores ([Migrations]), run on the database that keeps it. Declare it
           as a package-level variable of the one package a product imports:
 
           	var Module = app.NewModule("moderation",
@@ -1675,7 +1675,7 @@ packages:
           NotReused refuses a password that the current hash, or any of the n
           former ones, verifies — n from 1 to 100. It is a compliance policy, off by
           default: PCI DSS asks for it, OWASP ASVS 4.0.3 asks most products not to
-          impose it. kit keeps the field's last n hashes, so it implies history=n,
+          impose it. The framework keeps the field's last n hashes, so it implies history=n,
           and a tag whose history is smaller than n is refused.
 
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
@@ -1764,7 +1764,7 @@ packages:
           Telling the recipients (GDPR art. 19) is the product's job; the register
           lists them. reason is journaled.
 
-          What kit seals at rest, it erases cryptographically too (ADR 0006 §4): a
+          What the framework seals at rest, it erases cryptographically too (ADR 0006 §4): a
           held record is moved under a data key of its own, then the data key of
           each identity, and every data key the erased records were sealed under,
           is destroyed — every copy of what they sealed stops opening: a store's
@@ -1896,14 +1896,14 @@ packages:
             name: Resp
       - doc: |-
           SetCookie adds a Set-Cookie header to the HTTP response of the endpoint
-          ctx serves. kit fills what a cookie left zero with safe defaults — Path
+          ctx serves. The framework fills what a cookie left zero with safe defaults — Path
           "/", HttpOnly, SameSite Lax, and Secure outside dev — so a session cookie
           is hardened unless the code says otherwise. In an in-process
           [EndpointService.Call] there is no response: the cookie is dropped.
 
           HttpOnly is always set, and Secure always outside dev (and in dev for
           SameSite=None, which browsers require): a boolean has no "unset" a default
-          could fill, and kit chooses the hardened reading. A cookie set more than
+          could fill, and the framework chooses the hardened reading. A cookie set more than
           once in one response keeps its last value, and cookies set before an error
           are sent with the error — clearing a stale session on a 401 works.
         in:
@@ -1948,7 +1948,7 @@ packages:
           - type: time.Time
       - doc: |-
           NewTicker is a ticker of period d on the app's clock, for a loop written by
-          hand ([Service.Go]): a test's manual clock drives it like every timer kit
+          hand ([Service.Go]): a test's manual clock drives it like every timer the framework
           runs itself, where a time.Ticker would tick on the wall clock whatever the
           test does. It panics on a non-positive d, as time.NewTicker does.
         in:
@@ -2035,7 +2035,7 @@ packages:
       - doc: |-
           Anonymise says what an erased record keeps: fn runs first, and generalises
           into unclassified fields — a birth date to its year, an address to its
-          region; then kit clears the rest. kit cannot prove that what remains
+          region; then the framework clears the rest. The framework cannot prove that what remains
           identifies no one: by declaring the function, the product asserts it.
         in:
           - name: fn
@@ -2080,18 +2080,18 @@ packages:
       - doc: |-
           RetentionByProduct says the product keeps the store's retention itself:
           its own code erases and deletes what it no longer needs — a record whose
-          life the product's own rules end, a lifecycle kit cannot read from the
+          life the product's own rules end, a lifecycle the framework cannot read from the
           entity. limits says, in the product's words, for how long and how, which
           the register publishes as the store's time limits (GDPR art. 30(1)(f));
           "" says only that the product keeps them.
 
-          kit then runs no retention for the store, and warns of neither a missing
+          The framework then runs no retention for the store, and warns of neither a missing
           retention nor a missing subject. Its classified fields keep every other
           promise: sealed at rest, never shown, exported with their person — when
           the store names one — and erased by app.Erase and Store.Erase. It goes
           with app.Purpose, app.HeldUntil, app.Anonymise and app.DeleteOnErasure;
           with app.EraseAfter, app.EraseAt, app.DeleteAfter or app.DeleteAt it is
-          refused: a store's retention is kit's or the product's, never both.
+          refused: a store's retention is the framework's or the product's, never both.
         in:
           - name: limits
             type: string
@@ -2115,7 +2115,7 @@ packages:
 
           A store with Revisions(n) holds up to n+1 times its records: in memory
           with the store in the data directory, in the table <table>___vs on a
-          database, which kit's migrations create.
+          database, which the framework's migrations create.
         in:
           - name: "n"
             type: int
@@ -2155,7 +2155,7 @@ packages:
           - type: error
         variadic: true
       - doc: |-
-          Generated makes the secret kit's to make: versions of bytes random bytes —
+          Generated makes the secret the framework's to make: versions of bytes random bytes —
           32 for a key — the first made on the first start, a new one every 30 days,
           the last 3 kept, unless [RotateEvery] and [KeepVersions] say otherwise.
 
@@ -2176,7 +2176,7 @@ packages:
           where it lives at every use, as every provided secret is: given later —
           `secrets set` in the environment's store, a new content in the file its
           _FILE variable names —, it is found at its next use. A generated secret
-          is kit's to make and never absent: Optional with [Generated] is refused.
+          is the framework's to make and never absent: Optional with [Generated] is refused.
 
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
           only hands it to the declaration it configures.
@@ -2184,7 +2184,7 @@ packages:
         out:
           - type: SecretConfigurer
       - doc: |-
-          RotateEvery is how often kit makes a new version of a generated secret.
+          RotateEvery is how often the framework makes a new version of a generated secret.
 
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
           only hands it to the declaration it configures.
@@ -2257,7 +2257,7 @@ packages:
         out:
           - type: AppConfigurer
       - doc: |-
-          ConfigFiles gives kit the product's configuration files: config/config.<ext>,
+          ConfigFiles gives the framework the product's configuration files: config/config.<ext>,
           which every environment reads, and config/<env>.<ext>, the environment's
           own — <env> being KIT_ENV as written, dev when kit dev runs the product —
           in JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of
@@ -2313,7 +2313,7 @@ packages:
           projections — the subscriptions that keep it from the write side's
           events —, read by queries. It changes nothing of how the store runs; the
           diagram draws it on its domain's read side, and the static analysis warns
-          of a read model written by anything but a subscription. kit's topics are
+          of a read model written by anything but a subscription. The framework's topics are
           queues, not logs: a read model cannot be replayed from its events, and one
           fed by a topic lags the commands that feed it — a query that must read its
           own writes reads the write side.
@@ -2436,14 +2436,14 @@ packages:
           notice whose queue lives on the transaction's database — the one that
           keeps the service of its subscription, command, mailer or watch, by a
           store's rules — is written in the transaction, just before it commits, a
-          mail sealed under kit's data-key: a queue that refuses
+          mail sealed under the framework's data-key: a queue that refuses
           it fails the transaction, every write undone, and Transact returns the
           refusal. Every other one leaves after the commit: one a queue refuses then
           is logged and reported, and the commit stands; a process that dies
           between the commit and the release loses what was held.
 
           On a database the transaction is the database's own, at its default
-          isolation. On the data directory and in memory kit keeps its own: it takes
+          isolation. On the data directory and in memory the framework keeps its own: it takes
           the data's writer turn — one transaction at a time; a write outside any
           waits for it, and such writes share the turn among themselves —, its
           writes land at once, and an error writes each entity's previous value
@@ -2503,7 +2503,7 @@ packages:
 
           	func (m Me) Attrs() []authz.Attr { return []authz.Attr{authz.AttrStrings("roles", m.Roles...)} }
 
-          kit calls the caller a principal: in kit, a subject is the person
+          The framework calls the caller a principal: in the framework, a subject is the person
           personal data is about (ADR 0006).
         interface:
           methods:
@@ -2604,7 +2604,7 @@ packages:
 
               	func main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }
 
-              It understands ten commands, so every kit binary can describe itself, be
+              It understands ten commands, so every binary of the framework can describe itself, be
               probed, say its configuration, manage its secrets, migrate its databases,
               answer for the personal data it keeps, replay what its watches hear and
               copy its data directory into a database without a shell or another tool in
@@ -2652,7 +2652,7 @@ packages:
             recv: pointer
           - doc: |-
               Records returns the untyped port to the records of the store whose node ID
-              is store: what kit's export and erasure run on, and what a module reads
+              is store: what the framework's export and erasure run on, and what a module reads
               and erases through. A store the app does not mount is a [NotFound] error.
             in:
               - name: store
@@ -2675,7 +2675,7 @@ packages:
               - type: string
             recv: pointer
           - doc: |-
-              Unwrap is what the refusal is, when kit has a code for it: with
+              Unwrap is what the refusal is, when the framework has a code for it: with
               packages in Missing, an error carrying [CodeSubsystemMissing] (ADR
               0179 §6), which errs.HasCode reads through the refusal; nil
               otherwise.
@@ -2697,7 +2697,7 @@ packages:
           AnalyzeFunc reads the product's source — the Go module rooted at dir, and
           the packages that declare the modules it mounts — into a graph the runtime
           merges into its own: the edges found in handler bodies, each function's
-          steps. The framework links no analyzer (ADR 0147 §1): the platform's kit
+          steps. The framework links no analyzer (ADR 0147 §1): the platform's former runtime
           tool gives one, in dev, through [Analyzer].
         name: AnalyzeFunc
         underlying: func(ctx context.Context, dir string, modules []string) (*model.Graph, error)
@@ -2932,14 +2932,14 @@ packages:
               type: bool
       - doc: |-
           Dialect is the SQL an [Engine] speaks: [DialectPostgres], [DialectMySQL] or
-          [DialectSQLite], kit's own names (ADR 0179 Q5) — the graph names the
+          [DialectSQLite], the framework's own names (ADR 0179 Q5) — the graph names the
           engine by it.
         name: Dialect
         underlying: string
       - doc: |-
           Engine is an SQL engine a database runs on. An engine module returns one —
           github.com/kitsunium/sdk/framework/connectors/postgres, …/mysql, …/sqlite —;
-          kit calls it when the database starts. Like an SDK port, it grows by
+          the framework calls it when the database starts. Like an SDK port, it grows by
           sibling interfaces, never by a method.
         interface:
           methods:
@@ -2974,7 +2974,7 @@ packages:
       - doc: |-
           LockWaiter is an [Engine] whose connections wait a bounded time for a lock
           another connection holds — SQLite's busy timeout —, a sibling of Engine
-          (ADR 0178 C2). kit opens such an engine's pool with OpenWaiting instead
+          (ADR 0178 C2). The framework opens such an engine's pool with OpenWaiting instead
           of Open, and gives it a wait under <name>-timeout, so that a lost race on
           the lock comes back as the engine's refusal before the call's own
           deadline. An engine that does not implement it keeps its own wait.
@@ -3007,7 +3007,7 @@ packages:
         name: Keeper
       - doc: |-
           MigrationValue is one versioned change of a database's schema and its
-          reversal, kit's own (ADR 0179 step 10): the shape the SDK's sql runs,
+          reversal, the framework's own (ADR 0179 step 10): the shape the SDK's sql runs,
           which the store subsystem hands it.
 
           	app.Migration{
@@ -3282,9 +3282,9 @@ packages:
           unexported: true
         name: ListenerConfigurer
       - doc: |-
-          Loop is a declared loop of the daemon: kit owns the wait, the product owns
+          Loop is a declared loop of the daemon: the framework owns the wait, the product owns
           the work. Its wake sources — a period, a deadline the product computes, a
-          topic — are data, so the diagram draws exactly what wakes it; kit runs it on
+          topic — are data, so the diagram draws exactly what wakes it; the framework runs it on
           its own goroutine, one run at a time, observes every run, and restarts it
           after a panic.
         methods:
@@ -3336,7 +3336,7 @@ packages:
         name: LoopConfigurer
       - doc: |-
           Routine is a loop written by hand: a function that runs until its context
-          ends. kit starts it with the app, cancels its context on shutdown and waits
+          ends. The framework starts it with the app, cancels its context on shutdown and waits
           for it, restarts it after an error or a panic — backing off from one second
           to one minute — and reads its select statements to draw what it waits on.
         name: Routine
@@ -3423,7 +3423,7 @@ packages:
       - doc: |-
           ModuleConfigurer is what a module is made of: its services, the modules it
           requires ([Requires]), and the migrations of the data it keeps outside
-          kit's stores ([Migrations]).
+          the framework's stores ([Migrations]).
         interface:
           unexported: true
         name: ModuleConfigurer
@@ -3436,7 +3436,7 @@ packages:
           endpoint, a port — and, with ADR 0005, a command or a query. It is what
           [Fallback] and [Bind] give a port, and what [Replace] replaces in a test;
           a request or a response of other types does not compile. Its methods are
-          unexported: only kit implements it.
+          unexported: only the framework implements it.
 
           Every operation is a node of the graph, and runs in a span of its own
           through its whole pipeline — authentication, validation, policies, the
@@ -3493,7 +3493,7 @@ packages:
           - doc: |-
               Verify reports whether password is the one of the record under key, for
               a login, with the SDK's constant-time Verify. When the stored hash is
-              weaker than the SDK's policy now (password.NeedsRehash), kit stores it
+              weaker than the SDK's policy now (password.NeedsRehash), the framework stores it
               again, hashed anew: the same password, so no former value. A key with no
               record — or a record with no password yet — costs what a wrong password
               costs, and answers false.
@@ -3750,7 +3750,7 @@ packages:
             name: T
       - doc: |-
           TombstoneEvent is one record in a store's trash: its key, when the product
-          deleted it, on the app's clock, and when kit purges it — its trash's
+          deleted it, on the app's clock, and when the framework purges it — its trash's
           length after the deletion, or sooner when its retention says so.
         name: TombstoneEvent
         struct:
@@ -3831,7 +3831,7 @@ packages:
           unexported: true
       - doc: |-
           Secret is a secret the product declares: provided by the operator — an SMTP
-          URL, an API token — or generated by kit — a signing or sealing key — and
+          URL, an API token — or generated by the framework — a signing or sealing key — and
           rotated on its schedule.
         methods:
           - doc: |-
@@ -4144,7 +4144,7 @@ packages:
               earlier, with or without an error, restarts it after a backoff.
 
               Everything run does is drawn from the loop's node: a store it reads, a
-              topic it publishes on. kit has no span around it — a run lasts as long as
+              topic it publishes on. The framework has no span around it — a run lasts as long as
               the app — so each of those calls starts a trace of its own.
             in:
               - name: name
@@ -4214,18 +4214,18 @@ packages:
               environment — the variable <APP>_<NAME>, TODO_STRIPE_KEY for the secret
               "stripe-key" of the app "todo", or TODO_STRIPE_KEY_FILE naming a file that
               holds it, the Docker and Kubernetes way — or in the environment's store,
-              with `kit secrets set`. It is read at every use, so replacing it where it
+              with `the framework secrets set`. It is read at every use, so replacing it where it
               lives takes effect without a restart, and a start without it fails, naming
               the variable to set.
 
               With [Optional], a start without it goes on: the product asks
               [Secret.Present] before it uses the secret.
 
-              With [Generated], kit makes it: version 1 on the first start, a new version
+              With [Generated], the framework makes it: version 1 on the first start, a new version
               on its schedule, the previous ones kept so that what they sealed or signed
               still opens and verifies. It lives in the store the environment keeps — an
               encrypted file store in dev, KIT_SECRETS elsewhere. Its variable pins it:
-              kit then uses the value as it is and does not rotate it.
+              the framework then uses the value as it is and does not rotate it.
 
               name is 1 to 63 lower-case letters, digits and dashes, starting and ending
               with a letter or a digit — one grammar for a file name and a variable — and
@@ -4276,7 +4276,7 @@ packages:
               '/'. A path with no file extension that matches no file serves index.html,
               so client-side routing works; a missing file with an extension — a script,
               a stylesheet — stays a 404. A directory is never listed. The SDK's static
-              handler serves it; kit draws it and observes every request.
+              handler serves it; the framework draws it and observes every request.
             in:
               - name: name
               - name: prefix
@@ -4320,7 +4320,7 @@ packages:
           - doc: |-
               Subscribe declares a subscription of the service to topic. Delivery is at
               least once: handler must be idempotent, which is the one thing the SDK's
-              queue cannot check and kit therefore asks you to promise here.
+              queue cannot check and the framework therefore asks you to promise here.
             in:
               - name: name
                 type: string
@@ -4339,7 +4339,7 @@ packages:
                 name: T
             variadic: true
           - doc: |-
-              Watch declares a watch of the service: handler is told of every write kit
+              Watch declares a watch of the service: handler is told of every write the framework
               confirms on a store whose entity holds a field that carries mark — the
               product's stores and the other modules', never those of the module the
               service belongs to (for a service of the product's, never the product's
@@ -4450,7 +4450,7 @@ packages:
           it lives in memory. A store a database keeps ([Database], [Keeps]) lives
           in a table of it, and every call is a round trip. A store is a port (ADR
           0004): what it runs on is its engine (store_engine.go) — the SDK's
-          document store, in memory, in files or over SQL —; kit makes it a node of
+          document store, in memory, in files or over SQL —; the framework makes it a node of
           the graph, observes every call, and speaks for its refusals. Its writes
           join the transaction their context carries ([Transact]).
         methods:
@@ -4545,7 +4545,7 @@ packages:
             recv: pointer
           - doc: |-
               Passwords declares the password policy of one secret field of the store's
-              entity; field names it — kit calls it on a zero entity to find which. The
+              entity; field names it — the framework calls it on a zero entity to find which. The
               field then only ever holds the password's hash, a PHC string, or nothing
               before a first password; a write that puts anything else in it is
               refused. A field that is not secret refuses the start, as does a second
@@ -4673,7 +4673,7 @@ packages:
             recv: pointer
           - doc: |-
               Trashed returns the records in the store's trash, in key order: each
-              one's key, when the product deleted it, and when kit purges it. A store
+              one's key, when the product deleted it, and when the framework purges it. A store
               without [Revisions] keeps no trash: an [Invalid].
             in:
               - name: ctx
@@ -4758,10 +4758,10 @@ packages:
               On a store with [Revisions] it moves the entity to the store's trash
               instead, for <store>-trash — 30 days unless that setting says otherwise, 0
               deleting at once —: gone from every read, its unique keys free, its
-              versions kept, [StoreService.Untrash] brings it back, and kit purges it
+              versions kept, [StoreService.Untrash] brings it back, and the framework purges it
               once its time is up. When the store seals at rest and the entity was its
               person's last record, their data key goes with it, as with an erasure —
-              at the commit, in a [Transact] —, once nothing kit keeps still needs it: a
+              at the commit, in a [Transact] —, once nothing the framework keeps still needs it: a
               held record, a record in the trash, or a former value or version sealed
               under it, keeps the key.
             in:
@@ -4862,7 +4862,7 @@ packages:
               type: "[]FieldRefValue"
       - doc: |-
           Watch is a subscription fed by stores instead of a topic: its handler is
-          told of every write kit confirms on a store whose entity holds a field
+          told of every write the framework confirms on a store whose entity holds a field
           with its mark. [Service.Watch] declares one.
         name: Watch
         struct:
@@ -4971,7 +4971,7 @@ packages:
           - doc: |-
               At declares a timer transition at an instant the entity carries — a due
               date, a deadline: an entity in state from moves to state to once the time
-              instant returns has come; false means no instant for now. kit asks again
+              instant returns has come; false means no instant for now. The framework asks again
               each time the entity is written, and the workflow's own loop sleeps until
               the earliest instant.
             in:
@@ -4988,7 +4988,7 @@ packages:
             recv: pointer
           - doc: |-
               When declares a guard transition: an entity in state from moves to state to
-              as soon as guard holds. The guard sees the entity only: kit checks it each
+              as soon as guard holds. The guard sees the entity only: the framework checks it each
               time the entity is written, never on a clock — a condition that depends on
               the time is an instant, declared with [WorkflowService.At].
             in:
@@ -5134,9 +5134,9 @@ packages:
             name: S
     variables:
       - doc: |-
-          Privacy is kit's own service: the data keys, the legal holds and the
+          Privacy is the framework's own service: the data keys, the legal holds and the
           privacy journal of an app that keeps personal data or seals what it
-          keeps. kit mounts a copy of it — named kit.privacy, a name no service of a
+          keeps. The framework mounts a copy of it — named kit.privacy, a name no service of a
           product can take — in every app whose stores keep personal data or declare
           a retention, or that keeps sealed values at rest, before the product's
           services. Its stores stay in the data directory unless the product places
@@ -5164,50 +5164,50 @@ packages:
         type: ScopeValue
   - doc: |-
       Package jobengine is what framework/app/jobs plugs into kit: the scheduler
-      kit's jobs run on — the SDK's scheduler, on the app's clock — and the
+      the framework's jobs run on — the SDK's scheduler, on the app's clock — and the
       schedules it reads from a job's declaration, a period or a five-field cron
-      expression (ADR 0179 §1, step 7). kit's core imports none of the SDK's
+      expression (ADR 0179 §1, step 7). The framework's core imports none of the SDK's
       scheduler: it reaches it through plug, and a product that declares no job
       links none of it.
 
-      Package jobengine — the compile-time proof that the scheduler is kit's.
+      Package jobengine — the compile-time proof that the scheduler is the framework's.
     functions:
-      - doc: Enable plugs the jobs' scheduler and their schedules into kit.
+      - doc: Enable plugs the jobs' scheduler and their schedules into the framework.
         name: Enable
     path: github.com/kitsunium/sdk/framework/internal/app/jobengine
   - doc: |-
       Package mailengine is what framework/app/mail plugs into kit: the outbox
-      kit's mailers keep — the SDK's mail spool, on the database that keeps the
+      the framework's mailers keep — the SDK's mail spool, on the database that keeps the
       mailer's service in the queue subsystem's sealed broker, else in the data
       directory or in memory — and the transports that empty it, the SDK's SMTP
-      transport and its capture transport (ADR 0179 §1, step 6). kit's core
+      transport and its capture transport (ADR 0179 §1, step 6). The framework's core
       imports neither the SDK's spool nor a transport: it reaches them through
       plug, and a product that declares no mailer links none of them.
 
-      Package mailengine — the compile-time proof that the outbox is kit's.
+      Package mailengine — the compile-time proof that the outbox is the framework's.
     functions:
-      - doc: Enable plugs the mailers' outbox and their transports into kit.
+      - doc: Enable plugs the mailers' outbox and their transports into the framework.
         name: Enable
     path: github.com/kitsunium/sdk/framework/internal/app/mailengine
   - constants:
-      - blockDoc: The spool's refusals kit tells apart, which it words for the product.
-        doc: MailRefusalNone is no refusal kit words.
+      - blockDoc: The spool's refusals the framework tells apart, which it words for the product.
+        doc: MailRefusalNone is no refusal the framework words.
         name: MailRefusalNone
         type: MailRefusal
         value: "0"
-      - blockDoc: The spool's refusals kit tells apart, which it words for the product.
+      - blockDoc: The spool's refusals the framework tells apart, which it words for the product.
         doc: |-
           MailRefusalClosed is a spool that is closed: its mailer is not
           running.
         name: MailRefusalClosed
         type: MailRefusal
         value: "1"
-      - blockDoc: The spool's refusals kit tells apart, which it words for the product.
+      - blockDoc: The spool's refusals the framework tells apart, which it words for the product.
         doc: MailRefusalUnencodable is a mail the outbox cannot encode.
         name: MailRefusalUnencodable
         type: MailRefusal
         value: "2"
-      - blockDoc: The spool's refusals kit tells apart, which it words for the product.
+      - blockDoc: The spool's refusals the framework tells apart, which it words for the product.
         doc: |-
           MailRefusalInvalidURL is an SMTP URL that is not one of the form
           smtp://user:password@host:port; its "problem" field says the clause.
@@ -5215,7 +5215,7 @@ packages:
         type: MailRefusal
         value: "3"
       - blockDoc: What a spool reports of a mail.
-        doc: MailEventOther is an event of the spool kit shows nothing of.
+        doc: MailEventOther is an event of the spool the framework shows nothing of.
         name: MailEventOther
         type: MailEvent
         value: "0"
@@ -5272,7 +5272,7 @@ packages:
         type: WriteMode
         value: "2"
       - blockDoc: The kinds of refusal.
-        doc: RefusalNone is no refusal kit words.
+        doc: RefusalNone is no refusal the framework words.
         name: RefusalNone
         type: Refusal
         value: "0"
@@ -5451,7 +5451,7 @@ packages:
         type: WorkflowWake
         value: "2"
       - blockDoc: What a workflow's loop reports.
-        doc: WorkflowLoopOther is an event of the loop kit shows nothing of.
+        doc: WorkflowLoopOther is an event of the loop the framework shows nothing of.
         name: WorkflowLoopOther
         type: WorkflowLoopEvent
         value: "0"
@@ -5474,89 +5474,89 @@ packages:
         name: WorkflowLoopWaiting
         type: WorkflowLoopEvent
         value: "3"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
-        doc: WorkflowFailureNone is no failure kit words.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
+        doc: WorkflowFailureNone is no failure the framework words.
         name: WorkflowFailureNone
         type: WorkflowFailure
         value: "0"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
         doc: |-
           WorkflowTransitionRefused is an event that leaves no transition from
           the entity's state.
         name: WorkflowTransitionRefused
         type: WorkflowFailure
         value: "1"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
         doc: WorkflowEntityMissing is no entity under the key.
         name: WorkflowEntityMissing
         type: WorkflowFailure
         value: "2"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
         doc: WorkflowEntityExists is an entity already under the key Start names.
         name: WorkflowEntityExists
         type: WorkflowFailure
         value: "3"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
         doc: WorkflowKeyEmpty is an entity whose key is empty.
         name: WorkflowKeyEmpty
         type: WorkflowFailure
         value: "4"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
         doc: |-
           WorkflowHookFailed is a hook that returned an error, joined to it;
           its "hook" and "event" fields name the hook's kind and the event.
         name: WorkflowHookFailed
         type: WorkflowFailure
         value: "5"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
         doc: |-
           WorkflowHookPanicked is a hook that panicked; its "hook", "panic" and
           "stack" fields say which and how.
         name: WorkflowHookPanicked
         type: WorkflowFailure
         value: "6"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
         doc: |-
           WorkflowHookChangedState is an OnEnter hook that changed the state
           it entered.
         name: WorkflowHookChangedState
         type: WorkflowFailure
         value: "7"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
         doc: |-
           WorkflowHookChangedKey is an OnEnter hook that changed its entity's
           key.
         name: WorkflowHookChangedKey
         type: WorkflowFailure
         value: "8"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
         doc: WorkflowReentrant is an OnEnter hook that fired its own workflow.
         name: WorkflowReentrant
         type: WorkflowFailure
         value: "9"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
         doc: WorkflowStoreFailed is the workflow's store that failed.
         name: WorkflowStoreFailed
         type: WorkflowFailure
         value: "10"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
         doc: WorkflowJournalFailed is the workflow's journal that failed.
         name: WorkflowJournalFailed
         type: WorkflowFailure
         value: "11"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
         doc: |-
           WorkflowFunctionPanicked is a guard or an instant function that
           panicked.
         name: WorkflowFunctionPanicked
         type: WorkflowFailure
         value: "12"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
         doc: WorkflowLoopPanicked is the loop that panicked.
         name: WorkflowLoopPanicked
         type: WorkflowFailure
         value: "13"
-      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+      - blockDoc: The engine's failures the framework tells apart, which it words for the product.
         doc: |-
           WorkflowWaitAbandoned is a caller that stopped waiting for its
           entity: its context ended.
@@ -5564,35 +5564,35 @@ packages:
         type: WorkflowFailure
         value: "14"
     doc: |-
-      Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the
+      Package plug is where the framework's opt-in subsystems plug in: the HTTP engine, the
       frontends' file server and the process sampler of the runtime graph
       (framework/app/server), the Studio — the tool's variables, its routes and
-      kit's sentences in the languages after English (framework/app/studio) —, the
+      the framework's sentences in the languages after English (framework/app/studio) —, the
       stores and the databases (framework/app/store), the queues
       (framework/app/queue), the workflows (framework/app/workflow), the mailers
-      (framework/app/mail), the jobs (framework/app/jobs). kit reads
+      (framework/app/mail), the jobs (framework/app/jobs). The framework reads
       what they registered through the hooks declared here, and imports none of
       the SDK packages behind them: a product that does not import a subsystem
       neither links nor initialises its packages.
 
-      It is also the contract between kit's core and the subsystems ADR 0179
+      It is also the contract between the framework's core and the subsystems ADR 0179
       takes out of it, as database/sql/driver is between database/sql and a
-      driver: the store subsystem's engine over documents, its siblings, kit's
+      driver: the store subsystem's engine over documents, its siblings, the framework's
       scope on a database and its migrations ([Stores]), which framework/app/store
-      sets; the refusals an engine says in kit's terms ([Refusal]); what kit's
+      sets; the refusals an engine says in the framework's terms ([Refusal]); what the framework's
       transactions offer an engine that takes part in them ([Transaction]); the
       queue subsystem's brokers and their consumer ([Queues]), which
       framework/app/queue sets; the workflow subsystem's engine and the ports
       it runs on ([Workflows]), which framework/app/workflow sets; the mail
       subsystem's outbox and transports ([Mail]), which framework/app/mail sets;
       the jobs subsystem's schedules and scheduler ([Jobs]), which
-      framework/app/jobs sets; kit's catalogues in the languages after
+      framework/app/jobs sets; the framework's catalogues in the languages after
       English ([Words]), and the Studio's routes and the tool's variables
       ([Studio], ADR 0180 step 1), which framework/app/studio sets, the routes
-      reading the running app through a [StudioHost] kit gives.
+      reading the running app through a [StudioHost] the framework gives.
 
       The package imports the standard library and the framework's model only,
-      so that kit and every subsystem can import it.
+      so that the framework and every subsystem can import it.
     functions:
       - doc: Refuse is err as a refusal of kind.
         in:
@@ -5651,7 +5651,7 @@ packages:
         underlying: func(after time.Time) (next time.Time, ok bool)
       - doc: |-
           JobSchedulerConfig is the scheduler the app's jobs run on: the app's clock
-          and what kit hears of each fire.
+          and what the framework hears of each fire.
         name: JobSchedulerConfig
         struct:
           fields:
@@ -5733,7 +5733,7 @@ packages:
       - doc: |-
           MailDriverConfig is what framework/app/mail plugs into kit: how a
           mailer's outbox opens, the SDK's verdict on a mail, the transports a
-          mailer hands its mail to, and how kit tells the spool's refusals apart.
+          mailer hands its mail to, and how the framework tells the spool's refusals apart.
         name: MailDriverConfig
         struct:
           fields:
@@ -5767,7 +5767,7 @@ packages:
                 and the error keeps the fields the SDK gave it.
               name: Refused
               type: func(err error, kind MailRefusal) bool
-      - doc: MailRefusal is a refusal of the mail subsystem, as kit words it.
+      - doc: MailRefusal is a refusal of the mail subsystem, as the framework words it.
         name: MailRefusal
         underlying: uint8
       - doc: MailEvent is what a spool reports of a mail.
@@ -5775,7 +5775,7 @@ packages:
         underlying: uint8
       - doc: |-
           MailSpoolConfig is one mailer's outbox: the transport each attempt runs,
-          the app's clock, what kit hears of its mails, its retries, and where it
+          the app's clock, what the framework hears of its mails, its retries, and where it
           keeps them — a queue on the database that keeps the mailer's service, a
           directory, or memory.
         name: MailSpoolConfig
@@ -5846,7 +5846,7 @@ packages:
               type: int
       - doc: |-
           MailValue is a value of the SDK's mail package as it crosses the
-          contract: a mail.Message, or a sender's mail.Address, held as any — kit's
+          contract: a mail.Message, or a sender's mail.Address, held as any — the framework's
           core names the SDK's mail types, plug names none.
         name: MailValue
         struct:
@@ -5919,8 +5919,8 @@ packages:
               name: Kind
               type: MailEvent
       - doc: |-
-          MailSpool is one mailer's outbox as kit's core uses it: a mail put in it
-          at once or under an ID kit minted, the loop that hands each mail to the
+          MailSpool is one mailer's outbox as the framework's core uses it: a mail put in it
+          at once or under an ID the framework minted, the loop that hands each mail to the
           transport, and its dead letters.
         interface:
           methods:
@@ -5936,7 +5936,7 @@ packages:
               out:
                 - type: string
                 - type: error
-            - doc: SendWithID puts msg in the outbox under id, minted by kit.
+            - doc: SendWithID puts msg in the outbox under id, minted by the framework.
               in:
                 - name: ctx
                   type: context.Context
@@ -5999,7 +5999,7 @@ packages:
                 - type: "[]byte"
         name: MailCaptureSource
       - doc: |-
-          HTTPConfig is what kit asks of the HTTP engine: where to listen, its one
+          HTTPConfig is what the framework asks of the HTTP engine: where to listen, its one
           socket, its bounds, and the handler.
         name: HTTPConfig
         struct:
@@ -6045,7 +6045,7 @@ packages:
             - name: Total
             - name: Rejected
               type: uint64
-      - doc: HTTPServer is the HTTP engine kit starts, reads and stops.
+      - doc: HTTPServer is the HTTP engine the framework starts, reads and stops.
         interface:
           methods:
             - doc: Start binds the address and serves, returning once bound.
@@ -6095,7 +6095,7 @@ packages:
               name: NotRetryable
               type: func(err error) bool
       - doc: |-
-          QueueConfig is what kit asks of one queue: where it lies, its policy, the
+          QueueConfig is what the framework asks of one queue: where it lies, its policy, the
           app's clock, and for a mailer's outbox the sealing of what it keeps.
         name: QueueConfig
         struct:
@@ -6142,12 +6142,12 @@ packages:
             - doc: |-
                 Wrap, when a test sets it, stands in front of the queue the subsystem
                 opens: a func(queue.Broker) queue.Broker of the SDK's queue, which
-                kit's core does not name. Nil in every app a product builds.
+                the framework's core does not name. Nil in every app a product builds.
               name: Wrap
               type: any
       - doc: |-
           QueuePolicyValue is how a queue leases, retries and bounds its messages:
-          the SDK's queue policy, in kit's terms.
+          the SDK's queue policy, in the framework's terms.
         name: QueuePolicyValue
         struct:
           fields:
@@ -6179,7 +6179,7 @@ packages:
             - doc: |-
                 Handler handles one delivery: nil acknowledges it, an error has it
                 retried or, through DoNotRetry, dead-lettered at once. Every handler
-                kit runs tolerates a redelivery.
+                the framework runs tolerates a redelivery.
               name: Handler
               type: func(ctx context.Context, d DeliveryValue) error
             - doc: PollInterval bounds an idle wait.
@@ -6193,7 +6193,7 @@ packages:
               type: int
       - doc: |-
           MessageValue is one message of a queue: its identifier, its payload as
-          kit encoded it, and when it was published.
+          the framework encoded it, and when it was published.
         name: MessageValue
         struct:
           fields:
@@ -6203,7 +6203,7 @@ packages:
             - doc: ID identifies the message in its queue.
               name: ID
               type: string
-            - doc: Payload is the message as kit encoded it.
+            - doc: Payload is the message as the framework encoded it.
               name: Payload
               type: "[]byte"
       - doc: |-
@@ -6262,7 +6262,7 @@ packages:
               name: Deliveries
               type: int
       - doc: |-
-          Broker is one queue as kit's core uses it: a publication, the consumer
+          Broker is one queue as the framework's core uses it: a publication, the consumer
           that delivers it, and its dead letters. It grows by the sibling below.
         interface:
           methods:
@@ -6347,7 +6347,7 @@ packages:
                 - type: error
         name: MessageMover
       - doc: |-
-          Clock is the app's clock as a queue stamps and waits on it: kit's core
+          Clock is the app's clock as a queue stamps and waits on it: the framework's core
           hands the one its app runs on, a test's manual clock included.
         interface:
           methods:
@@ -6427,8 +6427,8 @@ packages:
         name: Ticker
       - doc: |-
           StoreDriverConfig is what framework/app/store plugs into kit: how a
-          store's engine opens, how kit opens its scope on a database, and the
-          migration that makes one of kit's tables.
+          store's engine opens, how the framework opens its scope on a database, and the
+          migration that makes one of the framework's tables.
         name: StoreDriverConfig
         struct:
           fields:
@@ -6437,7 +6437,7 @@ packages:
                 data directory, empty in memory, or on a database.
               name: Open
               type: func(cfg StoreConfig) (StoreEngine, error)
-            - doc: Database opens kit's scope on one database's pool.
+            - doc: Database opens the framework's scope on one database's pool.
               name: Database
               type: func(cfg DatabaseConfig) (Database, error)
             - doc: |-
@@ -6447,7 +6447,7 @@ packages:
               type: func(dialect string, t TableSpec, version uint64) (MigrationValue, error)
       - doc: |-
           DocumentValue is a record as a store's engine holds it (ADR 0179 §2):
-          its JSON as it rests, byte for byte what kit encodes, and the entity
+          its JSON as it rests, byte for byte what the framework encodes, and the entity
           once decoded, kept beside it so that a read, an index or a privacy
           walk does not decode it twice.
         name: DocumentValue
@@ -6492,9 +6492,9 @@ packages:
               name: Keys
               type: func(d DocumentValue) []string
       - doc: |-
-          StoreConfig is what kit asks of one store's engine: the store, its key and
+          StoreConfig is what the framework asks of one store's engine: the store, its key and
           its indexes over documents, where it rests and what it keeps, and how its
-          writes take part in kit's transactions.
+          writes take part in the framework's transactions.
         name: StoreConfig
         struct:
           fields:
@@ -6566,7 +6566,7 @@ packages:
               name: Stamp
               type: func(ctx context.Context) StampValue
             - doc: |-
-                Transaction is kit's transaction, which the engine's writes take part
+                Transaction is the framework's transaction, which the engine's writes take part
                 in.
               name: Transaction
               type: Transaction
@@ -6584,7 +6584,7 @@ packages:
               name: InPlace
               type: bool
       - doc: |-
-          DatabaseConfig is one database a product declares, as kit opened it: its
+          DatabaseConfig is one database a product declares, as the framework opened it: its
           pool, its dialect, its tuning and the timeout of each call.
         name: DatabaseConfig
         struct:
@@ -6600,7 +6600,7 @@ packages:
                 "sqlite".
               name: Dialect
               type: string
-            - doc: Timeout bounds each call kit makes on the database.
+            - doc: Timeout bounds each call the framework makes on the database.
               name: Timeout
               type: time.Duration
             - doc: MaxOpen and MaxIdle bound the pool's connections.
@@ -6617,7 +6617,7 @@ packages:
               name: CheckTimeout
               type: time.Duration
       - doc: |-
-          TableSpec is one of kit's tables on a database, as the store subsystem's
+          TableSpec is one of the framework's tables on a database, as the store subsystem's
           migration makes it: a store's, or a store's versions beside the store's
           table VersionsOf. A consumer's queue's table is the queue subsystem's
           (QueueDriverConfig's TableMigration).
@@ -6635,7 +6635,7 @@ packages:
       - doc: |-
           MigrationValue is one versioned change of a database's schema and its
           reversal, as the core hands it to the store subsystem: a product's
-          app.Migration, or one of kit's own, its steps on the standard library's
+          app.Migration, or one of the framework's own, its steps on the standard library's
           types.
         name: MigrationValue
         struct:
@@ -6702,7 +6702,7 @@ packages:
               name: At
               type: time.Time
       - doc: |-
-          Database is kit's scope on one database (ADR 0179 §2): the transactions
+          Database is the framework's scope on one database (ADR 0179 §2): the transactions
           app.Transact opens on it, their savepoints, and the functions held until
           their end. The core knows a database only through it; the store package
           implements it over the SDK's sql. It grows by the siblings below.
@@ -6856,7 +6856,7 @@ packages:
               variadic: true
         name: Executor
       - doc: |-
-          Transaction is kit's transaction as a store's engine takes part in it
+          Transaction is the framework's transaction as a store's engine takes part in it
           (ADR 0139, ADR 0178): the core implements it, an engine calls it with its
           caller's context.
         interface:
@@ -6906,7 +6906,7 @@ packages:
         name: Transaction
       - doc: |-
           StoreEngine is what a store runs on, over documents (ADR 0179 §2): the
-          non-generic engine under Store[T]. Its refusals are kit's ([Refusal]): the
+          non-generic engine under Store[T]. Its refusals are the framework's ([Refusal]): the
           engine translates the SDK's before they reach the core. Every call takes
           the caller's context, which carries the transaction the call joins. It
           grows by the sibling interfaces below, never by a method (the SDK's ADR
@@ -7268,13 +7268,13 @@ packages:
                 - type: error
         name: DocumentSink
       - doc: |-
-          Refusal is a kind of refusal of a store's engine or a database, as kit
+          Refusal is a kind of refusal of a store's engine or a database, as the framework
           words it.
         name: Refusal
         underlying: uint8
       - doc: |-
           RefusalError is an engine's refusal of one kind: the error it met, and
-          the kind kit words it by.
+          the kind the framework words it by.
         methods:
           - doc: Error is what the engine met's.
             name: Error
@@ -7292,12 +7292,12 @@ packages:
             - doc: Err is what the engine met.
               name: Err
               type: error
-            - doc: Kind is how kit words it.
+            - doc: Kind is how the framework words it.
               name: Kind
               type: Refusal
       - doc: |-
           WorkflowDriverConfig is what framework/app/workflow plugs into kit: how a
-          workflow's engine opens, and how kit tells the engine's failures apart.
+          workflow's engine opens, and how the framework tells the engine's failures apart.
         name: WorkflowDriverConfig
         struct:
           fields:
@@ -7321,7 +7321,7 @@ packages:
       - doc: WorkflowLoopEvent is what a workflow's loop reports.
         name: WorkflowLoopEvent
         underlying: uint8
-      - doc: WorkflowFailure is a failure of a workflow's engine, as kit words it.
+      - doc: WorkflowFailure is a failure of a workflow's engine, as the framework words it.
         name: WorkflowFailure
         underlying: uint8
       - doc: |-
@@ -7568,7 +7568,7 @@ packages:
               name: Wake
               type: WorkflowWake
       - doc: |-
-          WorkflowEngine is one workflow's engine as kit's core uses it: the
+          WorkflowEngine is one workflow's engine as the framework's core uses it: the
           transitions code fires, what a write of the store tells it, what it
           counts and records, and its loop.
         interface:
@@ -7734,12 +7734,12 @@ packages:
             - doc: |-
                 Settings are the tool's variables as the settings of a run show them,
                 in order, each with its value as the run resolved it and where it
-                came from: the product's code, the environment, or kit's default.
+                came from: the product's code, the environment, or the framework's default.
               name: Settings
               type: func(getenv func(string) string, state StudioStateValue) []model.Setting
             - doc: |-
                 Forced are the variables kit dev says it set itself for this launch,
-                as it names them; kit labels only those it lets kit dev set.
+                as it names them; the framework labels only those it lets kit dev set.
               name: Forced
               type: func(getenv func(string) string) []string
             - doc: |-
@@ -8026,7 +8026,7 @@ packages:
               out:
                 - type: bool
             - doc: |-
-                Reply answers r with body, a JSON document, or with err as kit
+                Reply answers r with body, a JSON document, or with err as the framework
                 answers an error.
               in:
                 - name: w
@@ -8057,7 +8057,7 @@ packages:
                   type: string
               name: Fail
             - doc: |-
-                NotFound is kit's answer to a request for what does not exist,
+                NotFound is the framework's answer to a request for what does not exist,
                 saying message.
               in:
                 - name: message
@@ -8066,7 +8066,7 @@ packages:
               out:
                 - type: error
             - doc: |-
-                Invalid is kit's answer to a request the caller must change, saying
+                Invalid is the framework's answer to a request the caller must change, saying
                 message.
               in:
                 - name: message
@@ -8075,7 +8075,7 @@ packages:
               out:
                 - type: error
             - doc: |-
-                ProfileUnreadable is kit's refusal of a profile the process could
+                ProfileUnreadable is the framework's refusal of a profile the process could
                 not read: public says which, cause why, for the logs.
               in:
                 - name: public
@@ -8097,20 +8097,20 @@ packages:
               name: Debug
         name: StudioHost
       - doc: |-
-          WordsConfig is what framework/app/studio plugs into kit: how kit's
+          WordsConfig is what framework/app/studio plugs into kit: how the framework's
           catalogues in the languages after English open.
         name: WordsConfig
         struct:
           fields:
             - doc: |-
                 Open reads and compiles the catalogue of every language after
-                English, each falling back to english — kit's own sentences, by
+                English, each falling back to english — the framework's own sentences, by
                 key, as its core holds them; a catalogue that does not decode or
                 does not compile is refused.
               name: Open
               type: func(english map[string]string) (Translator, error)
       - doc: |-
-          Translator says kit's sentences in the languages after English, which
+          Translator says the framework's sentences in the languages after English, which
           only the Studio shows, in its reader's language.
         interface:
           methods:
@@ -8145,13 +8145,13 @@ packages:
         name: Translator
     variables:
       - doc: |-
-          Jobs is the jobs subsystem: the schedules of kit's jobs and the scheduler
+          Jobs is the jobs subsystem: the schedules of the framework's jobs and the scheduler
           that fires them; nil until framework/app/jobs is imported. A product that
           declares a job without it is refused at the start (ADR 0179 §6).
         name: Jobs
         type: atomic.Pointer[JobDriverConfig]
       - doc: |-
-          Mail is the mail subsystem: the outbox kit's mailers keep and the
+          Mail is the mail subsystem: the outbox the framework's mailers keep and the
           transports that empty it; nil until framework/app/mail is imported. A
           product that declares a mailer without it is refused at the start (ADR
           0179 §6).
@@ -8175,7 +8175,7 @@ packages:
         name: SampleProcess
         type: atomic.Pointer[func() *model.Process]
       - doc: |-
-          Queues is the queue subsystem: the brokers kit's consumers' queues run on
+          Queues is the queue subsystem: the brokers the framework's consumers' queues run on
           and the migration of a queue's table on a database; nil until
           framework/app/queue is imported. A product that declares a topic, a
           subscription, a watch, a queued command or a mailer whose outbox is on a
@@ -8183,43 +8183,43 @@ packages:
         name: Queues
         type: atomic.Pointer[QueueDriverConfig]
       - doc: |-
-          Stores is the store subsystem: the engines kit's stores run on, kit's
-          scope on a database and the migrations of kit's tables; nil until
+          Stores is the store subsystem: the engines the framework's stores run on, the framework's
+          scope on a database and the migrations of the framework's tables; nil until
           framework/app/store is imported. A product that declares a store or a
           database without it is refused at the start (ADR 0179 §6).
         name: Stores
         type: atomic.Pointer[StoreDriverConfig]
       - doc: |-
           Studio is the Studio subsystem: the tool's variables and the Studio's
-          routes; nil until framework/app/studio is imported, and kit then reads
+          routes; nil until framework/app/studio is imported, and the framework then reads
           none of the tool's variables and serves no route of the Studio.
         name: Studio
         type: atomic.Pointer[StudioDriverConfig]
       - doc: |-
-          Workflows is the workflow subsystem: the engine kit's workflows run on;
+          Workflows is the workflow subsystem: the engine the framework's workflows run on;
           nil until framework/app/workflow is imported. A product that declares a
           workflow without it is refused at the start (ADR 0179 §6).
         name: Workflows
         type: atomic.Pointer[WorkflowDriverConfig]
       - doc: |-
-          Words is kit's sentences in the languages after English, the catalogues
+          Words is the framework's sentences in the languages after English, the catalogues
           the Studio shows its reader's language from; nil until
-          framework/app/studio is imported, and kit then speaks English alone.
+          framework/app/studio is imported, and the framework then speaks English alone.
           The terminal, the logs and an error read English whatever a program
           imports (ADR 0179 Q6).
         name: Words
         type: atomic.Pointer[WordsConfig]
   - doc: |-
       Package queueengine is what framework/app/queue plugs into kit: the brokers
-      kit's consumers' queues run on — the SDK's queue in memory, in the data
+      the framework's consumers' queues run on — the SDK's queue in memory, in the data
       directory and over SQL, a mailer's outbox on a database sealed in front of
       the SQL one —, the consumer that delivers them, and the migration of a
-      queue's table (ADR 0179 §1, step 4). kit's core imports none of the SDK's
+      queue's table (ADR 0179 §1, step 4). The framework's core imports none of the SDK's
       queue: it reaches it through plug, and a product that declares no topic,
       no subscription, no watch, no queued command and no outbox on a database
       links none of it.
 
-      Package queueengine — the compile-time proof that the brokers are kit's.
+      Package queueengine — the compile-time proof that the brokers are the framework's.
     functions:
       - doc: |-
           BrokerOf is the SDK's broker behind b, a queue this package opened: what a
@@ -8235,7 +8235,7 @@ packages:
           - type: bool
       - doc: |-
           Enable plugs the queues' brokers, their consumer and the migration of a
-          queue's table into kit.
+          queue's table into the framework.
         name: Enable
     imports:
       plug: github.com/kitsunium/sdk/framework/internal/app/plug
@@ -8246,26 +8246,26 @@ packages:
       engine an app in the server profile serves on (the SDK's net/server), the
       frontends' file server (the SDK's net/static), and the process sampler of
       the runtime graph a serving app answers (the SDK's proc/process, and through
-      it runtime/metrics and the spawn engine). kit imports none of them: a
+      it runtime/metrics and the spawn engine). The framework imports none of them: a
       daemon or a CLI neither links nor initialises them (ADR 0172).
 
-      Package serverengine — the compile-time proof that the engine is kit's.
+      Package serverengine — the compile-time proof that the engine is the framework's.
     functions:
       - doc: |-
           Enable plugs the HTTP engine, the frontends' file server and the process
-          sampler into kit.
+          sampler into the framework.
         name: Enable
     path: github.com/kitsunium/sdk/framework/internal/app/serverengine
   - doc: |-
       Package storeengine is what framework/app/store plugs into kit: the engines
-      kit's stores run on — the SDK's document store in memory, in the data
-      directory and over SQL —, kit's scope on a database — the SDK's
+      the framework's stores run on — the SDK's document store in memory, in the data
+      directory and over SQL —, the framework's scope on a database — the SDK's
       transaction manager, its check and its migrator — and the migrations of
-      kit's tables (ADR 0179 §1). kit's core imports neither the SDK's docstore
+      the framework's tables (ADR 0179 §1). The framework's core imports neither the SDK's docstore
       nor its sql: it reaches them through plug, and a product that declares no
       store links none of them.
 
-      Package storeengine — the compile-time proof that the engines are kit's.
+      Package storeengine — the compile-time proof that the engines are the framework's.
     functions:
       - doc: |-
           SQLOf is the SDK's transaction manager and dialect of db, a database this
@@ -8285,44 +8285,44 @@ packages:
           - name: ok
             type: bool
       - doc: |-
-          Enable plugs the stores' engines, kit's scope on a database and the
-          migrations of kit's tables into kit.
+          Enable plugs the stores' engines, the framework's scope on a database and the
+          migrations of the framework's tables into the framework.
         name: Enable
     imports:
       plug: github.com/kitsunium/sdk/framework/internal/app/plug
       sql: github.com/kitsunium/sdk/pkg/v1/data/sql
     path: github.com/kitsunium/sdk/framework/internal/app/storeengine
   - doc: |-
-      Package studioengine is what framework/app/studio plugs into kit (ADR 0179
+      Package studioengine is what framework/app/studio plugs into the framework (ADR 0179
       §1, step 8; ADR 0180 §4, step 1): the Studio's routes, their guard and
       their handlers — the graph, the live events as a Server-Sent Events
       stream (the SDK's net/sse), traces, source, instances, items, and the dev
-      tools with the profiler (the SDK's profiling) —, the tool's variables kit
-      dev and the Studio set, and kit's sentences in the languages after
+      tools with the profiler (the SDK's profiling) —, the tool's variables the framework
+      dev and the Studio set, and the framework's sentences in the languages after
       English — the catalogues the Studio shows its reader's language from,
-      compiled by the SDK's i18n (Q6). kit's core holds none of them: a product
+      compiled by the SDK's i18n (Q6). The framework's core holds none of them: a product
       that does not import the Studio neither links nor initialises them, reads
       none of the tool's variables, and speaks English alone. The routes read
-      the running app through the plug.StudioHost kit's core gives.
+      the running app through the plug.StudioHost the framework's core gives.
     functions:
       - doc: |-
           Enable plugs the Studio into kit: the tool's variables, the Studio's
-          routes — with its event stream and its profiler — and kit's catalogues
+          routes — with its event stream and its profiler — and the framework's catalogues
           after English.
         name: Enable
     path: github.com/kitsunium/sdk/framework/internal/app/studioengine
   - doc: |-
       Package workflowengine is what framework/app/workflow plugs into kit: the
-      engine kit's workflows run on — the SDK's statemachine, instantiated once,
-      over kit's entity and the state's spelling (ADR 0179 §1, step 5, Q3) —,
+      engine the framework's workflows run on — the SDK's statemachine, instantiated once,
+      over the framework's entity and the state's spelling (ADR 0179 §1, step 5, Q3) —,
       its loop of timers and guards, and the conversions between the engine's
-      values and plug's. kit's core imports none of the SDK's statemachine: it
+      values and plug's. The framework's core imports none of the SDK's statemachine: it
       reaches it through plug, and a product that declares no workflow links
       none of it.
 
-      Package workflowengine — the compile-time proof that the engine is kit's.
+      Package workflowengine — the compile-time proof that the engine is the framework's.
     functions:
-      - doc: Enable plugs the workflows' engine into kit.
+      - doc: Enable plugs the workflows' engine into the framework.
         name: Enable
     path: github.com/kitsunium/sdk/framework/internal/app/workflowengine
   - aliases:
@@ -8336,7 +8336,7 @@ packages:
 
           	func (m Me) Attrs() []authz.Attr { return []authz.Attr{authz.AttrStrings("roles", m.Roles...)} }
 
-          kit calls the caller a principal: in kit, a subject is the person
+          The framework calls the caller a principal: in the framework, a subject is the person
           personal data is about (ADR 0006).
         name: Principal
         target: iapp.AttrsProvider
@@ -8362,7 +8362,7 @@ packages:
           AnalyzeFunc reads the product's source — the Go module rooted at dir, and
           the packages that declare the modules it mounts — into a graph the runtime
           merges into its own: the edges found in handler bodies, each function's
-          steps. The framework links no analyzer (ADR 0147 §1): the platform's kit
+          steps. The framework links no analyzer (ADR 0147 §1): the platform's former runtime
           tool gives one, in dev, through [Analyzer].
         name: AnalyzeFunc
         target: iapp.AnalyzeFunc
@@ -8444,7 +8444,7 @@ packages:
         target: iapp.AppConfigurer
       - doc: |-
           Dialect is the SQL an [Engine] speaks: [DialectPostgres], [DialectMySQL] or
-          [DialectSQLite], kit's own names (ADR 0179 Q5) — the graph names the
+          [DialectSQLite], the framework's own names (ADR 0179 Q5) — the graph names the
           engine by it.
         name: Dialect
         target: iapp.Dialect
@@ -8457,14 +8457,14 @@ packages:
       - doc: |-
           Engine is an SQL engine a database runs on. An engine module returns one —
           github.com/kitsunium/sdk/framework/connectors/postgres, …/mysql, …/sqlite —;
-          kit calls it when the database starts. Like an SDK port, it grows by
+          the framework calls it when the database starts. Like an SDK port, it grows by
           sibling interfaces, never by a method.
         name: Engine
         target: iapp.Engine
       - doc: |-
           LockWaiter is an [Engine] whose connections wait a bounded time for a lock
           another connection holds — SQLite's busy timeout —, a sibling of Engine
-          (ADR 0178 C2). kit opens such an engine's pool with OpenWaiting instead
+          (ADR 0178 C2). The framework opens such an engine's pool with OpenWaiting instead
           of Open, and gives it a wait under <name>-timeout, so that a lost race on
           the lock comes back as the engine's refusal before the call's own
           deadline. An engine that does not implement it keeps its own wait.
@@ -8472,7 +8472,7 @@ packages:
         target: iapp.LockWaiter
       - doc: |-
           Migration is one versioned change of a database's schema and its
-          reversal, kit's own (ADR 0179 step 10): the shape the SDK's sql runs,
+          reversal, the framework's own (ADR 0179 step 10): the shape the SDK's sql runs,
           which the store subsystem hands it.
 
           	app.Migration{
@@ -8580,9 +8580,9 @@ packages:
         name: ListenerOption
         target: iapp.ListenerConfigurer
       - doc: |-
-          Loop is a declared loop of the daemon: kit owns the wait, the product owns
+          Loop is a declared loop of the daemon: the framework owns the wait, the product owns
           the work. Its wake sources — a period, a deadline the product computes, a
-          topic — are data, so the diagram draws exactly what wakes it; kit runs it on
+          topic — are data, so the diagram draws exactly what wakes it; the framework runs it on
           its own goroutine, one run at a time, observes every run, and restarts it
           after a panic.
         name: Loop
@@ -8599,7 +8599,7 @@ packages:
         target: iapp.LoopConfigurer
       - doc: |-
           Routine is a loop written by hand: a function that runs until its context
-          ends. kit starts it with the app, cancels its context on shutdown and waits
+          ends. The framework starts it with the app, cancels its context on shutdown and waits
           for it, restarts it after an error or a panic — backing off from one second
           to one minute — and reads its select statements to draw what it waits on.
         name: Routine
@@ -8633,7 +8633,7 @@ packages:
       - doc: |-
           ModulePart is what a module is made of: its services, the modules it
           requires ([Requires]), and the migrations of the data it keeps outside
-          kit's stores ([Migrations]).
+          the framework's stores ([Migrations]).
         name: ModulePart
         target: iapp.ModuleConfigurer
       - doc: "MountOption configures the mount of a module: [Prefix], [Bind], [Only]."
@@ -8644,7 +8644,7 @@ packages:
           endpoint, a port — and, with ADR 0005, a command or a query. It is what
           [Fallback] and [Bind] give a port, and what [Replace] replaces in a test;
           a request or a response of other types does not compile. Its methods are
-          unexported: only kit implements it.
+          unexported: only the framework implements it.
 
           Every operation is a node of the graph, and runs in a span of its own
           through its whole pipeline — authentication, validation, policies, the
@@ -8746,7 +8746,7 @@ packages:
             name: T
       - doc: |-
           Tombstone is one record in a store's trash: its key, when the product
-          deleted it, on the app's clock, and when kit purges it — its trash's
+          deleted it, on the app's clock, and when the framework purges it — its trash's
           length after the deletion, or sooner when its retention says so.
         name: Tombstone
         target: iapp.TombstoneEvent
@@ -8783,7 +8783,7 @@ packages:
         target: iapp.ScopeValue
       - doc: |-
           Secret is a secret the product declares: provided by the operator — an SMTP
-          URL, an API token — or generated by kit — a signing or sealing key — and
+          URL, an API token — or generated by the framework — a signing or sealing key — and
           rotated on its schedule.
         name: Secret
         target: iapp.Secret
@@ -8838,7 +8838,7 @@ packages:
           every write before returning, atomically — a crash never leaves a torn
           file — and a write costs one entity, whatever the store holds. Without one,
           it lives in memory. A store is a port (ADR 0004): what it runs on is its
-          engine (store_engine.go), today the SDK's document store (docstore); kit
+          engine (store_engine.go), today the SDK's document store (docstore); the framework
           makes it a node of the graph, observes every call, and speaks for its
           refusals.
         name: Store
@@ -8882,7 +8882,7 @@ packages:
         target: iapp.WrittenEvent
       - doc: |-
           Watch is a subscription fed by stores instead of a topic: its handler is
-          told of every write kit confirms on a store whose entity holds a field
+          told of every write the framework confirms on a store whose entity holds a field
           with its mark. [Service].Watch declares one.
         name: Watch
         target: iapp.Watch
@@ -8967,21 +8967,21 @@ packages:
         type: string
         value: "\"production\""
       - blockDoc: |-
-          The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+          The SQL dialects an [Engine] speaks: the framework's own names (ADR 0179 Q5), which
           the store subsystem maps onto the SDK's.
         doc: DialectPostgres is PostgreSQL.
         name: DialectPostgres
         type: Dialect
         value: "\"postgres\""
       - blockDoc: |-
-          The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+          The SQL dialects an [Engine] speaks: the framework's own names (ADR 0179 Q5), which
           the store subsystem maps onto the SDK's.
         doc: DialectMySQL is MySQL or MariaDB.
         name: DialectMySQL
         type: Dialect
         value: "\"mysql\""
       - blockDoc: |-
-          The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+          The SQL dialects an [Engine] speaks: the framework's own names (ADR 0179 Q5), which
           the store subsystem maps onto the SDK's.
         doc: DialectSQLite is SQLite.
         name: DialectSQLite
@@ -9132,7 +9132,7 @@ packages:
         type: errs.Code
         value: "0x00_04_02_15"
       - doc: |-
-          Deprecated: kit no longer returns it. The outbox is the SDK's mail
+          Deprecated: the framework no longer returns it. The outbox is the SDK's mail
           spool, which dead-letters a record that does not decode itself
           (MessageUndecodable, in pkg/v1/app/mail/spool).
         name: CodeMailUndecodable
@@ -9188,7 +9188,7 @@ packages:
         value: "0x00_04_02_22"
       - doc: |-
           CodeDatabaseVersion refuses the start of a database whose server is below
-          kit's floor: MySQL 8.0.1 or MariaDB 10.6, which lease with SKIP LOCKED.
+          the framework's floor: MySQL 8.0.1 or MariaDB 10.6, which lease with SKIP LOCKED.
         name: CodeDatabaseVersion
         type: errs.Code
         value: "0x00_04_02_4C"
@@ -9347,7 +9347,7 @@ packages:
         type: errs.Code
         value: "0x00_04_02_39"
       - doc: |-
-          The signals kit ends one of its own steps with and catches itself — a
+          The signals the framework ends one of its own steps with and catches itself — a
           caller never receives one —, typed when the SDK made rule 2 a gate.
         name: CodeSealErased
         type: errs.Code
@@ -9458,7 +9458,7 @@ packages:
       Package app — databases: the SQL engines a store can be kept on.
 
       Package app — the interfaces of databases: the engine a connector gives, and
-      what kit asks of it.
+      what the framework asks of it.
 
       Package app — the decoding of a request into its typed value.
 
@@ -9614,12 +9614,12 @@ packages:
 
       Package app — ports: an operation a service needs and does not implement.
 
-      Package app — privacy: kit's own service for holds and the journal.
+      Package app — privacy: the framework's own service for holds and the journal.
 
       Package app — erasure: a record's personal data removed as its retention
       would.
 
-      Package app — export: a person's data as kit gives it back.
+      Package app — export: a person's data as the framework gives it back.
 
       Package app — CPU profiles of the running process, for the Studio.
 
@@ -9657,7 +9657,7 @@ packages:
       Package app — settings: a value the environment gives a service.
 
       Package app — the interfaces of settings: the values a setting holds, and
-      what kit reads of a declaration.
+      what the framework reads of a declaration.
 
       Package app — frontends: static assets the product serves.
 
@@ -9819,7 +9819,7 @@ packages:
           - constraint: any
             name: D
       - doc: |-
-          Catalog lists the generic mechanics kit offers: the building blocks a node
+          Catalog lists the generic mechanics the framework offers: the building blocks a node
           composes rather than implements, each one backed by an SDK package. It is
           part of every graph, so the Studio — and an AI agent reading the graph —
           knows what can be added to a product and the exact code that adds it.
@@ -9969,9 +9969,9 @@ packages:
           - type: DatabaseOption
         variadic: true
       - doc: |-
-          Migrations are migrations, kit's own [Migration]s (ADR 0179 step 10),
+          Migrations are migrations, the framework's own [Migration]s (ADR 0179 step 10),
           run when the database starts (<name>-migrate: start) or by
-          `<product> migrate up`, kit's own first, each set under its own version
+          `<product> migrate up`, the framework's own first, each set under its own version
           table — and so its own lock. On MySQL a DDL statement commits by itself:
           write one per migration. The store subsystem runs them: a program that
           declares a database imports framework/app/store, as its engine module
@@ -9979,7 +9979,7 @@ packages:
 
           Given to [Database], they are the product's, under schema_migrations.
           Given to [NewModule], they are the module's (ADR 0008), for the data it
-          keeps outside kit's stores: run on the database that keeps the module,
+          keeps outside the framework's stores: run on the database that keeps the module,
           under <module>_migrations.
         in:
           - name: m
@@ -10351,10 +10351,10 @@ packages:
           - type: MailerOption
       - doc: |-
           NewModule declares a module named name — lower-case letters, digits and
-          dashes, starting with a letter; "kit", "external" and "schema" are kit's — that doc
+          dashes, starting with a letter; "kit", "external" and "schema" are the framework's — that doc
           describes, made of parts: its services, which it adopts, the modules it
           requires ([Requires]), and the migrations of the data it keeps outside
-          kit's stores ([Migrations]), run on the database that keeps it. Declare it
+          the framework's stores ([Migrations]), run on the database that keeps it. Declare it
           as a package-level variable of the one package a product imports:
 
           	var Module = app.NewModule("moderation",
@@ -10455,7 +10455,7 @@ packages:
           NotReused refuses a password that the current hash, or any of the n
           former ones, verifies — n from 1 to 100. It is a compliance policy, off by
           default: PCI DSS asks for it, OWASP ASVS 4.0.3 asks most products not to
-          impose it. kit keeps the field's last n hashes, so it implies history=n,
+          impose it. The framework keeps the field's last n hashes, so it implies history=n,
           and a tag whose history is smaller than n is refused.
 
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
@@ -10533,7 +10533,7 @@ packages:
 
           Once sealing lands (ADR 0006, step 3), an erasure also moves the held
           records under keys of their own and destroys the subject's data key, so
-          that it reaches every copy kit sealed.
+          that it reaches every copy the framework sealed.
         in:
           - name: ctx
             type: context.Context
@@ -10640,14 +10640,14 @@ packages:
             name: Resp
       - doc: |-
           SetCookie adds a Set-Cookie header to the HTTP response of the endpoint
-          ctx serves. kit fills what a cookie left zero with safe defaults — Path
+          ctx serves. The framework fills what a cookie left zero with safe defaults — Path
           "/", HttpOnly, SameSite Lax, and Secure outside dev — so a session cookie
           is hardened unless the code says otherwise. In an in-process
           [Endpoint].Call there is no response: the cookie is dropped.
 
           HttpOnly is always set, and Secure always outside dev (and in dev for
           SameSite=None, which browsers require): a boolean has no "unset" a default
-          could fill, and kit chooses the hardened reading. A cookie set more than
+          could fill, and the framework chooses the hardened reading. A cookie set more than
           once in one response keeps its last value, and cookies set before an error
           are sent with the error — clearing a stale session on a 401 works.
         in:
@@ -10692,7 +10692,7 @@ packages:
           - type: time.Time
       - doc: |-
           NewTicker is a ticker of period d on the app's clock, for a loop written by
-          hand ([Service].Go): a test's manual clock drives it like every timer kit
+          hand ([Service].Go): a test's manual clock drives it like every timer the framework
           runs itself, where a time.Ticker would tick on the wall clock whatever the
           test does. It panics on a non-positive d, as time.NewTicker does.
         in:
@@ -10779,7 +10779,7 @@ packages:
       - doc: |-
           Anonymise says what an erased record keeps: fn runs first, and generalises
           into unclassified fields — a birth date to its year, an address to its
-          region; then kit clears the rest. kit cannot prove that what remains
+          region; then the framework clears the rest. The framework cannot prove that what remains
           identifies no one: by declaring the function, the product asserts it.
         in:
           - name: fn
@@ -10824,18 +10824,18 @@ packages:
       - doc: |-
           RetentionByProduct says the product keeps the store's retention itself:
           its own code erases and deletes what it no longer needs — a record whose
-          life the product's own rules end, a lifecycle kit cannot read from the
+          life the product's own rules end, a lifecycle the framework cannot read from the
           entity. limits says, in the product's words, for how long and how, which
           the register publishes as the store's time limits (GDPR art. 30(1)(f));
           "" says only that the product keeps them.
 
-          kit then runs no retention for the store, and warns of neither a missing
+          The framework then runs no retention for the store, and warns of neither a missing
           retention nor a missing subject. Its classified fields keep every other
           promise: sealed at rest, never shown, exported with their person — when
           the store names one — and erased by app.Erase and Store.Erase. It goes
           with app.Purpose, app.HeldUntil, app.Anonymise and app.DeleteOnErasure;
           with app.EraseAfter, app.EraseAt, app.DeleteAfter or app.DeleteAt it is
-          refused: a store's retention is kit's or the product's, never both.
+          refused: a store's retention is the framework's or the product's, never both.
         in:
           - name: limits
             type: string
@@ -10859,7 +10859,7 @@ packages:
 
           A store with Revisions(n) holds up to n+1 times its records: in memory
           with the store in the data directory, in the table <table>___vs on a
-          database, which kit's migrations create.
+          database, which the framework's migrations create.
         in:
           - name: "n"
             type: int
@@ -10899,7 +10899,7 @@ packages:
           - type: error
         variadic: true
       - doc: |-
-          Generated makes the secret kit's to make: versions of bytes random bytes —
+          Generated makes the secret the framework's to make: versions of bytes random bytes —
           32 for a key — the first made on the first start, a new one every 30 days,
           the last 3 kept, unless [RotateEvery] and [KeepVersions] say otherwise.
 
@@ -10912,7 +10912,7 @@ packages:
         out:
           - type: SecretOption
       - doc: |-
-          RotateEvery is how often kit makes a new version of a generated secret.
+          RotateEvery is how often the framework makes a new version of a generated secret.
 
           IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
           only hands it to the declaration it configures.
@@ -10945,7 +10945,7 @@ packages:
           where it lives at every use, as every provided secret is: given later —
           `secrets set` in the environment's store, a new content in the file its
           _FILE variable names —, it is found at its next use. A generated secret
-          is kit's to make and never absent: Optional with [Generated] is refused.
+          is the framework's to make and never absent: Optional with [Generated] is refused.
         name: Optional
         out:
           - type: SecretOption
@@ -10994,7 +10994,7 @@ packages:
           - constraint: any
             name: V
       - doc: |-
-          ConfigFiles gives kit the product's configuration files: config/config.<ext>,
+          ConfigFiles gives the framework the product's configuration files: config/config.<ext>,
           which every environment reads, and config/<env>.<ext>, the environment's
           own — <env> being KIT_ENV as written, dev when kit dev runs the product —
           in JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of
@@ -11028,7 +11028,7 @@ packages:
           projections — the subscriptions that keep it from the write side's
           events —, read by queries. It changes nothing of how the store runs; the
           diagram draws it on its domain's read side, and the static analysis warns
-          of a read model written by anything but a subscription. kit's topics are
+          of a read model written by anything but a subscription. The framework's topics are
           queues, not logs: a read model cannot be replayed from its events, and one
           fed by a topic lags the commands that feed it — a query that must read its
           own writes reads the write side.
@@ -11129,14 +11129,14 @@ packages:
           notice whose queue lives on the transaction's database — the one that
           keeps the service of its subscription, command, mailer or watch, by a
           store's rules — is written in the transaction, just before it commits, a
-          mail sealed under kit's data-key: a queue that refuses
+          mail sealed under the framework's data-key: a queue that refuses
           it fails the transaction, every write undone, and Transact returns the
           refusal. Every other one leaves after the commit: one a queue refuses then
           is logged and reported, and the commit stands; a process that dies
           between the commit and the release loses what was held.
 
           On a database the transaction is the database's own, at its default
-          isolation. On the data directory and in memory kit keeps its own: it takes
+          isolation. On the data directory and in memory the framework keeps its own: it takes
           the data's writer turn — one transaction at a time; a write outside any
           waits for it, and such writes share the turn among themselves —, its
           writes land at once, and an error writes each entity's previous value
@@ -11166,8 +11166,8 @@ packages:
     path: github.com/kitsunium/sdk/framework/app
     variables:
       - doc: |-
-          Privacy is kit's own service: the legal holds and the privacy journal of
-          an app that keeps personal data. kit mounts a copy of it — named
+          Privacy is the framework's own service: the legal holds and the privacy journal of
+          an app that keeps personal data. The framework mounts a copy of it — named
           kit.privacy, a name no service of a product can take — in every app whose
           stores keep personal data or declare a retention, before the product's
           services. Its stores stay in the data directory unless the product places
@@ -11191,10 +11191,10 @@ packages:
         type: Scope
   - doc: |-
       Package apptest runs a product in its own tests as production runs it: on
-      a data directory, where kit seals what it keeps at rest, a transaction
+      a data directory, where the framework seals what it keeps at rest, a transaction
       writes files and a rollback writes them back, a store's retention erases
       and folds what it overwrote, and a restart reads everything back — none
-      of which a product kept in memory (app.InMemory) ever meets: kit seals
+      of which a product kept in memory (app.InMemory) ever meets: the framework seals
       nothing in memory.
 
       A suite keeps most of its tests in memory, fast and hermetic, and runs on
@@ -11215,7 +11215,7 @@ packages:
       restart.
     functions:
       - doc: |-
-          NewDisk returns a new data directory for t. The secrets kit makes — its
+          NewDisk returns a new data directory for t. The secrets the framework makes — its
           data-key and its index key, what the product generates — are kept beside
           the data, as production keeps them unless KIT_SECRETS says otherwise, so
           an app started again on the same Disk opens what the first sealed.
@@ -11239,7 +11239,7 @@ packages:
           - doc: |-
               Holding returns the files of the data directory that hold one of words,
               byte for byte — slash-separated, relative to Dir, sorted —, the secrets
-              kit keeps there left out: what a test asserts is empty once kit seals
+              the framework keeps there left out: what a test asserts is empty once the framework seals
               what the words were written into. An empty word matches nothing.
             in:
               - name: t
@@ -11278,9 +11278,9 @@ packages:
         type: string
         value: "\"storetest\""
     doc: |-
-      Package storetest is the conformance suite of kit's stores (ADR 0004): what
+      Package storetest is the conformance suite of the framework's stores (ADR 0004): what
       a store does on every backend — in memory, in the data directory, on each
-      database engine —, run by kit's tests on memory, files and kit's fake
+      database engine —, run by the framework's tests on memory, files and the framework's fake
       database, and by each engine module's tests on its engine. It is what
       keeps the test double honest: a product tested in memory sees what its
       database does.
@@ -11307,7 +11307,7 @@ packages:
     path: github.com/kitsunium/sdk/framework/app/storetest
     types:
       - doc: |-
-          BackendConfig is where Run runs kit's stores: a name for the subtests and
+          BackendConfig is where Run runs the framework's stores: a name for the subtests and
           the options that place the stores there.
         name: BackendConfig
         struct:

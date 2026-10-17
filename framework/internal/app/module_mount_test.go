@@ -231,7 +231,7 @@ func startColliding(t *testing.T) *app.DiagnosticsError {
 		app.Mount(app.NewModule("kit", "Reserved.")), app.Mount(app.NewModule("Bad", "Upper case.")),
 		app.Mount(app.NewModule("schema", "Its version table would be the product's.")),
 		app.Mount(app.NewModule("privacy", "Kit's own service.", app.Privacy)),
-		app.Mount(app.NewModule("under", "Under kit's own."), app.Prefix("/_kit/under/")),
+		app.Mount(app.NewModule("under", "Under the framework's own."), app.Prefix("/_kit/under/")),
 	))
 }
 
@@ -248,10 +248,10 @@ func TestModuleCollisionsRefuseTheStart(t *testing.T) {
 		`the product's service "one" is named like a module the app mounts`:                             `named := app.NewService("one"`,
 		`app.Mount of module two binds port orders/port/price, which is not the module's`:               `app.Mount(two, app.Bind(price, fixed))`,
 		`the app mounts a nil module`:                                                                   `app.NewApp("shop", product, named, desk)`,
-		`module name "kit" is kit's`:                                                                    `app.Mount(app.NewModule("kit"`,
-		`module name "schema" is kit's`:                                                                 `app.Mount(app.NewModule("schema"`,
+		`module name "kit" is the framework's`:                                                          `app.Mount(app.NewModule("kit"`,
+		`module name "schema" is the framework's`:                                                       `app.Mount(app.NewModule("schema"`,
 		`module name "Bad" must be lower-case letters`:                                                  `app.Mount(app.NewModule("Bad"`,
-		`module privacy lists kit.privacy, kit's own service`:                                           `app.Mount(app.NewModule("privacy"`,
+		`module privacy lists kit.privacy, the framework's own service`:                                 `app.Mount(app.NewModule("privacy"`,
 		`module under is mounted under "/_kit/under/"`:                                                  `app.Prefix("/_kit/under/")`,
 	} {
 		expectProblem(t, de, "module_mount_test.go", said, where)

@@ -6,14 +6,14 @@ import "context"
 // framework/internal/app/mailengine implements over the SDK's mail spool and
 // its transports.
 
-// MailSpool is one mailer's outbox as kit's core uses it: a mail put in it
-// at once or under an ID kit minted, the loop that hands each mail to the
+// MailSpool is one mailer's outbox as the framework's core uses it: a mail put in it
+// at once or under an ID the framework minted, the loop that hands each mail to the
 // transport, and its dead letters.
 type MailSpool interface {
 	// Send puts msg in the outbox — in the transaction ctx carries for its
 	// database, when it lives on one — and returns its outbox ID.
 	Send(ctx context.Context, msg MailValue) (string, error)
-	// SendWithID puts msg in the outbox under id, minted by kit.
+	// SendWithID puts msg in the outbox under id, minted by the framework.
 	SendWithID(ctx context.Context, id string, msg MailValue) error
 	// DeadLetters counts up to maxLetters of the mails earlier runs gave up
 	// on.

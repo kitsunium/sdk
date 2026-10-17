@@ -80,11 +80,11 @@ var (
 	// errReseal ends a write whose record means what it meant but must rest
 	// otherwise: it is written again in place.
 	errReseal = errs.New(CodeResealInPlace, "RESEAL_IN_PLACE", "the record is sealed again, unchanged",
-		"kit: a write that changed nothing ended so the record is sealed again in place, without a version")
+		"app: a write that changed nothing ended so the record is sealed again in place, without a version")
 	// errRestMoved ends that second write when another write changed the
 	// record meanwhile.
 	errRestMoved = errs.New(CodeResealMoved, "RESEAL_MOVED", "the record changed meanwhile",
-		"kit: a reseal in place found the record changed by another write")
+		"app: a reseal in place found the record changed by another write")
 )
 
 // resealed is what a write that seals a record again in place writes: the

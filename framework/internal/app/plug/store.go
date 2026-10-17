@@ -30,20 +30,20 @@ const (
 	WriteReplace
 )
 
-// Stores is the store subsystem: the engines kit's stores run on, kit's
-// scope on a database and the migrations of kit's tables; nil until
+// Stores is the store subsystem: the engines the framework's stores run on, the framework's
+// scope on a database and the migrations of the framework's tables; nil until
 // framework/app/store is imported. A product that declares a store or a
 // database without it is refused at the start (ADR 0179 §6).
 var Stores atomic.Pointer[StoreDriverConfig]
 
 // StoreDriverConfig is what framework/app/store plugs into kit: how a
-// store's engine opens, how kit opens its scope on a database, and the
-// migration that makes one of kit's tables.
+// store's engine opens, how the framework opens its scope on a database, and the
+// migration that makes one of the framework's tables.
 type StoreDriverConfig struct {
 	// Open opens the engine of one store, as cfg places it: loaded from the
 	// data directory, empty in memory, or on a database.
 	Open func(cfg StoreConfig) (StoreEngine, error)
-	// Database opens kit's scope on one database's pool.
+	// Database opens the framework's scope on one database's pool.
 	Database func(cfg DatabaseConfig) (Database, error)
 	// TableMigration is the migration that makes the table t on a database
 	// of the dialect named, at version.
@@ -51,7 +51,7 @@ type StoreDriverConfig struct {
 }
 
 // DocumentValue is a record as a store's engine holds it (ADR 0179 §2):
-// its JSON as it rests, byte for byte what kit encodes, and the entity
+// its JSON as it rests, byte for byte what the framework encodes, and the entity
 // once decoded, kept beside it so that a read, an index or a privacy
 // walk does not decode it twice.
 type DocumentValue struct {
@@ -85,9 +85,9 @@ type IndexSpec struct {
 	Keys func(d DocumentValue) []string
 }
 
-// StoreConfig is what kit asks of one store's engine: the store, its key and
+// StoreConfig is what the framework asks of one store's engine: the store, its key and
 // its indexes over documents, where it rests and what it keeps, and how its
-// writes take part in kit's transactions.
+// writes take part in the framework's transactions.
 type StoreConfig struct {
 	// Name is the store's, as a log line and a rollback name it.
 	Name string
@@ -132,7 +132,7 @@ type StoreConfig struct {
 	Held func(ctx context.Context, key string) bool
 	// Stamp is what a write under ctx says about the version it makes.
 	Stamp func(ctx context.Context) StampValue
-	// Transaction is kit's transaction, which the engine's writes take part
+	// Transaction is the framework's transaction, which the engine's writes take part
 	// in.
 	Transaction Transaction
 }
@@ -147,7 +147,7 @@ type StampValue struct {
 	InPlace bool
 }
 
-// DatabaseConfig is one database a product declares, as kit opened it: its
+// DatabaseConfig is one database a product declares, as the framework opened it: its
 // pool, its dialect, its tuning and the timeout of each call.
 type DatabaseConfig struct {
 	// Name is the database's, as the product declared it.
@@ -157,7 +157,7 @@ type DatabaseConfig struct {
 	// Dialect is the engine's SQL dialect: "postgres", "mysql" or
 	// "sqlite".
 	Dialect string
-	// Timeout bounds each call kit makes on the database.
+	// Timeout bounds each call the framework makes on the database.
 	Timeout time.Duration
 	// MaxOpen and MaxIdle bound the pool's connections.
 	MaxOpen, MaxIdle int
@@ -167,7 +167,7 @@ type DatabaseConfig struct {
 	CheckTimeout time.Duration
 }
 
-// TableSpec is one of kit's tables on a database, as the store subsystem's
+// TableSpec is one of the framework's tables on a database, as the store subsystem's
 // migration makes it: a store's, or a store's versions beside the store's
 // table VersionsOf. A consumer's queue's table is the queue subsystem's
 // (QueueDriverConfig's TableMigration).
@@ -181,7 +181,7 @@ type TableSpec struct {
 
 // MigrationValue is one versioned change of a database's schema and its
 // reversal, as the core hands it to the store subsystem: a product's
-// app.Migration, or one of kit's own, its steps on the standard library's
+// app.Migration, or one of the framework's own, its steps on the standard library's
 // types.
 type MigrationValue struct {
 	// Version orders the migration in its set: non-zero and unique.

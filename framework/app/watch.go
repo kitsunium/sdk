@@ -10,7 +10,7 @@ import (
 type Written = iapp.WrittenEvent
 
 // Watch is a subscription fed by stores instead of a topic: its handler is
-// told of every write kit confirms on a store whose entity holds a field
+// told of every write the framework confirms on a store whose entity holds a field
 // with its mark. [Service].Watch declares one.
 type Watch = iapp.Watch
 

@@ -63,7 +63,7 @@
 // Package app — the start's judgement of the declared databases.
 //
 // Package app — the interfaces of databases: the engine a connector gives, and
-// what kit asks of it.
+// what the framework asks of it.
 //
 // Package app — the migrations a database runs, and their lock.
 //
@@ -105,7 +105,7 @@
 //
 // Package app — the history as the graph and the Studio show it.
 //
-// Package app — what kit's own writes mean to the history.
+// Package app — what the framework's own writes mean to the history.
 //
 // Package app — legal holds: records kept whatever their retention says.
 //
@@ -122,7 +122,7 @@
 //
 // Package app — jobs: scheduled work run by the daemon's loop.
 //
-// Package app — the privacy journal: what kit did to personal data, and why.
+// Package app — the privacy journal: what the framework did to personal data, and why.
 //
 // Package app — idempotency keys and their leases.
 //
@@ -174,12 +174,12 @@
 //
 // Package app — ports: an operation a service needs and does not implement.
 //
-// Package app — privacy: kit's own service for holds and the journal.
+// Package app — privacy: the framework's own service for holds and the journal.
 //
 // Package app — erasure: a record's personal data removed as its retention
 // would.
 //
-// Package app — export: a person's data as kit gives it back.
+// Package app — export: a person's data as the framework gives it back.
 //
 // Package app — a store's personal data as the graph shows it.
 //
@@ -253,7 +253,7 @@
 // Package app — the current user on Windows: its SID, from os/user, which
 // reads the process token there without cgo.
 //
-// Package app — sealing at rest: members sealed where kit keeps them.
+// Package app — sealing at rest: members sealed where the framework keeps them.
 //
 // Package app — where the data keys are, against what they seal.
 //
@@ -265,7 +265,7 @@
 //
 // Package app — a store that seals: its records as they rest.
 //
-// Package app — a store that seals, as kit's port sees it.
+// Package app — a store that seals, as the framework's port sees it.
 //
 // Package app — secrets: the values the product declares and the operator
 // provides.
@@ -279,7 +279,7 @@
 // Package app — settings: a value the environment gives a service.
 //
 // Package app — the interfaces of settings: the values a setting holds, and
-// what kit reads of a declaration.
+// what the framework reads of a declaration.
 //
 // Package app — frontends: static assets the product serves.
 //
@@ -289,7 +289,7 @@
 //
 // Package app — stores on SQL: the SDK's document store over a database.
 //
-// Package app — kit's own migrations on a database.
+// Package app — the framework's own migrations on a database.
 //
 // Package app — telemetry: the numbers a product reports, exported on a
 // private socket when the deployment asks for them (ADR 0149).
@@ -309,7 +309,7 @@
 //
 // Package app — a watch in a running app: its queue and its consumer.
 //
-// Package app — the sentences kit says: English from its own table, the
+// Package app — the sentences the framework says: English from its own table, the
 // languages after it from framework/app/studio's catalogues.
 //
 // Package app — workflows: a state machine over the entities of one store.

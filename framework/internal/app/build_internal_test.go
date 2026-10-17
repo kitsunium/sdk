@@ -38,16 +38,16 @@ func TestBuildOfATodoOnALocalKit(t *testing.T) {
 		t.Errorf("product %+v: a pseudo-version is not a version; the VCS stamp is the revision", b.Product)
 	}
 	if !b.Kit.Local || b.Kit.Version != "" || b.Kit.Revision != "814a8d1c0ffee" || b.Kit.Time == nil || !b.Kit.Time.Equal(at) || asked != local {
-		t.Errorf("kit %+v (git asked about %q)", b.Kit, asked)
+		t.Errorf("the framework %+v (git asked about %q)", b.Kit, asked)
 	}
 	// kit is a part of the SDK module (ADR 0162): the SDK says what kit says,
 	// in a copy of its own.
 	if b.SDK.Module != sdkModule || !b.SDK.Local || b.SDK.Revision != b.Kit.Revision || b.SDK.Time == nil || b.SDK.Time == b.Kit.Time {
-		t.Errorf("sdk %+v, want kit's %+v in a copy of its own", b.SDK, b.Kit)
+		t.Errorf("sdk %+v, want the framework's %+v in a copy of its own", b.SDK, b.Kit)
 	}
 	// Outside dev, nothing runs git: the local module has no revision.
 	if b := buildOf(bi, nil); !b.Kit.Local || b.Kit.Revision != "" {
-		t.Errorf("without git, kit %+v", b.Kit)
+		t.Errorf("without git, the framework %+v", b.Kit)
 	}
 }
 

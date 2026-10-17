@@ -28,7 +28,7 @@ func MinLength(n int) PasswordOption {
 // NotReused refuses a password that the current hash, or any of the n
 // former ones, verifies — n from 1 to 100. It is a compliance policy, off by
 // default: PCI DSS asks for it, OWASP ASVS 4.0.3 asks most products not to
-// impose it. kit keeps the field's last n hashes, so it implies history=n,
+// impose it. The framework keeps the field's last n hashes, so it implies history=n,
 // and a tag whose history is smaller than n is refused.
 //
 // IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller

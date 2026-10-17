@@ -872,7 +872,7 @@ func rawText(raw []byte) string {
 	if len(raw) <= maxRawMail {
 		return string(raw)
 	}
-	return string(raw[:maxRawMail]) + "\r\n[… cut by kit at " + humanBytes(maxRawMail) + "]"
+	return string(raw[:maxRawMail]) + "\r\n[… cut by the framework at " + humanBytes(maxRawMail) + "]"
 }
 
 // traceIDOf is the trace ID of a traceparent header, "" when it has none.

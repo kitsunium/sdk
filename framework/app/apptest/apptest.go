@@ -29,7 +29,7 @@ type Disk struct {
 	Dir string
 }
 
-// NewDisk returns a new data directory for t. The secrets kit makes — its
+// NewDisk returns a new data directory for t. The secrets the framework makes — its
 // data-key and its index key, what the product generates — are kept beside
 // the data, as production keeps them unless KIT_SECRETS says otherwise, so
 // an app started again on the same Disk opens what the first sealed.
@@ -56,7 +56,7 @@ func NewDisk(t testing.TB) *Disk {
 
 // Holding returns the files of the data directory that hold one of words,
 // byte for byte — slash-separated, relative to Dir, sorted —, the secrets
-// kit keeps there left out: what a test asserts is empty once kit seals
+// the framework keeps there left out: what a test asserts is empty once the framework seals
 // what the words were written into. An empty word matches nothing.
 func (d *Disk) Holding(t testing.TB, words ...string) []string {
 	t.Helper()

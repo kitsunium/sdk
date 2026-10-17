@@ -3,7 +3,7 @@ package plug
 // kit's catalogues after English (ADR 0179 §3, step 8), which
 // framework/internal/app/studioengine implements over the SDK's i18n.
 
-// Translator says kit's sentences in the languages after English, which
+// Translator says the framework's sentences in the languages after English, which
 // only the Studio shows, in its reader's language.
 type Translator interface {
 	// Languages are the languages it speaks after English, in order.

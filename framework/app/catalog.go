@@ -5,7 +5,7 @@ import (
 	"github.com/kitsunium/sdk/framework/model"
 )
 
-// Catalog lists the generic mechanics kit offers: the building blocks a node
+// Catalog lists the generic mechanics the framework offers: the building blocks a node
 // composes rather than implements, each one backed by an SDK package. It is
 // part of every graph, so the Studio — and an AI agent reading the graph —
 // knows what can be added to a product and the exact code that adds it.

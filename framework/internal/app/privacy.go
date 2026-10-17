@@ -15,7 +15,7 @@ const (
 	// privacyService is the service's name.
 	privacyService = "kit.privacy"
 	// privacyDoc is the service's documentation.
-	privacyDoc = "kit's own service: the data keys, the legal holds and the privacy journal of the personal data the product keeps (ADR 0006)."
+	privacyDoc = "the framework's own service: the data keys, the legal holds and the privacy journal of the personal data the product keeps (ADR 0006)."
 )
 
 // Who did it, in the journal, when no user is in the context.
@@ -46,9 +46,9 @@ const (
 // person's erasure moves their held records under keys of their own, then
 // destroys their key (privacy_erase.go).
 
-// Privacy is kit's own service: the data keys, the legal holds and the
+// Privacy is the framework's own service: the data keys, the legal holds and the
 // privacy journal of an app that keeps personal data or seals what it
-// keeps. kit mounts a copy of it — named kit.privacy, a name no service of a
+// keeps. The framework mounts a copy of it — named kit.privacy, a name no service of a
 // product can take — in every app whose stores keep personal data or declare
 // a retention, or that keeps sealed values at rest, before the product's
 // services. Its stores stay in the data directory unless the product places

@@ -80,7 +80,7 @@ func (a *App) deriveKeys(ctx context.Context) (_ *referenceKeys, made bool, _ er
 	defer clear(ikm)
 	k, err := subkeysOf(ikm)
 	if err != nil {
-		return nil, made, failure(CodePrivacyKey, "INDEX_KEY_DERIVE", "kit's index key could not be derived", err)
+		return nil, made, failure(CodePrivacyKey, "INDEX_KEY_DERIVE", "the framework's index key could not be derived", err)
 	}
 	a.privacy.keys = k
 	return k, made, nil
@@ -116,7 +116,7 @@ func (a *App) indexKey(ctx context.Context) (raw []byte, made bool, err error) {
 		}
 		return raw, false, nil
 	case !errors.Is(err, secret.NotFound):
-		return nil, false, failure(CodePrivacyKey, "INDEX_KEY_READ", "kit's index key could not be read", err)
+		return nil, false, failure(CodePrivacyKey, "INDEX_KEY_READ", "the framework's index key could not be read", err)
 	}
 	raw, err = a.makeIndexKey(ctx)
 	return raw, err == nil, err
@@ -128,7 +128,7 @@ func (a *App) makeIndexKey(ctx context.Context) ([]byte, error) {
 	st := a.secretsNow()
 	if st.kept == nil {
 		return nil, failure(CodePrivacyKey, "INDEX_KEY_NOT_KEPT",
-			"kit's index key needs a store kit can write — KIT_SECRETS=file:<dir> or memory — or KIT_INDEX_KEY to pin it", nil)
+			"the framework's index key needs a store the framework can write — KIT_SECRETS=file:<dir> or memory — or KIT_INDEX_KEY to pin it", nil)
 	}
 	value, err := secret.Random(indexKeyBytes)()
 	if err == nil {
@@ -137,7 +137,7 @@ func (a *App) makeIndexKey(ctx context.Context) ([]byte, error) {
 			return kept.Value.Reveal(), nil
 		}
 	}
-	return nil, failure(CodePrivacyKey, "INDEX_KEY_MAKE", "kit's index key could not be made", err)
+	return nil, failure(CodePrivacyKey, "INDEX_KEY_MAKE", "the framework's index key could not be made", err)
 }
 
 // usesIndexKey reports whether the app makes and reads index-key: it keeps
@@ -208,7 +208,7 @@ func (k *referenceKeys) indexKeyID() string {
 func (k *referenceKeys) ref(key mac.Key, text string) string {
 	tag, err := mac.Tag(mac.HMACSHA256, key, []byte(text))
 	if err != nil {
-		panic("kit: HMAC-SHA256 is not registered: " + err.Error()) // the SDK registers it
+		panic("app: HMAC-SHA256 is not registered: " + err.Error()) // the SDK registers it
 	}
 	return hex.EncodeToString(tag[:refBytes])
 }

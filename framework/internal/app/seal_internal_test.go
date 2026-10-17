@@ -235,7 +235,7 @@ type legacyNote struct {
 	Body  string `json:"body" kit:"personal,history=2"`
 }
 
-var legacySvc = NewService("legacy", "Notes written before kit sealed them, for the sealing tests.")
+var legacySvc = NewService("legacy", "Notes written before the framework sealed them, for the sealing tests.")
 
 var legacyNotes = legacySvc.Store("notes", func(n legacyNote) string { return n.ID })
 
@@ -449,7 +449,7 @@ func TestTheDataKeysArePlacedApartFromWhatTheySeal(t *testing.T) {
 // keys beside what they seal.
 func beside(g *model.Graph) bool {
 	return slices.ContainsFunc(g.Diagnostics, func(d model.Diagnostic) bool {
-		return d.Severity == "warning" && strings.Contains(d.Message, "keeps kit's data keys")
+		return d.Severity == "warning" && strings.Contains(d.Message, "keeps the framework's data keys")
 	})
 }
 
@@ -546,9 +546,9 @@ func TestAnIndexKeyInMemoryIsWarnedOf(t *testing.T) {
 	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
 	t.Setenv("KIT_INDEX_KEY", "")
 	t.Setenv("KIT_INDEX_KEY_FILE", "")
-	svc := NewService("indexed", "Cards kit references, for the index key's warning.")
+	svc := NewService("indexed", "Cards the framework references, for the index key's warning.")
 	svc.Store("cards", func(c card) string { return c.ID })
-	const said = "kit's index key lives in memory alone"
+	const said = "the framework's index key lives in memory alone"
 	warned := func(app *App) bool {
 		return slices.ContainsFunc(app.Graph().Diagnostics, func(d model.Diagnostic) bool {
 			return d.Severity == "warning" && strings.Contains(d.Message, said) && strings.Contains(d.Texts["fr"], "ne vit qu’en mémoire")
@@ -705,7 +705,7 @@ func TestAnUnreadableBoxKeepsAPersonsKey(t *testing.T) {
 	copyOfC1 := restingAt(t, cards, "c1")
 	must(t, cards.Delete(ctx, "c1"))
 	if c, err := openCard(ctx, cards.sealing(), "c1", copyOfC1); err != nil || c.Note != "ann's" {
-		t.Errorf("ann's key went though a box kit cannot read might need it: %+v, %v", c, err)
+		t.Errorf("ann's key went though a box the framework cannot read might need it: %+v, %v", c, err)
 	}
 }
 

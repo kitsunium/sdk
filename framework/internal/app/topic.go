@@ -260,7 +260,7 @@ func Parallelism(n int) DeliveryOption {
 
 // Subscribe declares a subscription of the service to topic. Delivery is at
 // least once: handler must be idempotent, which is the one thing the SDK's
-// queue cannot check and kit therefore asks you to promise here.
+// queue cannot check and the framework therefore asks you to promise here.
 //
 //go:noinline
 func (s *Service) Subscribe[T any](name string, topic *TopicService[T], handler func(context.Context, T) error, opts ...SubscriptionConfigurer) *SubscriptionWorker[T] {

@@ -203,14 +203,14 @@ func TestATypeIsJudgedWhole(t *testing.T) {
 	for typ, want := range map[reflect.Type]struct{ everywhere, resting []string }{
 		reflect.TypeFor[twoSubjects]():   {everywhere: []string{"two subject fields"}},
 		reflect.TypeFor[listedSubject](): {resting: []string{"inside a list or a map"}},
-		reflect.TypeFor[badSubject]():    {everywhere: []string{"holds a []string", "kit stamps a time.Time"}},
+		reflect.TypeFor[badSubject]():    {everywhere: []string{"holds a []string", "the framework stamps a time.Time"}},
 		reflect.TypeFor[listedHistory](): {everywhere: []string{"sits inside a list or a map"}},
 	} {
 		p := planOf(typ)
 		saysAll(t, typ, "everywhere", p.problems, want.everywhere)
 		saysAll(t, typ, "at rest", p.resting, want.resting)
 		if p.subject != nil {
-			t.Errorf("%s has a subject kit can use", typ)
+			t.Errorf("%s has a subject the framework can use", typ)
 		}
 	}
 }

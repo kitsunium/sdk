@@ -52,7 +52,7 @@ func TestTheGraphCarriesTheHoldsAndTheLoops(t *testing.T) {
 		t.Errorf("invoices' privacy: %+v", inv)
 	}
 	if g.Node("kit.privacy/store/journal") == nil || g.Node("kit.privacy/store/holds") == nil {
-		t.Error("kit's own stores are not in the graph")
+		t.Error("the framework's own stores are not in the graph")
 	}
 	if loops := retentionLoopNames(g); !slices.Equal(loops, []string{"desk/store/reports retention", "people/store/invoices retention"}) {
 		t.Errorf("retention loops: %v", loops)
@@ -236,7 +236,7 @@ func TestPrivacyDeclarationProblemsAreReportedTogether(t *testing.T) {
 	}
 	for _, want := range []string{
 		`unknown word "privat"`, "two classes, personal and secret", "never plain", "nobody moderates it",
-		"two subject fields", "kit stamps a time.Time", "from 1 to 100", "cannot be public",
+		"two subject fields", "the framework stamps a time.Time", "from 1 to 100", "cannot be public",
 		"app.EraseAfter reads app_test.Invoice", "declares erase twice", "the delay of app.DeleteAfter must be positive",
 		"app.Anonymise has a nil function",
 	} {

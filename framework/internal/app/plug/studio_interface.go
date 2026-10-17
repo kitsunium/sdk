@@ -80,7 +80,7 @@ type StudioHost interface {
 	// AllowedHost reports whether a request's Host, its port, brackets and
 	// case removed, may reach the Studio.
 	AllowedHost(host string) bool
-	// Reply answers r with body, a JSON document, or with err as kit
+	// Reply answers r with body, a JSON document, or with err as the framework
 	// answers an error.
 	Reply(w http.ResponseWriter, r *http.Request, body json.RawMessage, err error)
 	// Forbid answers that the caller may not reach the Studio, saying
@@ -89,13 +89,13 @@ type StudioHost interface {
 	// Fail answers an internal error, saying message and nothing of the
 	// error.
 	Fail(w http.ResponseWriter, message string)
-	// NotFound is kit's answer to a request for what does not exist,
+	// NotFound is the framework's answer to a request for what does not exist,
 	// saying message.
 	NotFound(message string) error
-	// Invalid is kit's answer to a request the caller must change, saying
+	// Invalid is the framework's answer to a request the caller must change, saying
 	// message.
 	Invalid(message string) error
-	// ProfileUnreadable is kit's refusal of a profile the process could
+	// ProfileUnreadable is the framework's refusal of a profile the process could
 	// not read: public says which, cause why, for the logs.
 	ProfileUnreadable(public string, cause error) error
 	// Debug logs, at the debug level, a failure nobody is told of.

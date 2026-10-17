@@ -327,7 +327,7 @@ func (a *App) findSet(name string) (setRef, error) {
 		dbName, setName = "", name
 	}
 	if setName == setKit {
-		return setRef{}, failure(CodeMigrateRefused, "MIGRATE_REFUSED", "kit's own set is not migrated down: its migrations drop the stores' tables, and every entity in them", nil)
+		return setRef{}, failure(CodeMigrateRefused, "MIGRATE_REFUSED", "the framework's own set is not migrated down: its migrations drop the stores' tables, and every entity in them", nil)
 	}
 	found, all := a.matchingSets(dbName, setName)
 	switch {

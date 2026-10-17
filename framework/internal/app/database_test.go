@@ -189,7 +189,7 @@ func TestADatabaseOpensAndMigrates(t *testing.T) {
 	}
 	if own := rt.Migrations[0]; own.Name != "kit" || own.Table != "kit_migrations" || len(own.Pending) != 0 ||
 		!slices.Equal(kitsOwn, []string{"docstore kit_tables", "docstore audit__trail", "docstore books__entries"}) {
-		t.Errorf("kit's own set, first: %+v", rt.Migrations[0])
+		t.Errorf("the framework's own set, first: %+v", rt.Migrations[0])
 	}
 	if got := o.db.Tables(); !slices.Equal(got, []string{"audit__trail", "books__entries", "kit_tables"}) {
 		t.Errorf("the database's tables: %v", got)

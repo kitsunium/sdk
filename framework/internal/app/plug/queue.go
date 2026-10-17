@@ -14,7 +14,7 @@ import (
 // message itself: a queue carries bytes, and only the core's typed facades
 // (TopicService[T], Command[C, R]) know a message's type.
 
-// Queues is the queue subsystem: the brokers kit's consumers' queues run on
+// Queues is the queue subsystem: the brokers the framework's consumers' queues run on
 // and the migration of a queue's table on a database; nil until
 // framework/app/queue is imported. A product that declares a topic, a
 // subscription, a watch, a queued command or a mailer whose outbox is on a
@@ -39,7 +39,7 @@ type QueueDriverConfig struct {
 	NotRetryable func(err error) bool
 }
 
-// QueueConfig is what kit asks of one queue: where it lies, its policy, the
+// QueueConfig is what the framework asks of one queue: where it lies, its policy, the
 // app's clock, and for a mailer's outbox the sealing of what it keeps.
 type QueueConfig struct {
 	// Name names the queue's node in a refusal: the consumer's or the
@@ -69,12 +69,12 @@ type QueueConfig struct {
 	MaxPayload int
 	// Wrap, when a test sets it, stands in front of the queue the subsystem
 	// opens: a func(queue.Broker) queue.Broker of the SDK's queue, which
-	// kit's core does not name. Nil in every app a product builds.
+	// the framework's core does not name. Nil in every app a product builds.
 	Wrap any
 }
 
 // QueuePolicyValue is how a queue leases, retries and bounds its messages:
-// the SDK's queue policy, in kit's terms.
+// the SDK's queue policy, in the framework's terms.
 type QueuePolicyValue struct {
 	// VisibilityTimeout is how long a delivery is leased.
 	VisibilityTimeout time.Duration
@@ -95,7 +95,7 @@ type QueuePolicyValue struct {
 type ConsumeConfig struct {
 	// Handler handles one delivery: nil acknowledges it, an error has it
 	// retried or, through DoNotRetry, dead-lettered at once. Every handler
-	// kit runs tolerates a redelivery.
+	// the framework runs tolerates a redelivery.
 	Handler func(ctx context.Context, d DeliveryValue) error
 	// PollInterval bounds an idle wait.
 	PollInterval time.Duration
@@ -106,13 +106,13 @@ type ConsumeConfig struct {
 }
 
 // MessageValue is one message of a queue: its identifier, its payload as
-// kit encoded it, and when it was published.
+// the framework encoded it, and when it was published.
 type MessageValue struct {
 	// EnqueuedAt is when the message was published.
 	EnqueuedAt time.Time
 	// ID identifies the message in its queue.
 	ID string
-	// Payload is the message as kit encoded it.
+	// Payload is the message as the framework encoded it.
 	Payload []byte
 }
 

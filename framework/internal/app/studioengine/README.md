@@ -6,7 +6,7 @@
 import "github.com/kitsunium/sdk/framework/internal/app/studioengine"
 ```
 
-Package studioengine is what framework/app/studio plugs into kit (ADR 0179 §1, step 8; ADR 0180 §4, step 1): the Studio's routes, their guard and their handlers — the graph, the live events as a Server-Sent Events stream (the SDK's net/sse), traces, source, instances, items, and the dev tools with the profiler (the SDK's profiling) —, the tool's variables kit dev and the Studio set, and kit's sentences in the languages after English — the catalogues the Studio shows its reader's language from, compiled by the SDK's i18n (Q6). kit's core holds none of them: a product that does not import the Studio neither links nor initialises them, reads none of the tool's variables, and speaks English alone. The routes read the running app through the plug.StudioHost kit's core gives.
+Package studioengine is what framework/app/studio plugs into the framework (ADR 0179 §1, step 8; ADR 0180 §4, step 1): the Studio's routes, their guard and their handlers — the graph, the live events as a Server-Sent Events stream (the SDK's net/sse), traces, source, instances, items, and the dev tools with the profiler (the SDK's profiling) —, the tool's variables the framework dev and the Studio set, and the framework's sentences in the languages after English — the catalogues the Studio shows its reader's language from, compiled by the SDK's i18n (Q6). The framework's core holds none of them: a product that does not import the Studio neither links nor initialises them, reads none of the tool's variables, and speaks English alone. The routes read the running app through the plug.StudioHost the framework's core gives.
 
 ## Index
 
@@ -19,6 +19,6 @@ Package studioengine is what framework/app/studio plugs into kit (ADR 0179 §1, 
 func Enable()
 ```
 
-Enable plugs the Studio into kit: the tool's variables, the Studio's routes — with its event stream and its profiler — and kit's catalogues after English.
+Enable plugs the Studio into kit: the tool's variables, the Studio's routes — with its event stream and its profiler — and the framework's catalogues after English.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

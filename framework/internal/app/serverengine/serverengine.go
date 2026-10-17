@@ -16,7 +16,7 @@ type httpServer struct {
 }
 
 // Enable plugs the HTTP engine, the frontends' file server and the process
-// sampler into kit.
+// sampler into the framework.
 func Enable() {
 	newServer, newFiles, sample := newHTTPServer, newStaticFiles, sampleProcess
 	plug.NewHTTPServer.Store(&newServer)

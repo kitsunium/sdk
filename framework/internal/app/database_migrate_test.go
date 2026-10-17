@@ -78,8 +78,8 @@ func TestMigrateStatusAndUp(t *testing.T) {
 // tables, and every entity in them.
 func TestKitsOwnSetIsNotMigratedDown(t *testing.T) {
 	newApp := manualLedger(t, app.NewFakeDB(sql.DialectPostgres))
-	if code, _, errOut := migrateCommand(t, newApp, "down", "kit", "1"); code != 2 || !strings.Contains(errOut, "kit's own set is not migrated down") {
-		t.Errorf("down of kit's set: %d %s", code, errOut)
+	if code, _, errOut := migrateCommand(t, newApp, "down", "kit", "1"); code != 2 || !strings.Contains(errOut, "the framework's own set is not migrated down") {
+		t.Errorf("down of the framework's set: %d %s", code, errOut)
 	}
 }
 

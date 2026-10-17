@@ -9,7 +9,7 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/app/id"
 )
 
-// Catalog lists the generic mechanics kit offers: the building blocks a node
+// Catalog lists the generic mechanics the framework offers: the building blocks a node
 // composes rather than implements, each one backed by an SDK package. It is
 // part of every graph, so the Studio — and an AI agent reading the graph —
 // knows what can be added to a product and the exact code that adds it.
@@ -64,7 +64,7 @@ func operationMechanics() []model.Mechanic {
 		},
 		{
 			Kind: "transaction", Label: "transaction", Package: "github.com/kitsunium/sdk/pkg/v1/data/sql",
-			Doc:     "Runs a command's authorization and handler in one transaction, opened once its key is held: on a database the database's own, on the data directory and in memory kit's, which takes the writer turn. A failed command changes nothing; what it publishes, mails or dispatches leaves at the commit. app.Transact opens one anywhere; app.NoTransaction opts a command out.",
+			Doc:     "Runs a command's authorization and handler in one transaction, opened once its key is held: on a database the database's own, on the data directory and in memory the framework's, which takes the writer turn. A failed command changes nothing; what it publishes, mails or dispatches leaves at the commit. app.Transact opens one anywhere; app.NoTransaction opts a command out.",
 			Snippet: "err := app.Transact(ctx, func(ctx context.Context) error { return Orders.Insert(ctx, o) })",
 		},
 		{

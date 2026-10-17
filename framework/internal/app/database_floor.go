@@ -100,9 +100,9 @@ func mysqlRefusal(database, answer string) string {
 	}
 	switch {
 	case !ok:
-		return fmt.Sprintf("database %q does not say a MySQL version kit reads: kit needs MySQL 8.0.1 or MariaDB 10.6", database)
+		return fmt.Sprintf("database %q does not say a MySQL version the framework reads: the framework needs MySQL 8.0.1 or MariaDB 10.6", database)
 	case v.below(floor):
-		return fmt.Sprintf("database %q runs %s %s: kit needs MySQL 8.0.1 or MariaDB 10.6, for SKIP LOCKED", database, name, v)
+		return fmt.Sprintf("database %q runs %s %s: the framework needs MySQL 8.0.1 or MariaDB 10.6, for SKIP LOCKED", database, name, v)
 	}
 	return ""
 }

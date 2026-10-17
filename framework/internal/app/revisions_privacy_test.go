@@ -112,7 +112,7 @@ func TestVersionsRestSealed(t *testing.T) {
 		t.Errorf("files hold a version's sealed values in clear: %v", held)
 	}
 	if len(clinicFiles(t, dir, "bio-one")) == 0 {
-		t.Error("a former version's bio, which kit does not seal, is nowhere")
+		t.Error("a former version's bio, which the framework does not seal, is nowhere")
 	}
 	must(t, a.Start(ctx))
 	if got := strings.Join(memberNames(t, "m1"), ","); got != "Annabel Lowmoor,Annabel Vesper,Annabel Quist" {

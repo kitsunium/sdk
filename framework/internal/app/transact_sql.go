@@ -75,7 +75,7 @@ func openScope(wait context.Context, at scopeBase) (*sqlScope, error) {
 // errHeldPanicked is what run returns when a function the SDK held until the
 // commit panicked: close raises the panic again before anyone reads it.
 var errHeldPanicked = errs.New(CodeTransactionPanic, "TRANSACTION_HELD_PANICKED", "a function held until the commit panicked",
-	"kit: a function the SDK ran after a transaction's commit panicked; the level's end raises the panic again")
+	"app: a function the SDK ran after a transaction's commit panicked; the level's end raises the panic again")
 
 // run is the SDK's Transact of the scope, its function waiting for the
 // level's end. A panic of what the SDK runs after the commit is caught, for

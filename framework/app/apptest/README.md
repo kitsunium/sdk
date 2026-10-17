@@ -6,7 +6,7 @@
 import "github.com/kitsunium/sdk/framework/app/apptest"
 ```
 
-Package apptest runs a product in its own tests as production runs it: on a data directory, where kit seals what it keeps at rest, a transaction writes files and a rollback writes them back, a store's retention erases and folds what it overwrote, and a restart reads everything back — none of which a product kept in memory (app.InMemory) ever meets: kit seals nothing in memory.
+Package apptest runs a product in its own tests as production runs it: on a data directory, where the framework seals what it keeps at rest, a transaction writes files and a rollback writes them back, a store's retention erases and folds what it overwrote, and a restart reads everything back — none of which a product kept in memory (app.InMemory) ever meets: the framework seals nothing in memory.
 
 A suite keeps most of its tests in memory, fast and hermetic, and runs on disk those that are about what rests there:
 
@@ -36,7 +36,7 @@ A Disk is an AppOption: app.DataDir(disk.Dir), which wins over a app.InMemory gi
 func NewDisk(t testing.TB) *Disk
 ```
 
-NewDisk returns a new data directory for t. The secrets kit makes — its data-key and its index key, what the product generates — are kept beside the data, as production keeps them unless KIT\_SECRETS says otherwise, so an app started again on the same Disk opens what the first sealed.
+NewDisk returns a new data directory for t. The secrets the framework makes — its data-key and its index key, what the product generates — are kept beside the data, as production keeps them unless KIT\_SECRETS says otherwise, so an app started again on the same Disk opens what the first sealed.
 
 It skips t where the platform keeps no data directory: the SDK's disk file system is Linux's, macOS's and the BSDs', and refuses Windows.
 
@@ -61,6 +61,6 @@ type Disk struct {
 func (*Disk) Holding(t testing.TB, words ...string) []string
 ```
 
-Holding returns the files of the data directory that hold one of words, byte for byte — slash-separated, relative to Dir, sorted —, the secrets kit keeps there left out: what a test asserts is empty once kit seals what the words were written into. An empty word matches nothing.
+Holding returns the files of the data directory that hold one of words, byte for byte — slash-separated, relative to Dir, sorted —, the secrets the framework keeps there left out: what a test asserts is empty once the framework seals what the words were written into. An empty word matches nothing.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

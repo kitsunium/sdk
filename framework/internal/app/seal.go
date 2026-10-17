@@ -98,10 +98,10 @@ const (
 // was pruned. kit reads the value as its zero value.
 var (
 	errErased = errs.New(CodeSealErased, "SEAL_ERASED", "a sealed value's key is destroyed",
-		"kit: a sealed value's data key is destroyed, or the data-key version that sealed it was pruned")
+		"app: a sealed value's data key is destroyed, or the data-key version that sealed it was pruned")
 	// errNotCurrent ends a replacement of a key that changed meanwhile.
 	errNotCurrent = errs.New(CodeSealKeyMoved, "SEAL_KEY_MOVED", "the wrapped key changed meanwhile",
-		"kit: a data key's replacement found the wrapped key changed by another write")
+		"app: a data key's replacement found the wrapped key changed by another write")
 )
 
 // sealer seals and opens the members of an app's data at rest, in one run:
@@ -187,7 +187,7 @@ func (z *sealer) seal(ctx context.Context, ref string, plaintext []byte, bind ..
 	}
 	clear(padded)
 	if err != nil {
-		return nil, explain(CodeSealWrite, "SEAL_WRITE", "a member could not be sealed: kit's data keys could not be read or written", err)
+		return nil, explain(CodeSealWrite, "SEAL_WRITE", "a member could not be sealed: the framework's data keys could not be read or written", err)
 	}
 	out := make([]byte, 0, len(prefix)+base64.RawURLEncoding.EncodedLen(len(box))+2)
 	out = base64.RawURLEncoding.AppendEncode(append(append(out, '"'), prefix...), box)
@@ -243,9 +243,9 @@ func (z *sealer) open(ctx context.Context, value []byte, bind ...string) ([]byte
 		return nil, sealInvalid(err)
 	case errors.Is(err, secret.SubjectKeyUnreadable):
 		return nil, explain(CodeSealOpen, "SEAL_KEY_UNREADABLE",
-			"a data key does not unwrap under kit's data-key: data-key was replaced, or the version that wrapped it was pruned", err)
+			"a data key does not unwrap under the framework's data-key: data-key was replaced, or the version that wrapped it was pruned", err)
 	}
-	return nil, explain(CodeSealKey, "SEAL_KEYS", "kit's data keys could not be read", err)
+	return nil, explain(CodeSealKey, "SEAL_KEYS", "the framework's data keys could not be read", err)
 }
 
 // sealInvalid is a box that does not open where it lies: altered, or moved
@@ -414,7 +414,7 @@ func (a *App) sealing(ctx context.Context) (*sealer, error) {
 		CacheSize: keyCacheSize, CacheTTL: keyCacheTTL, Clock: a.clock,
 	})
 	if err != nil {
-		return nil, failure(CodeSealKey, "SEAL_KEYS", "kit's data keys could not be set up", err)
+		return nil, failure(CodeSealKey, "SEAL_KEYS", "the framework's data keys could not be set up", err)
 	}
 	z = &sealer{keys: sk, root: root, refs: refs, locks: &a.privacy.locks}
 	a.privacy.mu.Lock()
@@ -476,12 +476,12 @@ func (a *App) rewrapDataKeys(ctx context.Context) {
 		report, err = z.keys.Rewrap(ctx)
 		if err == nil {
 			if report.Rewrapped > 0 {
-				logger.Info(ctx, a.log, "kit's data keys moved to data-key's newest version",
+				logger.Info(ctx, a.log, "the framework's data keys moved to data-key's newest version",
 					logger.Int("rewrapped", report.Rewrapped), logger.Int("version", report.Root))
 			}
 			return
 		}
-		logger.Warn(ctx, a.log, "some of kit's data keys could not be re-wrapped", logger.Int("unreadable", report.Unreadable),
+		logger.Warn(ctx, a.log, "some of the framework's data keys could not be re-wrapped", logger.Int("unreadable", report.Unreadable),
 			logger.Int("rewrapped", report.Rewrapped), logger.String("error", errs.PublicOf(err)))
 	}
 	if keys := a.privacyKeyStore(); keys != nil {

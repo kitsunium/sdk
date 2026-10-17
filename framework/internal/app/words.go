@@ -35,7 +35,7 @@ var (
 	english = sync.OnceValue(func() *englishTable {
 		t, err := loadEnglish()
 		if err != nil {
-			panic("kit: its catalogues: " + err.Error())
+			panic("app: its catalogues: " + err.Error())
 		}
 		return t
 	})
@@ -88,13 +88,13 @@ type otherWords struct {
 func loadEnglish() (*englishTable, error) {
 	var texts map[string]string
 	if err := json.Unmarshal(englishFile, &texts); err != nil {
-		return nil, failure(CodeCatalogue, "CATALOGUE_INVALID", "kit's English catalogue does not decode", err)
+		return nil, failure(CodeCatalogue, "CATALOGUE_INVALID", "the framework's English catalogue does not decode", err)
 	}
 	t := &englishTable{texts: texts, sentences: make(map[string]sentence, len(texts))}
 	for key, text := range texts {
 		s, problem := compileSentence(text)
 		if problem != "" {
-			return nil, failure(CodeCatalogue, "CATALOGUE_INVALID", "a sentence of kit's English catalogue does not compile", nil, errs.String("key", key), errs.String("detail", problem))
+			return nil, failure(CodeCatalogue, "CATALOGUE_INVALID", "a sentence of the framework's English catalogue does not compile", nil, errs.String("key", key), errs.String("detail", problem))
 		}
 		t.sentences[key] = s
 	}
@@ -239,7 +239,7 @@ func translator() *otherWords {
 	}
 	o, err := openOthers(cfg)
 	if err != nil {
-		panic("kit: its catalogues: " + err.Error())
+		panic("app: its catalogues: " + err.Error())
 	}
 	others.Store(o)
 	return o

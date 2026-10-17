@@ -15,7 +15,7 @@ import (
 const clipLimit int = 64
 
 // The wire codes a caller branches on: an [Error]'s Code, snake_case, kept
-// byte-for-byte from the platform's kit (ADR 0147 §6). They are named Wire*,
+// byte-for-byte from the platform's former runtime (ADR 0147 §6). They are named Wire*,
 // not Code*, because Code* names a dotted-quad errs.Code in the SDK and the
 // registry audit holds every Code* constant to that.
 const (

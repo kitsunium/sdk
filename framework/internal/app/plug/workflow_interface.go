@@ -10,7 +10,7 @@ import (
 // and the ports it runs on — a workflow's store and its journal —, which the
 // core implements.
 
-// WorkflowEngine is one workflow's engine as kit's core uses it: the
+// WorkflowEngine is one workflow's engine as the framework's core uses it: the
 // transitions code fires, what a write of the store tells it, what it
 // counts and records, and its loop.
 type WorkflowEngine interface {

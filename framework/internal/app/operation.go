@@ -18,7 +18,7 @@ import (
 // endpoint, a port — and, with ADR 0005, a command or a query. It is what
 // [Fallback] and [Bind] give a port, and what [Replace] replaces in a test;
 // a request or a response of other types does not compile. Its methods are
-// unexported: only kit implements it.
+// unexported: only the framework implements it.
 //
 // Every operation is a node of the graph, and runs in a span of its own
 // through its whole pipeline — authentication, validation, policies, the

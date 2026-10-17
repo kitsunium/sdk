@@ -18,7 +18,7 @@ const workflowPackage = "github.com/kitsunium/sdk/framework/app/workflow"
 // import the workflow subsystem.
 func workflowsMissing() error {
 	return errs.New(CodeSubsystemMissing, "SUBSYSTEM_NOT_IMPORTED", subsystemPublic,
-		"kit: a workflow needs the workflow subsystem, which the program does not import: "+workflowPackage,
+		"app: a workflow needs the workflow subsystem, which the program does not import: "+workflowPackage,
 		errs.String("packages", workflowPackage))
 }
 

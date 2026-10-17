@@ -48,7 +48,7 @@ const (
 
 // What a workflow's loop reports.
 const (
-	// WorkflowLoopOther is an event of the loop kit shows nothing of.
+	// WorkflowLoopOther is an event of the loop the framework shows nothing of.
 	WorkflowLoopOther WorkflowLoopEvent = iota
 	// WorkflowLoopRunStarted is a run starting: Wake and Started are set.
 	WorkflowLoopRunStarted
@@ -60,9 +60,9 @@ const (
 	WorkflowLoopWaiting
 )
 
-// The engine's failures kit tells apart, which it words for the product.
+// The engine's failures the framework tells apart, which it words for the product.
 const (
-	// WorkflowFailureNone is no failure kit words.
+	// WorkflowFailureNone is no failure the framework words.
 	WorkflowFailureNone WorkflowFailure = iota
 	// WorkflowTransitionRefused is an event that leaves no transition from
 	// the entity's state.
@@ -101,13 +101,13 @@ const (
 	WorkflowWaitAbandoned
 )
 
-// Workflows is the workflow subsystem: the engine kit's workflows run on;
+// Workflows is the workflow subsystem: the engine the framework's workflows run on;
 // nil until framework/app/workflow is imported. A product that declares a
 // workflow without it is refused at the start (ADR 0179 §6).
 var Workflows atomic.Pointer[WorkflowDriverConfig]
 
 // WorkflowDriverConfig is what framework/app/workflow plugs into kit: how a
-// workflow's engine opens, and how kit tells the engine's failures apart.
+// workflow's engine opens, and how the framework tells the engine's failures apart.
 type WorkflowDriverConfig struct {
 	// Open opens the engine of one workflow, as cfg declares it: it reads
 	// the journal and every entity of the store once.
@@ -127,7 +127,7 @@ type WorkflowWake uint8
 // WorkflowLoopEvent is what a workflow's loop reports.
 type WorkflowLoopEvent uint8
 
-// WorkflowFailure is a failure of a workflow's engine, as kit words it.
+// WorkflowFailure is a failure of a workflow's engine, as the framework words it.
 type WorkflowFailure uint8
 
 // WorkflowConfig is one workflow as its engine runs it: its states and
