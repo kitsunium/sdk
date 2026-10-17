@@ -5048,6 +5048,19 @@ packages:
         name: PerConfigDir
         type: ScopeValue
   - doc: |-
+      Package jobkit is what framework/kit/jobs plugs into kit: the scheduler
+      kit's jobs run on — the SDK's scheduler, on the app's clock — and the
+      schedules it reads from a job's declaration, a period or a five-field cron
+      expression (ADR 0179 §1, step 7). kit's core imports none of the SDK's
+      scheduler: it reaches it through plug, and a product that declares no job
+      links none of it.
+
+      Package jobkit — the compile-time proof that the scheduler is kit's.
+    functions:
+      - doc: Enable plugs the jobs' scheduler and their schedules into kit.
+        name: Enable
+    path: github.com/kitsunium/sdk/framework/internal/kit/jobkit
+  - doc: |-
       Package mailkit is what framework/kit/mail plugs into kit: the outbox
       kit's mailers keep — the SDK's mail spool, on the database that keeps the
       mailer's service in the queue subsystem's sealed broker, else in the data
@@ -5441,10 +5454,10 @@ packages:
       (framework/kit/server), the Studio's event stream and its profiler
       (framework/kit/studio), the stores and the databases (framework/kit/store),
       the queues (framework/kit/queue), the workflows (framework/kit/workflow),
-      the mailers (framework/kit/mail). kit reads what they registered through the
-      hooks declared here, and imports none of the SDK packages behind them: a
-      product that does not import a subsystem neither links nor initialises its
-      packages.
+      the mailers (framework/kit/mail), the jobs (framework/kit/jobs). kit reads
+      what they registered through the hooks declared here, and imports none of
+      the SDK packages behind them: a product that does not import a subsystem
+      neither links nor initialises its packages.
 
       It is also the contract between kit's core and the subsystems ADR 0179
       takes out of it, as database/sql/driver is between database/sql and a
@@ -5454,8 +5467,10 @@ packages:
       transactions offer an engine that takes part in them ([Transaction]); the
       queue subsystem's brokers and their consumer ([Queues]), which
       framework/kit/queue sets; the workflow subsystem's engine and the ports
-      it runs on ([Workflows]), which framework/kit/workflow sets; and the mail
-      subsystem's outbox and transports ([Mail]), which framework/kit/mail sets.
+      it runs on ([Workflows]), which framework/kit/workflow sets; the mail
+      subsystem's outbox and transports ([Mail]), which framework/kit/mail sets;
+      and the jobs subsystem's schedules and scheduler ([Jobs]), which
+      framework/kit/jobs sets.
 
       The package imports the standard library and the framework's model only,
       so that kit and every subsystem can import it.
@@ -5487,6 +5502,115 @@ packages:
       sql: database/sql
     path: github.com/kitsunium/sdk/framework/internal/kit/plug
     types:
+      - doc: |-
+          JobDriverConfig is what framework/kit/jobs plugs into kit: how a job's
+          schedule is read from its declaration, and how the scheduler that fires
+          the app's jobs opens.
+        name: JobDriverConfig
+        struct:
+          fields:
+            - doc: |-
+                Every is the schedule of a job that runs every period, first one
+                period after the scheduler starts; a period that is not positive is
+                refused.
+              name: Every
+              type: func(period time.Duration) (JobScheduleFunc, error)
+            - doc: |-
+                Cron is the schedule of a five-field POSIX cron expression, in the
+                process's local time zone; an expression it cannot read is refused.
+              name: Cron
+              type: func(expr string) (JobScheduleFunc, error)
+            - doc: |-
+                Open opens the scheduler the app's jobs run on, as cfg says, with no
+                entry yet.
+              name: Open
+              type: func(cfg *JobSchedulerConfig) JobScheduler
+      - doc: |-
+          JobScheduleFunc says when a job runs next after an instant: the instant,
+          and false when it never runs again.
+        name: JobScheduleFunc
+        underlying: func(after time.Time) (next time.Time, ok bool)
+      - doc: |-
+          JobSchedulerConfig is the scheduler the app's jobs run on: the app's clock
+          and what kit hears of each fire.
+        name: JobSchedulerConfig
+        struct:
+          fields:
+            - doc: Clock is the app's clock, which the scheduler stamps and waits on.
+              name: Clock
+              type: Clock
+            - doc: |-
+                OnResult hears every decision of the scheduler — each run, with the
+                job's own error, and each fire skipped or missed —, one at a time.
+              name: OnResult
+              type: func(res JobResultValue)
+      - doc: |-
+          JobEntryValue is one job as the scheduler fires it: its name, its
+          schedule, and the run.
+        name: JobEntryValue
+        struct:
+          fields:
+            - doc: Name names the job; the scheduler refuses a name it holds already.
+              name: Name
+              type: string
+            - doc: Schedule says when the job runs next.
+              name: Schedule
+              type: JobScheduleFunc
+            - doc: Run runs the job once; its error is the result's.
+              name: Run
+              type: func(ctx context.Context) error
+      - doc: |-
+          JobResultValue is one decision of the scheduler: a run of a job, or a fire
+          it skipped.
+        name: JobResultValue
+        struct:
+          fields:
+            - doc: Name is the job's.
+              name: Name
+              type: string
+            - doc: Scheduled is the instant the fire was due.
+              name: Scheduled
+              type: time.Time
+            - doc: Started and Finished bound the run; zero for a fire that did not run.
+              name: Started
+            - doc: Started and Finished bound the run; zero for a fire that did not run.
+              name: Finished
+              type: time.Time
+            - doc: |-
+                Missed counts the fires that came due while the scheduler could not
+                fire them, skipped rather than caught up.
+              name: Missed
+              type: int
+            - doc: "Skipped says the fire did not run: a run of the same job was going."
+              name: Skipped
+              type: bool
+            - doc: Err is the run's error.
+              name: Err
+              type: error
+      - doc: |-
+          JobScheduler fires the app's jobs, each on its schedule, on the app's
+          clock: a fire due while the previous run of the same job is going is
+          skipped, a missed one is counted, never caught up.
+        interface:
+          methods:
+            - doc: |-
+                Add registers a job; it is refused while the scheduler runs, for a
+                name it holds already, and for an entry with no name, run or
+                schedule.
+              in:
+                - name: entry
+                  type: JobEntryValue
+              name: Add
+              out:
+                - type: error
+            - doc: Run fires the jobs until ctx ends, then waits for the runs going.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Run
+              out:
+                - type: error
+        name: JobScheduler
       - doc: |-
           MailDriverConfig is what framework/kit/mail plugs into kit: how a
           mailer's outbox opens, the SDK's verdict on a mail, the transports a
@@ -7517,6 +7641,12 @@ packages:
               variadic: true
         name: WorkflowJournal
     variables:
+      - doc: |-
+          Jobs is the jobs subsystem: the schedules of kit's jobs and the scheduler
+          that fires them; nil until framework/kit/jobs is imported. A product that
+          declares a job without it is refused at the start (ADR 0179 §6).
+        name: Jobs
+        type: atomic.Pointer[JobDriverConfig]
       - doc: |-
           Mail is the mail subsystem: the outbox kit's mailers keep and the
           transports that empty it; nil until framework/kit/mail is imported. A

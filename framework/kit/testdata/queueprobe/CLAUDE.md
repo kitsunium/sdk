@@ -6,7 +6,7 @@ A test fixture, not a package a product imports: `coreprobe` with
 (ADR 0179 Q4). `initgraph_external_test.go`'s
 `TestAProductThatImportsTheQueuesLinksThem` builds it and finds linked the
 queue subsystem's brokers (`framework/internal/kit/queuekit`) and the SDK's
-queue under them, beside the store subsystem's engines, and nothing of the workflows' nor of the mailers' (step 6) — the half of ADR 0179
+queue under them, beside the store subsystem's engines, and nothing of the workflows' nor of the mailers' (step 6) nor of the jobs' (step 7) — the half of ADR 0179
 §7 that keeps the other from passing by testing nothing, for step 4.
 
 ## Contents

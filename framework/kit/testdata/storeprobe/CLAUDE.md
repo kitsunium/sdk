@@ -12,7 +12,8 @@ brokers nor of the SDK's queue — not even its init since step 6 —: the store
 do not bring the queues (step 4, Q4), nor the workflow subsystem's engine nor
 the SDK's statemachine: nor the workflows (step 5), nor the mail subsystem's
 outbox, the SDK's spool or its transports beyond their inits: nor the mailers
-(step 6).
+(step 6), nor the jobs subsystem's scheduler nor the SDK's, not even its
+inits: nor the jobs (step 7).
 
 ## Contents
 

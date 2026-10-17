@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/app/scheduler"
 )
 
 // Job is scheduled work: a piece of the daemon's internal loop. It runs on
@@ -15,8 +15,13 @@ import (
 // counted, never caught up.
 type Job struct {
 	nodeBase
-	fn       func(context.Context) error
-	sched    scheduler.Schedule
+	fn func(context.Context) error
+	// period is an interval job's, expr a cron job's: what the product
+	// declared, read into a schedule at the start, through the jobs
+	// subsystem (ADR 0179 step 7) — never at the declaration, which a
+	// package's init may run before the subsystem's.
+	period   time.Duration
+	expr     string
 	schedule string
 	jobKind  string
 }
@@ -27,11 +32,7 @@ type Job struct {
 //go:noinline
 func (s *Service) Every(name string, period time.Duration, fn func(context.Context) error) *Job {
 	j := s.job(name, fn, "interval", "every "+period.String())
-	sched, err := scheduler.Every(period)
-	if err != nil {
-		s.problem(j.decl, j.id, "job.period", "name", name)
-	}
-	j.sched = sched
+	j.period = period
 	return j
 }
 
@@ -41,11 +42,7 @@ func (s *Service) Every(name string, period time.Duration, fn func(context.Conte
 //go:noinline
 func (s *Service) Cron(name, expr string, fn func(context.Context) error) *Job {
 	j := s.job(name, fn, "cron", expr)
-	sched, err := scheduler.Parse(expr)
-	if err != nil {
-		s.problem(j.decl, j.id, "job.cron", "name", name, "expr", expr)
-	}
-	j.sched = sched
+	j.expr = expr
 	return j
 }
 
@@ -64,8 +61,35 @@ func (s *Service) job(name string, fn func(context.Context) error, kind, schedul
 	return j
 }
 
+// scheduleOf reads the job's schedule through the jobs subsystem d: its
+// period's, or its cron expression's.
+func (j *Job) scheduleOf(d *plug.JobDriverConfig) (plug.JobScheduleFunc, error) {
+	if j.jobKind == "cron" {
+		return d.Cron(j.expr)
+	}
+	return d.Every(j.period)
+}
+
+// check judges the job's schedule at the start, by the SDK's rules: a period
+// that is not positive, a cron expression of no five fields. Without the jobs
+// subsystem it judges nothing: the start refuses the job for want of it
+// (subsystem.go).
+func (j *Job) check() []phrase {
+	d := plug.Jobs.Load()
+	if d == nil {
+		return nil
+	}
+	if _, err := j.scheduleOf(d); err != nil {
+		if j.jobKind == "cron" {
+			return []phrase{say("job.cron", "name", j.name, "expr", j.expr)}
+		}
+		return []phrase{say("job.period", "name", j.name)}
+	}
+	return nil
+}
+
 // run is the scheduler's view of the job: one root span per run.
-func (j *Job) run(a *App) scheduler.Job {
+func (j *Job) run(a *App) func(context.Context) error {
 	return func(ctx context.Context) error {
 		ctx, sp := a.begin(ctx, &spanStart{node: j.id, op: model.OpRun, name: j.name})
 		err := j.fn(ctx)

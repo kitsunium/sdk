@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/app/scheduler"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
@@ -19,11 +19,12 @@ import (
 // overlaps a scheduled run.
 var errOverlapped = errs.New(CodeJobOverlapped, "JOB_OVERLAPPED", "a run of this job is already going", "kit: the scheduler skipped a run whose previous run had not ended")
 
-// schedRunner runs the app's one SDK scheduler, which fires the jobs, and
-// counts its turns on the scheduler's own loop.
+// schedRunner runs the app's one scheduler, which fires the jobs — the
+// SDK's, through the jobs subsystem —, and counts its turns on the
+// scheduler's own loop.
 type schedRunner struct {
 	a     *App
-	sched scheduler.Scheduler
+	sched plug.JobScheduler
 	loop  *loopState
 
 	mu      sync.Mutex
@@ -211,7 +212,7 @@ func (a *App) asLoop(ctx context.Context, loop string) context.Context {
 
 // scheduled wraps a scheduler job so its loop shows the run, and so that a
 // fire never overlaps a run the Studio started.
-func (a *App) scheduled(l *loopState, wake string, job scheduler.Job) scheduler.Job {
+func (a *App) scheduled(l *loopState, wake string, job func(context.Context) error) func(context.Context) error {
 	return func(ctx context.Context) error {
 		if !l.tryBegin(a, wake) {
 			return errOverlapped
@@ -221,7 +222,7 @@ func (a *App) scheduled(l *loopState, wake string, job scheduler.Job) scheduler.
 }
 
 // newSchedRunner registers the scheduler's own loop.
-func (a *App) newSchedRunner(sched scheduler.Scheduler, entries int) *schedRunner {
+func (a *App) newSchedRunner(sched plug.JobScheduler, entries int) *schedRunner {
 	r := &schedRunner{a: a, sched: sched, loop: a.loop("scheduler", "", model.LoopScheduler, schedulerText(entries))}
 	a.mu.Lock()
 	a.rt.sched = r
@@ -310,7 +311,7 @@ func (r *schedRunner) stop(ctx context.Context) error {
 
 // fired records one decision of the scheduler on its own loop: every fire
 // is a turn of the scheduler's loop.
-func (r *schedRunner) fired(res *scheduler.Result, next *time.Time) {
+func (r *schedRunner) fired(res *plug.JobResultValue, next *time.Time) {
 	a := r.a
 	a.mu.Lock()
 	l := r.loop

@@ -3,10 +3,10 @@
 // (framework/kit/server), the Studio's event stream and its profiler
 // (framework/kit/studio), the stores and the databases (framework/kit/store),
 // the queues (framework/kit/queue), the workflows (framework/kit/workflow),
-// the mailers (framework/kit/mail). kit reads what they registered through the
-// hooks declared here, and imports none of the SDK packages behind them: a
-// product that does not import a subsystem neither links nor initialises its
-// packages.
+// the mailers (framework/kit/mail), the jobs (framework/kit/jobs). kit reads
+// what they registered through the hooks declared here, and imports none of
+// the SDK packages behind them: a product that does not import a subsystem
+// neither links nor initialises its packages.
 //
 // It is also the contract between kit's core and the subsystems ADR 0179
 // takes out of it, as database/sql/driver is between database/sql and a
@@ -16,8 +16,10 @@
 // transactions offer an engine that takes part in them ([Transaction]); the
 // queue subsystem's brokers and their consumer ([Queues]), which
 // framework/kit/queue sets; the workflow subsystem's engine and the ports
-// it runs on ([Workflows]), which framework/kit/workflow sets; and the mail
-// subsystem's outbox and transports ([Mail]), which framework/kit/mail sets.
+// it runs on ([Workflows]), which framework/kit/workflow sets; the mail
+// subsystem's outbox and transports ([Mail]), which framework/kit/mail sets;
+// and the jobs subsystem's schedules and scheduler ([Jobs]), which
+// framework/kit/jobs sets.
 //
 // The package imports the standard library and the framework's model only,
 // so that kit and every subsystem can import it.

@@ -77,20 +77,20 @@ var kitEngines = map[string]string{
 	"framework/kit/queue":    "framework/internal/kit/queuekit.",
 	"framework/kit/workflow": "framework/internal/kit/workflowkit.",
 	"framework/kit/mail":     "framework/internal/kit/mailkit.",
+	"framework/kit/jobs":     "framework/internal/kit/jobkit.",
 }
 
 // stillInCore is the allow-list while ADR 0179's migration runs: the SDK
 // packages of leaving that framework/internal/kit still imports. Each step
 // takes its own entries out in the same change that moves them — step 3 took
 // docstore and sql, step 4 queue, step 5 statemachine, step 6 mail/spool,
-// step 7 takes scheduler, step 8 i18n —, and step 10, which drops the
+// step 7 scheduler, step 8 takes i18n —, and step 10, which drops the
 // facade's blank imports, deletes it with this test's allowances. It is held
 // tight both ways: a package still listed that the core no longer imports
 // fails the test as surely as one the core imports and the list does not
 // name.
 var stillInCore = map[string]bool{
-	"pkg/v1/app/scheduler": true,
-	"pkg/v1/app/i18n":      true,
+	"pkg/v1/app/i18n": true,
 }
 
 // throughStill are the packages of stillInCore whose own graph holds pkg, or
@@ -307,7 +307,8 @@ func owners() map[string][]string {
 // that left it, but what the allow-list still names — and what a subsystem
 // still in the core imports, its packages' inits alone (beyondInits); since
 // step 6 took the mail spool out, the SDK's sql and queue are no longer in
-// its graph, not even by their inits. It builds testdata/coreprobe, the
+// its graph, not even by their inits, and since step 7 neither is the SDK's
+// scheduler, nor the jobs subsystem's. It builds testdata/coreprobe, the
 // smallest product on the core alone: the facade imports every registration
 // package until step 10, which a product built on it links.
 func TestTheSmallestProductLinksOnlyTheSubsystemsStillInTheCore(t *testing.T) {
@@ -391,6 +392,20 @@ func TestAProductThatImportsTheStoresLinksThem(t *testing.T) {
 		}
 	}
 	linksNoMail(t, "framework/kit/store", syms, linked)
+	linksNoJobs(t, "framework/kit/store", linked)
+}
+
+// linksNoJobs fails the test when a product that imports by, and not
+// framework/kit/jobs, links anything of the jobs subsystem: its scheduler,
+// or the SDK's — not even its inits (ADR 0179 step 7; no registration
+// package imports framework/kit/jobs).
+func linksNoJobs(t *testing.T, by string, linked map[string]int) {
+	t.Helper()
+	for _, owner := range []string{"framework/kit/jobs", "pkg/v1/app/scheduler"} {
+		if n := linked[owner]; n > 0 {
+			t.Errorf("a product that imports %s and not framework/kit/jobs links %d text symbols of %s", by, n, owner)
+		}
+	}
 }
 
 // linksNoMail fails the test when a product that imports by, and not
@@ -432,6 +447,7 @@ func TestAProductThatImportsTheQueuesLinksThem(t *testing.T) {
 		}
 	}
 	linksNoMail(t, "framework/kit/queue", syms, linked)
+	linksNoJobs(t, "framework/kit/queue", linked)
 }
 
 // The same half of §7 for step 5: testdata/workflowprobe, coreprobe with
@@ -465,6 +481,7 @@ func TestAProductThatImportsTheWorkflowsLinksThem(t *testing.T) {
 		t.Run(c.owner, func(t *testing.T) { runCase(t, c) })
 	}
 	linksNoMail(t, "framework/kit/workflow", syms, linked)
+	linksNoJobs(t, "framework/kit/workflow", linked)
 	// The probe's two workflows are compiled — the facade at each of their
 	// types —, and the SDK's machine at kit's entity and the state's
 	// spelling alone: its methods' wrappers name no other type, its shaped
@@ -530,6 +547,50 @@ func TestAProductThatImportsTheMailLinksIt(t *testing.T) {
 	}
 	if code := beyondInitsAt(syms, mailTransport); len(code) == 0 {
 		t.Error("a product that imports framework/kit/mail links nothing of the SDK's mail transports beyond their inits")
+	}
+	linksNoJobs(t, "framework/kit/mail", linked)
+}
+
+// The same half of §7 for step 7: testdata/jobsprobe, coreprobe with
+// framework/kit/jobs and two jobs — one every period, one on a cron
+// expression —, links the jobs subsystem's scheduler and the SDK's
+// scheduler under it, beyond its inits, and nothing of the other
+// subsystems: the jobs package imports no other registration package.
+func TestAProductThatImportsTheJobsLinksThem(t *testing.T) {
+	goTool := goToList(t)
+	syms := textSymbols(t, goTool, "./testdata/jobsprobe")
+	linked := linkedSymbols(syms, owners())
+	type tc struct {
+		owner  string
+		linked bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if n := linked[c.owner]; (n > 0) != c.linked {
+			t.Errorf("a product that imports framework/kit/jobs links %d text symbols of %s, want linked %v", n, c.owner, c.linked)
+		}
+	}
+	for _, c := range []tc{
+		{"framework/kit/jobs", true},
+		{"pkg/v1/app/scheduler", true},
+		{"framework/kit/store", false},
+		{"pkg/v1/data/docstore", false},
+		{"framework/kit/queue", false},
+		{"pkg/v1/data/queue", false},
+		{"framework/kit/workflow", false},
+		{"pkg/v1/app/statemachine", false},
+		{"framework/kit/mail", false},
+		{"pkg/v1/app/mail/spool", false},
+	} {
+		t.Run(c.owner, func(t *testing.T) { runCase(t, c) })
+	}
+	if code := beyondInits(syms, owners()["pkg/v1/app/scheduler"]); len(code) == 0 {
+		t.Error("a product that imports framework/kit/jobs links nothing of the SDK's scheduler beyond its inits")
+	}
+	for _, fn := range kitStoreCode {
+		if syms[kitStoreSymbol(fn)] {
+			t.Errorf("a product that imports framework/kit/jobs alone links kit's own store code: %s", fn)
+		}
 	}
 }
 

@@ -544,3 +544,121 @@ func TestAMailerStartedWithoutItsSubsystemNamesTheImport(t *testing.T) {
 		t.Errorf("a mailer started without framework/kit/mail: %v", err)
 	}
 }
+
+// withoutJobs runs the test as a program that does not import
+// framework/kit/jobs: the hook its package sets is nil (ADR 0179 §6, step
+// 7), as the core sees it in such a program; the test binary plugs the
+// subsystem in (subsystems_test.go), and the test takes it out until it
+// ends.
+func withoutJobs(t *testing.T) {
+	t.Helper()
+	saved := plug.Jobs.Load()
+	plug.Jobs.Store(nil)
+	t.Cleanup(func() { plug.Jobs.Store(saved) })
+}
+
+// jobsProduct declares two jobs, one every period and one on a cron
+// expression, in a daemon.
+func jobsProduct() *App {
+	svc := NewService("audit", "Audits.")
+	svc.Every("tally", time.Minute, func(context.Context) error { return nil })
+	svc.Cron("digest", "0 9 * * *", func(context.Context) error { return nil })
+	return NewApp("audit", svc).With(Profile("daemon"), InMemory(), Logs(io.Discard))
+}
+
+// A product that declares a job without importing framework/kit/jobs is
+// refused at the start (ADR 0179 §6, step 7): every job at once — an
+// interval's and a cron's —, each at its position, naming the package, with
+// CodeSubsystemMissing. With the subsystem plugged in — framework/kit/jobs's,
+// as the test binary has it —, the same product starts, its jobs' loops on
+// their schedules.
+func TestAJobWithoutItsSubsystemIsRefused(t *testing.T) {
+	type tc struct {
+		name    string
+		without bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if c.without {
+			withoutJobs(t)
+		}
+		app := jobsProduct()
+		err := app.Start(context.Background())
+		if !c.without {
+			if err != nil {
+				t.Fatalf("the start: %v", err)
+			}
+			defer func() { must(t, app.Stop(context.Background())) }()
+			for _, id := range []string{"audit/job/tally", "audit/job/digest"} {
+				if l := app.loopNamed(id); l == nil || l.schedule == nil {
+					t.Errorf("the job %s has no loop on its schedule: %+v", id, l)
+				}
+			}
+			return
+		}
+		var de *DiagnosticsError
+		if !errors.As(err, &de) {
+			t.Fatalf("the start: %v", err)
+		}
+		if got, want := refusedFor(t, de, jobsPackage), []string{"audit/job/digest", "audit/job/tally"}; !slices.Equal(got, want) {
+			t.Errorf("refused for want of %s: %q, want %q\n%v", jobsPackage, got, want, de)
+		}
+		if !slices.Equal(de.Missing, []string{jobsPackage}) {
+			t.Errorf("the refusal's Missing = %q, want [%s]", de.Missing, jobsPackage)
+		}
+		if !errs.HasCode(err, CodeSubsystemMissing) {
+			t.Errorf("the refusal does not carry CodeSubsystemMissing: %v", err)
+		}
+	}
+	for _, c := range []tc{{name: "without the subsystem", without: true}, {name: "with the subsystem"}} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// A daemon that declares no job starts without the jobs subsystem, and its
+// scheduler's loop is there all the same, waiting on no entry: the
+// workflows' timers start with it, and the Studio shows it as before.
+func TestADaemonWithoutJobsNeedsNoJobsSubsystem(t *testing.T) {
+	withoutJobs(t)
+	app := NewApp("quiet", NewService("quiet", "Waits.")).With(Profile("daemon"), InMemory(), Logs(io.Discard))
+	must(t, app.Start(context.Background()))
+	defer func() { must(t, app.Stop(context.Background())) }()
+	if l := app.loopNamed("scheduler"); l == nil || l.Schedule != "earliest of 0 entries" {
+		t.Errorf("the scheduler's loop: %+v", l)
+	}
+}
+
+// A job's schedule is read at the start, through the subsystem, never at
+// the declaration: a job declared before the subsystem is plugged in is
+// judged by it all the same, and judged by nothing without it — the start
+// refuses it for want of the import. A scheduler opened for jobs without the
+// subsystem — which the start's check makes unreachable — is refused with
+// the import it needs.
+func TestAJobIsJudgedAtTheStartThroughItsSubsystem(t *testing.T) {
+	withoutJobs(t)
+	svc := NewService("audit", "Audits.")
+	every := svc.Every("tally", 0, func(context.Context) error { return nil })
+	cron := svc.Cron("digest", "every tuesday", func(context.Context) error { return nil })
+	for _, j := range []*Job{every, cron} {
+		if got := j.check(); len(got) != 0 {
+			t.Errorf("the job %s judged without the subsystem: %v", j.name, got)
+		}
+	}
+	app := NewApp("audit", svc).With(InMemory(), Logs(io.Discard))
+	if _, err := app.openScheduler([]*Job{every}); !errs.HasCode(err, CodeSubsystemMissing) || !strings.Contains(errs.PrivateOf(err), jobsPackage) {
+		t.Errorf("a scheduler opened without framework/kit/jobs: %v", err)
+	}
+	refuse := &plug.JobDriverConfig{
+		Every: func(time.Duration) (plug.JobScheduleFunc, error) { return nil, errors.New("not positive") },
+		Cron:  func(string) (plug.JobScheduleFunc, error) { return nil, errors.New("not five fields") },
+	}
+	plug.Jobs.Store(refuse)
+	for _, c := range []struct {
+		j    *Job
+		want string
+	}{{every, "period must be positive"}, {cron, "five-field cron expression"}} {
+		if got := c.j.check(); len(got) != 1 || !strings.Contains(got[0].String(), c.want) {
+			t.Errorf("the job %s judged once the subsystem is plugged in: %v, want %q", c.j.name, got, c.want)
+		}
+	}
+}

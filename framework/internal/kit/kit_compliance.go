@@ -77,6 +77,8 @@ var (
 
 	_ plug.Clock = pluggedClock{}
 
+	_ plug.JobScheduler = idleScheduler{}
+
 	_ plug.DocumentSource = (*historied)(nil)
 	_ plug.DocumentSource = (*sealedEngine)(nil)
 	_ copyDocs            = (*jsonDocs)(nil)

@@ -10,7 +10,7 @@ distinct types (`Ticket` and its string `Phase`, `Job` and its integer
 workflow subsystem's engine (`framework/internal/kit/workflowkit`) and the
 SDK's statemachine under it — instantiated once, at kit's entity (Q3), whatever
 the product declares, while the facade is compiled at both workflows' types —, beside the store subsystem's engines, and nothing of the mailers' (step 6), nor of
-the queue subsystem's brokers: the half of ADR 0179 §7 that keeps the other
+the jobs' (step 7), nor of the queue subsystem's brokers: the half of ADR 0179 §7 that keeps the other
 from passing by testing nothing, for step 5.
 
 ## Contents
