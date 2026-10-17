@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // The floors kit holds a database to at its start (ADR 0178 C2). The SQL
@@ -112,7 +111,7 @@ func mysqlRefusal(database, answer string) string {
 // below kit's floor, read once with SELECT VERSION() within
 // <name>-check-timeout. Other engines have none to check.
 func (a *App) checkServerFloor(ctx context.Context, r *databaseRun, o *opened) error {
-	if r.d.dialect() != sql.DialectMySQL {
+	if r.d.dialect() != DialectMySQL {
 		return nil
 	}
 	fields := a.dbFields(r.d, &o.url)

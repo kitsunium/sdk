@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
@@ -42,19 +43,18 @@ type subsystem struct {
 
 // subsystems are the subsystems the start checks, one per registration
 // package of ADR 0179 §1, each added by the step that takes its subsystem out
-// of the core. The stores' engines are still the core's (until step 3), so
-// the program links them whatever it imports; step 3 makes linked read
-// plug.Stores. A test sets the table as a program that links none would see
-// it.
+// of the core: the stores' since step 3, linked when framework/kit/store set
+// plug.Stores. A test sets the hook as a program that does not import the
+// package would see it.
 var subsystems = []subsystem{{
 	name: "store", pkg: storePackage,
 	kinds: []model.NodeKind{model.KindStore}, databases: true,
-	linked: linkedInCore,
+	linked: storesLinked,
 }}
 
-// linkedInCore is the answer for a subsystem whose engine is still in the
-// core: linked, since the core is.
-func linkedInCore() bool { return true }
+// storesLinked reports whether the program imports framework/kit/store: the
+// store subsystem is plugged in.
+func storesLinked() bool { return plug.Stores.Load() != nil }
 
 // unlinkedDecl is one declaration whose subsystem the program does not link.
 type unlinkedDecl struct {

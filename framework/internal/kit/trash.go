@@ -10,7 +10,6 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
@@ -250,9 +249,9 @@ func (s *storeCore) purgeTrashed(ctx context.Context, a *App, key string, schedu
 	}
 	err = s.purgeScheduled(ctx, a, tr, key, scheduled)
 	switch {
-	case errors.Is(err, docstore.DocumentNotTrashed):
+	case plug.Refused(err, plug.RefusalNotTrashed):
 		return false, nil
-	case err != nil && !errors.Is(err, docstore.WriteUnconfirmed):
+	case err != nil && !plug.Refused(err, plug.RefusalUnconfirmed):
 		return false, s.trashFailure(err)
 	}
 	if subject != "" {
@@ -278,7 +277,7 @@ func (s *storeCore) purgeScheduled(ctx context.Context, a *App, tr plug.Trasher,
 			}
 			i := slices.IndexFunc(stones, func(st plug.TombstoneValue) bool { return st.Key == key })
 			if i < 0 || stones[i].At.After(scheduled) {
-				return docstore.DocumentNotTrashed
+				return kitRefusal(plug.RefusalNotTrashed, s.id)
 			}
 		}
 		return tr.Purge(ctx, key)
@@ -395,9 +394,9 @@ func (s *storeCore) trashSaid(err error, key string) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, docstore.DocumentNotTrashed):
+	case plug.Refused(err, plug.RefusalNotTrashed):
 		return NotFound(fmt.Sprintf("%s: no record %q in the trash", s.name, clip(key)))
-	case errors.Is(err, docstore.VersionsNotKept):
+	case plug.Refused(err, plug.RefusalVersionsNotKept):
 		return Invalid(fmt.Sprintf("%s keeps no trash: declare it with kit.Revisions(n)", s.name))
 	}
 	return s.said(err, key, "")

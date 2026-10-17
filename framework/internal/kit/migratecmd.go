@@ -9,7 +9,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -191,7 +191,7 @@ func (r *migrateRun) sets(ctx context.Context, d *database, o *opened) bool {
 
 // set runs the command on one set, and reports whether it went through.
 func (r *migrateRun) set(ctx context.Context, d *database, set migrationSet, o *opened) bool {
-	m, err := sql.NewMigrator(o.cfg, sql.MigrateConfig{Migrations: set.migrations, VersionTable: set.table})
+	m, err := migratorOf(o.db, set)
 	if err == nil {
 		switch r.sub {
 		case "status":
@@ -217,7 +217,7 @@ func (r *migrateRun) kitSet(ctx context.Context, d *database, o *opened) bool {
 		fmt.Fprintf(r.stderr, "%s/%s: %s\n", d.name, setKit, errs.PublicOf(r.a.migrationFailure(d, set, err)))
 		return false
 	}
-	g, err := openRegistry(ctx, o.cfg, o.tm, false)
+	g, err := openRegistry(ctx, d, o.db, false)
 	if err != nil {
 		return fail(migrationSet{name: setKit, table: tableKit}, err)
 	}
@@ -225,7 +225,7 @@ func (r *migrateRun) kitSet(ctx context.Context, d *database, o *opened) bool {
 	if err != nil {
 		return fail(set, err)
 	}
-	m, err := sql.NewMigrator(o.cfg, sql.MigrateConfig{Migrations: set.migrations, VersionTable: set.table})
+	m, err := migratorOf(o.db, set)
 	if err != nil {
 		return fail(set, err)
 	}
@@ -239,8 +239,8 @@ func (r *migrateRun) kitSet(ctx context.Context, d *database, o *opened) bool {
 	if err != nil {
 		return fail(set, err)
 	}
-	if g, err = openRegistry(ctx, o.cfg, o.tm, true); err == nil {
-		set, err = r.a.applyKitSet(ctx, d, o.cfg, g)
+	if g, err = openRegistry(ctx, d, o.db, true); err == nil {
+		set, err = r.a.applyKitSet(ctx, d, o.db, g)
 	}
 	switch {
 	case err != nil:
@@ -254,7 +254,7 @@ func (r *migrateRun) kitSet(ctx context.Context, d *database, o *opened) bool {
 }
 
 // status prints what a set's version table records and what is pending.
-func (r *migrateRun) status(ctx context.Context, d *database, set migrationSet, m sql.Migrator) error {
+func (r *migrateRun) status(ctx context.Context, d *database, set migrationSet, m plug.Migrator) error {
 	pending, err := m.Plan(ctx)
 	if err != nil {
 		return err
@@ -273,7 +273,7 @@ func (r *migrateRun) status(ctx context.Context, d *database, set migrationSet, 
 }
 
 // up applies a set's pending migrations, and says which.
-func (r *migrateRun) up(ctx context.Context, d *database, set migrationSet, m sql.Migrator) error {
+func (r *migrateRun) up(ctx context.Context, d *database, set migrationSet, m plug.Migrator) error {
 	pending, err := m.Plan(ctx)
 	if err == nil {
 		err = m.Up(ctx)
@@ -291,7 +291,7 @@ func (r *migrateRun) up(ctx context.Context, d *database, set migrationSet, m sq
 
 // down reverses a set's migrations above the version, and says which,
 // newest first — the order Down reverses them in.
-func (r *migrateRun) down(ctx context.Context, d *database, set migrationSet, m sql.Migrator) error {
+func (r *migrateRun) down(ctx context.Context, d *database, set migrationSet, m plug.Migrator) error {
 	pending, err := m.Plan(ctx)
 	if err == nil {
 		err = m.Down(ctx, r.version)
@@ -299,10 +299,10 @@ func (r *migrateRun) down(ctx context.Context, d *database, set migrationSet, m 
 	if err != nil {
 		return err
 	}
-	var reversed []sql.Migration
+	var reversed []plug.MigrationValue
 	for _, m := range slices.Backward(setStatus(set, pending).Applied) {
 		if m.Version > r.version {
-			reversed = append(reversed, sql.Migration{Version: m.Version, Name: m.Name})
+			reversed = append(reversed, plug.MigrationValue{Version: m.Version, Name: m.Name})
 		}
 	}
 	if len(reversed) == 0 {
@@ -358,7 +358,7 @@ func (a *App) matchingSets(dbName, setName string) (found []setRef, all []string
 
 // versionsText lists migrations as a command prints them: their versions,
 // and their names.
-func versionsText(ms []sql.Migration) string {
+func versionsText(ms []plug.MigrationValue) string {
 	parts := make([]string, len(ms))
 	for i, m := range ms {
 		parts[i] = versionText(m.Version) + " " + strconv.Quote(m.Name)

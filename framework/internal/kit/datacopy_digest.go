@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 )
 
 // The fingerprints a data copy is declared done by (ADR 0178 C7): never a
@@ -64,7 +64,7 @@ func documentDigest(store, key string, raw []byte) digest {
 // instant ‖ metadata ‖ bytes), the metadata in sorted-key JSON — none is
 // {} —, the instant to the nanosecond in UTC and empty when nobody recorded
 // it: a renumbered or re-stamped version differs.
-func versionDigest(store, key string, v *docstore.Version) (digest, error) {
+func versionDigest(store, key string, v *plug.VersionValue) (digest, error) {
 	at := ""
 	if !v.At.IsZero() {
 		at = v.At.UTC().Format(time.RFC3339Nano)

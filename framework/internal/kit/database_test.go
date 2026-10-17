@@ -148,7 +148,7 @@ func openLedger(t *testing.T) opened {
 	t.Helper()
 	o := opened{db: kit.NewFakeDB(sql.DialectPostgres), logs: &syncBuffer{}}
 	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
-	opt, line := kit.Database("database", o.db.Engine(), kit.Migrations(migrations...)), here()
+	opt, line := kit.Database("database", o.db.Engine(), sqlMigrations(migrations...)), here()
 	o.app, o.line = ledgerApp(t, newLedger(), o.logs, opt), line
 	run(t, o.app)
 	o.g = o.app.Graph()

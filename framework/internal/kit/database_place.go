@@ -2,7 +2,6 @@ package kit
 
 import (
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // Where a store's data is (ADR 0004): the most precise declaration wins — a
@@ -46,7 +45,7 @@ type placementSource interface {
 // then fail.
 func (a *App) placementOf(s placementSource) placement {
 	p := placement{memory: a.opts.memory || s.memoryOnly() || a.dataDir == "", db: a.keeperOf(s)}
-	if p.db != nil && s.apart() && p.db.dialect() == sql.DialectSQLite {
+	if p.db != nil && s.apart() && p.db.dialect() == DialectSQLite {
 		p.db = nil
 	}
 	return p

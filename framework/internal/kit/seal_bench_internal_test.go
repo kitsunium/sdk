@@ -57,7 +57,7 @@ func benchEngines(b *testing.B) (st *StoreService[benchPatient], plain, sealed p
 		b.Fatal(err)
 	}
 	stopAtCleanup(b, app)
-	p, err := openDocEngine(st.engineConfig(nil), storeFS{fs: vfs.NewMem(), path: "bench/plain.json"}, versionsOn{})
+	p, err := openLocalEngine("bench/plain", st.engineConfig(nil), storeFS{fs: vfs.NewMem(), path: "bench/plain.json"}, versionsOn{})
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func benchEngines(b *testing.B) (st *StoreService[benchPatient], plain, sealed p
 		b.Fatal(err)
 	}
 	s, err := openSealedEngine(&st.storeCore, app, z, nil, func(cfg *engineConfig) (plug.StoreEngine, error) {
-		return openDocEngine(cfg, storeFS{fs: vfs.NewMem(), path: "bench/sealed.json"}, versionsOn{})
+		return openLocalEngine("bench/sealed", cfg, storeFS{fs: vfs.NewMem(), path: "bench/sealed.json"}, versionsOn{})
 	})
 	if err != nil {
 		b.Fatal(err)

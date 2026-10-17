@@ -22,7 +22,7 @@ func manualLedger(t *testing.T, db *kit.FakeDB) func() *kit.App {
 	t.Setenv("LEDGER_DATABASE_MIGRATE", "manual")
 	var logs syncBuffer
 	return func() *kit.App {
-		return ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), kit.Migrations(migrations...)))
+		return ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), sqlMigrations(migrations...)))
 	}
 }
 
@@ -125,7 +125,7 @@ func TestAFailedMigrationStopsTheStart(t *testing.T) {
 	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
 	var logs syncBuffer
 	broken := append(slices.Clone(migrations), sql.Migration{Version: 20260903120000, Name: "broken", Up: sql.Statements("FAIL here"), Down: sql.Irreversible})
-	err := ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), kit.Migrations(broken...))).Start(t.Context())
+	err := ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), sqlMigrations(broken...))).Start(t.Context())
 	if !errs.HasCode(err, kit.CodeDatabaseMigrate) || !strings.Contains(err.Error(), "20260903120000") || strings.Contains(err.Error(), "syntax") {
 		t.Fatalf("start: %v", err)
 	}

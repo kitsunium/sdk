@@ -19,7 +19,7 @@ go_library(
     importpath = "github.com/kitsunium/sdk/framework/connectors/sqlite",
     deps = [
         "//framework/kit",
-        "//pkg/v1/data/sql",
+        "//framework/kit/store",
         "//pkg/v1/errs",
         "//pkg/v1/proc",
         "//pkg/v1/security/secret",

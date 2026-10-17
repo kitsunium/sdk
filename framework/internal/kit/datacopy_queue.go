@@ -105,7 +105,7 @@ func (a *App) queuePart(ctx context.Context, r *databaseRun, n node, b *nodeBase
 		return queuePart{}, failure(CodeDataCopy, "DATA_COPY_QUEUE", "a file queue cannot be read as it lies", closeFrom(), errs.String("node", b.id))
 	}
 	table := queueTable(b, under)
-	dst, err := queue.NewSQL(queue.SQLConfig{Transactor: r.transactor(), Dialect: r.d.dialect(), Table: table, Policy: policy, Clock: a.clock})
+	dst, err := a.newSQLQueue(r, table, policy)
 	if err != nil {
 		return queuePart{}, errors.Join(err, closeFrom())
 	}

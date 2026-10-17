@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -265,7 +264,7 @@ func (h *historied) now() time.Time {
 func (h *historied) load(ctx context.Context, key string, code errs.Code) (historyRecord, bool, error) {
 	d, err := h.hist.Get(ctx, key)
 	switch {
-	case errors.Is(err, docstore.DocumentNotFound):
+	case plug.Refused(err, plug.RefusalNotFound):
 		return historyRecord{Key: key}, false, nil
 	case err != nil:
 		return historyRecord{}, false, h.failed(code, err)
@@ -291,9 +290,9 @@ func (h *historied) put(ctx context.Context, w *historyWrite) error {
 		}
 	}
 	switch {
-	case errors.Is(err, docstore.WriteUnconfirmed):
+	case plug.Refused(err, plug.RefusalUnconfirmed):
 		w.unconfirmed, err = err, nil
-	case errors.Is(err, docstore.DocumentNotFound):
+	case plug.Refused(err, plug.RefusalNotFound):
 		err = nil
 	}
 	if err != nil {
@@ -395,7 +394,7 @@ func (h *historied) rewriteFormer(ctx context.Context, key string, fn func(point
 		return err
 	})
 	switch {
-	case err == nil, errors.Is(err, docstore.DocumentNotFound), errors.Is(err, docstore.WriteUnconfirmed):
+	case err == nil, plug.Refused(err, plug.RefusalNotFound), plug.Refused(err, plug.RefusalUnconfirmed):
 		return nil
 	}
 	return h.failed(CodeHistoryWrite, err)

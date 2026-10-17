@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
@@ -191,9 +190,8 @@ func (s *storeCore) withHistory(ctx context.Context, eng plug.StoreEngine, where
 	if files.fs != nil {
 		files.path = s.historyFile()
 	}
-	hist, err := openDocEngine(historyConfig, files, versionsOn{})
+	hist, err := openLocalEngine(s.id+" history", historyConfig, files, versionsOn{})
 	if err == nil {
-		hist.name = s.id + " history"
 		h.hist = hist
 		if err = h.reconcile(ctx); err != nil {
 			err = errors.Join(err, hist.Close())
@@ -207,7 +205,7 @@ func (s *storeCore) withHistory(ctx context.Context, eng plug.StoreEngine, where
 }
 
 // historyOnSQL opens the store's history in its table on r.
-func (s *storeCore) historyOnSQL(r *databaseRun) (*sqlEngine, error) {
+func (s *storeCore) historyOnSQL(r *databaseRun) (plug.StoreEngine, error) {
 	hist, err := openSQLEngine(s.app(), sqlTable{run: r, table: s.historyTable(), store: s.id}, historyConfig)
 	if err != nil {
 		return nil, failure(CodeHistoryLoad, "HISTORY_LOAD", "the store's history cannot be opened on its database", err,
@@ -232,7 +230,7 @@ func (h *historied) reconcile(ctx context.Context) error {
 		if len(doc.Fields) > 0 && h.recordExists(ctx, doc.Key) {
 			continue
 		}
-		if err := h.hist.Delete(ctx, doc.Key); err != nil && !errors.Is(err, docstore.WriteUnconfirmed) {
+		if err := h.hist.Delete(ctx, doc.Key); err != nil && !plug.Refused(err, plug.RefusalUnconfirmed) {
 			return err
 		}
 	}
@@ -244,7 +242,7 @@ func (h *historied) reconcile(ctx context.Context) error {
 // former values its restoration brings back.
 func (h *historied) recordExists(ctx context.Context, key string) bool {
 	_, err := h.Get(ctx, key)
-	if !errors.Is(err, docstore.DocumentNotFound) {
+	if !plug.Refused(err, plug.RefusalNotFound) {
 		return true
 	}
 	vk, ok := h.StoreEngine.(plug.VersionKeeper)
@@ -280,7 +278,7 @@ func (h *historied) Fold(ctx context.Context) error {
 // it: kit's failure, its cause for the logs only — Store.said words the
 // record's own refusals, and must never take the history's for them.
 func (h *historied) failed(code errs.Code, err error) error {
-	if errors.Is(err, docstore.StoreClosed) {
+	if plug.Refused(err, plug.RefusalClosed) {
 		return notRunning(&h.s.nodeBase)
 	}
 	public := "the store's history could not be written"

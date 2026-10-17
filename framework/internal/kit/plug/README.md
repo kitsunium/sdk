@@ -6,9 +6,9 @@
 import "github.com/kitsunium/sdk/framework/internal/kit/plug"
 ```
 
-Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/kit/server), the Studio's event stream and its profiler (framework/kit/studio). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
+Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/kit/server), the Studio's event stream and its profiler (framework/kit/studio), the stores and the databases (framework/kit/store). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
 
-It is also the contract between kit's core and the subsystems ADR 0179 takes out of it, as database/sql/driver is between database/sql and a driver: the store subsystem's engine over documents, its siblings and kit's scope on a database ([Stores](#Stores)), which framework/kit/store will set. Until it exists the core runs the stores itself; the start refuses a declaration whose subsystem the program does not link.
+It is also the contract between kit's core and the subsystems ADR 0179 takes out of it, as database/sql/driver is between database/sql and a driver: the store subsystem's engine over documents, its siblings, kit's scope on a database and its migrations ([Stores](#Stores)), which framework/kit/store sets; the refusals an engine says in kit's terms ([Refusal](#Refusal)); and what kit's transactions offer an engine that takes part in them ([Transaction](#Transaction)).
 
 The package imports the standard library and the framework's model only, so that kit and every subsystem can import it.
 
@@ -16,17 +16,39 @@ The package imports the standard library and the framework's model only, so that
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
+- [func Refuse\(kind Refusal, err error\) error](<#Refuse>)
+- [func Refused\(err error, kind Refusal\) bool](<#Refused>)
+- [type Checker](<#Checker>)
+  - [func \(Checker\) Check\(ctx context.Context\) error](<#Checker.Check>)
 - [type Database](<#Database>)
   - [func \(Database\) Defer\(ctx context.Context, fn func\(\)\) bool](<#Database.Defer>)
   - [func \(Database\) InTransaction\(ctx context.Context\) bool](<#Database.InTransaction>)
   - [func \(Database\) OnAbort\(ctx context.Context, fn func\(ctx context.Context\)\) bool](<#Database.OnAbort>)
   - [func \(Database\) Transact\(ctx context.Context, fn func\(ctx context.Context\) error\) error](<#Database.Transact>)
 - [type DatabaseConfig](<#DatabaseConfig>)
+- [type DocumentSink](<#DocumentSink>)
+  - [func \(DocumentSink\) InsertRaw\(ctx context.Context, raw json.RawMessage\) error](<#DocumentSink.InsertRaw>)
+  - [func \(DocumentSink\) PutDocument\(ctx context.Context, key string, versions \[\]VersionValue, trashedAt time.Time\) error](<#DocumentSink.PutDocument>)
+- [type DocumentSource](<#DocumentSource>)
+  - [func \(DocumentSource\) Documents\(\) \(Documents, bool\)](<#DocumentSource.Documents>)
 - [type DocumentValue](<#DocumentValue>)
+- [type Documents](<#Documents>)
+  - [func \(Documents\) Current\(ctx context.Context, key string\) \(json.RawMessage, error\)](<#Documents.Current>)
+  - [func \(Documents\) KeepsVersions\(\) bool](<#Documents.KeepsVersions>)
+  - [func \(Documents\) KeyList\(ctx context.Context\) iter.Seq2\[string, error\]](<#Documents.KeyList>)
+  - [func \(Documents\) TombstoneList\(ctx context.Context\) \(\[\]TombstoneValue, error\)](<#Documents.TombstoneList>)
+  - [func \(Documents\) VersionList\(ctx context.Context, key string\) \(\[\]VersionValue, error\)](<#Documents.VersionList>)
+- [type EntrySource](<#EntrySource>)
+  - [func \(EntrySource\) KeyedEntries\(ctx context.Context, limit int\) \(\[\]EntryValue, error\)](<#EntrySource.KeyedEntries>)
+- [type EntryValue](<#EntryValue>)
 - [type EventStream](<#EventStream>)
   - [func \(EventStream\) Close\(\) error](<#EventStream.Close>)
   - [func \(EventStream\) Done\(\) \<-chan struct{}](<#EventStream.Done>)
   - [func \(EventStream\) Send\(data string\) error](<#EventStream.Send>)
+- [type Executor](<#Executor>)
+  - [func \(Executor\) ExecContext\(ctx context.Context, query string, args ...any\) \(sql.Result, error\)](<#Executor.ExecContext>)
+  - [func \(Executor\) QueryContext\(ctx context.Context, query string, args ...any\) \(\*sql.Rows, error\)](<#Executor.QueryContext>)
+  - [func \(Executor\) QueryRowContext\(ctx context.Context, query string, args ...any\) \*sql.Row](<#Executor.QueryRowContext>)
 - [type Folder](<#Folder>)
   - [func \(Folder\) Fold\(ctx context.Context\) error](<#Folder.Fold>)
 - [type HTTPConfig](<#HTTPConfig>)
@@ -35,11 +57,28 @@ The package imports the standard library and the framework's model only, so that
   - [func \(HTTPServer\) Start\(ctx context.Context\) error](<#HTTPServer.Start>)
   - [func \(HTTPServer\) State\(\) HTTPState](<#HTTPServer.State>)
 - [type HTTPState](<#HTTPState>)
+- [type HandleProvider](<#HandleProvider>)
+  - [func \(HandleProvider\) Handle\(dst any\) bool](<#HandleProvider.Handle>)
 - [type IndexSpec](<#IndexSpec>)
 - [type Keyser](<#Keyser>)
   - [func \(Keyser\) Keys\(ctx context.Context, after string\) iter.Seq2\[string, error\]](<#Keyser.Keys>)
+- [type MigrationValue](<#MigrationValue>)
+- [type Migrator](<#Migrator>)
+  - [func \(Migrator\) Down\(ctx context.Context, version uint64\) error](<#Migrator.Down>)
+  - [func \(Migrator\) Plan\(ctx context.Context\) \(\[\]MigrationValue, error\)](<#Migrator.Plan>)
+  - [func \(Migrator\) Up\(ctx context.Context\) error](<#Migrator.Up>)
+- [type MigratorProvider](<#MigratorProvider>)
+  - [func \(MigratorProvider\) Migrator\(table string, ms \[\]MigrationValue\) \(Migrator, error\)](<#MigratorProvider.Migrator>)
 - [type ProfilerConfig](<#ProfilerConfig>)
+- [type Refusal](<#Refusal>)
+- [type RefusalError](<#RefusalError>)
+  - [func \(\*RefusalError\) Error\(\) string](<#RefusalError.Error>)
+  - [func \(\*RefusalError\) Unwrap\(\) error](<#RefusalError.Unwrap>)
+- [type Reindexer](<#Reindexer>)
+  - [func \(Reindexer\) Reindex\(ctx context.Context\) error](<#Reindexer.Reindex>)
 - [type SourceFunc](<#SourceFunc>)
+- [type StampValue](<#StampValue>)
+- [type Step](<#Step>)
 - [type StoreConfig](<#StoreConfig>)
 - [type StoreDriverConfig](<#StoreDriverConfig>)
 - [type StoreEngine](<#StoreEngine>)
@@ -55,7 +94,13 @@ The package imports the standard library and the framework's model only, so that
   - [func \(StoreEngine\) Update\(ctx context.Context, key string, fn func\(d \*DocumentValue\) error\) \(DocumentValue, error\)](<#StoreEngine.Update>)
   - [func \(StoreEngine\) Watch\(onWrite func\(key string\), onDelete func\(key string\)\)](<#StoreEngine.Watch>)
   - [func \(StoreEngine\) Write\(ctx context.Context, d DocumentValue, mode WriteMode\) error](<#StoreEngine.Write>)
+- [type TableSpec](<#TableSpec>)
 - [type TombstoneValue](<#TombstoneValue>)
+- [type Transaction](<#Transaction>)
+  - [func \(Transaction\) AtCommit\(ctx context.Context, fn func\(\)\) bool](<#Transaction.AtCommit>)
+  - [func \(Transaction\) Local\(ctx context.Context\) bool](<#Transaction.Local>)
+  - [func \(Transaction\) Retell\(ctx context.Context, fn func\(\)\)](<#Transaction.Retell>)
+  - [func \(Transaction\) Undo\(ctx context.Context, store string, restore func\(ctx context.Context\) error\)](<#Transaction.Undo>)
 - [type Trasher](<#Trasher>)
   - [func \(Trasher\) Purge\(ctx context.Context, key string\) error](<#Trasher.Purge>)
   - [func \(Trasher\) Tombstones\(ctx context.Context\) \(\[\]TombstoneValue, error\)](<#Trasher.Tombstones>)
@@ -85,6 +130,167 @@ const LabelNode string = "kit_node"
 ```
 
 LabelNode is the pprof label naming the node a goroutine works for.
+
+<a name="RefusalClosed"></a>
+```go
+const RefusalClosed Refusal = 13
+```
+
+RefusalClosed is a call on a closed engine.
+
+<a name="RefusalExists"></a>
+```go
+const RefusalExists Refusal = 2
+```
+
+RefusalExists is a document already under the key an insertion names.
+
+<a name="RefusalIndexBroken"></a>
+```go
+const RefusalIndexBroken Refusal = 8
+```
+
+RefusalIndexBroken is stored documents that break a unique index.
+
+<a name="RefusalIndexNotUnique"></a>
+```go
+const RefusalIndexNotUnique Refusal = 7
+```
+
+RefusalIndexNotUnique is a lookup on an index that is not unique.
+
+<a name="RefusalIndexUnknown"></a>
+```go
+const RefusalIndexUnknown Refusal = 6
+```
+
+RefusalIndexUnknown is an index the store does not declare.
+
+<a name="RefusalKeyChanged"></a>
+```go
+const RefusalKeyChanged Refusal = 5
+```
+
+RefusalKeyChanged is an update that changes the document's key.
+
+<a name="RefusalKeyEmpty"></a>
+```go
+const RefusalKeyEmpty Refusal = 4
+```
+
+RefusalKeyEmpty is a document whose key is empty.
+
+<a name="RefusalKeyTooLong"></a>
+```go
+const RefusalKeyTooLong Refusal = 18
+```
+
+RefusalKeyTooLong is a key longer than a database's key columns hold; its "max" field says how long they hold.
+
+<a name="RefusalLoad"></a>
+```go
+const RefusalLoad Refusal = 12
+```
+
+RefusalLoad is a store that could not be loaded; its "problem" field says why.
+
+<a name="RefusalNone"></a>
+```go
+const RefusalNone Refusal = 0
+```
+
+RefusalNone is no refusal kit words.
+
+<a name="RefusalNotFound"></a>
+```go
+const RefusalNotFound Refusal = 1
+```
+
+RefusalNotFound is no document under the key, or under the index's key.
+
+<a name="RefusalNotTrashed"></a>
+```go
+const RefusalNotTrashed Refusal = 17
+```
+
+RefusalNotTrashed is no record in the trash under the key.
+
+<a name="RefusalOutOfOrder"></a>
+```go
+const RefusalOutOfOrder Refusal = 22
+```
+
+RefusalOutOfOrder is a migration older than one already applied; its "applied" field names the newer.
+
+<a name="RefusalPersist"></a>
+```go
+const RefusalPersist Refusal = 11
+```
+
+RefusalPersist is a write the store could not keep.
+
+<a name="RefusalStatement"></a>
+```go
+const RefusalStatement Refusal = 19
+```
+
+RefusalStatement is a statement the database did not complete.
+
+<a name="RefusalTxClosed"></a>
+```go
+const RefusalTxClosed Refusal = 20
+```
+
+RefusalTxClosed is a call with the context of a transaction that ended.
+
+<a name="RefusalTxFailed"></a>
+```go
+const RefusalTxFailed Refusal = 21
+```
+
+RefusalTxFailed is a transaction or a savepoint the database would not open, commit or roll back.
+
+<a name="RefusalUnconfirmed"></a>
+```go
+const RefusalUnconfirmed Refusal = 14
+```
+
+RefusalUnconfirmed is a write that stands but whose survival across a power loss is in doubt.
+
+<a name="RefusalUndecodable"></a>
+```go
+const RefusalUndecodable Refusal = 9
+```
+
+RefusalUndecodable is a record that does not decode into its type.
+
+<a name="RefusalUnencodable"></a>
+```go
+const RefusalUnencodable Refusal = 10
+```
+
+RefusalUnencodable is an entity that does not encode.
+
+<a name="RefusalUniqueTaken"></a>
+```go
+const RefusalUniqueTaken Refusal = 3
+```
+
+RefusalUniqueTaken is another document under a unique index's key.
+
+<a name="RefusalVersionsNotKept"></a>
+```go
+const RefusalVersionsNotKept Refusal = 15
+```
+
+RefusalVersionsNotKept is a call on the versions of a store that keeps none.
+
+<a name="RefusalVersionsRewrite"></a>
+```go
+const RefusalVersionsRewrite Refusal = 16
+```
+
+RefusalVersionsRewrite is a rewrite of versions that adds or renumbers one.
 
 <a name="WriteInsert"></a>
 ```go
@@ -142,7 +348,7 @@ SampleProcess samples the running process — its heap, goroutines, collections 
 var Stores atomic.Pointer[StoreDriverConfig]
 ```
 
-Stores is the store subsystem: the engines kit's stores run on and kit's scope on a database; nil until framework/kit/store is imported. Until that package exists (ADR 0179, step 3) the core runs the stores itself and nothing sets it; once it does, a product that declares a store or a database without it is refused at the start (ADR 0179 §6).
+Stores is the store subsystem: the engines kit's stores run on, kit's scope on a database and the migrations of kit's tables; nil until framework/kit/store is imported. A product that declares a store or a database without it is refused at the start (ADR 0179 §6).
 
 <a name="StudioProfiler"></a>
 ```go
@@ -151,10 +357,49 @@ var StudioProfiler atomic.Pointer[ProfilerConfig]
 
 StudioProfiler is the Studio's profiler; nil until framework/kit/studio is imported.
 
+<a name="Refuse"></a>
+## func [Refuse](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_refusal.go>)
+
+```go
+func Refuse(kind Refusal, err error) error
+```
+
+Refuse is err as a refusal of kind.
+
+<a name="Refused"></a>
+## func [Refused](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_refusal.go>)
+
+```go
+func Refused(err error, kind Refusal) bool
+```
+
+Refused reports whether err, or an error it wraps, is a refusal of kind.
+
+<a name="Checker"></a>
+## type [Checker](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+Checker is a Database that says whether it answers. A sibling of [Database](#Database).
+
+```go
+type Checker interface {
+	// Check asks the database whether it answers, within its check timeout.
+	Check(ctx context.Context) error
+}
+```
+
+<a name="Checker.Check"></a>
+### func \(Checker\) [Check](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Checker) Check(ctx context.Context) error
+```
+
+Check asks the database whether it answers, within its check timeout.
+
 <a name="Database"></a>
 ## type [Database](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
 
-Database is kit's scope on one database (ADR 0179 §2): the transactions kit.Transact opens on it, their savepoints, and the functions held until their end. The core knows a database only through it; the store package implements it over the SDK's sql.
+Database is kit's scope on one database (ADR 0179 §2): the transactions kit.Transact opens on it, their savepoints, and the functions held until their end. The core knows a database only through it; the store package implements it over the SDK's sql. It grows by the siblings below.
 
 ```go
 type Database interface {
@@ -215,21 +460,87 @@ Transact runs fn in a transaction of the database, or in a savepoint of the one 
 <a name="DatabaseConfig"></a>
 ## type [DatabaseConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)
 
-DatabaseConfig is one database a product declares, as kit opened it: its pool, its dialect and the timeout of each call.
+DatabaseConfig is one database a product declares, as kit opened it: its pool, its dialect, its tuning and the timeout of each call.
 
 ```go
 type DatabaseConfig struct {
 	// Name is the database's, as the product declared it.
-	Name    string
+	Name         string
 	// DB is the pool kit.Engine opened.
-	DB      *sql.DB
+	DB           *sql.DB
 	// Dialect is the engine's SQL dialect: "postgres", "mysql" or
 	// "sqlite".
-	Dialect string
+	Dialect      string
 	// Timeout bounds each call kit makes on the database.
-	Timeout time.Duration
+	Timeout      time.Duration
+	// MaxOpen and MaxIdle bound the pool's connections.
+	MaxOpen      int
+	// MaxOpen and MaxIdle bound the pool's connections.
+	MaxIdle      int
+	// MaxLifetime and MaxIdleTime bound a connection's life.
+	MaxLifetime  time.Duration
+	// MaxLifetime and MaxIdleTime bound a connection's life.
+	MaxIdleTime  time.Duration
+	// CheckTimeout bounds a check of the database.
+	CheckTimeout time.Duration
 }
 ```
+
+<a name="DocumentSink"></a>
+## type [DocumentSink](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+DocumentSink is a store's documents on the database a data copy writes. A sibling of [Documents](#Documents).
+
+```go
+type DocumentSink interface {
+	// InsertRaw writes a document of a store that keeps no versions, as it
+	// rests.
+	InsertRaw(ctx context.Context, raw json.RawMessage) error
+	// PutDocument writes the document key with its versions and its trash
+	// as they are given.
+	PutDocument(ctx context.Context, key string, versions []VersionValue, trashedAt time.Time) error
+}
+```
+
+<a name="DocumentSink.InsertRaw"></a>
+### func \(DocumentSink\) [InsertRaw](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (DocumentSink) InsertRaw(ctx context.Context, raw json.RawMessage) error
+```
+
+InsertRaw writes a document of a store that keeps no versions, as it rests.
+
+<a name="DocumentSink.PutDocument"></a>
+### func \(DocumentSink\) [PutDocument](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (DocumentSink) PutDocument(ctx context.Context, key string, versions []VersionValue, trashedAt time.Time) error
+```
+
+PutDocument writes the document key with its versions and its trash as they are given.
+
+<a name="DocumentSource"></a>
+## type [DocumentSource](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+DocumentSource is an engine that says the document store it runs on: itself, or the one what it wraps runs on. A data copy reads and writes a store through it (ADR 0178 C7). A sibling of [StoreEngine](#StoreEngine).
+
+```go
+type DocumentSource interface {
+	// Documents is the document store the engine runs on, and whether there
+	// is one.
+	Documents() (Documents, bool)
+}
+```
+
+<a name="DocumentSource.Documents"></a>
+### func \(DocumentSource\) [Documents](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (DocumentSource) Documents() (Documents, bool)
+```
+
+Documents is the document store the engine runs on, and whether there is one.
 
 <a name="DocumentValue"></a>
 ## type [DocumentValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)
@@ -243,6 +554,107 @@ type DocumentValue struct {
 	// Value is the entity decoded from JSON, nil until something decoded it;
 	// the store's typed facade asserts it to its type.
 	Value any
+}
+```
+
+<a name="Documents"></a>
+## type [Documents](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+Documents is a store's documents as they rest, as a data copy reads them.
+
+```go
+type Documents interface {
+	// Current is the document key as the store keeps it.
+	Current(ctx context.Context, key string) (json.RawMessage, error)
+	// KeepsVersions reports whether the store keeps versions.
+	KeepsVersions() bool
+	// KeyList yields every key the store holds, in key order.
+	KeyList(ctx context.Context) iter.Seq2[string, error]
+	// TombstoneList is the trash, in key order: none when the store keeps
+	// no versions.
+	TombstoneList(ctx context.Context) ([]TombstoneValue, error)
+	// VersionList is the versions of the document key, newest first.
+	VersionList(ctx context.Context, key string) ([]VersionValue, error)
+}
+```
+
+<a name="Documents.Current"></a>
+### func \(Documents\) [Current](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Documents) Current(ctx context.Context, key string) (json.RawMessage, error)
+```
+
+Current is the document key as the store keeps it.
+
+<a name="Documents.KeepsVersions"></a>
+### func \(Documents\) [KeepsVersions](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Documents) KeepsVersions() bool
+```
+
+KeepsVersions reports whether the store keeps versions.
+
+<a name="Documents.KeyList"></a>
+### func \(Documents\) [KeyList](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Documents) KeyList(ctx context.Context) iter.Seq2[string, error]
+```
+
+KeyList yields every key the store holds, in key order.
+
+<a name="Documents.TombstoneList"></a>
+### func \(Documents\) [TombstoneList](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Documents) TombstoneList(ctx context.Context) ([]TombstoneValue, error)
+```
+
+TombstoneList is the trash, in key order: none when the store keeps no versions.
+
+<a name="Documents.VersionList"></a>
+### func \(Documents\) [VersionList](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Documents) VersionList(ctx context.Context, key string) ([]VersionValue, error)
+```
+
+VersionList is the versions of the document key, newest first.
+
+<a name="EntrySource"></a>
+## type [EntrySource](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+EntrySource is an engine that lists its records as they rest with their keys: what a sealing store reads its records by. A sibling of [StoreEngine](#StoreEngine).
+
+```go
+type EntrySource interface {
+	// KeyedEntries returns up to limit records as they rest, in key order.
+	KeyedEntries(ctx context.Context, limit int) ([]EntryValue, error)
+}
+```
+
+<a name="EntrySource.KeyedEntries"></a>
+### func \(EntrySource\) [KeyedEntries](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (EntrySource) KeyedEntries(ctx context.Context, limit int) ([]EntryValue, error)
+```
+
+KeyedEntries returns up to limit records as they rest, in key order.
+
+<a name="EntryValue"></a>
+## type [EntryValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)
+
+EntryValue is a record as it rests, with its key: what an engine lists for a reader that cannot key a record itself.
+
+```go
+type EntryValue struct {
+	// Key is the record's key.
+	Key  string
+	// JSON is the record as it rests.
+	JSON json.RawMessage
 }
 ```
 
@@ -288,6 +700,49 @@ func (EventStream) Send(data string) error
 ```
 
 Send writes one event's data.
+
+<a name="Executor"></a>
+## type [Executor](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+Executor is what a migration's step runs its statements on: the transaction its migration runs in.
+
+```go
+type Executor interface {
+	// ExecContext runs a statement that returns no rows.
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	// QueryContext runs a query that returns rows.
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	// QueryRowContext runs a query that returns at most one row.
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+```
+
+<a name="Executor.ExecContext"></a>
+### func \(Executor\) [ExecContext](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Executor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+```
+
+ExecContext runs a statement that returns no rows.
+
+<a name="Executor.QueryContext"></a>
+### func \(Executor\) [QueryContext](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Executor) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+```
+
+QueryContext runs a query that returns rows.
+
+<a name="Executor.QueryRowContext"></a>
+### func \(Executor\) [QueryRowContext](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Executor) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+```
+
+QueryRowContext runs a query that returns at most one row.
 
 <a name="Folder"></a>
 ## type [Folder](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
@@ -398,6 +853,27 @@ type HTTPState struct {
 }
 ```
 
+<a name="HandleProvider"></a>
+## type [HandleProvider](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+HandleProvider is a Database that hands one of the SDK's own handles on: the value dst points at — its transaction manager, its dialect — set, and true; false for a handle it has none of. It serves the subsystems still in kit's core that take the SDK's types (the SQL broker of a queue, the spool of a mailer) until they leave it (ADR 0179, steps 4 and 6), and the core never names the type it asks for. A sibling of [Database](#Database).
+
+```go
+type HandleProvider interface {
+	// Handle sets what dst points at to the SDK's handle of its type.
+	Handle(dst any) bool
+}
+```
+
+<a name="HandleProvider.Handle"></a>
+### func \(HandleProvider\) [Handle](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (HandleProvider) Handle(dst any) bool
+```
+
+Handle sets what dst points at to the SDK's handle of its type.
+
 <a name="IndexSpec"></a>
 ## type [IndexSpec](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)
 
@@ -435,6 +911,88 @@ func (Keyser) Keys(ctx context.Context, after string) iter.Seq2[string, error]
 
 Keys yields the keys above after, in order, then its failure if any.
 
+<a name="MigrationValue"></a>
+## type [MigrationValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)
+
+MigrationValue is one versioned change of a database's schema and its reversal, as kit's migrations are written: the SDK's own, on the standard library's types.
+
+```go
+type MigrationValue struct {
+	// Version orders the migration in its set: non-zero and unique.
+	Version uint64
+	// Name labels it in the version table.
+	Name    string
+	// Up applies the change.
+	Up      Step
+	// Down reverses it.
+	Down    Step
+}
+```
+
+<a name="Migrator"></a>
+## type [Migrator](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+Migrator is one set of migrations on a database.
+
+```go
+type Migrator interface {
+	// Down reverses the applied migrations above version, newest first.
+	Down(ctx context.Context, version uint64) error
+	// Plan is the set's pending migrations, oldest first, applying nothing.
+	Plan(ctx context.Context) ([]MigrationValue, error)
+	// Up applies every pending migration, in order.
+	Up(ctx context.Context) error
+}
+```
+
+<a name="Migrator.Down"></a>
+### func \(Migrator\) [Down](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Migrator) Down(ctx context.Context, version uint64) error
+```
+
+Down reverses the applied migrations above version, newest first.
+
+<a name="Migrator.Plan"></a>
+### func \(Migrator\) [Plan](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Migrator) Plan(ctx context.Context) ([]MigrationValue, error)
+```
+
+Plan is the set's pending migrations, oldest first, applying nothing.
+
+<a name="Migrator.Up"></a>
+### func \(Migrator\) [Up](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Migrator) Up(ctx context.Context) error
+```
+
+Up applies every pending migration, in order.
+
+<a name="MigratorProvider"></a>
+## type [MigratorProvider](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+MigratorProvider is a Database that runs a set of migrations under a version table of its own, and so a lock of its own. A sibling of [Database](#Database).
+
+```go
+type MigratorProvider interface {
+	// Migrator is the set ms, under the version table table.
+	Migrator(table string, ms []MigrationValue) (Migrator, error)
+}
+```
+
+<a name="MigratorProvider.Migrator"></a>
+### func \(MigratorProvider\) [Migrator](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (MigratorProvider) Migrator(table string, ms []MigrationValue) (Migrator, error)
+```
+
+Migrator is the set ms, under the version table table.
+
 <a name="ProfilerConfig"></a>
 ## type [ProfilerConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
 
@@ -450,6 +1008,68 @@ type ProfilerConfig struct {
 }
 ```
 
+<a name="Refusal"></a>
+## type [Refusal](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_refusal.go>)
+
+Refusal is a kind of refusal of a store's engine or a database, as kit words it.
+
+```go
+type Refusal uint8
+```
+
+<a name="RefusalError"></a>
+## type [RefusalError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_refusal.go>)
+
+RefusalError is an engine's refusal of one kind: the error it met, and the kind kit words it by.
+
+```go
+type RefusalError struct {
+	// Err is what the engine met.
+	Err  error
+	// Kind is how kit words it.
+	Kind Refusal
+}
+```
+
+<a name="RefusalError.Error"></a>
+### func \(RefusalError\) [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_refusal.go>)
+
+```go
+func (*RefusalError) Error() string
+```
+
+Error is what the engine met's.
+
+<a name="RefusalError.Unwrap"></a>
+### func \(RefusalError\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_refusal.go>)
+
+```go
+func (*RefusalError) Unwrap() error
+```
+
+Unwrap is what the engine met.
+
+<a name="Reindexer"></a>
+## type [Reindexer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+Reindexer is an engine on a database that files its index rows again. A sibling of [StoreEngine](#StoreEngine).
+
+```go
+type Reindexer interface {
+	// Reindex files every record's index rows again.
+	Reindex(ctx context.Context) error
+}
+```
+
+<a name="Reindexer.Reindex"></a>
+### func \(Reindexer\) [Reindex](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Reindexer) Reindex(ctx context.Context) error
+```
+
+Reindex files every record's index rows again.
+
 <a name="SourceFunc"></a>
 ## type [SourceFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
 
@@ -459,61 +1079,107 @@ SourceFunc says where the function fn, at file:line, lies in the product, nil wh
 type SourceFunc func(file string, line int, fn string) *model.Source
 ```
 
+<a name="StampValue"></a>
+## type [StampValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)
+
+StampValue is what a write says about the version it makes: who made it and which command, kept with the version; and whether it changes the document in place, without a version of its own.
+
+```go
+type StampValue struct {
+	// Meta is kept with the version the write makes.
+	Meta    map[string]string
+	// InPlace makes the write change the document without making a version.
+	InPlace bool
+}
+```
+
+<a name="Step"></a>
+## type [Step](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)
+
+Step is one direction of a migration, run on ex.
+
+```go
+type Step func(ctx context.Context, ex Executor) error
+```
+
 <a name="StoreConfig"></a>
 ## type [StoreConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)
 
-StoreConfig is what kit asks of one store's engine: the store, its key and its indexes over documents, where it rests and what it keeps.
+StoreConfig is what kit asks of one store's engine: the store, its key and its indexes over documents, where it rests and what it keeps, and how its writes take part in kit's transactions.
 
 ```go
 type StoreConfig struct {
-	// Name is the store's, as its files and its table name it.
-	Name     string
+	// Name is the store's, as a log line and a rollback name it.
+	Name        string
 	// Key is a document's key: the product's key function on its type,
-	// wrapped once at the declaration.
-	Key      func(d DocumentValue) string
+	// wrapped once at the declaration. It reads the document's Value, which
+	// the engine decodes first unless KeyAtRest gives the key.
+	Key         func(d DocumentValue) string
+	// KeyAtRest, when set, gives the key of a record as it rests, without
+	// decoding it; false when it cannot.
+	KeyAtRest   func(raw json.RawMessage) (string, bool)
 	// Decode is the entity a document's JSON holds, which the engine keeps
 	// as the document's Value.
-	Decode   func(raw json.RawMessage) (any, error)
+	Decode      func(raw json.RawMessage) (any, error)
 	// Indexes are the store's secondary indexes.
-	Indexes  []IndexSpec
+	Indexes     []IndexSpec
 	// Data is the data directory the store rests in — the SDK's writable
 	// file system, which the engine asserts — and Path its snapshot there;
 	// a nil Data and a nil Database keep the store in memory.
-	Data     fs.FS
+	Data        fs.FS
 	// Path is the store's snapshot in Data.
-	Path     string
-	// Database keeps the store, nil when the data directory or memory does.
-	Database Database
+	Path        string
+	// Database keeps the store, nil when the data directory or memory does:
+	// a scope the store subsystem's Database opened.
+	Database    Database
+	// Table is the store's table on Database.
+	Table       string
+	// IndexKey is the key a table's index keys are hashed under, nil for
+	// none: an index key reaches the table as its keyed hash.
+	IndexKey    func(index string, key string) []byte
+	// Call is the context one call of the engine on Database runs with: on
+	// the transaction ctx carries for it, else on the pool, within the
+	// database's timeout; done ends it.
+	Call        func(ctx context.Context, write bool) (call context.Context, done func(), err error)
 	// Versions is how many former versions of each record the engine keeps,
 	// none when zero; Clock stamps them.
-	Versions int
+	Versions    int
 	// Clock is the app's clock, which stamps a version.
-	Clock    func() time.Time
+	Clock       func() time.Time
 	// Held reports whether a record's versions are held, and no write may
-	// prune them.
-	Held     func(key string) bool
+	// prune them: asked with the write's context, on a database inside its
+	// transaction.
+	Held        func(ctx context.Context, key string) bool
+	// Stamp is what a write under ctx says about the version it makes.
+	Stamp       func(ctx context.Context) StampValue
+	// Transaction is kit's transaction, which the engine's writes take part
+	// in.
+	Transaction Transaction
 }
 ```
 
 <a name="StoreDriverConfig"></a>
 ## type [StoreDriverConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)
 
-StoreDriverConfig is what framework/kit/store plugs into kit: how a store's engine opens, and how kit opens its scope on a database.
+StoreDriverConfig is what framework/kit/store plugs into kit: how a store's engine opens, how kit opens its scope on a database, and the migration that makes one of kit's tables.
 
 ```go
 type StoreDriverConfig struct {
 	// Open opens the engine of one store, as cfg places it: loaded from the
 	// data directory, empty in memory, or on a database.
-	Open     func(cfg StoreConfig) (StoreEngine, error)
+	Open           func(cfg StoreConfig) (StoreEngine, error)
 	// Database opens kit's scope on one database's pool.
-	Database func(cfg DatabaseConfig) (Database, error)
+	Database       func(cfg DatabaseConfig) (Database, error)
+	// TableMigration is the migration that makes the table t on a database
+	// of the dialect named, at version.
+	TableMigration func(dialect string, t TableSpec, version uint64) (MigrationValue, error)
 }
 ```
 
 <a name="StoreEngine"></a>
 ## type [StoreEngine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
 
-StoreEngine is what a store runs on, over documents (ADR 0179 §2): the non-generic engine under Store\[T]. Its refusals are kit's: the engine translates the SDK's before they reach the core. Every call takes the caller's context, which carries the transaction the call joins. It grows by the sibling interfaces below, never by a method (the SDK's ADR 0039).
+StoreEngine is what a store runs on, over documents (ADR 0179 §2): the non-generic engine under Store\[T]. Its refusals are kit's ([Refusal](#Refusal)): the engine translates the SDK's before they reach the core. Every call takes the caller's context, which carries the transaction the call joins. It grows by the sibling interfaces below, never by a method (the SDK's ADR 0039).
 
 ```go
 type StoreEngine interface {
@@ -655,6 +1321,23 @@ func (StoreEngine) Write(ctx context.Context, d DocumentValue, mode WriteMode) e
 
 Write stores d as mode says. The document and its index keys are kept together, or neither.
 
+<a name="TableSpec"></a>
+## type [TableSpec](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)
+
+TableSpec is one of kit's tables on a database, as its migration makes it: a store's, a store's versions beside the store's table VersionsOf, or a consumer's queue.
+
+```go
+type TableSpec struct {
+	// Name is the table's.
+	Name       string
+	// VersionsOf is, for a store's versions, the store's table, from which
+	// the versions' table is named.
+	VersionsOf string
+	// Queue marks a consumer's queue: the SQL broker's one table.
+	Queue      bool
+}
+```
+
 <a name="TombstoneValue"></a>
 ## type [TombstoneValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)
 
@@ -668,6 +1351,66 @@ type TombstoneValue struct {
 	At  time.Time
 }
 ```
+
+<a name="Transaction"></a>
+## type [Transaction](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+Transaction is kit's transaction as a store's engine takes part in it (ADR 0139, ADR 0178): the core implements it, an engine calls it with its caller's context.
+
+```go
+type Transaction interface {
+	// AtCommit holds fn until the transaction ctx carries commits, and
+	// reports whether it did: false outside one, where the caller runs it
+	// now.
+	AtCommit(ctx context.Context, fn func()) bool
+	// Local reports whether ctx runs in a transaction that holds the data's
+	// writer turn: a write in the data directory or in memory then records
+	// what it replaces.
+	Local(ctx context.Context) bool
+	// Retell keeps fn, which announces a write on a database again when the
+	// transaction ctx carries rolls it back.
+	Retell(ctx context.Context, fn func())
+	// Undo keeps restore, which a rollback of the transaction ctx carries
+	// runs; nothing outside one. store names the store in a log line.
+	Undo(ctx context.Context, store string, restore func(ctx context.Context) error)
+}
+```
+
+<a name="Transaction.AtCommit"></a>
+### func \(Transaction\) [AtCommit](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Transaction) AtCommit(ctx context.Context, fn func()) bool
+```
+
+AtCommit holds fn until the transaction ctx carries commits, and reports whether it did: false outside one, where the caller runs it now.
+
+<a name="Transaction.Local"></a>
+### func \(Transaction\) [Local](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Transaction) Local(ctx context.Context) bool
+```
+
+Local reports whether ctx runs in a transaction that holds the data's writer turn: a write in the data directory or in memory then records what it replaces.
+
+<a name="Transaction.Retell"></a>
+### func \(Transaction\) [Retell](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Transaction) Retell(ctx context.Context, fn func())
+```
+
+Retell keeps fn, which announces a write on a database again when the transaction ctx carries rolls it back.
+
+<a name="Transaction.Undo"></a>
+### func \(Transaction\) [Undo](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
+
+```go
+func (Transaction) Undo(ctx context.Context, store string, restore func(ctx context.Context) error)
+```
+
+Undo keeps restore, which a rollback of the transaction ctx carries runs; nothing outside one. store names the store in a log line.
 
 <a name="Trasher"></a>
 ## type [Trasher](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)

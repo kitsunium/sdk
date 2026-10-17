@@ -115,15 +115,25 @@ func (a *App) openConsumerQueue(b *nodeBase, under string, maxDeliveries int) (q
 // joins the transaction its context carries —, and says when b's queue left
 // messages in the data directory it moved from.
 func (a *App) openSQLQueue(b *nodeBase, under string, r *databaseRun, policy queue.Policy) (queue.Broker, error) {
-	broker, err := queue.NewSQL(queue.SQLConfig{
-		Transactor: r.transactor(), Dialect: r.d.dialect(), Table: queueTable(b, under),
-		Policy: policy, Clock: a.clock,
-	})
+	broker, err := a.newSQLQueue(r, queueTable(b, under), policy)
 	if err != nil {
 		return nil, err
 	}
 	a.warnFileQueueLeft(b, under, r)
 	return broker, nil
+}
+
+// newSQLQueue is the SDK's SQL broker over table on the open database r,
+// under policy: it joins the transaction its context carries, on the
+// transaction manager and in the dialect the store subsystem hands on
+// (plug.HandleProvider) — kit's core names neither, until the queues leave it (ADR
+// 0179, step 4).
+func (a *App) newSQLQueue(r *databaseRun, table string, policy queue.Policy) (queue.Broker, error) {
+	cfg := queue.SQLConfig{Table: table, Policy: policy, Clock: a.clock}
+	if !r.handle(&cfg.Transactor) || !r.handle(&cfg.Dialect) {
+		return nil, Unavailable(fmt.Sprintf("database %q is not open", r.d.name))
+	}
+	return queue.NewSQL(cfg)
 }
 
 // warnFileQueueLeft says, at its start, that a consumer's queue moved from

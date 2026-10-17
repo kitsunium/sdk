@@ -571,6 +571,15 @@ rules:
     #     to the implementation behind settingDecl, so it arrives without a
     #     static type and the method asserts it to T. `any` is the type the
     #     value has here, not a missing abstraction.
+    #   - plug.HandleProvider.Handle and its one caller in kit's core,
+    #     databaseRun.handle (ADR 0179, step 3): they hand on one of the SDK's
+    #     own handles — its transaction manager, its dialect — to the queues'
+    #     SQL broker and the mail spool still in kit's core, which take the
+    #     SDK's types, through a pointer the core takes from those packages'
+    #     configuration without naming the type: plug imports the standard
+    #     library alone and the core no longer imports the SDK's sql, so
+    #     `any` is the one type both sides can spell. The two go with steps 4
+    #     and 6, which take those subsystems out of the core.
     exclude_functions:
       - "**/internal/service/app/consensus/ops.go:Node.submit"
       - "internal/service/app/consensus/ops.go:Node.submit"
@@ -578,6 +587,10 @@ rules:
       - "internal/service/app/consensus/apply.go:Node.applied1"
       - "**/framework/internal/kit/setting_interface.go:settingDecl.fromCode"
       - "framework/internal/kit/setting_interface.go:settingDecl.fromCode"
+      - "**/framework/internal/kit/plug/store_interface.go:HandleProvider.Handle"
+      - "framework/internal/kit/plug/store_interface.go:HandleProvider.Handle"
+      - "**/framework/internal/kit/database_run.go:databaseRun.handle"
+      - "framework/internal/kit/database_run.go:databaseRun.handle"
 
   # KTN-API-MINIF (info) — "prefer the narrowest interface for this parameter".
   #
@@ -1767,8 +1780,9 @@ rules:
   # UnmarshalText assigns and must take a pointer. time.Time, which they sit
   # beside, has exactly this method set. Scoped to the one file.
   #
-  # framework/internal/kit's docRecord (store_document.go, ADR 0179 §2 —
-  # sealedDoc's shape generalised to every store) is the same case as
+  # framework/internal/kit/storekit's docRecord (document.go, ADR 0179 §2 —
+  # sealedDoc's shape generalised to every store, moved with the engines out
+  # of kit's core at step 3) is the same case as
   # the two above: the SDK's document store encodes a store's records
   # BY VALUE — json.Marshal(v) in internal/service/data/docstore/write.go:123 —, so its
   # MarshalJSON — the record as it rests — must be a value method, while its
@@ -1797,8 +1811,8 @@ rules:
       - "internal/core/security/secret/**"
       - "**/internal/service/data/codec/toml/localtime.go"
       - "internal/service/data/codec/toml/localtime.go"
-      - "**/framework/internal/kit/store_document.go"
-      - "framework/internal/kit/store_document.go"
+      - "**/framework/internal/kit/storekit/document.go"
+      - "framework/internal/kit/storekit/document.go"
       - "**/internal/service/data/codec/bson/types.go"
       - "internal/service/data/codec/bson/types.go"
       - "**/internal/service/data/codec/bson/objectid.go"
@@ -1819,8 +1833,8 @@ rules:
       - "internal/service/data/codec/bson/decimal.go"
       - "**/internal/service/data/codec/toml/localtime.go"
       - "internal/service/data/codec/toml/localtime.go"
-      - "**/framework/internal/kit/store_document.go"
-      - "framework/internal/kit/store_document.go"
+      - "**/framework/internal/kit/storekit/document.go"
+      - "framework/internal/kit/storekit/document.go"
 
   # KTN-TEST-PARALLEL (phase 8) — genuine false positive, fix pending upstream.
   #

@@ -8,7 +8,6 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -28,7 +27,7 @@ const writeAttempts int = 3
 // rather than wait for its locks on the pool. On the data directory and in
 // memory the write runs as it is.
 func (h *historied) inOne(ctx context.Context, write func(context.Context) error) error {
-	if h.hist == nil || h.onDatabase() == nil || unitOf(ctx) != nil {
+	if h.hist == nil || h.s.onDatabase() == nil || unitOf(ctx) != nil {
 		return write(ctx)
 	}
 	return transact(ctx, h.s.app(), write)
@@ -57,12 +56,12 @@ func (h *historied) write(ctx context.Context, d plug.DocumentValue, mode plug.W
 	for range writeAttempts {
 		_, err = h.update(ctx, key, func(cur *plug.DocumentValue) error { *cur = d; return nil })
 		switch {
-		case errors.Is(err, docstore.DocumentUndecodable):
+		case plug.Refused(err, plug.RefusalUndecodable):
 			return h.overwrite(ctx, d, mode)
-		case mode == plug.WriteReplace || !errors.Is(err, docstore.DocumentNotFound):
+		case mode == plug.WriteReplace || !plug.Refused(err, plug.RefusalNotFound):
 			return err
 		}
-		if err = h.insert(ctx, key, d); !errors.Is(err, docstore.DocumentExists) {
+		if err = h.insert(ctx, key, d); !plug.Refused(err, plug.RefusalExists) {
 			return err
 		}
 	}
@@ -77,7 +76,7 @@ func (h *historied) insert(ctx context.Context, key string, d plug.DocumentValue
 	}
 	if h.hist != nil {
 		if _, err := h.hist.Get(ctx, key); err == nil && !h.recordExists(ctx, key) {
-			if err := h.remove(ctx, key); err != nil && !errors.Is(err, docstore.WriteUnconfirmed) {
+			if err := h.remove(ctx, key); err != nil && !plug.Refused(err, plug.RefusalUnconfirmed) {
 				return err
 			}
 		}
@@ -118,7 +117,7 @@ func (h *historied) update(ctx context.Context, key string, fn func(d *plug.Docu
 	switch {
 	case err == nil && w.unconfirmed != nil:
 		return d, w.unconfirmed
-	case err != nil && !errors.Is(err, docstore.WriteUnconfirmed):
+	case err != nil && !plug.Refused(err, plug.RefusalUnconfirmed):
 		h.undo(ctx, key, &w)
 	}
 	return d, err
@@ -134,7 +133,7 @@ func (h *historied) Delete(ctx context.Context, key string) error {
 // delete removes the record under key, then its history.
 func (h *historied) delete(ctx context.Context, key string) error {
 	err := h.StoreEngine.Delete(ctx, key)
-	if h.hist == nil || (err != nil && !errors.Is(err, docstore.WriteUnconfirmed)) {
+	if h.hist == nil || (err != nil && !plug.Refused(err, plug.RefusalUnconfirmed)) {
 		return err
 	}
 	if rerr := h.remove(ctx, key); rerr != nil {
@@ -147,9 +146,9 @@ func (h *historied) delete(ctx context.Context, key string) error {
 func (h *historied) remove(ctx context.Context, key string) error {
 	err := h.hist.Delete(ctx, key)
 	switch {
-	case err == nil, errors.Is(err, docstore.DocumentNotFound):
+	case err == nil, plug.Refused(err, plug.RefusalNotFound):
 		return nil
-	case errors.Is(err, docstore.WriteUnconfirmed):
+	case plug.Refused(err, plug.RefusalUnconfirmed):
 		return err
 	}
 	return h.failed(CodeHistoryWrite, err)
@@ -191,8 +190,8 @@ func (h *historied) undo(ctx context.Context, key string, w *historyWrite) {
 		})
 	}
 	switch {
-	case err == nil, errors.Is(err, errHistoryMoved), errors.Is(err, docstore.DocumentExists),
-		errors.Is(err, docstore.DocumentNotFound), errors.Is(err, docstore.WriteUnconfirmed):
+	case err == nil, errors.Is(err, errHistoryMoved), plug.Refused(err, plug.RefusalExists),
+		plug.Refused(err, plug.RefusalNotFound), plug.Refused(err, plug.RefusalUnconfirmed):
 	default:
 		h.warn(ctx, err)
 	}

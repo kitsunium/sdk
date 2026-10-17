@@ -71,7 +71,7 @@ func wronglyDeclared(t *testing.T) (*kit.App, int) {
 		kit.Database(strings.Repeat("x", 50), db.Engine(), kit.Keeps()),
 		kit.Database("second", db.Engine(), kit.Keeps()),
 		kit.Database("third", db.Engine(), kit.Keeps()),
-		kit.Database("lite", lite.Engine(), kit.Keeps(), kit.Migrations(migrations...)),
+		kit.Database("lite", lite.Engine(), kit.Keeps(), sqlMigrations(migrations...)),
 		kit.Database("none", nil, kit.Keeps()),
 		kit.Database("one", db.Engine(), kit.Keeps()),
 		kit.InMemory()), line

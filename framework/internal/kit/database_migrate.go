@@ -7,8 +7,8 @@ import (
 	"slices"
 	"unicode/utf8"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -25,7 +25,8 @@ const maxPublic int = 120
 // own, the product's (kit.Migrations), a module's —, each with its own
 // version table, and so its own lock. They run when the database starts
 // (<name>-migrate: start) or by `<product> migrate` (migratecmd.go), under
-// the SDK's Migrator; kit sends no SQL of its own.
+// the store subsystem's migrator — the SDK's (plug.MigratorProvider) —; kit sends
+// no SQL of its own.
 
 // migrationSet is one set of migrations a database runs, with its own
 // version table — and so its own lock.
@@ -33,7 +34,17 @@ type migrationSet struct {
 	// name is the set's origin: "kit", "product", a module's.
 	name       string
 	table      string
-	migrations []sql.Migration
+	migrations []plug.MigrationValue
+}
+
+// migratorOf is set on db, under its own version table: the store
+// subsystem's migrator (plug.MigratorProvider), the SDK's.
+func migratorOf(db plug.Database, set migrationSet) (plug.Migrator, error) {
+	m, ok := db.(plug.MigratorProvider)
+	if !ok {
+		return nil, failure(CodeDatabaseMigrate, "DATABASE_MIGRATE", "the database's engine runs no migrations", nil)
+	}
+	return m.Migrator(set.table, set.migrations)
 }
 
 // migrateAtStart runs a database's sets, in order — kit's own first, which
@@ -70,7 +81,7 @@ func (a *App) migrateAtStart(ctx context.Context, d *database, o *opened) ([]mod
 // migrates manually, refuses the start while it is pending — and returns it
 // as it left it, nil when it could not read it.
 func (a *App) migrateSet(ctx context.Context, d *database, o *opened, set migrationSet, manual bool) (*model.MigrationSet, error) {
-	m, err := sql.NewMigrator(o.cfg, sql.MigrateConfig{Migrations: set.migrations, VersionTable: set.table})
+	m, err := migratorOf(o.db, set)
 	if err != nil {
 		return nil, a.migrationFailure(d, set, err)
 	}
@@ -87,7 +98,7 @@ func (a *App) migrateSet(ctx context.Context, d *database, o *opened, set migrat
 
 // pendingSet refuses the start of d, which migrates manually, while set has
 // a pending migration, naming the command that runs it.
-func (a *App) pendingSet(ctx context.Context, d *database, set migrationSet, m sql.Migrator) (*model.MigrationSet, error) {
+func (a *App) pendingSet(ctx context.Context, d *database, set migrationSet, m plug.Migrator) (*model.MigrationSet, error) {
 	pending, err := m.Plan(ctx)
 	if err != nil {
 		return nil, a.migrationFailure(d, set, err)
@@ -104,7 +115,7 @@ func (a *App) pendingSet(ctx context.Context, d *database, set migrationSet, m s
 // its tables —, or, when d migrates manually, as its registry says it, for
 // the start to judge.
 func (a *App) kitSetAtStart(ctx context.Context, d *database, o *opened, manual bool) (migrationSet, *tableRegistry, error) {
-	g, err := openRegistry(ctx, o.cfg, o.tm, !manual)
+	g, err := openRegistry(ctx, d, o.db, !manual)
 	if err != nil {
 		return migrationSet{name: setKit, table: tableKit}, nil, err
 	}
@@ -112,7 +123,7 @@ func (a *App) kitSetAtStart(ctx context.Context, d *database, o *opened, manual 
 		set, err := a.planKitSet(d, g)
 		return set, g, err
 	}
-	set, err := a.applyKitSet(ctx, d, o.cfg, g)
+	set, err := a.applyKitSet(ctx, d, o.db, g)
 	return set, g, err
 }
 
@@ -139,7 +150,7 @@ func dbFailure(code errs.Code, reason, text string, fields ...errs.Field) error 
 
 // readSet says what a set's version table records and what this build has
 // that it does not, as the SDK's migrator reads it.
-func readSet(ctx context.Context, set migrationSet, m sql.Migrator) model.MigrationSet {
+func readSet(ctx context.Context, set migrationSet, m plug.Migrator) model.MigrationSet {
 	pending, err := m.Plan(ctx)
 	if err != nil {
 		return model.MigrationSet{Name: set.name, Table: set.table, Problem: errs.PublicOf(err)}
@@ -150,7 +161,7 @@ func readSet(ctx context.Context, set migrationSet, m sql.Migrator) model.Migrat
 // setStatus is a set, oldest first: what its version table records — the
 // migrations of the set the SDK's Plan does not find pending — and what is
 // pending. kit reads no version table itself: its columns are the SDK's.
-func setStatus(set migrationSet, pending []sql.Migration) model.MigrationSet {
+func setStatus(set migrationSet, pending []plug.MigrationValue) model.MigrationSet {
 	out := model.MigrationSet{Name: set.name, Table: set.table}
 	waiting := map[uint64]bool{}
 	for _, p := range pending {

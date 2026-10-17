@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
-// A transaction on a database (ADR 0004) is the database's own: the SDK's
-// Transactor opens it, and a level nested in it is a savepoint. The SDK runs
+// A transaction on a database (ADR 0004) is the database's own: kit's scope
+// on it (plug.Database, the store subsystem's, over the SDK's Transactor)
+// opens it, and a level nested in it is a savepoint. The SDK runs
 // a unit of work inside a function it calls, where kit's transaction begins
 // at its first store call on the database, in the middle of the product's
 // function: each level's transaction or savepoint is opened on a goroutine
@@ -36,13 +37,13 @@ type sqlScope struct {
 }
 
 // scopeBase is where a level's transaction opens: the context it is begun
-// under — a savepoint when it carries one of tm's — and the transactor.
+// under — a savepoint when it carries one of db's — and the database.
 type scopeBase struct {
 	ctx context.Context
-	tm  sql.Transactor
+	db  plug.Database
 }
 
-// openScope opens a transaction on at's transactor and returns once the
+// openScope opens a transaction on at's database and returns once the
 // SDK runs its function in it, or refused it. wait bounds the wait: the call
 // that needs the transaction's.
 //
@@ -51,12 +52,12 @@ type scopeBase struct {
 // done says it returned, and nothing of the level outlives it.
 func openScope(wait context.Context, at scopeBase) (*sqlScope, error) {
 	s := &sqlScope{end: make(chan error, 1), done: make(chan error, 1)}
-	tm := at.tm
+	db := at.db
 	began, cancel := context.WithCancel(at.ctx)
 	ready := make(chan struct{})
 	go func() {
 		defer cancel()
-		s.done <- s.run(began, tm, ready)
+		s.done <- s.run(began, db, ready)
 	}()
 	select {
 	case <-ready:
@@ -79,14 +80,14 @@ var errHeldPanicked = errs.New(CodeTransactionPanic, "TRANSACTION_HELD_PANICKED"
 // run is the SDK's Transact of the scope, its function waiting for the
 // level's end. A panic of what the SDK runs after the commit is caught, for
 // the level's end to raise.
-func (s *sqlScope) run(ctx context.Context, tm sql.Transactor, ready chan struct{}) (err error) {
+func (s *sqlScope) run(ctx context.Context, db plug.Database, ready chan struct{}) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			s.caught = p
 			err = errHeldPanicked
 		}
 	}()
-	return tm.Transact(ctx, sql.TxOptions{}, func(ctx context.Context, _ sql.Executor) error {
+	return db.Transact(ctx, func(ctx context.Context) error {
 		s.ctx = ctx
 		close(ready)
 		return <-s.end
@@ -160,11 +161,11 @@ func (u *unit) sqlScope(wait context.Context, r *databaseRun) (*sqlScope, error)
 		}
 		base = outer.ctx
 	}
-	tm := r.transactor()
-	if tm == nil {
+	db := r.database()
+	if db == nil {
 		return nil, Unavailable(fmt.Sprintf("database %q is not open", r.d.name))
 	}
-	s, err := openScope(wait, scopeBase{ctx: base, tm: tm})
+	s, err := openScope(wait, scopeBase{ctx: base, db: db})
 	if err != nil {
 		return nil, r.said(err)
 	}

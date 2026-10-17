@@ -11,7 +11,6 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 )
 
 // The parts of a record that may keep a member in clear.
@@ -154,7 +153,7 @@ func (s *storeCore) sealAll(ctx context.Context) (sealed, total int, err error) 
 func (s *storeCore) sealOne(ctx context.Context, se *sealedEngine, key string) (bool, error) {
 	record, err := se.inClear(ctx, key)
 	switch {
-	case errors.Is(err, docstore.DocumentNotFound):
+	case plug.Refused(err, plug.RefusalNotFound):
 		return false, nil
 	case err != nil:
 		return false, s.said(err, key, "")

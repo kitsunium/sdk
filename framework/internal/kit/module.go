@@ -4,8 +4,8 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // Modules (ADR 0008). A module is a Go module's services, released together
@@ -35,7 +35,7 @@ type Module struct {
 	services []*Service
 	requires []*Module
 	// migrations are its kit.Migrations (module_database.go).
-	migrations []sql.Migration
+	migrations []plug.MigrationValue
 	// diags are what is wrong with its declaration, reported when an app
 	// mounts it.
 	diags []diagnostic

@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "storeprobe_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/kitsunium/sdk/framework/kit/testdata/storeprobe",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/internal/kit",
+        "//framework/kit/store",
+    ],
+)
+
+go_binary(
+    name = "storeprobe",
+    embed = [":storeprobe_lib"],
+    visibility = ["//visibility:public"],
+)

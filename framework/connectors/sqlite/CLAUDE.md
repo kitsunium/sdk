@@ -10,7 +10,7 @@ product stays one static binary (CI builds the module with `CGO_ENABLED=0`).
 
 | File | Holds |
 |---|---|
-| `sqlite.go` | `Engine()`: `Dialect` (the SDK's `sql.DialectSQLite`); `Describe` — the file, and no address, user or password —; `Open` — the file, made if need be; `current` is never asked, a file has no credentials to rotate —; `OpenWaiting` — `kit.LockWaiter`, the busy timeout kit gives —; `dsn` and `split`, which read a path or a `file:` URI and add the `defaults` the URL does not write under either spelling: `_journal_mode=WAL`, `_busy_timeout=5000` (or kit's wait), `_txlock=immediate` |
+| `sqlite.go` | `Engine()`: `Dialect` (`kit.DialectSQLite`, kit's own type — ADR 0179 Q5); the blank import of `framework/kit/store`, the stores a database keeps (ADR 0179 §4); `Describe` — the file, and no address, user or password —; `Open` — the file, made if need be; `current` is never asked, a file has no credentials to rotate —; `OpenWaiting` — `kit.LockWaiter`, the busy timeout kit gives —; `dsn` and `split`, which read a path or a `file:` URI and add the `defaults` the URL does not write under either spelling: `_journal_mode=WAL`, `_busy_timeout=5000` (or kit's wait), `_txlock=immediate` |
 | `driver.go` / `driver_none.go` | the blank import of modernc.org/sqlite, on every GOOS it has a port to; on dragonfly, illumos and solaris (its libc excludes them) `driverLinked` is false and `Open` refuses with `proc.UnsupportedPlatform`, so the module still builds there (the cross-build lane) |
 
 Rules:

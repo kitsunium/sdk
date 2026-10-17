@@ -9,6 +9,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
@@ -65,26 +66,17 @@ func TestAServerWithoutItsPackageIsRefused(t *testing.T) {
 	}
 }
 
-// withUnlinked runs the test as a program that does not link the subsystem
-// name: the start's table holds it unlinked, as a program that does not
-// import its registration package will see it once the subsystem leaves the
-// core (ADR 0179). Until then the core links every subsystem itself and the
-// facade imports everything, so no program reaches the refusal but this way.
-func withUnlinked(t *testing.T, name string) {
+// withoutStores runs the test as a program that does not import
+// framework/kit/store: the hook its package sets is nil (ADR 0179 §6), as
+// the core sees it in such a program. The facade imports the package until
+// ADR 0179's last step, so no product reaches the refusal yet but this way;
+// the test binary plugs the subsystem in (subsystems_test.go), and the
+// test takes it out until it ends.
+func withoutStores(t *testing.T) {
 	t.Helper()
-	saved := subsystems
-	t.Cleanup(func() { subsystems = saved })
-	subsystems = slices.Clone(saved)
-	found := false
-	for i := range subsystems {
-		if subsystems[i].name == name {
-			subsystems[i].linked = func() bool { return false }
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("no subsystem %q in the start's table", name)
-	}
+	saved := plug.Stores.Load()
+	plug.Stores.Store(nil)
+	t.Cleanup(func() { plug.Stores.Store(saved) })
 }
 
 // probeOrder is the entity of the stores these tests declare.
@@ -95,7 +87,7 @@ type probeOrder struct{ ID string }
 // declaration at once, each at its own position, naming the package to
 // import, and the refusal carries CodeSubsystemMissing for errs.HasCode.
 func TestADeclarationWithoutItsSubsystemIsRefused(t *testing.T) {
-	withUnlinked(t, "store")
+	withoutStores(t)
 	svc := NewService("shop", "Sells.")
 	svc.Store[probeOrder]("orders", func(o probeOrder) string { return o.ID })
 	svc.Store[probeOrder]("returns", func(o probeOrder) string { return o.ID })
@@ -138,9 +130,10 @@ func TestADeclarationWithoutItsSubsystemIsRefused(t *testing.T) {
 	}
 }
 
-// While the core links the stores — until ADR 0179's step 3 —, the same
-// product starts: the check refuses nothing a program links.
-func TestAStoreTheCoreLinksIsNotRefused(t *testing.T) {
+// With the store subsystem plugged in — framework/kit/store's, as the test
+// binary has it —, the same product starts: the check refuses nothing a
+// program imports.
+func TestAStoreWithItsSubsystemIsNotRefused(t *testing.T) {
 	svc := NewService("shop", "Sells.")
 	svc.Store[probeOrder]("orders", func(o probeOrder) string { return o.ID })
 	app := NewApp("shop", svc).With(Profile("daemon"), InMemory(), Logs(io.Discard))

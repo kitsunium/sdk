@@ -9,15 +9,15 @@ import (
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 
 	"github.com/kitsunium/sdk/pkg/v1/clock"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
 // A data copy's documents and fingerprints (ADR 0178 C7), between two of the
-// SDK's document stores in memory: every document with its versions — their
-// numbers, instants and metadata — and the trash at its instants comes
-// across, both sides' fingerprints are equal, and a difference injected on
-// the target's side is caught and the first key that differs named.
+// store subsystem's document stores in memory: every document with its
+// versions — their numbers, instants and metadata — and the trash at its
+// instants comes across, both sides' fingerprints are equal, and a difference
+// injected on the target's side is caught and the first key that differs
+// named.
 
 // page is what the copy's stores keep.
 type page struct {
@@ -25,72 +25,74 @@ type page struct {
 	Title string `json:"title"`
 }
 
-// memorySink is a document store in memory, written as a copy writes a
-// table: through PutDocument, which the file engine has too.
-type memorySink struct{ *docEngine }
+// byKey carries who a test's write is by, which the pages' stamp reads.
+type byKey struct{}
 
-func (m memorySink) putDocument(_ context.Context, key string, versions []docstore.Version, trashedAt time.Time) error {
-	return m.ds.PutDocument(key, versions, trashedAt)
-}
-
-func (m memorySink) insertRaw(_ context.Context, raw json.RawMessage) error {
-	var p page
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return err
-	}
-	return m.ds.Insert(pageDoc(p))
-}
-
-// pageConfig is the engine of a store of pages, keyed by their ID.
-var pageConfig = &engineConfig{
-	key: func(d plug.DocumentValue) string {
-		p, _ := d.Value.(page)
-		return p.ID
-	},
-	decode: func(raw json.RawMessage) (any, error) {
-		var p page
-		err := json.Unmarshal(raw, &p)
-		return p, err
-	},
-}
-
-// pageDoc is p as the engine's document store keeps it.
-func pageDoc(p page) docRecord {
-	raw, err := json.Marshal(p)
-	if err != nil {
-		panic(err)
-	}
-	return recordFor(plug.DocumentValue{JSON: raw, Value: p})
+// pageEngine is a store of pages in memory, as a copy reads and writes one:
+// its engine, its documents, its trash and its versions.
+type pageEngine interface {
+	plug.StoreEngine
+	plug.Trasher
+	plug.VersionKeeper
+	copySink
 }
 
 // pages opens a store of pages in memory, keeping two former versions on
-// clk.
-func pages(t *testing.T, clk clock.Clock) *docEngine {
+// clk, each stamped by whom its context says.
+func pages(t *testing.T, clk clock.Clock) pageEngine {
 	t.Helper()
-	e, err := openDocEngine(pageConfig, storeFS{}, versionsOn{keep: 2, clock: clk})
+	eng, err := openEngine(plug.StoreConfig{
+		Name: "pages",
+		Key: func(d plug.DocumentValue) string {
+			p, _ := d.Value.(page)
+			return p.ID
+		},
+		Decode: func(raw json.RawMessage) (any, error) {
+			var p page
+			err := json.Unmarshal(raw, &p)
+			return p, err
+		},
+		Versions: 2, Clock: clk.Now,
+		Stamp: func(ctx context.Context) plug.StampValue {
+			if by, ok := ctx.Value(byKey{}).(string); ok {
+				return plug.StampValue{Meta: map[string]string{"by": by}}
+			}
+			return plug.StampValue{}
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return e
+	pe, ok := eng.(pageEngine)
+	if !ok {
+		t.Fatalf("the store subsystem's engine in memory is not a document store a copy writes: %T", eng)
+	}
+	return pe
+}
+
+// putPage writes p into e, by whom ctx says.
+func putPage(ctx context.Context, t *testing.T, e pageEngine, p page) {
+	t.Helper()
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Write(ctx, plug.DocumentValue{JSON: raw, Value: p}, plug.WriteUpsert); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // history writes pages with versions — renamed, stamped — and trashes one.
-func history(t *testing.T, e *docEngine, clk *clock.ManualClock) {
+func history(t *testing.T, e pageEngine, clk *clock.ManualClock) {
 	t.Helper()
 	for _, title := range []string{"draft", "review", "final"} {
-		if err := e.ds.PutStamped(pageDoc(page{ID: "p1", Title: title}), docstore.Stamp{Meta: map[string]string{"by": title}}); err != nil {
-			t.Fatal(err)
-		}
+		putPage(context.WithValue(t.Context(), byKey{}, title), t, e, page{ID: "p1", Title: title})
 		clk.Advance(time.Minute)
 	}
-	if err := e.ds.Put(pageDoc(page{ID: "p2", Title: "kept"})); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.ds.Put(pageDoc(page{ID: "p3", Title: "trashed"})); err != nil {
-		t.Fatal(err)
-	}
+	putPage(t.Context(), t, e, page{ID: "p2", Title: "kept"})
+	putPage(t.Context(), t, e, page{ID: "p3", Title: "trashed"})
 	clk.Advance(time.Hour)
-	if err := e.ds.Trash("p3"); err != nil {
+	if err := e.Trash(t.Context(), "p3"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -102,7 +104,7 @@ func TestACopyCarriesVersionsAndTheTrashAndItsFingerprintsMatch(t *testing.T) {
 	clk := clock.NewManualClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
 	from := pages(t, clk)
 	history(t, from, clk)
-	to := memorySink{pages(t, clock.NewManualClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)))}
+	to := pages(t, clock.NewManualClock(time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)))
 	part := copyPart{name: "site__pages", from: from, to: to}
 	n, err := copyDocuments(t.Context(), part)
 	if err != nil || n != 3 {
@@ -111,11 +113,11 @@ func TestACopyCarriesVersionsAndTheTrashAndItsFingerprintsMatch(t *testing.T) {
 	if err := verifyDocuments(t.Context(), part); err != nil {
 		t.Fatalf("verifyDocuments() = %v, want equal fingerprints", err)
 	}
-	tombs, err := to.ds.Tombstones()
+	tombs, err := to.Tombstones(t.Context())
 	if err != nil || len(tombs) != 1 || tombs[0].Key != "p3" || !tombs[0].At.Equal(time.Date(2026, 10, 1, 10, 3, 0, 0, time.UTC)) {
 		t.Fatalf("the target's trash = %+v, %v", tombs, err)
 	}
-	versions, err := to.ds.Versions("p1")
+	versions, err := to.StoredVersions(t.Context(), "p1")
 	if err != nil || len(versions) != 3 || versions[0].Number != 3 || versions[2].Number != 1 || versions[0].Meta["by"] != "final" {
 		t.Fatalf("the target's versions of p1 = %+v, %v", versions, err)
 	}
@@ -126,21 +128,17 @@ func TestACopyCarriesVersionsAndTheTrashAndItsFingerprintsMatch(t *testing.T) {
 // hold — and finds DATA_COPY_DIVERGED naming the first key that differs.
 func TestADivergenceIsCaughtAndItsFirstKeyNamed(t *testing.T) {
 	cases := []struct {
-		alter func(t *testing.T, to memorySink)
+		alter func(t *testing.T, to pageEngine)
 		key   string
 	}{
-		{key: "p2", alter: func(t *testing.T, to memorySink) {
-			if err := to.ds.Put(pageDoc(page{ID: "p2", Title: "tampered"})); err != nil {
-				t.Fatal(err)
-			}
+		{key: "p2", alter: func(t *testing.T, to pageEngine) {
+			putPage(t.Context(), t, to, page{ID: "p2", Title: "tampered"})
 		}},
-		{key: "p0", alter: func(t *testing.T, to memorySink) {
-			if err := to.ds.Put(pageDoc(page{ID: "p0", Title: "extra"})); err != nil {
-				t.Fatal(err)
-			}
+		{key: "p0", alter: func(t *testing.T, to pageEngine) {
+			putPage(t.Context(), t, to, page{ID: "p0", Title: "extra"})
 		}},
-		{key: "p3", alter: func(t *testing.T, to memorySink) {
-			if err := to.ds.Purge("p3"); err != nil {
+		{key: "p3", alter: func(t *testing.T, to pageEngine) {
+			if err := to.Purge(t.Context(), "p3"); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -150,7 +148,7 @@ func TestADivergenceIsCaughtAndItsFirstKeyNamed(t *testing.T) {
 			clk := clock.NewManualClock(time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))
 			from := pages(t, clk)
 			history(t, from, clk)
-			to := memorySink{pages(t, clk)}
+			to := pages(t, clk)
 			part := copyPart{name: "site__pages", from: from, to: to}
 			if _, err := copyDocuments(t.Context(), part); err != nil {
 				t.Fatal(err)
@@ -172,9 +170,9 @@ func TestADivergenceIsCaughtAndItsFirstKeyNamed(t *testing.T) {
 // is another fingerprint; the whitespace of a snapshot is not.
 func TestAVersionRenumberedChangesItsFingerprint(t *testing.T) {
 	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
-	v := docstore.Version{Number: 2, At: at, Meta: map[string]string{"by": "ada"}, JSON: json.RawMessage(`{"id":"p1"}`)}
+	v := plug.VersionValue{Number: 2, At: at, Meta: map[string]string{"by": "ada"}, JSON: json.RawMessage(`{"id":"p1"}`)}
 	base := mustVersionDigest(t, &v)
-	for name, other := range map[string]docstore.Version{
+	for name, other := range map[string]plug.VersionValue{
 		"number":   {Number: 3, At: at, Meta: v.Meta, JSON: v.JSON},
 		"instant":  {Number: 2, At: at.Add(time.Nanosecond), Meta: v.Meta, JSON: v.JSON},
 		"metadata": {Number: 2, At: at, Meta: map[string]string{"by": "bob"}, JSON: v.JSON},
@@ -184,7 +182,7 @@ func TestAVersionRenumberedChangesItsFingerprint(t *testing.T) {
 			t.Errorf("a version with another %s has the same fingerprint", name)
 		}
 	}
-	spaced := docstore.Version{Number: 2, At: at, Meta: v.Meta, JSON: json.RawMessage("{ \"id\": \"p1\" }")}
+	spaced := plug.VersionValue{Number: 2, At: at, Meta: v.Meta, JSON: json.RawMessage("{ \"id\": \"p1\" }")}
 	if mustVersionDigest(t, &spaced) != base {
 		t.Error("the whitespace of a snapshot changed a version's fingerprint")
 	}
@@ -194,7 +192,7 @@ func TestAVersionRenumberedChangesItsFingerprint(t *testing.T) {
 }
 
 // mustVersionDigest is v's fingerprint in the table t, under the key p1.
-func mustVersionDigest(t *testing.T, v *docstore.Version) digest {
+func mustVersionDigest(t *testing.T, v *plug.VersionValue) digest {
 	t.Helper()
 	sum, err := versionDigest("t", "p1", v)
 	if err != nil {

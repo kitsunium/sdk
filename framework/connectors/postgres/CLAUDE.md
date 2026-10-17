@@ -9,7 +9,7 @@ that links a PostgreSQL driver — pgx v5, through `database/sql` (`stdlib`).
 
 | File | Holds |
 |---|---|
-| `postgres.go` | `Engine()`: `Dialect` (the SDK's `sql.DialectPostgres`); `Describe` — host:port or a socket's directory, the database, and the `sslmode` as the URL writes it (`sslmode` reads a URL's query or libpq's `key=value` form), never a user or a password —; `Open` — pgx's `stdlib.OpenDB`, with a before-connect hook that reads the URL again (`current`) —; `errMalformed`, the one error for a URL pgx cannot read, which quotes nothing |
+| `postgres.go` | `Engine()`: `Dialect` (`kit.DialectPostgres`, kit's own type — ADR 0179 Q5); the blank import of `framework/kit/store`, the stores a database keeps (ADR 0179 §4); `Describe` — host:port or a socket's directory, the database, and the `sslmode` as the URL writes it (`sslmode` reads a URL's query or libpq's `key=value` form), never a user or a password —; `Open` — pgx's `stdlib.OpenDB`, with a before-connect hook that reads the URL again (`current`) —; `errMalformed`, the one error for a URL pgx cannot read, which quotes nothing |
 | `credentials.go` | `withCredentials`: the user and the password of the URL as it is now, given to the connection pgx is about to make |
 
 Rules:

@@ -4,8 +4,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // A module on the product's databases (ADR 0008, ADR 0004). A module never
@@ -20,7 +20,7 @@ func (m *Module) keep() kept { return kept{module: m} }
 
 // migrations is kit.Migrations' value: an option of a database — the
 // product's set — and a part of a module — the module's.
-type migrations []sql.Migration
+type migrations []plug.MigrationValue
 
 // databaseConfigure sets the option on what it configures.
 func (ms migrations) databaseConfigure(o *databaseOptions) {

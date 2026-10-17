@@ -9,6 +9,7 @@ go_library(
         "plug.go",
         "store.go",
         "store_interface.go",
+        "store_refusal.go",
     ],
     importpath = "github.com/kitsunium/sdk/framework/internal/kit/plug",
     visibility = [

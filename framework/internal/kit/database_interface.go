@@ -5,7 +5,6 @@ import (
 	stdsql "database/sql"
 	"time"
 
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
@@ -14,8 +13,8 @@ import (
 // kit calls it when the database starts. Like an SDK port, it grows by
 // sibling interfaces, never by a method.
 type Engine interface {
-	// Dialect is the SQL the SDK speaks to it.
-	Dialect() sql.Dialect
+	// Dialect is the SQL it speaks.
+	Dialect() Dialect
 	// Describe says what url points at — the driver, host and port, the
 	// database, the TLS mode as written — for the graph and the logs: never
 	// a user, never a password.

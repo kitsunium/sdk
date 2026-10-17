@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/pkg/v1/data/queue"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -224,42 +223,28 @@ func (m *Mailer) outboxPolicy() queue.Policy {
 
 // openOutbox opens the mailer's outbox on the database that keeps its
 // service, when that database is open: the SQL broker behind the sealing,
-// behind a test's wrapper, and the database's transaction manager, for the
-// spool to announce a mail after the commit and forget it after a rollback.
-// It returns no database where the outbox stays the spool's own.
-func (m *Mailer) openOutbox(ctx context.Context, a *App) (db *databaseRun, broker queue.Broker, deferrer sql.Deferrer, err error) {
+// behind a test's wrapper. The spool takes the database's transaction
+// manager too, to announce a mail after the commit and forget it after a
+// rollback (deferrerOf). It returns no database where the outbox stays the
+// spool's own.
+func (m *Mailer) openOutbox(ctx context.Context, a *App) (db *databaseRun, broker queue.Broker, err error) {
 	r := a.queueDatabase(&m.nodeBase)
 	if r == nil {
-		return nil, nil, nil, nil
+		return nil, nil, nil
 	}
 	z, err := a.sealing(ctx)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	inner, err := a.openSQLQueue(&m.nodeBase, underOutbox, r, m.outboxPolicy())
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	sealed, err := newSealedOutbox(inner, z, m.id)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	return r, a.wrapped(sealed), transactionManager(r), nil
-}
-
-// transactionManager is r's transaction manager as the spool takes it: a
-// Deferrer that is an Aborter too — the SDK's is both —, nil otherwise, and
-// the spool then tells the mailbox when Send returns.
-func transactionManager(r *databaseRun) sql.Deferrer {
-	tm := r.transactor()
-	d, ok := tm.(sql.Deferrer)
-	if !ok {
-		return nil
-	}
-	if _, aborts := tm.(sql.Aborter); !aborts {
-		return nil
-	}
-	return d
+	return r, a.wrapped(sealed), nil
 }
 
 // queueUnder is what the mailer's outbox is kept under, beside its name:

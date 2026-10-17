@@ -12,7 +12,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
@@ -203,7 +202,7 @@ func (a *App) copyInto(ctx context.Context, r *databaseRun, stdout io.Writer) (e
 		return err
 	}
 	counts := map[string]int{}
-	err = r.transactor().Transact(ctx, sql.TxOptions{}, func(ctx context.Context, _ sql.Executor) error {
+	err = r.database().Transact(ctx, func(ctx context.Context) error {
 		if err := c.copyAll(ctx, counts); err != nil {
 			return err
 		}
@@ -311,10 +310,10 @@ func notEmpty(table string, err error) error {
 
 // docsEmpty reports whether a store's table holds no document and no trash.
 func docsEmpty(ctx context.Context, docs copyDocs) (bool, error) {
-	for _, err := range docs.keyList(ctx) {
+	for _, err := range docs.KeyList(ctx) {
 		return false, err
 	}
-	tombs, err := docs.tombstoneList(ctx)
+	tombs, err := docs.TombstoneList(ctx)
 	return len(tombs) == 0, err
 }
 
@@ -365,7 +364,7 @@ func (c *dataCopy) verifyAll(ctx context.Context) error {
 // keeps versions; as it rests otherwise. It says how many records it wrote.
 func copyDocuments(ctx context.Context, p copyPart) (int, error) {
 	n := 0
-	for key, err := range p.from.keyList(ctx) {
+	for key, err := range p.from.KeyList(ctx) {
 		if err != nil {
 			return n, err
 		}
@@ -374,7 +373,7 @@ func copyDocuments(ctx context.Context, p copyPart) (int, error) {
 		}
 		n++
 	}
-	tombs, err := p.from.tombstoneList(ctx)
+	tombs, err := p.from.TombstoneList(ctx)
 	if err != nil {
 		return n, err
 	}
@@ -389,18 +388,18 @@ func copyDocuments(ctx context.Context, p copyPart) (int, error) {
 
 // copyOne writes the document key of p's source into its table.
 func copyOne(ctx context.Context, p copyPart, key string, trashedAt time.Time) error {
-	if !p.from.keepsVersions() {
-		raw, err := p.from.current(ctx, key)
+	if !p.from.KeepsVersions() {
+		raw, err := p.from.Current(ctx, key)
 		if err != nil {
 			return err
 		}
-		return p.to.insertRaw(ctx, raw)
+		return p.to.InsertRaw(ctx, raw)
 	}
-	versions, err := p.from.versionList(ctx, key)
+	versions, err := p.from.VersionList(ctx, key)
 	if err != nil {
 		return err
 	}
-	return p.to.putDocument(ctx, key, versions, trashedAt)
+	return p.to.PutDocument(ctx, key, versions, trashedAt)
 }
 
 // moveQueuesAside moves each copied file queue under

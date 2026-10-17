@@ -1,9 +1,28 @@
 package kit
 
 import (
+	"context"
+
 	ikit "github.com/kitsunium/sdk/framework/internal/kit"
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
+
+// The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+// the store subsystem maps onto the SDK's.
+const (
+	// DialectPostgres is PostgreSQL.
+	DialectPostgres Dialect = ikit.DialectPostgres
+	// DialectMySQL is MySQL or MariaDB.
+	DialectMySQL Dialect = ikit.DialectMySQL
+	// DialectSQLite is SQLite.
+	DialectSQLite Dialect = ikit.DialectSQLite
+)
+
+// Dialect is the SQL an [Engine] speaks: [DialectPostgres], [DialectMySQL] or
+// [DialectSQLite], kit's own names (ADR 0179 Q5) — the graph names the
+// engine by it.
+type Dialect = ikit.Dialect
 
 // DatabaseURL is what a database's URL points at, as its engine describes it
 // for the graph, the Studio, the logs and every error: never a user, never a
@@ -33,8 +52,29 @@ func Migrations(m ...sql.Migration) interface {
 	DatabaseOption
 	ModulePart
 } {
-	//: the implementation is framework/internal/kit's; this facade only forwards.
-	return ikit.Migrations(m...)
+	//: the implementation is framework/internal/kit's; this facade hands it the
+	//: SDK's migrations on the standard library's types, which its core runs
+	//: through the store subsystem without naming the SDK's sql (ADR 0179 Q5).
+	return ikit.Migrations(pluggedMigrations(m)...)
+}
+
+// pluggedMigrations are ms as kit's core takes them: the same versions,
+// names and steps, each step run on the executor the store subsystem hands
+// it — the SDK's, the standard library's types.
+func pluggedMigrations(ms []sql.Migration) []plug.MigrationValue {
+	out := make([]plug.MigrationValue, len(ms))
+	for i, m := range ms {
+		out[i] = plug.MigrationValue{Version: m.Version, Name: m.Name, Up: pluggedStep(m.Up), Down: pluggedStep(m.Down)}
+	}
+	return out
+}
+
+// pluggedStep is s on the standard library's executor, nil for none.
+func pluggedStep(s sql.Step) plug.Step {
+	if s == nil {
+		return nil
+	}
+	return func(ctx context.Context, ex plug.Executor) error { return s(ctx, ex) }
 }
 
 // Database declares a database the product keeps its stores in, named name,

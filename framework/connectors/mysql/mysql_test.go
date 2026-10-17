@@ -6,7 +6,6 @@ import (
 
 	"github.com/kitsunium/sdk/framework/connectors/mysql"
 	"github.com/kitsunium/sdk/framework/kit"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
@@ -62,7 +61,7 @@ func TestDescribeSaysWhereNeverWho(t *testing.T) {
 }
 
 func TestTheEngineSpeaksMySQL(t *testing.T) {
-	if mysql.Engine().Dialect() != sql.DialectMySQL {
+	if mysql.Engine().Dialect() != kit.DialectMySQL {
 		t.Fatal(mysql.Engine().Dialect())
 	}
 }
