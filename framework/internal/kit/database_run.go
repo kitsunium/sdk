@@ -123,9 +123,9 @@ func (a *App) databaseRuns() []*databaseRun {
 	return slices.Clone(a.rt.dbs)
 }
 
-// addDatabases registers a lifecycle component per database — none when the
+// addDatabaseComponents registers a lifecycle component per database — none when the
 // app keeps its data in memory — and a readiness check for each.
-func (a *App) addDatabases() error {
+func (a *App) addDatabaseComponents() error {
 	for _, r := range a.newDatabaseRuns() {
 		if a.opts.memory || r.d.engine == nil {
 			continue

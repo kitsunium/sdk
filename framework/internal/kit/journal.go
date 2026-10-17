@@ -68,10 +68,10 @@ type journalLine struct {
 	reason              string
 }
 
-// journal appends one entry to the privacy journal — inside a transaction,
+// appendToJournal appends one entry to the privacy journal — inside a transaction,
 // once it commits: an entry says what stands, and a rollback drops it. An
 // app that keeps no personal data has no journal: there is nothing to say.
-func (a *App) journal(ctx context.Context, l *journalLine) error {
+func (a *App) appendToJournal(ctx context.Context, l *journalLine) error {
 	_, j := a.privacyStores()
 	if j == nil {
 		return nil

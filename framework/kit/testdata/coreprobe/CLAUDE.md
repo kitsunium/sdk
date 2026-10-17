@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-17T12:00:00Z -->
+<!-- updated: 2026-10-17T18:00:00Z -->
 # framework/kit/testdata/coreprobe — the smallest product, on kit's core alone
 
 A test fixture, not a package a product imports: `cliprobe`'s service and
@@ -8,7 +8,8 @@ every registration package of ADR 0179 until its step 10, so a product built
 on it links every subsystem; this probe imports none, and is what
 `initgraph_external_test.go`'s
 `TestTheSmallestProductLinksOnlyTheSubsystemsStillInTheCore` builds and reads
-the symbols of. Once step 10 drops the facade's imports, `cliprobe` is that
+the symbols of: none of the store subsystem's engines, and none of kit's own
+store code (`kitStoreCode`, step 3b). Once step 10 drops the facade's imports, `cliprobe` is that
 program again and this probe can go.
 
 ## Contents

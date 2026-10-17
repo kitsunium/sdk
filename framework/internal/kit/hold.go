@@ -315,7 +315,7 @@ func (s *storeCore) removeUnlessHeld(ctx context.Context, a *App, key string) er
 // behind, the store has no subject, or the record cannot be read — its
 // deletion then says why.
 func (s *storeCore) subjectAt(ctx context.Context, a *App, key string) (subject string, known bool) {
-	if a.privacyKeyStore() == nil || s.plan().subject == nil {
+	if !a.keepsDataKeys() || s.plan().subject == nil {
 		return "", false
 	}
 	v, err := s.read(ctx, key)

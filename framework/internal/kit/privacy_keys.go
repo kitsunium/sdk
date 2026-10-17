@@ -146,7 +146,7 @@ func (a *App) makeIndexKey(ctx context.Context) ([]byte, error) {
 // references —, or keeps an indexed store on a database, whose index keys
 // the table files hashed under it (ADR 0004).
 func (a *App) usesIndexKey() bool {
-	if a.keepsPersonalData() || a.privacyKeyStore() != nil {
+	if a.keepsPersonalData() || a.keepsDataKeys() {
 		return true
 	}
 	for _, st := range a.placedStores() {

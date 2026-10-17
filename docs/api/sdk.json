@@ -5365,6 +5365,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.EnableStores",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "EnableStores",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "EnableStores makes kit's own store code reachable: what kit mounts, starts\nand answers for the stores and databases a product declares.\nframework/kit/store calls it as it is imported; a product never does.\n",
+      "file": "framework/internal/kit/store_enable.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit.EnableStudio",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/kit",

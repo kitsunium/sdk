@@ -15,15 +15,20 @@
 // line yet.
 package store
 
-import "github.com/kitsunium/sdk/framework/internal/kit/storekit"
+import (
+	ikit "github.com/kitsunium/sdk/framework/internal/kit"
+	"github.com/kitsunium/sdk/framework/internal/kit/storekit"
+)
 
 // Importing the package plugs the stores in: a blank package-level value
 // rather than an init, the SDK's convention.
 var _ = enable()
 
 // enable plugs the stores' engines, kit's scope on a database and the
-// migrations of kit's tables into every app.
+// migrations of kit's tables into every app, and makes kit's own store code
+// reachable: what kit mounts, starts and answers for the stores.
 func enable() bool {
 	storekit.Enable()
+	ikit.EnableStores()
 	return true
 }

@@ -64,9 +64,9 @@ type trashRunner interface {
 // keepsTrash reports whether the store keeps a trash: it has revisions.
 func (s *storeCore) keepsTrash() bool { return s.revisions > 0 && s.trashFor != nil }
 
-// addTrash registers the component that empties the stores' trash: at
+// addTrashComponent registers the component that empties the stores' trash: at
 // start, what is past due, then each record at its instant.
-func (a *App) addTrash() error {
+func (a *App) addTrashComponent() error {
 	var stores []privacyStore
 	for _, st := range a.productStores() {
 		if st.keepsTrash() {

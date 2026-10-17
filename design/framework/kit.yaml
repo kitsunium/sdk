@@ -826,6 +826,11 @@ packages:
           framework/kit/server calls it as it is imported; a product never does.
         name: EnableServer
       - doc: |-
+          EnableStores makes kit's own store code reachable: what kit mounts, starts
+          and answers for the stores and databases a product declares.
+          framework/kit/store calls it as it is imported; a product never does.
+        name: EnableStores
+      - doc: |-
           Analyzer runs fn in the background once the product serves, in dev and when
           KIT_ANALYZE allows it. Without one, the graph is the runtime's alone.
         in:

@@ -74,9 +74,13 @@ func TestAServerWithoutItsPackageIsRefused(t *testing.T) {
 // test takes it out until it ends.
 func withoutStores(t *testing.T) {
 	t.Helper()
-	saved := plug.Stores.Load()
+	saved, code := plug.Stores.Load(), storeCode.Load()
 	plug.Stores.Store(nil)
-	t.Cleanup(func() { plug.Stores.Store(saved) })
+	storeCode.Store(nil)
+	t.Cleanup(func() {
+		plug.Stores.Store(saved)
+		storeCode.Store(code)
+	})
 }
 
 // probeOrder is the entity of the stores these tests declare.
@@ -157,5 +161,47 @@ func TestARefusalThatMissesNoSubsystemCarriesNoCode(t *testing.T) {
 	}
 	if errs.HasCode(err, CodeSubsystemMissing) || de.Missing != nil {
 		t.Errorf("a service declared twice is refused with CodeSubsystemMissing (Missing %q): %v", de.Missing, err)
+	}
+}
+
+// sealedProbe is the message of a topic whose values are sealed at rest.
+type sealedProbe struct {
+	Token string `json:"token" kit:"secret"`
+}
+
+// A topic whose messages are sealed on disk needs the store subsystem — the
+// data keys it seals under are kept in kit's own store —, and is refused
+// without it, as a store is (ADR 0179 §6, step 3b).
+func TestASealedTopicWithoutTheStoresIsRefused(t *testing.T) {
+	withoutStores(t)
+	svc := NewService("vault", "Keeps.")
+	svc.Topic[sealedProbe]("tokens")
+	app := NewApp("vault", svc).With(Profile("daemon"), DataDir(t.TempDir()), Logs(io.Discard))
+	err := app.Start(context.Background())
+	var de *DiagnosticsError
+	if !errors.As(err, &de) || !errs.HasCode(err, CodeSubsystemMissing) {
+		t.Fatalf("a sealed topic without framework/kit/store: %v", err)
+	}
+	if !slices.ContainsFunc(de.Diagnostics, func(d model.Diagnostic) bool {
+		return d.Node == "vault/topic/tokens" && strings.Contains(d.Message, storePackage)
+	}) {
+		t.Errorf("the refusal does not name the topic and the import:\n%v", de)
+	}
+}
+
+// Main's commands on the stores — migrate, privacy, revisions, data and watch
+// — are kit's own store code: without the store subsystem each says the
+// import it needs and exits 78, and runs nothing.
+func TestAStoreCommandWithoutTheStoresNamesTheImport(t *testing.T) {
+	withoutStores(t)
+	app := NewApp("cli", NewService("cli", "Runs.")).With(Profile("cli"), InMemory(), Logs(io.Discard))
+	for _, name := range []string{"migrate", "privacy", "revisions", "data", "watch"} {
+		var stdout, stderr strings.Builder
+		if code := app.storeCommand(context.Background(), name, []string{"list"}, &stdout, &stderr); code != exitConfig {
+			t.Errorf("%s without the stores exits %d, want %d", name, code, exitConfig)
+		}
+		if !strings.Contains(stderr.String(), storePackage) || stdout.Len() != 0 {
+			t.Errorf("%s without the stores says %q on stderr and %q on stdout", name, stderr.String(), stdout.String())
+		}
 	}
 }

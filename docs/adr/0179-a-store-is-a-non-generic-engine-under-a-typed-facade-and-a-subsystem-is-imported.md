@@ -338,6 +338,7 @@ created, until step 10 removes those imports.
 | 1 | the hook types of §3 for the store, the start's check of §6 with its code in the design, the extended `initgraph` test with its allow-list — done (#359, 2026-10-17) | no |
 | 2 | the store engine non-generic **inside** kit's core (no package moves yet): `StoreService[T]` over documents; `docEngine`, `sqlEngine`, `historied`, `sealedEngine`, revisions, trash, retention, records, data copy on documents; the per-type instantiations gone. `storetest` passes unchanged — done (2026-10-17, §Step 2, done) | no |
 | 3 | `storekit` + `framework/kit/store`: the stores' implementation — the code naming `docstore` and the SDK's `sql` — moves there; `kit.Engine` stays in the core and still returns `*sql.DB`, its dialect now kit's own type (Q5); the connectors import `framework/kit/store` — done (2026-10-17, §Step 3, done) | no (the facade imports it) |
+| 3b | kit's own store code — the privacy service and its journal, the holds, sealing, history, revisions, trash, retention, the databases' components, migrations and checks, the dev tools and Main's commands on the stores (`migrate`, `privacy`, `revisions`, `data`, `watch`) — reached only through `framework/kit/store` (`EnableStores`, on `EnableServer`'s model), the core keeping call sites that fall back to an app without a store — done (2026-10-17, §Step 3b, done) | no (the facade imports it) |
 | 4 | `queuekit` + `framework/kit/queue` | no |
 | 5 | `workflowkit` + `framework/kit/workflow` (Q3) | no |
 | 6 | `mailkit` + `framework/kit/mail` | no |
@@ -601,6 +602,75 @@ it — is the change that brings the stores' share of the step-0 ceiling, and
 the next one to make before step 4. Not measured here: the initialisation and
 the latency, which the cut leaves unchanged for a product of the facade.
 
+### Step 3b, done (2026-10-17)
+
+The change §Step 3, done named: kit's own store code — which names no SDK
+type and so stays in the core (§3) — is reached only through a value the
+store package provides. `framework/kit/store` calls `EnableStores` (on
+`EnableServer`'s model) besides `storekit.Enable`; it sets `storeCode`, the
+entries of kit's store code the rest of the core calls: kit's privacy service
+mounted with its stores (the data keys, the holds, the journal), the
+components of the databases, the retention and the trash, the journal's
+append, the problems of sealing, of kit's index key, of the databases and of
+the privacy declarations, and Main's commands on the stores — `migrate`,
+`privacy`, `revisions`, `data` and `watch`, whose replay opens the watched
+stores and journals the read. Each call site keeps its name and falls back to
+what an app without a store does: nothing to mount, start or warn of. A
+command on the stores, without the subsystem, says the import it needs
+(`subsystem.missing`) and exits 78. The Studio's routes on the stores stay
+reached through the Studio alone, served only with the subsystem.
+
+Two things the linker needs, found by reading its reachability
+(`-ldflags=-dumpdep`): no hook's signature names a type of the store family,
+and neither does the app's own type — kit's own stores were three typed
+fields of `App`, whose type descriptor kept `StoreService` and every method
+under it linked in a program that declares no store; they are one value held
+as `any`, read by the store code alone, and whether a store of data keys is
+mounted is read from its secret, `data-key`, declared with it. The start's check of §6 also refuses, without the
+subsystem, a node that seals what it keeps at rest — a topic, a queued
+command or a mailer sealed on disk —, since the data keys it seals under are
+kept in kit's own store (Q4's reason, ahead of steps 4 and 6). `framework/kit`'s
+initgraph test lists one function of each part of that code (`kitStoreCode`)
+and requires none of them in `coreprobe` and every one in `storeprobe`.
+
+Measured as the steps before (Go 1.27.2, `-trimpath`, MB = 10⁶ bytes, text
+symbols `T`/`t` by `go tool nm -size`), before on `origin/main` at 7b32c0cd:
+
+| | cliprobe before | cliprobe after | coreprobe before | coreprobe after | storeprobe before | storeprobe after |
+|---|---|---|---|---|---|---|
+| packages (`go list -deps`) | 365 | 365 | 359 | 359 | 364 | 364 |
+| file | 18.209 | 18.217 | 17.252 | **14.645 (−2.61)** | 18.193 | 18.208 |
+| `.text` | 5.828 | 5.831 | 5.519 | **4.580 (−0.94)** | 5.827 | 5.830 |
+| text symbols | 5.639 | 5.642 | 5.339 | **4.429 (−0.91)** | 5.638 | 5.641 |
+| `.gopclntab` / debug | 4.411 / 4.428 | 4.415 / 4.430 | 4.157 / 4.236 | 3.488 / 3.647 | 4.408 / 4.422 | 4.411 / 4.424 |
+| kit's core | 0.991 | 0.993 | 0.988 | **0.397 (−0.59)** | 0.991 | 0.993 |
+| SDK `queue` (core and service) | 0.114 | 0.114 | 0.112 | **0.001** | 0.114 | 0.114 |
+| `slices` (instantiations) | 0.407 | 0.407 | 0.379 | 0.317 | 0.407 | 0.407 |
+| SDK `secret` | 0.090 | 0.090 | 0.090 | 0.056 | 0.090 | 0.090 |
+| `database/sql` | 0.061 | 0.061 | 0.050 | 0.028 | 0.061 | 0.061 |
+| SDK `i18n` / `scheduler` (steps 8, 7) | 0.044 / 0.010 | same | 0.044 / 0.010 | same | 0.044 / 0.010 | same |
+| init lines / median of 50 (`inittrace`) | 151 / 0.91 ms | 151 / 0.87 ms | 147 / 0.84–0.86 ms | 147 / 0.71–0.72 ms | — | — |
+
+**Reading.** On kit's core alone, against step 0's base (§Step 0, measured:
+the probe's text symbols 6.80 MB, its file 22.06 MB), the code is down by
+**2.37 MB** (6.80 → 4.43) and the file by **7.42 MB** (22.06 → 14.65):
+§Measurement's targets — at least 2.15 MB of code and 6.8 MB of file — are
+met, and the probe is within 0.02 MB of code and 0.1 MB of file of step 0's
+ceiling (4.41 / 14.55), which also took the queues, the scheduler and the
+catalogues out. The SDK's queue went with the store code: nothing but the
+databases and the watches' replay reached its brokers in a product that
+declares no topic. What remains of §1's packages in the probe — `i18n`
+(0.044 MB, step 8), the scheduler (0.010 MB, step 7), `database/sql`
+(0.028 MB, its types and what `kit.Engine` reaches, Q5) — is theirs, and
+`net/http` and its closure are §Deferred. A product
+of the facade links what it linked (+0.003 MB of code, the hooks): every
+store engine and every line of kit's store code is still there, through the
+facade's own import. The packages do not change — no import moved, only
+reachability —, so the initialisation is the same 147 inits; the median of
+50 is about 0.13 ms lower, at a 1-minute load of 1.5, which this step does not
+claim. Not measured: the latency of a fresh process, and the status line,
+which imports the facade and so links all of it until step 10.
+
 ### Risks
 
 - **A read decodes.** The generic engine hands back a `T`; the document engine
@@ -734,6 +804,7 @@ release note.
 | Accepted, step 0 measured | 2026-10-16 | §Step 0, measured: the ceiling built in a throwaway copy — the probe's file −7.52 MB, its code −2.39 MB, its init ≈ −0.08 ms, its warm p50 about −0.3 ms; the status line's file −7.41 MB, its latency gain within the noise of its control; §Measurement's probe target set from the ceiling (at least 2.15 MB of code, 6.8 MB of file); §Context's estimate marked measured; §Context's file size written in MB like every other figure (22.06 MB, the 21.0 it gave being MiB) and the package counts reconciled. No decision changed |
 | Accepted, steps 1 and 2 done | 2026-10-17 | The migration table marks step 1 done (#359) and step 2 done; §Step 2, done records the engine over documents — the probe's file −3.87 MB, its code −1.15 MB, kit's generic code 0.915 → 0.035 MB, an entity type's cost 0.41 → 0.011 MB of code —, §Context's per-type estimate measured, and the two parts of §3's contract left to step 3 (`plug.StoreConfig`, the refusals). No decision changed |
 | Accepted, step 3 done | 2026-10-17 | The migration table marks step 3 done; §Step 3, done records the stores' engines in `storekit` behind `framework/kit/store`, the core importing neither the SDK's `docstore` nor its `sql`, the two parts of §3's contract step 2 left settled (`plug.StoreConfig` with `Held(ctx, key)`, the stamp and kit's transaction; kit's own refusal kinds), `kit.Engine`'s dialect kit's own type (Q5), the SDK's sql still reached through the queues until step 4, `kit.Migrations`' facade conversion and the open point it leaves for step 10, and the measure — on kit's core alone, `docstore` gone, 0.32 MB of code and 0.94 MB of file less —, which says that the core's own store code is still reached from `App.Main`: the cut of that reachability is the next change. No decision changed |
+| Accepted, step 3b done | 2026-10-17 | The migration table gains step 3b, done; §Step 3b, done records kit's own store code reached only through `framework/kit/store` (`EnableStores`), the start's check extended to a node that seals at rest, Main's commands on the stores refused without it, and the measure — on kit's core alone, §Measurement's probe target met against step 0's base. No decision changed |
 
 ## Deferred
 
