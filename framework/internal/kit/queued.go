@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/lifecycle"
-	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 )
@@ -25,7 +25,7 @@ import (
 
 // commandQueue is a queued command's queue in one run of the app.
 type commandQueue struct {
-	broker queue.Broker
+	broker plug.Broker
 	// db is the database the queue lives on, nil for a file or a memory
 	// queue: a dispatch in a transaction on it joins the transaction (ADR
 	// 0178 C1).
@@ -148,7 +148,7 @@ func (c *Command[C, R]) put(ctx context.Context, q *commandQueue, key string, en
 		return failure(CodeCommandEncode, "COMMAND_ENCODE", "the command cannot be queued", err, errs.String("command", c.id))
 	}
 	queue := func(ctx context.Context) error {
-		if _, err := q.broker.Publish(ctx, payload); err != nil {
+		if err := q.broker.Publish(ctx, payload); err != nil {
 			return failure(CodeCommandQueue, "COMMAND_QUEUE", "the command's queue refused it", err, errs.String("command", c.id))
 		}
 		return nil
@@ -173,11 +173,11 @@ func (c *Command[C, R]) put(ctx context.Context, q *commandQueue, key string, en
 // runs the command inside its node — the policies around its key and its
 // handler — and reports the run to the consumer's loop. A dispatch handled,
 // or dead-lettered — after its last attempt, or at once when no retry can
-// help (queue.DoNotRetry) —, gives its key back. A dispatch that does not
+// help (doNotRetry) —, gives its key back. A dispatch that does not
 // decode will not decode on its next attempt either: it is dead-lettered on
 // its first (ADR 0151 §D8).
-func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) queue.Handler {
-	return func(ctx context.Context, d queue.Delivery) (err error) {
+func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) deliveryHandler {
+	return func(ctx context.Context, d plug.DeliveryValue) (err error) {
 		env, decodeErr, openErr := c.decode(ctx, a, d.Message.Payload)
 		if decodeErr == nil {
 			ctx = env.restore(ctx)
@@ -191,7 +191,7 @@ func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) queue.
 			}
 			sp.end(err)
 			loop.ran(a, started, a.clock.Now(), err)
-			if err == nil || d.Deliveries >= c.opts.deliveries.maxDeliveries || errs.HasCode(err, queue.CodeNotRetryable) {
+			if err == nil || d.Deliveries >= c.opts.deliveries.maxDeliveries || notRetryable(err) {
 				q.release(env.Key)
 			}
 		}()
@@ -199,7 +199,7 @@ func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) queue.
 		case openErr != nil:
 			return openErr
 		case decodeErr != nil:
-			return queue.DoNotRetry(failure(CodeUndecodable, "MESSAGE_UNDECODABLE", "the queued command does not decode into its input", decodeErr,
+			return doNotRetry(failure(CodeUndecodable, "MESSAGE_UNDECODABLE", "the queued command does not decode into its input", decodeErr,
 				errs.String("command", c.id), errs.String("message", d.Message.ID)))
 		}
 		return c.handle(ctx, a, sp, env)
@@ -209,7 +209,7 @@ func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) queue.
 // handleSpan begins the span of a handling: on the command, from the node
 // that dispatched it — no edge: the dispatch drew it —, its delivery and
 // its key.
-func (c *Command[C, R]) handleSpan(ctx context.Context, a *App, env *queuedEnvelope[C], d *queue.Delivery) (context.Context, *span) {
+func (c *Command[C, R]) handleSpan(ctx context.Context, a *App, env *queuedEnvelope[C], d *plug.DeliveryValue) (context.Context, *span) {
 	ctx, sp := a.begin(ctx, &spanStart{node: c.id, from: env.From, op: model.OpHandle, name: c.name})
 	sp.attr("delivery", strconv.Itoa(d.Deliveries))
 	if env.Key != "" {
@@ -276,7 +276,7 @@ func (c *Command[C, R]) start(_ context.Context, a *App) error {
 	c.queue.Store(q)
 	run := consumer{a: a, loop: loop, node: c.id, name: c.name, wake: model.WakeTopic}
 	handler := c.handler(a, q, loop)
-	sup, err := run.supervise(func(ctx context.Context) error { return c.consume(ctx, a, q, handler) })
+	sup, err := run.supervise(func(ctx context.Context) error { return c.consume(ctx, q, handler) })
 	if err != nil {
 		return failure(CodeLoopStart, "LOOP_START", "a queued command's consumer cannot start", err, errs.String("command", c.id))
 	}
@@ -299,14 +299,12 @@ func (c *Command[C, R]) queueUnder() string {
 // worker handles its batch in turn, so a batch of several would hold
 // dispatches behind a slow one — their leases lapsing — and Parallelism
 // would not say how many run.
-func (c *Command[C, R]) consume(ctx context.Context, a *App, q *commandQueue, handler queue.Handler) error {
-	return queue.Consume(ctx, q.broker, queue.ConsumerConfig{
-		Handler:             handler,
-		Clock:               a.clock,
-		PollInterval:        pollInterval,
-		Parallelism:         c.opts.deliveries.parallelism,
-		BatchSize:           1,
-		HandlerIsIdempotent: true,
+func (c *Command[C, R]) consume(ctx context.Context, q *commandQueue, handler deliveryHandler) error {
+	return q.broker.Consume(ctx, plug.ConsumeConfig{
+		Handler:      handler,
+		PollInterval: pollInterval,
+		Parallelism:  c.opts.deliveries.parallelism,
+		BatchSize:    1,
 	})
 }
 
@@ -335,10 +333,8 @@ func (c *Command[C, R]) describeQueue(a *App, info *model.CommandInfo) {
 	if q == nil || a == nil || !a.running() {
 		return
 	}
-	if r, ok := q.broker.(queue.DeadLetterReader); ok {
-		if dl, err := r.DeadLetters(context.Background(), 1000); err == nil {
-			info.DeadLetters = new(len(dl))
-		}
+	if dl, err := q.broker.DeadLetters(context.Background(), 1000); err == nil {
+		info.DeadLetters = new(len(dl))
 	}
 }
 

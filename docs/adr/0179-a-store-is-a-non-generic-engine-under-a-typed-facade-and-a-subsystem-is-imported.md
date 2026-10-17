@@ -339,7 +339,7 @@ created, until step 10 removes those imports.
 | 2 | the store engine non-generic **inside** kit's core (no package moves yet): `StoreService[T]` over documents; `docEngine`, `sqlEngine`, `historied`, `sealedEngine`, revisions, trash, retention, records, data copy on documents; the per-type instantiations gone. `storetest` passes unchanged — done (2026-10-17, §Step 2, done) | no |
 | 3 | `storekit` + `framework/kit/store`: the stores' implementation — the code naming `docstore` and the SDK's `sql` — moves there; `kit.Engine` stays in the core and still returns `*sql.DB`, its dialect now kit's own type (Q5); the connectors import `framework/kit/store` — done (2026-10-17, §Step 3, done) | no (the facade imports it) |
 | 3b | kit's own store code — the privacy service and its journal, the holds, sealing, history, revisions, trash, retention, the databases' components, migrations and checks, the dev tools and Main's commands on the stores (`migrate`, `privacy`, `revisions`, `data`, `watch`) — reached only through `framework/kit/store` (`EnableStores`, on `EnableServer`'s model), the core keeping call sites that fall back to an app without a store — done (2026-10-17, §Step 3b, done) | no (the facade imports it) |
-| 4 | `queuekit` + `framework/kit/queue` | no |
+| 4 | `queuekit` + `framework/kit/queue`: the queues' brokers — the code naming the SDK's `queue`, a mailer's sealed outbox on a database among it — move there, behind `plug.Queues`; `framework/kit/queue` imports `framework/kit/store` (Q4) — done (2026-10-17, §Step 4, done) | no (the facade imports it) |
 | 5 | `workflowkit` + `framework/kit/workflow` (Q3) | no |
 | 6 | `mailkit` + `framework/kit/mail` | no |
 | 7 | `jobkit` + `framework/kit/jobs` | no |
@@ -673,6 +673,99 @@ reachability —, so the initialisation is the same 147 inits; the median of
 claim. Not measured: the latency of a fresh process, and the status line,
 which imports the facade and so links all of it until step 10.
 
+### Step 4, done (2026-10-17)
+
+The queues' implementation is `framework/internal/kit/queuekit`, which
+`framework/kit/queue` plugs in (`plug.Queues`) as it is imported, and which
+`framework/kit` itself imports until step 10 (`subsystems.go`, Q8). Per Q4,
+`framework/kit/queue` imports `framework/kit/store`, and `queuekit` imports
+`storekit`: a queue on a database runs on the transaction manager and in the
+dialect of the database the store subsystem opened — `storekit.SQLOf`, typed
+—, so that a publication joins the transaction its context carries, as ADR
+0151 and ADR 0178 C1 require; never the other way, and a program that imports
+`framework/kit/store` alone links nothing of the queues. kit's core imports
+neither `pkg/v1/data/queue` nor, through it, `pkg/v1/data/sql`: the initgraph
+test took `queue` off its allow-list.
+
+§3's contract for the queues (`plug/queue.go`, `plug/queue_interface.go`):
+the core opens every queue — a subscription's, a watch's, a queued command's,
+a mailer's outbox on a database, and both sides of a data copy's — with a
+`plug.QueueConfig` (its place: a directory, a `plug.Database`, memory; its
+`QueuePolicyValue`; the app's clock as a `plug.Clock`, in standard-library
+types, a test's manual clock included) and holds a `plug.Broker`: `Publish`,
+`Consume` — the SDK's `queue.Consume`, run by `queuekit` over
+`plug.ConsumeConfig` and `plug.DeliveryValue` —, `DeadLetters`, and the data
+copy's sibling `MessageMover`. The mark of a delivery no retry helps is the
+driver's (`DoNotRetry`, `NotRetryable`); the migration of a queue's table is
+too (`TableMigration`, which `plug.TableSpec` no longer marks). The core still
+encodes every message and holds every rule of ADR 0151 and 0178 — what a
+publication in a transaction joins, the writer turn, the key of a queued
+command, the catch-up of a watch —: a queue carries bytes. A mailer's sealed
+outbox is `queuekit`'s, the sealing itself kit's, handed in `Seal` and
+`Unseal`. The bytes at rest are unchanged: the same tables
+(`kit_queue__…`), the same file queues, the same sealed boxes.
+
+The start's check of §6 gains the queue row: a topic, a subscription — a
+watch is one —, a queued command and a mailer whose outbox is on a database
+are refused without `framework/kit/queue`, every declaration at once, with
+`CodeSubsystemMissing`, never a command that is not queued
+(`TestAQueueWithoutItsSubsystemIsRefused`); a queue opened without the
+subsystem — Main's watch replay, a data copy — is refused with the import it
+needs (`queuesMissing`).
+
+`plug.HandleProvider` is off the queues: the core no longer asks a database
+for the SDK's transaction manager or dialect, and `storekit`'s `Handle`
+answers one handle only. It stays for the mail spool alone, until step 6: the
+spool still in the core takes the SDK's types — a database's transaction
+manager as its `Deferrer`, and now the SDK's broker behind the queue
+subsystem's outbox as its `Broker`, which `queuekit`'s broker hands on
+through the same interface (the mailer calls it inline) —, so its two
+function-level ktn exclusions (`HandleProvider.Handle`,
+`databaseRun.handle`) stay, their reason narrowed to the spool.
+
+`initgraph_external_test.go` follows: `kitEngines` gains
+`framework/internal/kit/queuekit` for `framework/kit/queue`; `throughStill`
+reads the SDK package and its core and service halves, and a package the
+smallest product reaches only through one still on the list may link its
+inits alone (`beyondInits`) — in `coreprobe`, the SDK's `sql` and `queue`
+link nothing but `init` (172 bytes for the queue's service half's
+`regexp.MustCompile` and wake tables), the mail spool importing them, until
+step 6; `TestAProductThatImportsTheStoresLinksThem` requires that
+`storeprobe` link nothing of `queuekit` nor of the SDK's queue beyond its
+init; and `TestAProductThatImportsTheQueuesLinksThem` builds
+`testdata/queueprobe` (coreprobe with `framework/kit/queue`) and requires
+`queuekit`'s and the SDK's queue's code linked, and the store subsystem's.
+
+Measured as the steps before (Go 1.27.2, `-trimpath`, MB = 10⁶ bytes, text
+symbols `T`/`t` by `go tool nm -size`), before on `origin/main` at 393a0faa:
+
+| | coreprobe before | coreprobe after | storeprobe before | storeprobe after | queueprobe after | cliprobe before | cliprobe after |
+|---|---|---|---|---|---|---|---|
+| packages (`go list -deps`) | 359 | **357** | 364 | 363 | 366 | 365 | 367 |
+| file | 14.792 | 14.781 | 18.209 | **17.783 (−0.43)** | 18.255 | 18.220 | 18.264 |
+| `.text` | 4.635 | 4.634 | 5.830 | **5.661 (−0.17)** | 5.842 | 5.831 | 5.843 |
+| text symbols | 4.482 | 4.481 | 5.641 | 5.476 | 5.653 | 5.642 | 5.654 |
+| `.gopclntab` / debug | 3.527 / 3.684 | 3.528 / 3.687 | 4.411 / 4.425 | 4.310 / 4.344 | 4.424 / 4.436 | 4.415 / 4.431 | 4.427 / 4.441 |
+| kit's core | 0.421 | 0.422 | 0.995 | 0.991 | 0.991 | 0.996 | 0.992 |
+| `queuekit` | — | 0 | — | 0 | 0.017 | — | 0.017 |
+| SDK `queue` (core and service) | 0.0002 (its init) | 0.0002 (its init) | 0.114 | **0.0002** | 0.114 | 0.114 | 0.114 |
+| SDK `sql` | 0.0009 (inits) | 0.0009 (inits) | 0.041 | 0.041 | 0.041 | 0.041 | 0.041 |
+| init lines (`inittrace`) | 147 | 145 | 150 | 149 | 151 | 151 | 152 |
+
+**Reading.** On kit's core alone almost nothing moves, as expected: since
+step 3b nothing but the databases and the watches' replay reached the
+queues' brokers in a product that declares no queue, so the probe already
+linked the SDK's queue's init alone; what goes is the import — two packages
+fewer, `pkg/v1/data/queue` and `pkg/v1/data/sql`, two inits fewer. The SDK's
+queue's two halves stay in the graph, imported by the mail spool, their
+code unlinked: step 6's. The gain is a product that declares stores and no
+queue: `storeprobe` no longer links the SDK's queue (0.114 MB of code, 0.43 MB
+of file), which `storekit` brought with the migration of a consumer's queue's
+table. A product of the facade links what it linked, plus `queuekit`'s
+conversions (+0.012 MB of code, two packages more: `queue` and `queuekit`).
+Not measured: the initialisation's time and the latency, which a product of
+the facade leaves where they were.
+
 ### Risks
 
 - **A read decodes.** The generic engine hands back a `T`; the document engine
@@ -807,6 +900,7 @@ release note.
 | Accepted, steps 1 and 2 done | 2026-10-17 | The migration table marks step 1 done (#359) and step 2 done; §Step 2, done records the engine over documents — the probe's file −3.87 MB, its code −1.15 MB, kit's generic code 0.915 → 0.035 MB, an entity type's cost 0.41 → 0.011 MB of code —, §Context's per-type estimate measured, and the two parts of §3's contract left to step 3 (`plug.StoreConfig`, the refusals). No decision changed |
 | Accepted, step 3 done | 2026-10-17 | The migration table marks step 3 done; §Step 3, done records the stores' engines in `storekit` behind `framework/kit/store`, the core importing neither the SDK's `docstore` nor its `sql`, the two parts of §3's contract step 2 left settled (`plug.StoreConfig` with `Held(ctx, key)`, the stamp and kit's transaction; kit's own refusal kinds), `kit.Engine`'s dialect kit's own type (Q5), the SDK's sql still reached through the queues until step 4, `kit.Migrations`' facade conversion and the open point it leaves for step 10, and the measure — on kit's core alone, `docstore` gone, 0.32 MB of code and 0.94 MB of file less —, which says that the core's own store code is still reached from `App.Main`: the cut of that reachability is the next change. No decision changed |
 | Accepted, step 3b done | 2026-10-17 | The migration table gains step 3b, done; §Step 3b, done records kit's own store code reached only through `framework/kit/store` (`EnableStores`), the start's check extended to a node that seals at rest, Main's commands on the stores refused without it, and the measure — on kit's core alone, §Measurement's probe target met against step 0's base. No decision changed |
+| Accepted, step 4 done | 2026-10-17 | The migration table marks step 4 done; §Step 4, done records the queues' brokers in `queuekit` behind `framework/kit/queue`, which imports `framework/kit/store` (Q4) — `queuekit` reaching a database through `storekit.SQLOf` —, kit's core importing neither the SDK's `queue` nor, through it, its `sql`, the queues' contract in `plug` (`Queues`, `QueueConfig`, `Broker`, `MessageMover`, `Clock`), the start's check gaining the queue row (a topic, a subscription, a watch, a queued command, a mailer whose outbox is on a database), `plug.HandleProvider` off the queues and kept for the mail spool alone until step 6, and the measure — the smallest product two packages fewer, a product with stores and no queue 0.43 MB of file and 0.17 MB of code less. No decision changed |
 
 ## Deferred
 

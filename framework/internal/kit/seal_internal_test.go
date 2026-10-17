@@ -19,7 +19,6 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
@@ -372,10 +371,10 @@ func TestADeadLetterOfAPersonErasedReadsEmpty(t *testing.T) {
 	must(t, people.Insert(ctx, letter2{To: "ann@x.dev", Body: "ann's file"}))
 	must(t, letters.Publish(ctx, letter2{To: "ann@x.dev", Body: "a letter to ann"}))
 	sub := letters.subs[0]
-	var dead []queue.DeadLetter
+	var dead []plug.DeadLetterValue
 	eventuallyInternal(t, "the dead letter", func() bool {
 		var err error
-		dead, err = sub.broker.(queue.DeadLetterReader).DeadLetters(ctx, 10)
+		dead, err = sub.broker.DeadLetters(ctx, 10)
 		return err == nil && len(dead) == 1
 	})
 	if msg, _, derr, oerr := letters.decode(ctx, app, dead[0].Message.Payload); derr != nil || oerr != nil || msg.Body != "a letter to ann" {

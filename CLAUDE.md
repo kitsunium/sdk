@@ -314,11 +314,12 @@ framework/         the layer above pkg/v1, packages of the root module — ADR 0
                    model (the graph types + the ID grammar, Version 5),
                    kit (the runtime a product imports; beneath it the
                      opt-in subsystems config/{toml,yaml}, server,
-                     studio and store — the stores and databases, ADR
-                     0179 —, storetest, the stores' conformance suite,
-                     and kittest, a product's tests on disk — ADR 0175;
-                     its engine internal/kit, + plug, serverkit,
-                     studiokit, storekit), telemetry (the telemetry port + exporter
+                     studio, store — the stores and databases, ADR
+                     0179 — and queue — the queues, step 4 —, storetest,
+                     the stores' conformance suite, and kittest, a
+                     product's tests on disk — ADR 0175; its engine
+                     internal/kit, + plug, serverkit, studiokit, storekit,
+                     queuekit), telemetry (the telemetry port + exporter
                      — ADR 0149),
                    entitlement, selfupdate, gate, git (the distribution
                      mechanisms the SDK library shipped until ADR 0158:

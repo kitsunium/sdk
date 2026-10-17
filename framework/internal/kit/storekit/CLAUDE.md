@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-17T12:00:00Z -->
+<!-- updated: 2026-10-17T22:00:00Z -->
 # framework/internal/kit/storekit — the stores' engines, kit's scope on a database
 
 What `framework/kit/store` plugs into kit (`plug.Stores`, ADR 0179 §1, step
@@ -19,14 +19,14 @@ at the start for a store or a database it declares (`CodeSubsystemMissing`).
 | `document.go` | `docRecord`, the one record type the SDK's document store is instantiated at (the JSON as it rests, the entity decoded once beside it, `openedDoc`); `documents`, a store's `plug.StoreConfig` as its engines read it — the key (`KeyAtRest` first), the decoding, the indexes as the SDK takes them (`specs`), the stamp of a version, `docLoad` (the first record a load could not decode, which refuses the opening); the conversions between the SDK's values and plug's (versions, tombstones, entries, weight); `clockFunc`, the app's clock as the SDK reads it |
 | `file.go` | `fileEngine`, the SDK's document store in memory and in the data directory (`openFile`): every `plug.StoreEngine` call and its siblings (`Folder`, `Keyser`, `EntrySource`, `VersionKeeper`, `VersionWeighter`, `Trasher`, `DocumentSource`, `Documents`, `DocumentSink`); in a transaction of the data's, what a write replaced is kept for a rollback (`before`, `uncreate`, `forget`) and its hooks wait for the commit (`after`) — through `plug.Transaction`, kit's |
 | `sql.go` | `sqlEngine`, the SDK's document store over SQL (`openSQL`): each call on the context `plug.StoreConfig.Call` gives — kit's transaction on the database, else the pool, within `<name>-timeout` —, a rolled-back write told again (`retold`, `plug.Transaction.Retell`), `Reindex`, keys listed `sqlKeysChunk` at a time, the data copy's reads and writes |
-| `database.go` | `database`, kit's scope on one database (`openDatabase`): the SDK's `Transactor`, `Checker` and `Migrator` over the pool kit opened, `plug.Database` and its siblings `Checker`, `MigratorProvider`, `HandleProvider` (the SDK's handles the queues' SQL broker and the mail spool still in kit's core take, until ADR 0179's steps 4 and 6); `migrator`; the conversions between plug's migrations and the SDK's; `tableMigration` — the document store's table, its versions' table, and a consumer's queue's (the SDK's SQL broker's, until step 4) |
+| `database.go` | `database`, kit's scope on one database (`openDatabase`): the SDK's `Transactor`, `Checker` and `Migrator` over the pool kit opened, `plug.Database` and its siblings `Checker`, `MigratorProvider`, `HandleProvider` (the transaction manager as the `Deferrer` the mail spool still in kit's core takes, until ADR 0179's step 6); `SQLOf`, the SDK's transaction manager and dialect of a database this package opened, which `queuekit`'s SQL broker runs on (step 4); `migrator`; the conversions between plug's migrations and the SDK's; `tableMigration` — the document store's table and its versions' table (a consumer's queue's is `queuekit`'s since step 4) |
 | `refusal.go` | `said`: every error the package returns, its SDK sentinel told by the kind kit words it by (`plug.Refusal`), the SDK's error kept inside — a key too long with the columns' bound in its `max` field |
 | `storekit_compliance.go` | the compile-time assertions of every plug interface the engines and the scope implement |
 | `README.md` | written by `tools/genindex` from `docs/api` (`make docs-readme`, ADR 0167) |
 
 ## Rules
 
-- It imports `plug` and the SDK, never kit's core: the core imports no `*kit` package (ADR 0179 §3), and kit's own suites plug it in through `framework/kit/store` (`framework/internal/kit/subsystems_test.go`).
+- It imports `plug` and the SDK — never the SDK's queue, which is `queuekit`'s —, never kit's core: the core imports no `*kit` package (ADR 0179 §3), and kit's own suites plug it in through `framework/kit/store` (`framework/internal/kit/subsystems_test.go`).
 - Nothing it returns reaches the core as an SDK sentinel the core would match: `said` wraps it in a `plug.RefusalError`. A new sentinel the core must tell is a new `plug.Refusal` kind and a row of `sentinels`.
 - The bytes at rest are the core's: an engine writes the JSON `plug.DocumentValue` carries as it is, and the SQL tables keep their names and shapes (ADR 0179 §Consequences).
 

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-17T18:00:00Z -->
+<!-- updated: 2026-10-17T22:00:00Z -->
 # framework/kit/store — the stores, for a product that declares them
 
 A subsystem of `framework/kit`, enabled by a blank import:
@@ -18,8 +18,9 @@ declaration at once, the refusal naming this import and carrying
 
 Until ADR 0179's step 10, `framework/kit` imports this package itself
 (`subsystems.go`, Q8), and the three connectors (`framework/connectors/
-{postgres,mysql,sqlite}`) do too (§4): no product needs the line yet, and
-`kit gen` will write it (§5).
+{postgres,mysql,sqlite}`) do too (§4), and so does `framework/kit/queue` (step
+4, Q4: a queue on a database joins the stores' transactions): no product
+needs the line yet, and `kit gen` will write it (§5).
 
 ## Contents
 

@@ -242,3 +242,98 @@ func TestAStoreCommandWithoutTheStoresNamesTheImport(t *testing.T) {
 		}
 	}
 }
+
+// withoutQueues runs the test as a program that does not import
+// framework/kit/queue: the hook its package sets is nil (ADR 0179 §6, step
+// 4), as the core sees it in such a program; the test binary plugs the
+// subsystem in (subsystems_test.go), and the test takes it out until it
+// ends.
+func withoutQueues(t *testing.T) {
+	t.Helper()
+	saved := plug.Queues.Load()
+	plug.Queues.Store(nil)
+	t.Cleanup(func() { plug.Queues.Store(saved) })
+}
+
+// probeKey is the input of the queued command these tests declare.
+type probeKey struct {
+	Key string `json:"key"`
+}
+
+// queueProduct declares, in one service its database keeps, a topic and its
+// subscription, a watch, a queued command, a command that is not queued and a
+// mailer — whose outbox is on the database, the app keeping its data in a
+// data directory.
+func queueProduct(t *testing.T) *App {
+	svc := NewService("post", "Posts.")
+	letters := svc.Topic[probeOrder]("letters")
+	svc.Subscribe("read", letters, func(context.Context, probeOrder) error { return nil })
+	svc.Watch("content", Moderated, func(context.Context, WrittenEvent) error { return nil })
+	svc.Command("later", func(context.Context, probeKey) (EmptyValue, error) { return EmptyValue{}, nil }, Queued())
+	svc.Command("now", func(context.Context, probeKey) (EmptyValue, error) { return EmptyValue{}, nil })
+	svc.Mailer("notify", From("Post", "post@example.com"))
+	return NewApp("post", svc).With(Profile("daemon"), DataDir(t.TempDir()), Logs(io.Discard),
+		Database("main", NewFakeDB(sql.DialectPostgres).Engine(), Keeps(svc)))
+}
+
+// A product that declares what runs on a queue without importing
+// framework/kit/queue is refused at the start (ADR 0179 §6, step 4): a
+// topic, a subscription, a watch, a queued command and a mailer whose outbox
+// is on a database — every declaration at once, each at its position, naming
+// the package —, never a command that is not queued; the refusal carries
+// CodeSubsystemMissing.
+func TestAQueueWithoutItsSubsystemIsRefused(t *testing.T) {
+	withoutQueues(t)
+	err := queueProduct(t).Start(context.Background())
+	var de *DiagnosticsError
+	if !errors.As(err, &de) {
+		t.Fatalf("the start: %v", err)
+	}
+	var refused []string
+	for _, d := range de.Diagnostics {
+		if !strings.Contains(d.Message, queuePackage) {
+			continue
+		}
+		refused = append(refused, d.Node)
+		if d.Source == nil || d.Source.Line == 0 || !strings.HasSuffix(d.Source.File, "subsystems_internal_test.go") {
+			t.Errorf("a refusal names no declaration at its position: %+v", d)
+		}
+	}
+	slices.Sort(refused)
+	want := []string{"post/command/later", "post/mailer/notify", "post/subscription/content", "post/subscription/read", "post/topic/letters"}
+	if !slices.Equal(refused, want) {
+		t.Errorf("refused for want of %s: %q, want %q\n%v", queuePackage, refused, want, de)
+	}
+	if !slices.Contains(de.Missing, queuePackage) {
+		t.Errorf("the refusal's Missing = %q, want it to hold %s", de.Missing, queuePackage)
+	}
+	if !errs.HasCode(err, CodeSubsystemMissing) {
+		t.Errorf("the refusal does not carry CodeSubsystemMissing: %v", err)
+	}
+}
+
+// With the queue subsystem plugged in — framework/kit/queue's, as the test
+// binary has it —, the check refuses none of those declarations.
+func TestAQueueWithItsSubsystemIsNotRefused(t *testing.T) {
+	app := queueProduct(t)
+	err := app.Start(context.Background())
+	if err == nil {
+		must(t, app.Stop(context.Background()))
+	}
+	var de *DiagnosticsError
+	if errors.As(err, &de) && strings.Contains(de.Error(), queuePackage) {
+		t.Fatalf("a product that imports framework/kit/queue is refused for want of it:\n%v", de)
+	}
+}
+
+// What opens a queue in a program without the subsystem — Main's watch
+// replay, a data copy — is refused with the import it needs, as the start
+// would say it.
+func TestAQueueOpenedWithoutItsSubsystemNamesTheImport(t *testing.T) {
+	withoutQueues(t)
+	a := NewApp("bare", NewService("bare", "Runs.")).With(InMemory(), Logs(io.Discard))
+	_, err := a.openQueue(&nodeBase{id: "bare/subscription/read"}, "", 1)
+	if !errs.HasCode(err, CodeSubsystemMissing) || !strings.Contains(errs.PrivateOf(err), queuePackage) {
+		t.Errorf("a queue opened without framework/kit/queue: %v", err)
+	}
+}

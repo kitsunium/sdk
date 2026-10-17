@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/mail"
 	mailspool "github.com/kitsunium/sdk/pkg/v1/app/mail/spool"
@@ -495,8 +496,13 @@ func (m *Mailer) start(ctx context.Context, a *App) error {
 		// broker's policy bounds a mail. The database's transaction manager,
 		// a Deferrer that is an Aborter too — the SDK's is both —, as the
 		// store subsystem hands it on; none otherwise, and the spool then
-		// tells the mailbox when Send returns.
-		cfg.Broker = broker
+		// tells the mailbox when Send returns. The broker is the SDK's, as
+		// the queue subsystem hands it on (plug.HandleProvider): the spool
+		// takes the SDK's type, which the core does not name, until the
+		// mailers leave it (ADR 0179, step 6).
+		if h, ok := broker.(plug.HandleProvider); !ok || !h.Handle(&cfg.Broker) {
+			return failure(CodeMailQueue, "OUTBOX_OPEN", "a mailer's outbox cannot be opened", nil, errs.String("mailer", m.id))
+		}
 		db.handle(&cfg.Deferrer)
 	default:
 		cfg.MaxMessageBytes = maxMailBytes

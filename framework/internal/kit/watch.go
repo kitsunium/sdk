@@ -6,9 +6,9 @@ import (
 	"slices"
 	"sync/atomic"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/lifecycle"
-	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 )
 
 // Watches (ADR 0008). A module hears of the writes of the fields a product
@@ -181,7 +181,7 @@ type FieldRefValue struct {
 // watchRun is a watch in one run of its app: its queue and its consumer, and
 // what it hears — the marked fields of each store that feeds it.
 type watchRun struct {
-	broker queue.Broker
+	broker plug.Broker
 	// db is the database the queue lives on, nil for a file or a memory
 	// queue: a notice of a write in a transaction on it joins the
 	// transaction (ADR 0178 C1).
@@ -241,10 +241,8 @@ func (w *Watch) describe(a *App, out *model.Node) []model.Edge {
 		slices.Sort(info.Stores)
 	}
 	if r := w.run.Load(); r != nil {
-		if dl, ok := r.broker.(queue.DeadLetterReader); ok {
-			if dead, err := dl.DeadLetters(context.Background(), 1000); err == nil {
-				info.DeadLetters = new(len(dead))
-			}
+		if dead, err := r.broker.DeadLetters(context.Background(), 1000); err == nil {
+			info.DeadLetters = new(len(dead))
 		}
 	}
 	return edges

@@ -14,9 +14,10 @@ import (
 
 // kit's own migrations on a database (ADR 0004): its tables — a store's, its
 // history's, a workflow's journal, a consumer's queue (ADR 0178 C1) —, each
-// one migration of the SDK's document store or, for a queue, of its SQL
-// broker, which the store subsystem writes (plug.StoreDriverConfig's
-// TableMigration), under kit's version table, kit_migrations, and run before
+// one migration of the SDK's document store, which the store subsystem
+// writes (plug.StoreDriverConfig's TableMigration), or, for a queue, of its
+// SQL broker, which the queue subsystem writes (plug.QueueDriverConfig's),
+// under kit's version table, kit_migrations, and run before
 // the modules' and the product's.
 //
 // The SDK's migrator refuses a pending migration older than one already
@@ -230,17 +231,24 @@ func freeVersion(used map[uint64]bool, v uint64) uint64 {
 	return v
 }
 
-// tableMigration is the migration of one of kit's tables, as the store
-// subsystem writes it: the SDK's document store's two tables; for a store's
-// versions, the table of versions beside the store's, which the SDK names
-// from it; for a consumer's queue, the SQL broker's one table (ADR 0178
-// C1).
+// tableMigration is the migration of one of kit's tables: as the store
+// subsystem writes it, the SDK's document store's two tables, and for a
+// store's versions the table of versions beside the store's, which the SDK
+// names from it; as the queue subsystem writes it, for a consumer's queue,
+// the SQL broker's one table (ADR 0178 C1).
 func tableMigration(dialect Dialect, t kitTable, version uint64) (plug.MigrationValue, error) {
+	if t.queue {
+		queues := plug.Queues.Load()
+		if queues == nil || queues.TableMigration == nil {
+			return plug.MigrationValue{}, queuesMissing()
+		}
+		return queues.TableMigration(string(dialect), t.name, version)
+	}
 	stores := plug.Stores.Load()
 	if stores == nil || stores.TableMigration == nil {
 		return plug.MigrationValue{}, storesMissing()
 	}
-	return stores.TableMigration(string(dialect), plug.TableSpec{Name: t.name, VersionsOf: t.versionsOf, Queue: t.queue}, version)
+	return stores.TableMigration(string(dialect), plug.TableSpec{Name: t.name, VersionsOf: t.versionsOf}, version)
 }
 
 // nameDigest is the low half of a new table's version.

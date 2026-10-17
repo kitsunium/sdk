@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-17T18:00:00Z -->
+<!-- updated: 2026-10-17T22:00:00Z -->
 # framework/kit/testdata/storeprobe — the smallest product, with the stores imported
 
 A test fixture, not a package a product imports: `coreprobe` with
@@ -7,7 +7,9 @@ A test fixture, not a package a product imports: `coreprobe` with
 store subsystem's engines (`framework/internal/kit/storekit`) and the SDK's
 document store and sql under them, and every function of kit's own store
 code the test lists (`kitStoreCode`, step 3b) — the half of ADR 0179 §7 that keeps the
-other from passing by testing nothing.
+other from passing by testing nothing —, and none of the queue subsystem's
+brokers nor of the SDK's queue beyond its init: the stores do not bring the
+queues (step 4, Q4).
 
 ## Contents
 

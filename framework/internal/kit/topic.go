@@ -7,9 +7,9 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/lifecycle"
-	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 )
@@ -133,7 +133,7 @@ func (t *TopicService[T]) subscribers(a *App) []*SubscriptionWorker[T] {
 
 // publishTo puts payload in sub's queue.
 func (t *TopicService[T]) publishTo(ctx context.Context, sub *SubscriptionWorker[T], payload []byte) error {
-	if _, err := sub.broker.Publish(ctx, payload); err != nil {
+	if err := sub.broker.Publish(ctx, payload); err != nil {
 		return failure(CodeTopicPublish, "TOPIC_PUBLISH", "a subscription's queue refused the message", err,
 			errs.String("topic", t.id), errs.String("subscription", sub.id))
 	}
@@ -171,7 +171,7 @@ type SubscriptionWorker[T any] struct {
 	maxDeliver  int
 	parallelism int
 
-	broker queue.Broker
+	broker plug.Broker
 	// queueDB is the database its queue lives on, nil for a file or a
 	// memory queue: a publication in a transaction on it joins the
 	// transaction (ADR 0178 C1).
@@ -308,13 +308,11 @@ func (sb *SubscriptionWorker[T]) start(_ context.Context, a *App) error {
 	c := consumer{a: a, loop: loop, node: sb.id, name: sb.name, wake: model.WakeTopic}
 	broker, handler := sb.broker, sb.deliver(&c)
 	sb.sup, err = c.supervise(func(ctx context.Context) error {
-		return queue.Consume(ctx, broker, queue.ConsumerConfig{
-			Handler:             handler,
-			Clock:               a.clock,
-			PollInterval:        pollInterval,
-			Parallelism:         sb.parallelism,
-			BatchSize:           consumerBatch,
-			HandlerIsIdempotent: true,
+		return broker.Consume(ctx, plug.ConsumeConfig{
+			Handler:      handler,
+			PollInterval: pollInterval,
+			Parallelism:  sb.parallelism,
+			BatchSize:    consumerBatch,
 		})
 	})
 	if err != nil {
@@ -328,9 +326,9 @@ func (sb *SubscriptionWorker[T]) start(_ context.Context, a *App) error {
 // the run to the internal loop. A message that does not decode is
 // dead-lettered on its first delivery: no retry makes it decode (ADR 0151
 // §D8).
-func (sb *SubscriptionWorker[T]) deliver(c *consumer) queue.Handler {
+func (sb *SubscriptionWorker[T]) deliver(c *consumer) func(context.Context, plug.DeliveryValue) error {
 	a := c.a
-	return func(ctx context.Context, d queue.Delivery) error {
+	return func(ctx context.Context, d plug.DeliveryValue) error {
 		msg, tr, decodeErr, openErr := sb.topic.decode(ctx, a, d.Message.Payload)
 		if decodeErr != nil {
 			tr = ""
@@ -340,7 +338,7 @@ func (sb *SubscriptionWorker[T]) deliver(c *consumer) queue.Handler {
 			case openErr != nil:
 				return openErr
 			case decodeErr != nil:
-				return queue.DoNotRetry(failure(CodeUndecodable, "MESSAGE_UNDECODABLE", "the message does not decode into the topic's type", decodeErr,
+				return doNotRetry(failure(CodeUndecodable, "MESSAGE_UNDECODABLE", "the message does not decode into the topic's type", decodeErr,
 					errs.String("subscription", sb.id), errs.String("message", d.Message.ID)))
 			}
 			if sp.detailed() {
@@ -366,8 +364,8 @@ func (sb *SubscriptionWorker[T]) describe(_ *App, out *model.Node) []model.Edge 
 	if sb.topic != nil {
 		out.Subscription.Topic = sb.topic.id
 	}
-	if r, ok := sb.broker.(queue.DeadLetterReader); ok {
-		if dl, err := r.DeadLetters(context.Background(), 1000); err == nil {
+	if sb.broker != nil {
+		if dl, err := sb.broker.DeadLetters(context.Background(), 1000); err == nil {
 			out.Subscription.DeadLetters = new(len(dl))
 		}
 	}
