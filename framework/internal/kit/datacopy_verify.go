@@ -7,7 +7,7 @@ import (
 	"iter"
 	"time"
 
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -25,20 +25,20 @@ type keyedDigest struct {
 // recordsInOrder yields every record of docs in key order — the keys it
 // holds and those in its trash, merged —, each with the instant it was
 // trashed, zero for a document it holds.
-func recordsInOrder(ctx context.Context, docs copyDocs) iter.Seq2[docstore.Tombstone, error] {
-	return func(yield func(docstore.Tombstone, error) bool) {
-		tombs, err := docs.tombstoneList(ctx)
+func recordsInOrder(ctx context.Context, docs copyDocs) iter.Seq2[plug.TombstoneValue, error] {
+	return func(yield func(plug.TombstoneValue, error) bool) {
+		tombs, err := docs.TombstoneList(ctx)
 		if err != nil {
-			yield(docstore.Tombstone{}, err)
+			yield(plug.TombstoneValue{}, err)
 			return
 		}
-		for key, err := range docs.keyList(ctx) {
+		for key, err := range docs.KeyList(ctx) {
 			if err != nil {
-				yield(docstore.Tombstone{}, err)
+				yield(plug.TombstoneValue{}, err)
 				return
 			}
 			var ok bool
-			if tombs, ok = yieldTrashedBefore(yield, tombs, key); !ok || !yield(docstore.Tombstone{Key: key}, nil) {
+			if tombs, ok = yieldTrashedBefore(yield, tombs, key); !ok || !yield(plug.TombstoneValue{Key: key}, nil) {
 				return
 			}
 		}
@@ -52,7 +52,7 @@ func recordsInOrder(ctx context.Context, docs copyDocs) iter.Seq2[docstore.Tombs
 
 // yieldTrashedBefore yields the trashed records whose key sorts before key,
 // and returns those left and whether the caller wants more.
-func yieldTrashedBefore(yield func(docstore.Tombstone, error) bool, tombs []docstore.Tombstone, key string) ([]docstore.Tombstone, bool) {
+func yieldTrashedBefore(yield func(plug.TombstoneValue, error) bool, tombs []plug.TombstoneValue, key string) ([]plug.TombstoneValue, bool) {
 	for len(tombs) > 0 && tombs[0].Key < key {
 		if !yield(tombs[0], nil) {
 			return tombs, false
@@ -85,7 +85,7 @@ func recordDigests(ctx context.Context, table string, docs copyDocs) iter.Seq2[k
 func recordDigest(ctx context.Context, table string, docs copyDocs, key string, trashedAt time.Time) (digest, error) {
 	h := sha256.New()
 	if trashedAt.IsZero() {
-		raw, err := docs.current(ctx, key)
+		raw, err := docs.Current(ctx, key)
 		if err != nil {
 			return digest{}, err
 		}
@@ -95,8 +95,8 @@ func recordDigest(ctx context.Context, table string, docs copyDocs, key string, 
 		sum := trashDigest(table, key, trashedAt)
 		h.Write(sum[:])
 	}
-	if docs.keepsVersions() {
-		versions, err := docs.versionList(ctx, key)
+	if docs.KeepsVersions() {
+		versions, err := docs.VersionList(ctx, key)
 		if err != nil {
 			return digest{}, err
 		}

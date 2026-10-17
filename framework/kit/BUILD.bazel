@@ -54,6 +54,7 @@ go_library(
         "setting_interface.go",
         "static.go",
         "store.go",
+        "subsystems.go",
         "telemetry.go",
         "topic.go",
         "transact.go",
@@ -63,6 +64,8 @@ go_library(
     importpath = "github.com/kitsunium/sdk/framework/kit",
     deps = [
         "//framework/internal/kit",
+        "//framework/internal/kit/plug",
+        "//framework/kit/store",
         "//framework/model",
         "//pkg/v1/clock",
         "//pkg/v1/data/sql",

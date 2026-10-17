@@ -10,10 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/health"
-	"github.com/kitsunium/sdk/pkg/v1/clock"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
@@ -40,35 +39,41 @@ type databaseRun struct {
 	url     DatabaseURLValue
 	urlFrom string
 	pool    *stdsql.DB
-	cfg     sql.Config
-	checker sql.Checker
 	// ready and checkedAt are its last check's; problem, the public text of
 	// its last failure.
 	ready     bool
 	checkedAt time.Time
 	problem   string
 	sets      []model.MigrationSet
-	// tm is the database's transaction manager, which its stores and kit's
-	// transactions run on; callTimeout bounds each store call
-	// (<name>-timeout); registry is kit's record of its tables there.
-	tm          sql.Transactor
+	// db is kit's scope on the database (plug.Database), which its stores
+	// and kit's transactions run on and its checks ask; callTimeout bounds
+	// each store call (<name>-timeout); registry is kit's record of its
+	// tables there.
+	db          plug.Database
 	callTimeout time.Duration
 	registry    *tableRegistry
 }
 
-// transactor is the database's transaction manager while it is open, nil
-// otherwise.
-func (r *databaseRun) transactor() sql.Transactor {
+// database is kit's scope on the database while it is open, nil otherwise.
+func (r *databaseRun) database() plug.Database {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.tm
+	return r.db
+}
+
+// handle sets what dst points at to the SDK's handle of its type, as the
+// store subsystem hands it on (plug.HandleProvider): false while the database is
+// not open, or for a handle it has none of.
+func (r *databaseRun) handle(dst any) bool {
+	h, ok := r.database().(plug.HandleProvider)
+	return ok && h.Handle(dst)
 }
 
 // open reports whether the database is open: its stores then run on it.
 func (r *databaseRun) open() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.state == model.DatabaseOpen && r.tm != nil
+	return r.state == model.DatabaseOpen && r.db != nil
 }
 
 // said is a failure of the database's transaction manager in kit's words:
@@ -151,13 +156,12 @@ func resolvedSetting[T SettingValue](a *App, s *SettingService[T]) T {
 	return s.def
 }
 
-// opened is a database's pool, open, with what it runs on.
+// opened is a database's pool, open, with kit's scope on it.
 type opened struct {
 	url  DatabaseURLValue
 	from string
 	pool *stdsql.DB
-	cfg  sql.Config
-	tm   sql.Transactor
+	db   plug.Database
 }
 
 // openDatabase reads the database's URL where the environment keeps it,
@@ -179,17 +183,12 @@ func (a *App) openDatabase(ctx context.Context, d *database) (*opened, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := a.tune(d, pool, &desc)
+	db, err := a.tune(d, pool, &desc)
 	if err != nil {
 		_ = pool.Close()
 		return nil, err
 	}
-	tm, err := sql.NewTransactor(cfg)
-	if err != nil {
-		_ = pool.Close()
-		return nil, dbFailure(CodeDatabaseConfig, "DATABASE_POOL", fmt.Sprintf("the pool of database %q cannot be set up: %s", d.name, errs.PublicOf(err)), a.dbFields(d, &desc)...)
-	}
-	return &opened{url: desc, from: from, pool: pool, cfg: cfg, tm: tm}, nil
+	return &opened{url: desc, from: from, pool: pool, db: db}, nil
 }
 
 // dbFields are a database's error fields: its name, its URL's variable and,
@@ -246,24 +245,24 @@ func (a *App) openPool(d *database, url secret.Value, desc *DatabaseURLValue) (*
 	return pool, nil
 }
 
-// tune applies d's tuning to its pool — the SDK refuses a pool policy it
-// cannot honour — and returns what its ports are built from.
-func (a *App) tune(d *database, pool *stdsql.DB, desc *DatabaseURLValue) (sql.Config, error) {
-	cfg := sql.Config{
-		DB: pool, Dialect: d.dialect(),
-		Pool: sql.PoolConfig{
-			MaxOpen: resolvedSetting(a, d.maxOpen), MaxIdle: resolvedSetting(a, d.maxIdle),
-			MaxLifetime: resolvedSetting(a, d.maxLifetime), MaxIdleTime: resolvedSetting(a, d.maxIdleTime),
-		},
-		// A database's budgets are the network's, in wall time: a test's
-		// manual clock would hold a check or a migration lock forever.
-		Clock:        clock.System,
+// tune has the store subsystem apply d's tuning to its pool — the SDK
+// refuses a pool policy it cannot honour — and returns kit's scope on it:
+// its transaction manager, its check, its migrations.
+func (a *App) tune(d *database, pool *stdsql.DB, desc *DatabaseURLValue) (plug.Database, error) {
+	stores := plug.Stores.Load()
+	if stores == nil || stores.Database == nil {
+		return nil, storesMissing()
+	}
+	db, err := stores.Database(plug.DatabaseConfig{
+		Name: d.name, DB: pool, Dialect: string(d.dialect()), Timeout: resolvedSetting(a, d.timeout),
+		MaxOpen: resolvedSetting(a, d.maxOpen), MaxIdle: resolvedSetting(a, d.maxIdle),
+		MaxLifetime: resolvedSetting(a, d.maxLifetime), MaxIdleTime: resolvedSetting(a, d.maxIdleTime),
 		CheckTimeout: resolvedSetting(a, d.checkTimeout),
+	})
+	if err != nil {
+		return nil, dbFailure(CodeDatabaseConfig, "DATABASE_POOL", fmt.Sprintf("the pool of database %q cannot be set up: %s", d.name, errs.PublicOf(err)), a.dbFields(d, desc)...)
 	}
-	if _, err := sql.NewChecker(cfg); err != nil {
-		return cfg, dbFailure(CodeDatabaseConfig, "DATABASE_POOL", fmt.Sprintf("the pool of database %q cannot be set up: %s", d.name, errs.PublicOf(err)), a.dbFields(d, desc)...)
-	}
-	return cfg, nil
+	return db, nil
 }
 
 // startDatabase brings a database up: opened, migrated — or its pending
@@ -315,17 +314,10 @@ func (a *App) bringUp(ctx context.Context, r *databaseRun, o *opened) error {
 	return err
 }
 
-// opened remembers the pool the run opened, its checker and its
-// transaction manager.
+// opened remembers the pool the run opened, and kit's scope on it.
 func (r *databaseRun) opened(o *opened, callTimeout time.Duration) {
-	// A checker that cannot be built leaves none: every check then reports
-	// the database as not open, which is what it is to kit.
-	checker, err := sql.NewChecker(o.cfg)
-	if err != nil {
-		checker = nil
-	}
 	r.mu.Lock()
-	r.url, r.urlFrom, r.pool, r.cfg, r.checker, r.tm, r.callTimeout = o.url, o.from, o.pool, o.cfg, checker, o.tm, callTimeout
+	r.url, r.urlFrom, r.pool, r.db, r.callTimeout = o.url, o.from, o.pool, o.db, callTimeout
 	r.mu.Unlock()
 }
 
@@ -351,7 +343,7 @@ func (r *databaseRun) failed(err error) {
 func (r *databaseRun) close() error {
 	r.mu.Lock()
 	pool := r.pool
-	r.pool, r.checker, r.tm, r.registry = nil, nil, nil, nil
+	r.pool, r.db, r.registry = nil, nil, nil
 	if r.state == model.DatabaseOpen {
 		r.state = model.DatabaseClosed
 	}
@@ -369,7 +361,8 @@ func (r *databaseRun) close() error {
 // SDK's verdict.
 func (a *App) checkDatabase(ctx context.Context, r *databaseRun) error {
 	r.mu.Lock()
-	state, checker, url := r.state, r.checker, r.url
+	state, url := r.state, r.url
+	checker, _ := r.db.(plug.Checker)
 	r.mu.Unlock()
 	if state == model.DatabaseUnset || state == model.DatabaseMemory {
 		return nil

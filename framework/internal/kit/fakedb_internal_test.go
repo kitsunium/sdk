@@ -228,7 +228,7 @@ func (f *FakeDB) URLs() []string {
 
 type fakeEngine struct{ f *FakeDB }
 
-func (e fakeEngine) Dialect() sql.Dialect { return e.f.dialect }
+func (e fakeEngine) Dialect() Dialect { return Dialect(e.f.dialect.String()) }
 
 func (e fakeEngine) Describe(v secret.Value) (DatabaseURLValue, error) {
 	raw := v.RevealString()

@@ -44,8 +44,10 @@ type storeCore struct {
 	readModel bool
 
 	mu sync.RWMutex
-	// eng is the engine the store runs on, nil while the app is not running.
+	// eng is the engine the store runs on, nil while the app is not running;
+	// on is the database it runs on, nil for the data directory or memory.
 	eng plug.StoreEngine
+	on  *databaseRun
 	// onWrite is told the key of every entity written, once it is stored,
 	// and onDelete the key of every entity deleted: a workflow over the store
 	// hears of what it did not write itself (watch).

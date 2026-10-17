@@ -333,7 +333,7 @@ Package kit — the ports the workflow engine reaches a store through.
 - [func MailAttempts\(n int\) MailerConfigurer](<#MailAttempts>)
 - [func MaxBody\(bytes int64\) EndpointConfigurer](<#MaxBody>)
 - [func MaxDeliveries\(n int\) DeliveryOption](<#MaxDeliveries>)
-- [func Migrations\(m ...sql.Migration\) interface{DatabaseConfigurer; ModuleConfigurer}](<#Migrations>)
+- [func Migrations\(m ...plug.MigrationValue\) interface{DatabaseConfigurer; ModuleConfigurer}](<#Migrations>)
 - [func MinLength\(n int\) PasswordConfigurer](<#MinLength>)
 - [func Mount\(m \*Module, opts ...MountConfigurer\) AppConfigurer](<#Mount>)
 - [func Name\(name string\) EndpointConfigurer](<#Name>)
@@ -446,6 +446,7 @@ Package kit — the ports the workflow engine reaches a store through.
 - [type DiagnosticsError](<#DiagnosticsError>)
   - [func \(\*DiagnosticsError\) Error\(\) string](<#DiagnosticsError.Error>)
   - [func \(\*DiagnosticsError\) Unwrap\(\) error](<#DiagnosticsError.Unwrap>)
+- [type Dialect](<#Dialect>)
 - [type Edit](<#Edit>)
 - [type EmptyValue](<#EmptyValue>)
 - [type EndpointConfigurer](<#EndpointConfigurer>)
@@ -453,7 +454,7 @@ Package kit — the ports the workflow engine reaches a store through.
   - [func \(\*EndpointService\) Call\(ctx context.Context, req Req\) \(Resp, error\)](<#EndpointService.Call>)
 - [type Engine](<#Engine>)
   - [func \(Engine\) Describe\(url secret.Value\) \(DatabaseURLValue, error\)](<#Engine.Describe>)
-  - [func \(Engine\) Dialect\(\) sql.Dialect](<#Engine.Dialect>)
+  - [func \(Engine\) Dialect\(\) Dialect](<#Engine.Dialect>)
   - [func \(Engine\) Open\(url secret.Value, current func\(context.Context\) \(secret.Value, error\)\) \(\*stdsql.DB, error\)](<#Engine.Open>)
 - [type Erasure](<#Erasure>)
 - [type Error](<#Error>)
@@ -1354,6 +1355,27 @@ const DefaultMaxBody int64 = 1048576
 
 DefaultMaxBody is the largest request body an endpoint reads, unless the endpoint says otherwise with [MaxBody](#MaxBody).
 
+<a name="DialectMySQL"></a>
+```go
+const DialectMySQL Dialect = "mysql"
+```
+
+DialectMySQL is MySQL or MariaDB.
+
+<a name="DialectPostgres"></a>
+```go
+const DialectPostgres Dialect = "postgres"
+```
+
+DialectPostgres is PostgreSQL.
+
+<a name="DialectSQLite"></a>
+```go
+const DialectSQLite Dialect = "sqlite"
+```
+
+DialectSQLite is SQLite.
+
 <a name="EnvDev"></a>
 ```go
 const EnvDev = "dev"
@@ -2043,10 +2065,10 @@ IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller 
 ## func [Migrations](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database.go>)
 
 ```go
-func Migrations(m ...sql.Migration) interface{DatabaseConfigurer; ModuleConfigurer}
+func Migrations(m ...plug.MigrationValue) interface{DatabaseConfigurer; ModuleConfigurer}
 ```
 
-Migrations are migrations, values of the SDK's sql.Migration, run when the database starts (\<name>-migrate: start) or by \`\<product> migrate up\`, kit's own first, each set under its own version table — and so its own lock. On MySQL a DDL statement commits by itself: write one per migration.
+Migrations are migrations — the SDK's sql.Migration, as the facade takes them —, run when the database starts (\<name>-migrate: start) or by \`\<product> migrate up\`, kit's own first, each set under its own version table — and so its own lock. On MySQL a DDL statement commits by itself: write one per migration.
 
 Given to [Database](#Database), they are the product's, under schema\_migrations. Given to [NewModule](#NewModule), they are the module's (ADR 0008), for the data it keeps outside kit's stores: run on the database that keeps the module, under \<module>\_migrations.
 
@@ -3287,6 +3309,15 @@ func (*DiagnosticsError) Unwrap() error
 
 Unwrap is what the refusal is, when kit has a code for it: with packages in Missing, an error carrying [CodeSubsystemMissing](#CodeSubsystemMissing) (ADR 0179 §6), which errs.HasCode reads through the refusal; nil otherwise.
 
+<a name="Dialect"></a>
+## type [Dialect](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database.go>)
+
+Dialect is the SQL an [Engine](#Engine) speaks: [DialectPostgres](#DialectPostgres), [DialectMySQL](#DialectMySQL) or [DialectSQLite](#DialectSQLite), kit's own names (ADR 0179 Q5) — the graph names the engine by it.
+
+```go
+type Dialect string
+```
+
 <a name="Edit"></a>
 ## type [Edit](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/revisions.go>)
 
@@ -3357,8 +3388,8 @@ type Engine interface {
 	// database, the TLS mode as written — for the graph and the logs: never
 	// a user, never a password.
 	Describe(url secret.Value) (DatabaseURLValue, error)
-	// Dialect is the SQL the SDK speaks to it.
-	Dialect() sql.Dialect
+	// Dialect is the SQL it speaks.
+	Dialect() Dialect
 	// Open opens the pool url names. Before each new connection it asks
 	// current for the URL as it is now.
 	Open(url secret.Value, current func(context.Context) (secret.Value, error)) (*stdsql.DB, error)
@@ -3378,10 +3409,10 @@ Describe says what url points at — the driver, host and port, the database, th
 ### func \(Engine\) [Dialect](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go>)
 
 ```go
-func (Engine) Dialect() sql.Dialect
+func (Engine) Dialect() Dialect
 ```
 
-Dialect is the SQL the SDK speaks to it.
+Dialect is the SQL it speaks.
 
 <a name="Engine.Open"></a>
 ### func \(Engine\) [Open](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go>)

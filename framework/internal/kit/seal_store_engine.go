@@ -3,12 +3,10 @@ package kit
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"maps"
 	"slices"
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
@@ -43,16 +41,11 @@ func (e *sealedEngine) List(ctx context.Context) ([]plug.DocumentValue, error) {
 	return out, nil
 }
 
-// entriesSource is an engine that says the keys of the records it lists as
-// they rest: the document store does. A sibling of the port.
-type entriesSource interface {
-	KeyedEntries(ctx context.Context, limit int) ([]docstore.Entry, error)
-}
-
 // resting are up to limit records as they rest, with their keys: the
-// engine's, or read from the members kit does not seal.
-func (e *sealedEngine) resting(ctx context.Context, limit int) ([]docstore.Entry, error) {
-	if k, ok := e.inner.(entriesSource); ok {
+// engine's (plug.EntrySource, the store subsystem's document store), or read
+// from the members kit does not seal.
+func (e *sealedEngine) resting(ctx context.Context, limit int) ([]plug.EntryValue, error) {
+	if k, ok := e.inner.(plug.EntrySource); ok {
 		return k.KeyedEntries(ctx, limit)
 	}
 	all, err := e.inner.List(ctx)
@@ -62,9 +55,9 @@ func (e *sealedEngine) resting(ctx context.Context, limit int) ([]docstore.Entry
 	if limit > 0 && len(all) > limit {
 		all = all[:limit]
 	}
-	out := make([]docstore.Entry, len(all))
+	out := make([]plug.EntryValue, len(all))
 	for i, d := range all {
-		out[i] = docstore.Entry{Key: e.docKey(d), JSON: d.JSON}
+		out[i] = plug.EntryValue{Key: e.docKey(d), JSON: d.JSON}
 	}
 	return out, nil
 }
@@ -139,10 +132,10 @@ func (e *sealedEngine) Write(ctx context.Context, d plug.DocumentValue, mode plu
 	var err error
 	for range writeAttempts {
 		err = e.replace(ctx, key, d)
-		if mode == plug.WriteReplace || !errors.Is(err, docstore.DocumentNotFound) {
+		if mode == plug.WriteReplace || !plug.Refused(err, plug.RefusalNotFound) {
 			return err
 		}
-		if err = e.insert(ctx, d, plug.WriteInsert); !errors.Is(err, docstore.DocumentExists) {
+		if err = e.insert(ctx, d, plug.WriteInsert); !plug.Refused(err, plug.RefusalExists) {
 			return err
 		}
 	}
@@ -236,7 +229,7 @@ func (e *sealedEngine) update(ctx context.Context, key string, fn func(d *plug.D
 // record back, sealed under it.
 func (e *sealedEngine) Delete(ctx context.Context, key string) error {
 	err := e.inner.Delete(ctx, key)
-	if (err != nil && !errors.Is(err, docstore.WriteUnconfirmed)) || !e.s.plan().sealsAny() {
+	if (err != nil && !plug.Refused(err, plug.RefusalUnconfirmed)) || !e.s.plan().sealsAny() {
 		return err
 	}
 	e.dropOwnKeyAfter(ctx, key)
@@ -276,7 +269,7 @@ func (e *sealedEngine) dropOwnKey(ctx context.Context, key string) error {
 		return err
 	}
 	defer release()
-	if _, err := e.inner.Get(ctx, key); !errors.Is(err, docstore.DocumentNotFound) {
+	if _, err := e.inner.Get(ctx, key); !plug.Refused(err, plug.RefusalNotFound) {
 		return nil // written again meanwhile: the key seals it
 	}
 	if e.inTrash(ctx, key) {

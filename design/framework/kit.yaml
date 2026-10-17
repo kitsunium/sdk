@@ -363,6 +363,27 @@ packages:
         doc: "EnvProduction is the default: no Studio, no source, no analysis."
         name: EnvProduction
         value: "\"production\""
+      - blockDoc: |-
+          The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+          the store subsystem maps onto the SDK's.
+        doc: DialectPostgres is PostgreSQL.
+        name: DialectPostgres
+        type: Dialect
+        value: "\"postgres\""
+      - blockDoc: |-
+          The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+          the store subsystem maps onto the SDK's.
+        doc: DialectMySQL is MySQL or MariaDB.
+        name: DialectMySQL
+        type: Dialect
+        value: "\"mysql\""
+      - blockDoc: |-
+          The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+          the store subsystem maps onto the SDK's.
+        doc: DialectSQLite is SQLite.
+        name: DialectSQLite
+        type: Dialect
+        value: "\"sqlite\""
       - doc: |-
           DefaultMaxBody is the largest request body an endpoint reads, unless the
           endpoint says otherwise with [MaxBody].
@@ -1097,7 +1118,8 @@ packages:
           - type: DatabaseConfigurer
         variadic: true
       - doc: |-
-          Migrations are migrations, values of the SDK's sql.Migration, run when
+          Migrations are migrations — the SDK's sql.Migration, as the facade takes
+          them —, run when
           the database starts (<name>-migrate: start) or by `<product> migrate up`,
           kit's own first, each set under its own version table — and so its own
           lock. On MySQL a DDL statement commits by itself: write one per migration.
@@ -1108,7 +1130,7 @@ packages:
           under <module>_migrations.
         in:
           - name: m
-            type: sql.Migration
+            type: plug.MigrationValue
         name: Migrations
         out:
           - type: interface{DatabaseConfigurer; ModuleConfigurer}
@@ -2426,8 +2448,8 @@ packages:
       logger: github.com/kitsunium/sdk/pkg/v1/observe/logger
       mail: github.com/kitsunium/sdk/pkg/v1/app/mail
       model: github.com/kitsunium/sdk/framework/model
+      plug: github.com/kitsunium/sdk/framework/internal/kit/plug
       secret: github.com/kitsunium/sdk/pkg/v1/security/secret
-      sql: github.com/kitsunium/sdk/pkg/v1/data/sql
       stdsql: database/sql
     path: github.com/kitsunium/sdk/framework/internal/kit
     types:
@@ -2869,16 +2891,22 @@ packages:
               name: Networked
               type: bool
       - doc: |-
+          Dialect is the SQL an [Engine] speaks: [DialectPostgres], [DialectMySQL] or
+          [DialectSQLite], kit's own names (ADR 0179 Q5) — the graph names the
+          engine by it.
+        name: Dialect
+        underlying: string
+      - doc: |-
           Engine is an SQL engine a database runs on. An engine module returns one —
           github.com/kitsunium/sdk/framework/connectors/postgres, …/mysql, …/sqlite —;
           kit calls it when the database starts. Like an SDK port, it grows by
           sibling interfaces, never by a method.
         interface:
           methods:
-            - doc: Dialect is the SQL the SDK speaks to it.
+            - doc: Dialect is the SQL it speaks.
               name: Dialect
               out:
-                - type: sql.Dialect
+                - type: Dialect
             - doc: |-
                 Describe says what url points at — the driver, host and port, the
                 database, the TLS mode as written — for the graph and the logs: never
@@ -5039,24 +5067,176 @@ packages:
         name: WriteReplace
         type: WriteMode
         value: "2"
+      - blockDoc: The kinds of refusal.
+        doc: RefusalNone is no refusal kit words.
+        name: RefusalNone
+        type: Refusal
+        value: "0"
+      - blockDoc: The kinds of refusal.
+        doc: |-
+          RefusalNotFound is no document under the key, or under the index's
+          key.
+        name: RefusalNotFound
+        type: Refusal
+        value: "1"
+      - blockDoc: The kinds of refusal.
+        doc: RefusalExists is a document already under the key an insertion names.
+        name: RefusalExists
+        type: Refusal
+        value: "2"
+      - blockDoc: The kinds of refusal.
+        doc: RefusalUniqueTaken is another document under a unique index's key.
+        name: RefusalUniqueTaken
+        type: Refusal
+        value: "3"
+      - blockDoc: The kinds of refusal.
+        doc: RefusalKeyEmpty is a document whose key is empty.
+        name: RefusalKeyEmpty
+        type: Refusal
+        value: "4"
+      - blockDoc: The kinds of refusal.
+        doc: RefusalKeyChanged is an update that changes the document's key.
+        name: RefusalKeyChanged
+        type: Refusal
+        value: "5"
+      - blockDoc: The kinds of refusal.
+        doc: RefusalIndexUnknown is an index the store does not declare.
+        name: RefusalIndexUnknown
+        type: Refusal
+        value: "6"
+      - blockDoc: The kinds of refusal.
+        doc: RefusalIndexNotUnique is a lookup on an index that is not unique.
+        name: RefusalIndexNotUnique
+        type: Refusal
+        value: "7"
+      - blockDoc: The kinds of refusal.
+        doc: RefusalIndexBroken is stored documents that break a unique index.
+        name: RefusalIndexBroken
+        type: Refusal
+        value: "8"
+      - blockDoc: The kinds of refusal.
+        doc: RefusalUndecodable is a record that does not decode into its type.
+        name: RefusalUndecodable
+        type: Refusal
+        value: "9"
+      - blockDoc: The kinds of refusal.
+        doc: RefusalUnencodable is an entity that does not encode.
+        name: RefusalUnencodable
+        type: Refusal
+        value: "10"
+      - blockDoc: The kinds of refusal.
+        doc: RefusalPersist is a write the store could not keep.
+        name: RefusalPersist
+        type: Refusal
+        value: "11"
+      - blockDoc: The kinds of refusal.
+        doc: |-
+          RefusalLoad is a store that could not be loaded; its "problem" field
+          says why.
+        name: RefusalLoad
+        type: Refusal
+        value: "12"
+      - blockDoc: The kinds of refusal.
+        doc: RefusalClosed is a call on a closed engine.
+        name: RefusalClosed
+        type: Refusal
+        value: "13"
+      - blockDoc: The kinds of refusal.
+        doc: |-
+          RefusalUnconfirmed is a write that stands but whose survival across a
+          power loss is in doubt.
+        name: RefusalUnconfirmed
+        type: Refusal
+        value: "14"
+      - blockDoc: The kinds of refusal.
+        doc: |-
+          RefusalVersionsNotKept is a call on the versions of a store that keeps
+          none.
+        name: RefusalVersionsNotKept
+        type: Refusal
+        value: "15"
+      - blockDoc: The kinds of refusal.
+        doc: |-
+          RefusalVersionsRewrite is a rewrite of versions that adds or
+          renumbers one.
+        name: RefusalVersionsRewrite
+        type: Refusal
+        value: "16"
+      - blockDoc: The kinds of refusal.
+        doc: RefusalNotTrashed is no record in the trash under the key.
+        name: RefusalNotTrashed
+        type: Refusal
+        value: "17"
+      - blockDoc: The kinds of refusal.
+        doc: |-
+          RefusalKeyTooLong is a key longer than a database's key columns hold;
+          its "max" field says how long they hold.
+        name: RefusalKeyTooLong
+        type: Refusal
+        value: "18"
+      - blockDoc: The kinds of refusal.
+        doc: RefusalStatement is a statement the database did not complete.
+        name: RefusalStatement
+        type: Refusal
+        value: "19"
+      - blockDoc: The kinds of refusal.
+        doc: |-
+          RefusalTxClosed is a call with the context of a transaction that
+          ended.
+        name: RefusalTxClosed
+        type: Refusal
+        value: "20"
+      - blockDoc: The kinds of refusal.
+        doc: |-
+          RefusalTxFailed is a transaction or a savepoint the database would
+          not open, commit or roll back.
+        name: RefusalTxFailed
+        type: Refusal
+        value: "21"
+      - blockDoc: The kinds of refusal.
+        doc: |-
+          RefusalOutOfOrder is a migration older than one already applied; its
+          "applied" field names the newer.
+        name: RefusalOutOfOrder
+        type: Refusal
+        value: "22"
     doc: |-
       Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the
       frontends' file server and the process sampler of the runtime graph
       (framework/kit/server), the Studio's event stream and its profiler
-      (framework/kit/studio). kit reads what they
-      registered through the hooks declared here, and imports none of the SDK
-      packages behind them: a product that does not import a subsystem neither
-      links nor initialises its packages.
+      (framework/kit/studio), the stores and the databases (framework/kit/store).
+      kit reads what they registered through the hooks declared here, and imports
+      none of the SDK packages behind them: a product that does not import a
+      subsystem neither links nor initialises its packages.
 
       It is also the contract between kit's core and the subsystems ADR 0179
       takes out of it, as database/sql/driver is between database/sql and a
-      driver: the store subsystem's engine over documents, its siblings and
-      kit's scope on a database ([Stores]), which framework/kit/store will set.
-      Until it exists the core runs the stores itself; the start refuses a
-      declaration whose subsystem the program does not link.
+      driver: the store subsystem's engine over documents, its siblings, kit's
+      scope on a database and its migrations ([Stores]), which framework/kit/store
+      sets; the refusals an engine says in kit's terms ([Refusal]); and what kit's
+      transactions offer an engine that takes part in them ([Transaction]).
 
       The package imports the standard library and the framework's model only,
       so that kit and every subsystem can import it.
+    functions:
+      - doc: Refuse is err as a refusal of kind.
+        in:
+          - name: kind
+            type: Refusal
+          - name: err
+            type: error
+        name: Refuse
+        out:
+          - type: error
+      - doc: Refused reports whether err, or an error it wraps, is a refusal of kind.
+        in:
+          - name: err
+            type: error
+          - name: kind
+            type: Refusal
+        name: Refused
+        out:
+          - type: bool
     imports:
       atomic: sync/atomic
       fs: io/fs
@@ -5175,7 +5355,8 @@ packages:
         name: EventStream
       - doc: |-
           StoreDriverConfig is what framework/kit/store plugs into kit: how a
-          store's engine opens, and how kit opens its scope on a database.
+          store's engine opens, how kit opens its scope on a database, and the
+          migration that makes one of kit's tables.
         name: StoreDriverConfig
         struct:
           fields:
@@ -5187,6 +5368,11 @@ packages:
             - doc: Database opens kit's scope on one database's pool.
               name: Database
               type: func(cfg DatabaseConfig) (Database, error)
+            - doc: |-
+                TableMigration is the migration that makes the table t on a database
+                of the dialect named, at version.
+              name: TableMigration
+              type: func(dialect string, t TableSpec, version uint64) (MigrationValue, error)
       - doc: |-
           DocumentValue is a record as a store's engine holds it (ADR 0179 §2):
           its JSON as it rests, byte for byte what kit encodes, and the entity
@@ -5203,6 +5389,18 @@ packages:
                 the store's typed facade asserts it to its type.
               name: Value
               type: any
+      - doc: |-
+          EntryValue is a record as it rests, with its key: what an engine lists
+          for a reader that cannot key a record itself.
+        name: EntryValue
+        struct:
+          fields:
+            - doc: Key is the record's key.
+              name: Key
+              type: string
+            - doc: JSON is the record as it rests.
+              name: JSON
+              type: json.RawMessage
       - doc: WriteMode says what a write expects to find under the document's key.
         name: WriteMode
         underlying: int
@@ -5223,18 +5421,25 @@ packages:
               type: func(d DocumentValue) []string
       - doc: |-
           StoreConfig is what kit asks of one store's engine: the store, its key and
-          its indexes over documents, where it rests and what it keeps.
+          its indexes over documents, where it rests and what it keeps, and how its
+          writes take part in kit's transactions.
         name: StoreConfig
         struct:
           fields:
-            - doc: Name is the store's, as its files and its table name it.
+            - doc: Name is the store's, as a log line and a rollback name it.
               name: Name
               type: string
             - doc: |-
                 Key is a document's key: the product's key function on its type,
-                wrapped once at the declaration.
+                wrapped once at the declaration. It reads the document's Value, which
+                the engine decodes first unless KeyAtRest gives the key.
               name: Key
               type: func(d DocumentValue) string
+            - doc: |-
+                KeyAtRest, when set, gives the key of a record as it rests, without
+                decoding it; false when it cannot.
+              name: KeyAtRest
+              type: func(raw json.RawMessage) (string, bool)
             - doc: |-
                 Decode is the entity a document's JSON holds, which the engine keeps
                 as the document's Value.
@@ -5252,9 +5457,25 @@ packages:
             - doc: Path is the store's snapshot in Data.
               name: Path
               type: string
-            - doc: Database keeps the store, nil when the data directory or memory does.
+            - doc: |-
+                Database keeps the store, nil when the data directory or memory does:
+                a scope the store subsystem's Database opened.
               name: Database
               type: Database
+            - doc: Table is the store's table on Database.
+              name: Table
+              type: string
+            - doc: |-
+                IndexKey is the key a table's index keys are hashed under, nil for
+                none: an index key reaches the table as its keyed hash.
+              name: IndexKey
+              type: func(index, key string) []byte
+            - doc: |-
+                Call is the context one call of the engine on Database runs with: on
+                the transaction ctx carries for it, else on the pool, within the
+                database's timeout; done ends it.
+              name: Call
+              type: func(ctx context.Context, write bool) (call context.Context, done func(), err error)
             - doc: |-
                 Versions is how many former versions of each record the engine keeps,
                 none when zero; Clock stamps them.
@@ -5265,12 +5486,34 @@ packages:
               type: func() time.Time
             - doc: |-
                 Held reports whether a record's versions are held, and no write may
-                prune them.
+                prune them: asked with the write's context, on a database inside its
+                transaction.
               name: Held
-              type: func(key string) bool
+              type: func(ctx context.Context, key string) bool
+            - doc: Stamp is what a write under ctx says about the version it makes.
+              name: Stamp
+              type: func(ctx context.Context) StampValue
+            - doc: |-
+                Transaction is kit's transaction, which the engine's writes take part
+                in.
+              name: Transaction
+              type: Transaction
+      - doc: |-
+          StampValue is what a write says about the version it makes: who made it
+          and which command, kept with the version; and whether it changes the
+          document in place, without a version of its own.
+        name: StampValue
+        struct:
+          fields:
+            - doc: Meta is kept with the version the write makes.
+              name: Meta
+              type: map[string]string
+            - doc: InPlace makes the write change the document without making a version.
+              name: InPlace
+              type: bool
       - doc: |-
           DatabaseConfig is one database a product declares, as kit opened it: its
-          pool, its dialect and the timeout of each call.
+          pool, its dialect, its tuning and the timeout of each call.
         name: DatabaseConfig
         struct:
           fields:
@@ -5288,11 +5531,110 @@ packages:
             - doc: Timeout bounds each call kit makes on the database.
               name: Timeout
               type: time.Duration
+            - doc: MaxOpen and MaxIdle bound the pool's connections.
+              name: MaxOpen
+            - doc: MaxOpen and MaxIdle bound the pool's connections.
+              name: MaxIdle
+              type: int
+            - doc: MaxLifetime and MaxIdleTime bound a connection's life.
+              name: MaxLifetime
+            - doc: MaxLifetime and MaxIdleTime bound a connection's life.
+              name: MaxIdleTime
+              type: time.Duration
+            - doc: CheckTimeout bounds a check of the database.
+              name: CheckTimeout
+              type: time.Duration
+      - doc: |-
+          TableSpec is one of kit's tables on a database, as its migration makes it:
+          a store's, a store's versions beside the store's table VersionsOf, or a
+          consumer's queue.
+        name: TableSpec
+        struct:
+          fields:
+            - doc: Name is the table's.
+              name: Name
+              type: string
+            - doc: |-
+                VersionsOf is, for a store's versions, the store's table, from which
+                the versions' table is named.
+              name: VersionsOf
+              type: string
+            - doc: "Queue marks a consumer's queue: the SQL broker's one table."
+              name: Queue
+              type: bool
+      - doc: |-
+          MigrationValue is one versioned change of a database's schema and its
+          reversal, as kit's migrations are written: the SDK's own, on the standard
+          library's types.
+        name: MigrationValue
+        struct:
+          fields:
+            - doc: "Version orders the migration in its set: non-zero and unique."
+              name: Version
+              type: uint64
+            - doc: Name labels it in the version table.
+              name: Name
+              type: string
+            - doc: Up applies the change.
+              name: Up
+              type: Step
+            - doc: Down reverses it.
+              name: Down
+              type: Step
+      - doc: Step is one direction of a migration, run on ex.
+        name: Step
+        underlying: func(ctx context.Context, ex Executor) error
+      - doc: |-
+          VersionValue is one version of a record: its number, when the write
+          that made it ran, what that write said about it, and the record as it
+          held it.
+        name: VersionValue
+        struct:
+          fields:
+            - doc: Number counts a record's versions from 1.
+              name: Number
+              type: uint64
+            - doc: At is when the write that made the version ran, in UTC.
+              name: At
+              type: time.Time
+            - doc: "Meta is what the write said about it: who made it, which command."
+              name: Meta
+              type: map[string]string
+            - doc: JSON is the record as the version holds it.
+              name: JSON
+              type: json.RawMessage
+      - doc: |-
+          VersionWeightValue is what a store keeps beyond the records it holds:
+          its former versions and its trash, counted and weighed.
+        name: VersionWeightValue
+        struct:
+          fields:
+            - doc: Former is how many former versions the store keeps.
+              name: Former
+              type: int
+            - doc: Trashed is how many records are in the trash.
+              name: Trashed
+              type: int
+            - doc: Bytes is what the former versions and the trashed records weigh.
+              name: Bytes
+              type: int64
+      - doc: |-
+          TombstoneValue is one record in a store's trash: its key, and when it was
+          trashed.
+        name: TombstoneValue
+        struct:
+          fields:
+            - doc: Key is the trashed record's key.
+              name: Key
+              type: string
+            - doc: At is when the record was trashed, in UTC.
+              name: At
+              type: time.Time
       - doc: |-
           Database is kit's scope on one database (ADR 0179 §2): the transactions
           kit.Transact opens on it, their savepoints, and the functions held until
           their end. The core knows a database only through it; the store package
-          implements it over the SDK's sql.
+          implements it over the SDK's sql. It grows by the siblings below.
         interface:
           methods:
             - doc: |-
@@ -5342,11 +5684,179 @@ packages:
                 - type: bool
         name: Database
       - doc: |-
+          Checker is a Database that says whether it answers. A sibling of
+          [Database].
+        interface:
+          methods:
+            - doc: Check asks the database whether it answers, within its check timeout.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Check
+              out:
+                - type: error
+        name: Checker
+      - doc: |-
+          MigratorProvider is a Database that runs a set of migrations under a version
+          table of its own, and so a lock of its own. A sibling of [Database].
+        interface:
+          methods:
+            - doc: Migrator is the set ms, under the version table table.
+              in:
+                - name: table
+                  type: string
+                - name: ms
+                  type: "[]MigrationValue"
+              name: Migrator
+              out:
+                - type: Migrator
+                - type: error
+        name: MigratorProvider
+      - doc: Migrator is one set of migrations on a database.
+        interface:
+          methods:
+            - doc: Plan is the set's pending migrations, oldest first, applying nothing.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Plan
+              out:
+                - type: "[]MigrationValue"
+                - type: error
+            - doc: Up applies every pending migration, in order.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Up
+              out:
+                - type: error
+            - doc: Down reverses the applied migrations above version, newest first.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: version
+                  type: uint64
+              name: Down
+              out:
+                - type: error
+        name: Migrator
+      - doc: |-
+          Executor is what a migration's step runs its statements on: the
+          transaction its migration runs in.
+        interface:
+          methods:
+            - doc: ExecContext runs a statement that returns no rows.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: query
+                  type: string
+                - name: args
+                  type: any
+              name: ExecContext
+              out:
+                - type: sql.Result
+                - type: error
+              variadic: true
+            - doc: QueryContext runs a query that returns rows.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: query
+                  type: string
+                - name: args
+                  type: any
+              name: QueryContext
+              out:
+                - type: "*sql.Rows"
+                - type: error
+              variadic: true
+            - doc: QueryRowContext runs a query that returns at most one row.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: query
+                  type: string
+                - name: args
+                  type: any
+              name: QueryRowContext
+              out:
+                - type: "*sql.Row"
+              variadic: true
+        name: Executor
+      - doc: |-
+          HandleProvider is a Database that hands one of the SDK's own handles on: the
+          value dst points at — its transaction manager, its dialect — set, and
+          true; false for a handle it has none of. It serves the subsystems still in
+          kit's core that take the SDK's types (the SQL broker of a queue, the
+          spool of a mailer) until they leave it (ADR 0179, steps 4 and 6), and
+          the core never names the type it asks for. A sibling of [Database].
+        interface:
+          methods:
+            - doc: Handle sets what dst points at to the SDK's handle of its type.
+              in:
+                - name: dst
+                  type: any
+              name: Handle
+              out:
+                - type: bool
+        name: HandleProvider
+      - doc: |-
+          Transaction is kit's transaction as a store's engine takes part in it
+          (ADR 0139, ADR 0178): the core implements it, an engine calls it with its
+          caller's context.
+        interface:
+          methods:
+            - doc: |-
+                Local reports whether ctx runs in a transaction that holds the data's
+                writer turn: a write in the data directory or in memory then records
+                what it replaces.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Local
+              out:
+                - type: bool
+            - doc: |-
+                Undo keeps restore, which a rollback of the transaction ctx carries
+                runs; nothing outside one. store names the store in a log line.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: store
+                  type: string
+                - name: restore
+                  type: func(ctx context.Context) error
+              name: Undo
+            - doc: |-
+                AtCommit holds fn until the transaction ctx carries commits, and
+                reports whether it did: false outside one, where the caller runs it
+                now.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: fn
+                  type: func()
+              name: AtCommit
+              out:
+                - type: bool
+            - doc: |-
+                Retell keeps fn, which announces a write on a database again when the
+                transaction ctx carries rolls it back.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: fn
+                  type: func()
+              name: Retell
+        name: Transaction
+      - doc: |-
           StoreEngine is what a store runs on, over documents (ADR 0179 §2): the
-          non-generic engine under Store[T]. Its refusals are kit's: the engine
-          translates the SDK's before they reach the core. Every call takes the
-          caller's context, which carries the transaction the call joins. It grows by
-          the sibling interfaces below, never by a method (the SDK's ADR 0039).
+          non-generic engine under Store[T]. Its refusals are kit's ([Refusal]): the
+          engine translates the SDK's before they reach the core. Every call takes
+          the caller's context, which carries the transaction the call joins. It
+          grows by the sibling interfaces below, never by a method (the SDK's ADR
+          0039).
         interface:
           methods:
             - doc: Get returns the document under key.
@@ -5382,7 +5892,6 @@ packages:
                 - name: ctx
                   type: context.Context
                 - name: index
-                  type: string
                 - name: key
                   type: string
               name: Lookup
@@ -5394,7 +5903,6 @@ packages:
                 - name: ctx
                   type: context.Context
                 - name: index
-                  type: string
                 - name: key
                   type: string
               name: Find
@@ -5460,7 +5968,6 @@ packages:
                 and deleted, once the write stands.
               in:
                 - name: onWrite
-                  type: func(key string)
                 - name: onDelete
                   type: func(key string)
               name: Watch
@@ -5498,24 +6005,34 @@ packages:
                 - type: iter.Seq2[string, error]
         name: Keyser
       - doc: |-
-          VersionValue is one version of a record: its number, when the write
-          that made it ran, what that write said about it, and the record as it
-          held it.
-        name: VersionValue
-        struct:
-          fields:
-            - doc: Number counts a record's versions from 1.
-              name: Number
-              type: uint64
-            - doc: At is when the write that made the version ran, in UTC.
-              name: At
-              type: time.Time
-            - doc: "Meta is what the write said about it: who made it, which command."
-              name: Meta
-              type: map[string]string
-            - doc: JSON is the record as the version holds it.
-              name: JSON
-              type: json.RawMessage
+          EntrySource is an engine that lists its records as they rest with their keys:
+          what a sealing store reads its records by. A sibling of [StoreEngine].
+        interface:
+          methods:
+            - doc: KeyedEntries returns up to limit records as they rest, in key order.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: limit
+                  type: int
+              name: KeyedEntries
+              out:
+                - type: "[]EntryValue"
+                - type: error
+        name: EntrySource
+      - doc: |-
+          Reindexer is an engine on a database that files its index rows again. A
+          sibling of [StoreEngine].
+        interface:
+          methods:
+            - doc: Reindex files every record's index rows again.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Reindex
+              out:
+                - type: error
+        name: Reindexer
       - doc: |-
           VersionKeeper is an engine that keeps its records' versions. A sibling of
           [StoreEngine].
@@ -5549,21 +6066,6 @@ packages:
                 - type: error
         name: VersionKeeper
       - doc: |-
-          VersionWeightValue is what a store keeps beyond the records it holds:
-          its former versions and its trash, counted and weighed.
-        name: VersionWeightValue
-        struct:
-          fields:
-            - doc: Former is how many former versions the store keeps.
-              name: Former
-              type: int
-            - doc: Trashed is how many records are in the trash.
-              name: Trashed
-              type: int
-            - doc: Bytes is what the former versions and the trashed records weigh.
-              name: Bytes
-              type: int64
-      - doc: |-
           VersionWeighter is an engine that says what its records' versions weigh.
           A sibling of [StoreEngine].
         interface:
@@ -5577,18 +6079,6 @@ packages:
                 - type: VersionWeightValue
                 - type: error
         name: VersionWeighter
-      - doc: |-
-          TombstoneValue is one record in a store's trash: its key, and when it was
-          trashed.
-        name: TombstoneValue
-        struct:
-          fields:
-            - doc: Key is the trashed record's key.
-              name: Key
-              type: string
-            - doc: At is when the record was trashed, in UTC.
-              name: At
-              type: time.Time
       - doc: Trasher is an engine that keeps a trash. A sibling of [StoreEngine].
         interface:
           methods:
@@ -5632,6 +6122,125 @@ packages:
                 - type: "[]TombstoneValue"
                 - type: error
         name: Trasher
+      - doc: |-
+          DocumentSource is an engine that says the document store it runs on: itself,
+          or the one what it wraps runs on. A data copy reads and writes a store
+          through it (ADR 0178 C7). A sibling of [StoreEngine].
+        interface:
+          methods:
+            - doc: |-
+                Documents is the document store the engine runs on, and whether there
+                is one.
+              name: Documents
+              out:
+                - type: Documents
+                - type: bool
+        name: DocumentSource
+      - doc: Documents is a store's documents as they rest, as a data copy reads them.
+        interface:
+          methods:
+            - doc: KeyList yields every key the store holds, in key order.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: KeyList
+              out:
+                - type: iter.Seq2[string, error]
+            - doc: |-
+                TombstoneList is the trash, in key order: none when the store keeps
+                no versions.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: TombstoneList
+              out:
+                - type: "[]TombstoneValue"
+                - type: error
+            - doc: VersionList is the versions of the document key, newest first.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: VersionList
+              out:
+                - type: "[]VersionValue"
+                - type: error
+            - doc: Current is the document key as the store keeps it.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: Current
+              out:
+                - type: json.RawMessage
+                - type: error
+            - doc: KeepsVersions reports whether the store keeps versions.
+              name: KeepsVersions
+              out:
+                - type: bool
+        name: Documents
+      - doc: |-
+          DocumentSink is a store's documents on the database a data copy writes. A
+          sibling of [Documents].
+        interface:
+          methods:
+            - doc: |-
+                PutDocument writes the document key with its versions and its trash
+                as they are given.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+                - name: versions
+                  type: "[]VersionValue"
+                - name: trashedAt
+                  type: time.Time
+              name: PutDocument
+              out:
+                - type: error
+            - doc: |-
+                InsertRaw writes a document of a store that keeps no versions, as it
+                rests.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: raw
+                  type: json.RawMessage
+              name: InsertRaw
+              out:
+                - type: error
+        name: DocumentSink
+      - doc: |-
+          Refusal is a kind of refusal of a store's engine or a database, as kit
+          words it.
+        name: Refusal
+        underlying: uint8
+      - doc: |-
+          RefusalError is an engine's refusal of one kind: the error it met, and
+          the kind kit words it by.
+        methods:
+          - doc: Error is what the engine met's.
+            name: Error
+            out:
+              - type: string
+            recv: pointer
+          - doc: Unwrap is what the engine met.
+            name: Unwrap
+            out:
+              - type: error
+            recv: pointer
+        name: RefusalError
+        struct:
+          fields:
+            - doc: Err is what the engine met.
+              name: Err
+              type: error
+            - doc: Kind is how kit words it.
+              name: Kind
+              type: Refusal
     variables:
       - doc: |-
           NewHTTPServer builds the HTTP engine an app in the server profile
@@ -5661,10 +6270,9 @@ packages:
         name: StudioProfiler
         type: atomic.Pointer[ProfilerConfig]
       - doc: |-
-          Stores is the store subsystem: the engines kit's stores run on and kit's
-          scope on a database; nil until framework/kit/store is imported. Until
-          that package exists (ADR 0179, step 3) the core runs the stores itself
-          and nothing sets it; once it does, a product that declares a store or a
+          Stores is the store subsystem: the engines kit's stores run on, kit's
+          scope on a database and the migrations of kit's tables; nil until
+          framework/kit/store is imported. A product that declares a store or a
           database without it is refused at the start (ADR 0179 §6).
         name: Stores
         type: atomic.Pointer[StoreDriverConfig]
@@ -5683,6 +6291,22 @@ packages:
           sampler into kit.
         name: Enable
     path: github.com/kitsunium/sdk/framework/internal/kit/serverkit
+  - doc: |-
+      Package storekit is what framework/kit/store plugs into kit: the engines
+      kit's stores run on — the SDK's document store in memory, in the data
+      directory and over SQL —, kit's scope on a database — the SDK's
+      transaction manager, its check and its migrator — and the migrations of
+      kit's tables (ADR 0179 §1). kit's core imports neither the SDK's docstore
+      nor its sql: it reaches them through plug, and a product that declares no
+      store links none of them.
+
+      Package storekit — the compile-time proof that the engines are kit's.
+    functions:
+      - doc: |-
+          Enable plugs the stores' engines, kit's scope on a database and the
+          migrations of kit's tables into kit.
+        name: Enable
+    path: github.com/kitsunium/sdk/framework/internal/kit/storekit
   - doc: |-
       Package studiokit — the Studio's live events, as a Server-Sent Events
       stream.
@@ -5817,6 +6441,12 @@ packages:
       - doc: AppOption configures an app. Options win over the environment.
         name: AppOption
         target: ikit.AppConfigurer
+      - doc: |-
+          Dialect is the SQL an [Engine] speaks: [DialectPostgres], [DialectMySQL] or
+          [DialectSQLite], kit's own names (ADR 0179 Q5) — the graph names the
+          engine by it.
+        name: Dialect
+        target: ikit.Dialect
       - doc: |-
           DatabaseURL is what a database's URL points at, as its engine describes it
           for the graph, the Studio, the logs and every error: never a user, never a
@@ -6309,6 +6939,27 @@ packages:
         name: EnvProduction
         type: string
         value: "\"production\""
+      - blockDoc: |-
+          The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+          the store subsystem maps onto the SDK's.
+        doc: DialectPostgres is PostgreSQL.
+        name: DialectPostgres
+        type: Dialect
+        value: "\"postgres\""
+      - blockDoc: |-
+          The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+          the store subsystem maps onto the SDK's.
+        doc: DialectMySQL is MySQL or MariaDB.
+        name: DialectMySQL
+        type: Dialect
+        value: "\"mysql\""
+      - blockDoc: |-
+          The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+          the store subsystem maps onto the SDK's.
+        doc: DialectSQLite is SQLite.
+        name: DialectSQLite
+        type: Dialect
+        value: "\"sqlite\""
       - doc: |-
           DefaultMaxBody is the largest request body an endpoint reads, unless the
           endpoint says otherwise with [MaxBody].

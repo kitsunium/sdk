@@ -486,14 +486,18 @@ func (m *Mailer) start(ctx context.Context, a *App) error {
 		SendTimeout:  mailSendTimeout,
 		PollInterval: pollInterval,
 	}
-	db, broker, deferrer, err := m.openOutbox(ctx, a)
+	db, broker, err := m.openOutbox(ctx, a)
 	switch {
 	case err != nil:
 		return failure(CodeMailQueue, "OUTBOX_OPEN", "a mailer's outbox cannot be opened", err, errs.String("mailer", m.id))
 	case broker != nil:
 		// On the database that keeps the mailer's service, sealed: the
-		// broker's policy bounds a mail.
-		cfg.Broker, cfg.Deferrer = broker, deferrer
+		// broker's policy bounds a mail. The database's transaction manager,
+		// a Deferrer that is an Aborter too — the SDK's is both —, as the
+		// store subsystem hands it on; none otherwise, and the spool then
+		// tells the mailbox when Send returns.
+		cfg.Broker = broker
+		db.handle(&cfg.Deferrer)
 	default:
 		cfg.MaxMessageBytes = maxMailBytes
 		if a.dataDir != "" {

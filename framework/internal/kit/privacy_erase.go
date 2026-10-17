@@ -8,7 +8,6 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -260,7 +259,7 @@ func (s *storeCore) sealedRefs(ctx context.Context, a *App, key string) ([]strin
 	}
 	refs, err := se.refsAt(ctx, key)
 	switch {
-	case errors.Is(err, docstore.DocumentNotFound):
+	case plug.Refused(err, plug.RefusalNotFound):
 		return nil, nil
 	case err != nil:
 		return nil, s.said(err, key, "")
@@ -288,7 +287,7 @@ func (s *storeCore) moveOwn(ctx context.Context, a *App, key string) error {
 		v, err = s.valueOf(d)
 	}
 	switch {
-	case errors.Is(err, docstore.DocumentNotFound):
+	case plug.Refused(err, plug.RefusalNotFound):
 		return nil
 	case err != nil:
 		return s.said(err, key, "")

@@ -14,7 +14,6 @@ import (
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/statemachine"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
@@ -145,8 +144,8 @@ func (s *storeCore) writeTransition(ctx context.Context, eng plug.StoreEngine, v
 // taken, or an entity gone, is stored false, not an error.
 func transitionStored(mode plug.WriteMode, raw, err error) (bool, error) {
 	switch {
-	case mode == plug.WriteInsert && errors.Is(raw, docstore.DocumentExists),
-		mode == plug.WriteReplace && errors.Is(raw, docstore.DocumentNotFound):
+	case mode == plug.WriteInsert && plug.Refused(raw, plug.RefusalExists),
+		mode == plug.WriteReplace && plug.Refused(raw, plug.RefusalNotFound):
 		return false, nil
 	case err != nil:
 		return false, err
@@ -160,7 +159,7 @@ func transitionStored(mode plug.WriteMode, raw, err error) (bool, error) {
 // OnEnter hooks wrote and its record commit together.
 type sqlJournal[E any, S comparable] struct {
 	w   *WorkflowService[E, S]
-	eng *sqlEngine
+	eng plug.StoreEngine
 }
 
 // Load reads every record of the workflow's journal.
@@ -197,7 +196,7 @@ func (j *sqlJournal[E, S]) Save(ctx context.Context, records ...statemachine.Rec
 // Delete removes the records of keys; a record already gone is no error.
 func (j *sqlJournal[E, S]) Delete(ctx context.Context, keys ...string) error {
 	for _, key := range keys {
-		if err := j.eng.Delete(ctx, key); err != nil && !errors.Is(err, docstore.DocumentNotFound) {
+		if err := j.eng.Delete(ctx, key); err != nil && !plug.Refused(err, plug.RefusalNotFound) {
 			return err
 		}
 	}

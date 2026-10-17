@@ -66,11 +66,11 @@ func TestKeepsPlacesAModule(t *testing.T) {
 func TestAModulesMigrationsRunOnItsDatabase(t *testing.T) {
 	needsFileStore(t)
 	withDatabases(t, "DATABASE", "ARCHIVE")
-	n := newNotebook(kit.Migrations(noteMigrations...))
+	n := newNotebook(sqlMigrations(noteMigrations...))
 	main, archive := kit.NewFakeDB(sql.DialectPostgres), kit.NewFakeDB(sql.DialectPostgres)
 	var logs syncBuffer
 	app := ledgerApp(t, newLedger(), &logs, n.module,
-		kit.Database("database", main.Engine(), kit.Migrations(migrations...)),
+		kit.Database("database", main.Engine(), sqlMigrations(migrations...)),
 		kit.Database("archive", archive.Engine(), kit.Keeps(n.module)))
 	run(t, app)
 	if got := archive.Versions("notebook_migrations"); !slices.Equal(got, []int64{20260903120000}) {
@@ -97,7 +97,7 @@ func TestAModulesMigrationsRunOnItsDatabase(t *testing.T) {
 // kit.Keeps of a module the app does not mount.
 func TestAModuleOnTwoDatabasesIsRefused(t *testing.T) {
 	withDatabases(t, "DATABASE", "ARCHIVE")
-	n := newNotebook(kit.Migrations(noteMigrations...))
+	n := newNotebook(sqlMigrations(noteMigrations...))
 	other := newNotebook()
 	var logs syncBuffer
 	err := ledgerApp(t, newLedger(), &logs, n.module,

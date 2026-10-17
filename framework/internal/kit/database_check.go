@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
@@ -214,7 +213,7 @@ func (a *App) databaseURLProblems() []model.Diagnostic {
 		if p := a.urlProblem(d, a.source(&d.decl)); p != nil {
 			out = append(out, *p)
 		}
-		if d.dialect() == sql.DialectSQLite {
+		if d.dialect() == DialectSQLite {
 			if p := a.sqliteProblem(d, a.source(&d.decl)); p != nil {
 				out = append(out, *p)
 			}

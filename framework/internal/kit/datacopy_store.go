@@ -100,11 +100,16 @@ func (s *storeCore) historyPart(r *databaseRun) (*copyPart, error) {
 	if !ok {
 		return nil, nil
 	}
-	to, err := s.historyOnSQL(r)
+	hist, err := s.historyOnSQL(r)
 	if err != nil {
 		return nil, err
 	}
-	return &copyPart{name: s.historyTable(), from: from, to: to}, nil
+	to, ok := documentsOf(hist)
+	sink, sinks := to.(copySink)
+	if !ok || !sinks {
+		return nil, failure(CodeDataCopy, "DATA_COPY_STORE", "a store's history cannot be written by a copy", nil, errs.String("store", s.id))
+	}
+	return &copyPart{name: s.historyTable(), from: from, to: sink}, nil
 }
 
 // sampleOpened reads the first records of the table through the store's
@@ -112,7 +117,7 @@ func (s *storeCore) historyPart(r *databaseRun) (*copyPart, error) {
 // not open, fails the copy.
 func sampleOpened(ctx context.Context, eng plug.StoreEngine, keys copyDocs) error {
 	read := 0
-	for key, err := range keys.keyList(ctx) {
+	for key, err := range keys.KeyList(ctx) {
 		if err != nil {
 			return err
 		}

@@ -83,7 +83,7 @@ func TestTheStudioSamplesTheDatabases(t *testing.T) {
 	db := kit.NewFakeDB(sql.DialectPostgres)
 	t.Setenv("LEDGER_DATABASE_URL", fakeURL("ledger", "pw", ""))
 	var logs syncBuffer
-	app := ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), kit.Migrations(migrations...)), kit.Env(kit.EnvDev), kit.Analyze(false))
+	app := ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), sqlMigrations(migrations...)), kit.Env(kit.EnvDev), kit.Analyze(false))
 	run(t, app)
 	r := call(t, app, "GET /_kit/api/databases", noBody)
 	var got []model.Database

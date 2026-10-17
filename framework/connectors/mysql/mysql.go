@@ -9,7 +9,7 @@ import (
 
 	driver "github.com/go-sql-driver/mysql"
 	"github.com/kitsunium/sdk/framework/kit"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
+	_ "github.com/kitsunium/sdk/framework/kit/store" // the stores a database keeps (ADR 0179 §4)
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
@@ -37,7 +37,7 @@ type quiet struct{}
 func Engine() kit.Engine { return engine{} }
 
 // Dialect is the SQL the database speaks.
-func (engine) Dialect() sql.Dialect { return sql.DialectMySQL }
+func (engine) Dialect() kit.Dialect { return kit.DialectMySQL }
 
 // Describe says where the URL points — host:port, or the socket; the
 // database; the tls as the URL writes it — and never who connects or with

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
@@ -22,6 +22,17 @@ const (
 	dbTimeout      = "timeout"
 	dbCheckTimeout = "check-timeout"
 	dbMigrate      = "migrate"
+)
+
+// The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
+// the store subsystem maps onto the SDK's.
+const (
+	// DialectPostgres is PostgreSQL.
+	DialectPostgres Dialect = "postgres"
+	// DialectMySQL is MySQL or MariaDB.
+	DialectMySQL Dialect = "mysql"
+	// DialectSQLite is SQLite.
+	DialectSQLite Dialect = "sqlite"
 )
 
 // The values of <name>-migrate.
@@ -75,7 +86,7 @@ type databaseOptions struct {
 	// with nothing: the database is then not the default.
 	keeps      []Keeper
 	keepsGiven bool
-	migrations []sql.Migration
+	migrations []plug.MigrationValue
 }
 
 type databaseOption func(o *databaseOptions)
@@ -144,7 +155,13 @@ func Keeps(things ...Keeper) DatabaseConfigurer {
 	})
 }
 
-// Migrations are migrations, values of the SDK's sql.Migration, run when
+// Dialect is the SQL an [Engine] speaks: [DialectPostgres], [DialectMySQL] or
+// [DialectSQLite], kit's own names (ADR 0179 Q5) — the graph names the
+// engine by it.
+type Dialect string
+
+// Migrations are migrations — the SDK's sql.Migration, as the facade takes
+// them —, run when
 // the database starts (<name>-migrate: start) or by `<product> migrate up`,
 // kit's own first, each set under its own version table — and so its own
 // lock. On MySQL a DDL statement commits by itself: write one per migration.
@@ -153,7 +170,7 @@ func Keeps(things ...Keeper) DatabaseConfigurer {
 // Given to [NewModule], they are the module's (ADR 0008), for the data it
 // keeps outside kit's stores: run on the database that keeps the module,
 // under <module>_migrations.
-func Migrations(m ...sql.Migration) interface {
+func Migrations(m ...plug.MigrationValue) interface {
 	DatabaseConfigurer
 	ModuleConfigurer
 } {
@@ -252,22 +269,16 @@ func (d *database) derivedNames() []string {
 	return out
 }
 
-// dialect is the engine's dialect, or the unknown one when there is no
-// engine.
-func (d *database) dialect() sql.Dialect {
+// dialect is the engine's dialect, none when there is no engine.
+func (d *database) dialect() Dialect {
 	if d.engine == nil {
-		return 0
+		return ""
 	}
 	return d.engine.Dialect()
 }
 
 // engineName is the engine as the graph names it: "postgres".
-func (d *database) engineName() string {
-	if d.engine == nil {
-		return ""
-	}
-	return d.engine.Dialect().String()
-}
+func (d *database) engineName() string { return string(d.dialect()) }
 
 // engineTitle is the engine as a reader names it: "PostgreSQL".
 func engineTitle(engine string) string {
@@ -304,7 +315,7 @@ func (a *App) databaseURL(ctx context.Context, d *database) (secret.Value, strin
 		}
 		return v.Value, settingFrom(from), nil
 	}
-	if errors.Is(err, secret.NotFound) && d.dialect() == sql.DialectSQLite && a.dataDir != "" {
+	if errors.Is(err, secret.NotFound) && d.dialect() == DialectSQLite && a.dataDir != "" {
 		return secret.FromString(filepath.Join(a.dataDir, d.name+".sqlite")), model.SettingDefault, nil
 	}
 	return secret.Value{}, "", err

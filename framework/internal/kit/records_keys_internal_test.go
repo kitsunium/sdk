@@ -169,8 +169,7 @@ func TestRecordsKeysIsOfferedToAWatchingModuleOnly(t *testing.T) {
 			w := newKeysWorld(t, place)
 			app := w.start(t, nil)
 			defer stop(t, app)
-			src, onDB := w.posts.engine().(databaseSource)
-			if onDB = onDB && src.onDatabase() != nil; onDB != (name == "sql") {
+			if onDB := w.posts.onDatabase() != nil; onDB != (name == "sql") {
 				t.Fatalf("the posts on a database: %v; want %v", onDB, name == "sql")
 			}
 			ctx := t.Context()

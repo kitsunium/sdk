@@ -6,8 +6,8 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
@@ -198,7 +198,7 @@ func versionsSealUnder(ctx context.Context, se *sealedEngine, ref string) (bool,
 	for _, key := range keys {
 		versions, err := se.StoredVersions(ctx, key)
 		switch {
-		case errors.Is(err, docstore.DocumentNotFound):
+		case plug.Refused(err, plug.RefusalNotFound):
 			continue // deleted meanwhile, its versions with it
 		case err != nil:
 			return false, err
@@ -224,7 +224,7 @@ func keptKeys(ctx context.Context, se *sealedEngine) ([]string, error) {
 		keys = append(keys, en.Key)
 	}
 	stones, err := se.Tombstones(ctx)
-	if err != nil && !errors.Is(err, docstore.VersionsNotKept) {
+	if err != nil && !plug.Refused(err, plug.RefusalVersionsNotKept) {
 		return nil, err
 	}
 	for _, st := range stones {

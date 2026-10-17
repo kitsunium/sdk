@@ -7,7 +7,6 @@ import (
 
 	"github.com/kitsunium/sdk/framework/connectors/postgres"
 	"github.com/kitsunium/sdk/framework/kit"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
@@ -64,7 +63,7 @@ func TestDescribeSaysWhereNeverWho(t *testing.T) {
 }
 
 func TestTheEngineSpeaksPostgres(t *testing.T) {
-	if postgres.Engine().Dialect() != sql.DialectPostgres {
+	if postgres.Engine().Dialect() != kit.DialectPostgres {
 		t.Fatal(postgres.Engine().Dialect())
 	}
 	// A pool opens without a connection: the first one is made on use.

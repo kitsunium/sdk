@@ -1,6 +1,7 @@
 package plug
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"io/fs"
@@ -15,7 +16,7 @@ import (
 // and sql; the core reads it and imports neither. Nothing here names an
 // entity's type: the engine works on documents, and Store[T] stays the typed
 // facade above it, in the core. The values are here, the engine and its
-// siblings in store_interface.go.
+// siblings in store_interface.go, the refusals in store_refusal.go.
 
 // The write modes.
 const (
@@ -29,21 +30,24 @@ const (
 	WriteReplace
 )
 
-// Stores is the store subsystem: the engines kit's stores run on and kit's
-// scope on a database; nil until framework/kit/store is imported. Until
-// that package exists (ADR 0179, step 3) the core runs the stores itself
-// and nothing sets it; once it does, a product that declares a store or a
+// Stores is the store subsystem: the engines kit's stores run on, kit's
+// scope on a database and the migrations of kit's tables; nil until
+// framework/kit/store is imported. A product that declares a store or a
 // database without it is refused at the start (ADR 0179 §6).
 var Stores atomic.Pointer[StoreDriverConfig]
 
 // StoreDriverConfig is what framework/kit/store plugs into kit: how a
-// store's engine opens, and how kit opens its scope on a database.
+// store's engine opens, how kit opens its scope on a database, and the
+// migration that makes one of kit's tables.
 type StoreDriverConfig struct {
 	// Open opens the engine of one store, as cfg places it: loaded from the
 	// data directory, empty in memory, or on a database.
 	Open func(cfg StoreConfig) (StoreEngine, error)
 	// Database opens kit's scope on one database's pool.
 	Database func(cfg DatabaseConfig) (Database, error)
+	// TableMigration is the migration that makes the table t on a database
+	// of the dialect named, at version.
+	TableMigration func(dialect string, t TableSpec, version uint64) (MigrationValue, error)
 }
 
 // DocumentValue is a record as a store's engine holds it (ADR 0179 §2):
@@ -56,6 +60,15 @@ type DocumentValue struct {
 	// Value is the entity decoded from JSON, nil until something decoded it;
 	// the store's typed facade asserts it to its type.
 	Value any
+}
+
+// EntryValue is a record as it rests, with its key: what an engine lists
+// for a reader that cannot key a record itself.
+type EntryValue struct {
+	// Key is the record's key.
+	Key string
+	// JSON is the record as it rests.
+	JSON json.RawMessage
 }
 
 // WriteMode says what a write expects to find under the document's key.
@@ -73,13 +86,18 @@ type IndexSpec struct {
 }
 
 // StoreConfig is what kit asks of one store's engine: the store, its key and
-// its indexes over documents, where it rests and what it keeps.
+// its indexes over documents, where it rests and what it keeps, and how its
+// writes take part in kit's transactions.
 type StoreConfig struct {
-	// Name is the store's, as its files and its table name it.
+	// Name is the store's, as a log line and a rollback name it.
 	Name string
 	// Key is a document's key: the product's key function on its type,
-	// wrapped once at the declaration.
+	// wrapped once at the declaration. It reads the document's Value, which
+	// the engine decodes first unless KeyAtRest gives the key.
 	Key func(d DocumentValue) string
+	// KeyAtRest, when set, gives the key of a record as it rests, without
+	// decoding it; false when it cannot.
+	KeyAtRest func(raw json.RawMessage) (string, bool)
 	// Decode is the entity a document's JSON holds, which the engine keeps
 	// as the document's Value.
 	Decode func(raw json.RawMessage) (any, error)
@@ -91,20 +109,46 @@ type StoreConfig struct {
 	Data fs.FS
 	// Path is the store's snapshot in Data.
 	Path string
-	// Database keeps the store, nil when the data directory or memory does.
+	// Database keeps the store, nil when the data directory or memory does:
+	// a scope the store subsystem's Database opened.
 	Database Database
+	// Table is the store's table on Database.
+	Table string
+	// IndexKey is the key a table's index keys are hashed under, nil for
+	// none: an index key reaches the table as its keyed hash.
+	IndexKey func(index, key string) []byte
+	// Call is the context one call of the engine on Database runs with: on
+	// the transaction ctx carries for it, else on the pool, within the
+	// database's timeout; done ends it.
+	Call func(ctx context.Context, write bool) (call context.Context, done func(), err error)
 	// Versions is how many former versions of each record the engine keeps,
 	// none when zero; Clock stamps them.
 	Versions int
 	// Clock is the app's clock, which stamps a version.
 	Clock func() time.Time
 	// Held reports whether a record's versions are held, and no write may
-	// prune them.
-	Held func(key string) bool
+	// prune them: asked with the write's context, on a database inside its
+	// transaction.
+	Held func(ctx context.Context, key string) bool
+	// Stamp is what a write under ctx says about the version it makes.
+	Stamp func(ctx context.Context) StampValue
+	// Transaction is kit's transaction, which the engine's writes take part
+	// in.
+	Transaction Transaction
+}
+
+// StampValue is what a write says about the version it makes: who made it
+// and which command, kept with the version; and whether it changes the
+// document in place, without a version of its own.
+type StampValue struct {
+	// Meta is kept with the version the write makes.
+	Meta map[string]string
+	// InPlace makes the write change the document without making a version.
+	InPlace bool
 }
 
 // DatabaseConfig is one database a product declares, as kit opened it: its
-// pool, its dialect and the timeout of each call.
+// pool, its dialect, its tuning and the timeout of each call.
 type DatabaseConfig struct {
 	// Name is the database's, as the product declared it.
 	Name string
@@ -115,7 +159,43 @@ type DatabaseConfig struct {
 	Dialect string
 	// Timeout bounds each call kit makes on the database.
 	Timeout time.Duration
+	// MaxOpen and MaxIdle bound the pool's connections.
+	MaxOpen, MaxIdle int
+	// MaxLifetime and MaxIdleTime bound a connection's life.
+	MaxLifetime, MaxIdleTime time.Duration
+	// CheckTimeout bounds a check of the database.
+	CheckTimeout time.Duration
 }
+
+// TableSpec is one of kit's tables on a database, as its migration makes it:
+// a store's, a store's versions beside the store's table VersionsOf, or a
+// consumer's queue.
+type TableSpec struct {
+	// Name is the table's.
+	Name string
+	// VersionsOf is, for a store's versions, the store's table, from which
+	// the versions' table is named.
+	VersionsOf string
+	// Queue marks a consumer's queue: the SQL broker's one table.
+	Queue bool
+}
+
+// MigrationValue is one versioned change of a database's schema and its
+// reversal, as kit's migrations are written: the SDK's own, on the standard
+// library's types.
+type MigrationValue struct {
+	// Version orders the migration in its set: non-zero and unique.
+	Version uint64
+	// Name labels it in the version table.
+	Name string
+	// Up applies the change.
+	Up Step
+	// Down reverses it.
+	Down Step
+}
+
+// Step is one direction of a migration, run on ex.
+type Step func(ctx context.Context, ex Executor) error
 
 // VersionValue is one version of a record: its number, when the write
 // that made it ran, what that write said about it, and the record as it

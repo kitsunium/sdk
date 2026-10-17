@@ -327,6 +327,7 @@ Package kit — workflows: a state machine over the entities of one store.
 - [type DiagnosticsError](<#DiagnosticsError>)
   - [func \(\*DiagnosticsError\) Error\(\) string](<#DiagnosticsError.Error>)
   - [func \(\*DiagnosticsError\) Unwrap\(\) error](<#DiagnosticsError.Unwrap>)
+- [type Dialect](<#Dialect>)
 - [type Edit](<#Edit>)
 - [type Empty](<#Empty>)
 - [type Endpoint](<#Endpoint>)
@@ -334,7 +335,7 @@ Package kit — workflows: a state machine over the entities of one store.
 - [type EndpointOption](<#EndpointOption>)
 - [type Engine](<#Engine>)
   - [func \(Engine\) Describe\(url secret.Value\) \(DatabaseURLValue, error\)](<#Engine.Describe>)
-  - [func \(Engine\) Dialect\(\) sql.Dialect](<#Engine.Dialect>)
+  - [func \(Engine\) Dialect\(\) Dialect](<#Engine.Dialect>)
   - [func \(Engine\) Open\(url secret.Value, current func\(context.Context\) \(secret.Value, error\)\) \(\*stdsql.DB, error\)](<#Engine.Open>)
 - [type Erasure](<#Erasure>)
 - [type Error](<#Error>)
@@ -1404,6 +1405,33 @@ const DefaultMaxBody int64 = 1048576
 DefaultMaxBody is the largest request body an endpoint reads, unless the endpoint says otherwise with [MaxBody](#MaxBody).
 
 Initialised with `github.com/kitsunium/sdk/framework/internal/kit.DefaultMaxBody`.
+
+<a name="DialectMySQL"></a>
+```go
+const DialectMySQL Dialect = "mysql"
+```
+
+DialectMySQL is MySQL or MariaDB.
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/kit.DialectMySQL`.
+
+<a name="DialectPostgres"></a>
+```go
+const DialectPostgres Dialect = "postgres"
+```
+
+DialectPostgres is PostgreSQL.
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/kit.DialectPostgres`.
+
+<a name="DialectSQLite"></a>
+```go
+const DialectSQLite Dialect = "sqlite"
+```
+
+DialectSQLite is SQLite.
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/kit.DialectSQLite`.
 
 <a name="EnvDev"></a>
 ```go
@@ -3299,6 +3327,21 @@ func (*DiagnosticsError) Unwrap() error
 
 Unwrap is what the refusal is, when kit has a code for it: with packages in Missing, an error carrying [CodeSubsystemMissing](#CodeSubsystemMissing) (ADR 0179 §6), which errs.HasCode reads through the refusal; nil otherwise.
 
+<a name="Dialect"></a>
+## type [Dialect](<https://github.com/kitsunium/sdk/blob/main/framework/kit/database.go>)
+
+Dialect is the SQL an [Engine](#Engine) speaks: [DialectPostgres](#DialectPostgres), [DialectMySQL](#DialectMySQL) or [DialectSQLite](#DialectSQLite), kit's own names (ADR 0179 Q5) — the graph names the engine by it.
+
+```go
+type Dialect = ikit.Dialect
+```
+
+Dialect is an alias of `github.com/kitsunium/sdk/framework/internal/kit.Dialect`, declared as:
+
+```go
+type Dialect string
+```
+
 <a name="Edit"></a>
 ## type [Edit](<https://github.com/kitsunium/sdk/blob/main/framework/kit/revisions.go>)
 
@@ -3393,8 +3436,8 @@ type Engine interface {
 	// database, the TLS mode as written — for the graph and the logs: never
 	// a user, never a password.
 	Describe(url secret.Value) (DatabaseURLValue, error)
-	// Dialect is the SQL the SDK speaks to it.
-	Dialect() sql.Dialect
+	// Dialect is the SQL it speaks.
+	Dialect() Dialect
 	// Open opens the pool url names. Before each new connection it asks
 	// current for the URL as it is now.
 	Open(url secret.Value, current func(context.Context) (secret.Value, error)) (*stdsql.DB, error)
@@ -3414,10 +3457,10 @@ Describe says what url points at — the driver, host and port, the database, th
 ### func \(Engine\) [Dialect](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go>)
 
 ```go
-func (Engine) Dialect() sql.Dialect
+func (Engine) Dialect() Dialect
 ```
 
-Dialect is the SQL the SDK speaks to it.
+Dialect is the SQL it speaks.
 
 <a name="Engine.Open"></a>
 ### func \(Engine\) [Open](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go>)

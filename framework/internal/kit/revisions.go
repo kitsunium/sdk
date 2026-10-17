@@ -3,7 +3,6 @@ package kit
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -310,9 +308,9 @@ func (s *storeCore) noVersion(key string, number uint64) error {
 // versionsSaid is a refusal of the engine's versions in kit's words.
 func (s *storeCore) versionsSaid(err error, key string) error {
 	switch {
-	case errors.Is(err, docstore.VersionsNotKept):
+	case plug.Refused(err, plug.RefusalVersionsNotKept):
 		return Invalid(fmt.Sprintf("%s keeps no revisions: declare it with kit.Revisions(n)", s.name))
-	case errors.Is(err, docstore.VersionsRewriteRefused):
+	case plug.Refused(err, plug.RefusalVersionsRewrite):
 		return failure(CodeRevisionWrite, "REVISIONS_REWRITE", "a record's versions could not be rewritten", err, errs.String("store", s.id))
 	}
 	return s.said(err, key, "")
@@ -354,8 +352,8 @@ func inPlace(ctx context.Context) bool {
 
 // stampOf is what a write under ctx says about the version it makes: who —
 // the caller's user —, which command, and whether it makes none.
-func stampOf(ctx context.Context) docstore.Stamp {
-	st := docstore.Stamp{InPlace: inPlace(ctx)}
+func stampOf(ctx context.Context) plug.StampValue {
+	st := plug.StampValue{InPlace: inPlace(ctx)}
 	meta := map[string]string{}
 	if uid, ok := UserID(ctx); ok && uid != "" {
 		meta[metaBy] = string(uid)

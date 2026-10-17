@@ -28,8 +28,6 @@ var (
 	_ Operation[struct{}, struct{}] = (*PortService[struct{}, struct{}])(nil)
 	_ Operation[struct{}, struct{}] = (*Query[struct{}, struct{}])(nil)
 
-	_ plug.StoreEngine = (*docEngine)(nil)
-	_ plug.StoreEngine = (*sqlEngine)(nil)
 	_ plug.StoreEngine = (*sealedEngine)(nil)
 	_ plug.StoreEngine = (*historied)(nil)
 
@@ -89,13 +87,11 @@ var (
 	_ queueReader             = (*sealedOutbox)(nil)
 	_ queueWriter             = (*sealedOutbox)(nil)
 
-	_ documenter = (*historied)(nil)
-	_ documenter = (*sealedEngine)(nil)
-	_ documenter = (*docEngine)(nil)
-	_ documenter = (*sqlEngine)(nil)
-	_ copyDocs   = (*docEngine)(nil)
-	_ copySink   = (*sqlEngine)(nil)
-	_ copyDocs   = (*jsonDocs)(nil)
+	_ plug.DocumentSource = (*historied)(nil)
+	_ plug.DocumentSource = (*sealedEngine)(nil)
+	_ copyDocs            = (*jsonDocs)(nil)
+
+	_ plug.Transaction = kitTransaction{}
 
 	_ copyPartser   = (*StoreService[struct{}])(nil)
 	_ journalParter = (*WorkflowService[struct{}, string])(nil)
@@ -141,37 +137,21 @@ var (
 	_ trashSource     = (*storeCore)(nil)
 	_ typeSource      = (*storeCore)(nil)
 
-	_ plug.Folder = (*docEngine)(nil)
 	_ plug.Folder = (*historied)(nil)
 	_ plug.Folder = (*sealedEngine)(nil)
 
-	_ entriesSource = (*docEngine)(nil)
-	_ entriesSource = (*sqlEngine)(nil)
-
-	_ plug.Keyser = (*docEngine)(nil)
-	_ plug.Keyser = (*sqlEngine)(nil)
 	_ plug.Keyser = (*sealedEngine)(nil)
 	_ plug.Keyser = (*historied)(nil)
 
-	_ databaseSource = (*historied)(nil)
-	_ databaseSource = (*sealedEngine)(nil)
-	_ databaseSource = (*sqlEngine)(nil)
-
-	_ plug.VersionKeeper = (*docEngine)(nil)
 	_ plug.VersionKeeper = (*historied)(nil)
 	_ plug.VersionKeeper = (*sealedEngine)(nil)
-	_ plug.VersionKeeper = (*sqlEngine)(nil)
 
 	// The engines that keep a trash, and those that hand it on (trash.go).
-	_ plug.Trasher = (*docEngine)(nil)
 	_ plug.Trasher = (*historied)(nil)
 	_ plug.Trasher = (*sealedEngine)(nil)
-	_ plug.Trasher = (*sqlEngine)(nil)
 
-	_ plug.VersionWeighter = (*docEngine)(nil)
 	_ plug.VersionWeighter = (*historied)(nil)
 	_ plug.VersionWeighter = (*sealedEngine)(nil)
-	_ plug.VersionWeighter = (*sqlEngine)(nil)
 
 	_ sealingSource = (*TopicService[struct{}])(nil)
 	_ topicWaker    = (*TopicService[struct{}])(nil)

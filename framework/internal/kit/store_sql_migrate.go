@@ -2,22 +2,21 @@ package kit
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"hash/fnv"
 	"maps"
 	"slices"
 	"strconv"
 	"sync"
 
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
-	"github.com/kitsunium/sdk/pkg/v1/data/queue"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 )
 
 // kit's own migrations on a database (ADR 0004): its tables — a store's, its
 // history's, a workflow's journal, a consumer's queue (ADR 0178 C1) —, each
 // one migration of the SDK's document store or, for a queue, of its SQL
-// broker, under kit's version table, kit_migrations, and run before
+// broker, which the store subsystem writes (plug.StoreDriverConfig's
+// TableMigration), under kit's version table, kit_migrations, and run before
 // the modules' and the product's.
 //
 // The SDK's migrator refuses a pending migration older than one already
@@ -60,7 +59,7 @@ func (t tableRecord) key() string { return t.Table }
 // tableRegistry is kit's registry on one database: its store, and what it
 // held when the database started.
 type tableRegistry struct {
-	store *docstore.SQLStore[tableRecord]
+	store plug.StoreEngine
 
 	mu    sync.Mutex
 	known map[string]tableRecord
@@ -76,7 +75,11 @@ func (g *tableRegistry) get(table string) (tableRecord, bool) {
 
 // put records rec.
 func (g *tableRegistry) put(ctx context.Context, rec tableRecord) error {
-	if err := g.store.Put(ctx, rec); err != nil {
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		return unencodable(kitTablesTable, err)
+	}
+	if err := g.store.Write(ctx, plug.DocumentValue{JSON: raw, Value: rec}, plug.WriteUpsert); err != nil {
 		return err
 	}
 	g.mu.Lock()
@@ -93,23 +96,41 @@ type kitSet struct {
 }
 
 // registryMigration is the registry's migration.
-func registryMigration(dialect sql.Dialect) (sql.Migration, error) {
-	return docstore.SQLMigration(dialect, kitTablesTable, registryVersion)
+func registryMigration(dialect Dialect) (plug.MigrationValue, error) {
+	return tableMigration(dialect, kitTable{name: kitTablesTable}, registryVersion)
 }
 
-// openRegistry reads kit's registry on the database cfg opens; an empty one
-// when its table is not there yet — when apply is not set, and its migration
-// is pending.
-func openRegistry(ctx context.Context, cfg sql.Config, tm sql.Transactor, apply bool) (*tableRegistry, error) {
-	first, err := registryMigration(cfg.Dialect)
+// registryConfig is the engine of kit's registry: its records, keyed by
+// their table.
+var registryConfig = &engineConfig{
+	key: func(d plug.DocumentValue) string {
+		rec, _ := d.Value.(tableRecord)
+		return rec.key()
+	},
+	decode: func(raw json.RawMessage) (any, error) {
+		var rec tableRecord
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			return nil, undecodable(kitTablesTable, err)
+		}
+		return rec, nil
+	},
+}
+
+// openRegistry reads kit's registry on db, d's scope; an empty one when its
+// table is not there yet — when apply is not set, and its migration is
+// pending.
+func openRegistry(ctx context.Context, d *database, db plug.Database, apply bool) (*tableRegistry, error) {
+	first, err := registryMigration(d.dialect())
 	if err != nil {
 		return nil, err
 	}
-	m, err := sql.NewMigrator(cfg, sql.MigrateConfig{Migrations: []sql.Migration{first}, VersionTable: tableKit})
+	m, err := migratorOf(db, migrationSet{name: setKit, table: tableKit, migrations: []plug.MigrationValue{first}})
 	if err != nil {
 		return nil, err
 	}
-	store, err := docstore.OpenSQL(docstore.SQLConfig[tableRecord]{Key: tableRecord.key, Transactor: tm, Dialect: cfg.Dialect, Table: kitTablesTable})
+	sc := registryConfig.storeConfig(kitTablesTable, versionsOn{})
+	sc.Database, sc.Table = db, kitTablesTable
+	store, err := openEngine(sc)
 	if err != nil {
 		return nil, err
 	}
@@ -125,10 +146,28 @@ func openRegistry(ctx context.Context, cfg sql.Config, tm sql.Transactor, apply 
 	if err != nil {
 		return nil, err
 	}
-	for _, rec := range all {
+	for _, doc := range all {
+		rec, err := tableRecordOf(doc)
+		if err != nil {
+			return nil, err
+		}
 		g.known[rec.Table] = rec
 	}
 	return g, nil
+}
+
+// tableRecordOf is the registry's record d holds: its entity when the
+// engine decoded it, else its JSON decoded.
+func tableRecordOf(d plug.DocumentValue) (tableRecord, error) {
+	if rec, ok := d.Value.(tableRecord); ok {
+		return rec, nil
+	}
+	v, err := registryConfig.decode(d.JSON)
+	if err != nil {
+		return tableRecord{}, err
+	}
+	rec, _ := v.(tableRecord)
+	return rec, nil
 }
 
 // resolveKitSet is kit's set on d: the registry's migration, each table the
@@ -139,7 +178,7 @@ func (a *App) resolveKitSet(d *database, g *tableRegistry, gen uint64) (kitSet, 
 	if err != nil {
 		return kitSet{}, err
 	}
-	out := kitSet{set: migrationSet{name: setKit, table: tableKit, migrations: []sql.Migration{first}}}
+	out := kitSet{set: migrationSet{name: setKit, table: tableKit, migrations: []plug.MigrationValue{first}}}
 	used := map[uint64]bool{registryVersion: true}
 	known, fresh, tables := a.kitTablesOf(d, g)
 	for _, rec := range known {
@@ -191,18 +230,17 @@ func freeVersion(used map[uint64]bool, v uint64) uint64 {
 	return v
 }
 
-// tableMigration is the migration of one of kit's tables: the SDK's
-// document store's two tables; for a store's versions, the table of
-// versions beside the store's, which the SDK names from it; for a
-// consumer's queue, the SQL broker's one table (ADR 0178 C1).
-func tableMigration(dialect sql.Dialect, t kitTable, version uint64) (sql.Migration, error) {
-	switch {
-	case t.queue:
-		return queue.SQLMigration(dialect, t.name, version)
-	case t.versionsOf != "":
-		return docstore.SQLVersionsMigration(dialect, t.versionsOf, version)
+// tableMigration is the migration of one of kit's tables, as the store
+// subsystem writes it: the SDK's document store's two tables; for a store's
+// versions, the table of versions beside the store's, which the SDK names
+// from it; for a consumer's queue, the SQL broker's one table (ADR 0178
+// C1).
+func tableMigration(dialect Dialect, t kitTable, version uint64) (plug.MigrationValue, error) {
+	stores := plug.Stores.Load()
+	if stores == nil || stores.TableMigration == nil {
+		return plug.MigrationValue{}, storesMissing()
 	}
-	return docstore.SQLMigration(dialect, t.name, version)
+	return stores.TableMigration(string(dialect), plug.TableSpec{Name: t.name, VersionsOf: t.versionsOf, Queue: t.queue}, version)
 }
 
 // nameDigest is the low half of a new table's version.
@@ -228,11 +266,11 @@ func nextGeneration(g *tableRegistry) uint64 {
 // at the next generation, the one after when another process applied a
 // newer one meanwhile — and records the new tables. It returns the set as
 // it applied it.
-func (a *App) applyKitSet(ctx context.Context, d *database, cfg sql.Config, g *tableRegistry) (migrationSet, error) {
+func (a *App) applyKitSet(ctx context.Context, d *database, db plug.Database, g *tableRegistry) (migrationSet, error) {
 	gen := nextGeneration(g)
 	var last error
 	for range kitSetAttempts {
-		set, next, err := a.applyKitSetAt(ctx, d, cfg, g, gen)
+		set, next, err := a.applyKitSetAt(ctx, d, db, g, gen)
 		if next == 0 {
 			return set, err
 		}
@@ -244,12 +282,12 @@ func (a *App) applyKitSet(ctx context.Context, d *database, cfg sql.Config, g *t
 // applyKitSetAt applies kit's set on d with its new tables at generation
 // gen, and records them. next is the generation to try again at when
 // another process applied a newer one meanwhile, zero otherwise.
-func (a *App) applyKitSetAt(ctx context.Context, d *database, cfg sql.Config, g *tableRegistry, gen uint64) (set migrationSet, next uint64, err error) {
+func (a *App) applyKitSetAt(ctx context.Context, d *database, db plug.Database, g *tableRegistry, gen uint64) (set migrationSet, next uint64, err error) {
 	ks, err := a.resolveKitSet(d, g, gen)
 	if err != nil {
 		return migrationSet{}, 0, err
 	}
-	m, err := sql.NewMigrator(cfg, sql.MigrateConfig{Migrations: ks.set.migrations, VersionTable: tableKit})
+	m, err := migratorOf(db, ks.set)
 	if err != nil {
 		return ks.set, 0, err
 	}
@@ -268,7 +306,7 @@ func (a *App) applyKitSetAt(ctx context.Context, d *database, cfg sql.Config, g 
 // when err says the migrator refused kit's set for it; zero for any other
 // refusal.
 func laterGeneration(gen uint64, err error) uint64 {
-	if !errors.Is(err, sql.MigrationOutOfOrder) {
+	if !plug.Refused(err, plug.RefusalOutOfOrder) {
 		return 0
 	}
 	applied, perr := strconv.ParseUint(fieldOf(err, "applied"), 10, 64)

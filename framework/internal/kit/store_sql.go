@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -14,8 +13,6 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -37,259 +34,6 @@ const (
 // <name>-timeout. Nothing is held in memory: the database is the source of
 // truth. Index keys reach the table as keyed hashes, HMAC-SHA256 under a
 // subkey of kit's index key: an e-mail, a token's hash, a subject never does.
-
-// sqlEngine is a store on a database: the SDK's document store over SQL,
-// of records as they rest.
-type sqlEngine struct {
-	ds  *docstore.SQLStore[docRecord]
-	cfg *engineConfig
-	// load keeps the first record a refiling of the index rows could not
-	// decode: it refuses the start.
-	load docLoad
-	run  *databaseRun
-	a    *App
-	// store is the store's node ID, which a refusal names.
-	store string
-	// own marks kit's own stores (kit.Privacy's holds and journal): a read
-	// kit makes of them on the way — a hold looked up before a deletion —
-	// runs on the pool, and never makes a product's transaction theirs.
-	own bool
-	// keep is how many former versions the table keeps of each record (ADR
-	// 0007 §3), in <table>___vs: none when zero.
-	keep int
-	// onWrite is what the store's Watch registered: the SDK tells it each
-	// write once its transaction commits, and a rollback of kit's
-	// transaction tells it again, so that what reads the store reads it
-	// anew.
-	onWrite func(key string)
-}
-
-// call is ctx for a call of the engine: on the transaction it carries for
-// the store's database, else on the pool — a read of kit's own store always
-// there —, within the database's timeout; done ends it.
-func (e *sqlEngine) call(ctx context.Context, write bool) (context.Context, func(), error) {
-	if e.own && !write {
-		ctx = withoutUnit(ctx)
-	}
-	return callContext(ctx, e.a, e.run, e.store, write)
-}
-
-// keyOf is the document store's key function.
-func (e *sqlEngine) keyOf(r docRecord) string { return e.cfg.keyOf(r, &e.load) }
-
-// Get reads the record key.
-func (e *sqlEngine) Get(ctx context.Context, key string) (plug.DocumentValue, error) {
-	c, done, err := e.call(ctx, false)
-	if err != nil {
-		return plug.DocumentValue{}, err
-	}
-	defer done()
-	r, err := e.ds.Get(c, key)
-	return r.value(), err
-}
-
-// List reads every record.
-func (e *sqlEngine) List(ctx context.Context) ([]plug.DocumentValue, error) {
-	c, done, err := e.call(ctx, false)
-	if err != nil {
-		return nil, err
-	}
-	defer done()
-	rs, err := e.ds.List(c)
-	if err != nil {
-		return nil, err
-	}
-	return values(rs), nil
-}
-
-// Filter reads the records keep keeps.
-func (e *sqlEngine) Filter(ctx context.Context, keep func(d plug.DocumentValue) bool) ([]plug.DocumentValue, error) {
-	all, err := e.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := all[:0]
-	for _, d := range all {
-		if keep(d) {
-			out = append(out, d)
-		}
-	}
-	return out, nil
-}
-
-// Lookup reads the record whose unique index holds key.
-func (e *sqlEngine) Lookup(ctx context.Context, index, key string) (plug.DocumentValue, error) {
-	c, done, err := e.call(ctx, false)
-	if err != nil {
-		return plug.DocumentValue{}, err
-	}
-	defer done()
-	r, err := e.ds.Lookup(c, index, key)
-	return r.value(), err
-}
-
-// Find reads the records an index files under key.
-func (e *sqlEngine) Find(ctx context.Context, index, key string) ([]plug.DocumentValue, error) {
-	c, done, err := e.call(ctx, false)
-	if err != nil {
-		return nil, err
-	}
-	defer done()
-	rs, err := e.ds.Find(c, index, key)
-	if err != nil {
-		return nil, err
-	}
-	return values(rs), nil
-}
-
-// Count is how many records the table holds.
-func (e *sqlEngine) Count(ctx context.Context) (int, error) {
-	c, done, err := e.call(ctx, false)
-	if err != nil {
-		return 0, err
-	}
-	defer done()
-	return e.ds.Count(c)
-}
-
-// Entries are up to limit records as the table keeps them.
-func (e *sqlEngine) Entries(ctx context.Context, limit int) ([]json.RawMessage, error) {
-	entries, err := e.KeyedEntries(ctx, limit)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]json.RawMessage, len(entries))
-	for i, en := range entries {
-		out[i] = en.JSON
-	}
-	return out, nil
-}
-
-// KeyedEntries are up to limit records as the table keeps them, with their
-// keys: what a sealing store reads its records by (seal_store_engine.go).
-func (e *sqlEngine) KeyedEntries(ctx context.Context, limit int) ([]docstore.Entry, error) {
-	c, done, err := e.call(ctx, false)
-	if err != nil {
-		return nil, err
-	}
-	defer done()
-	return e.ds.Entries(c, limit)
-}
-
-// Write writes d in mode, stamped as the caller's context says.
-func (e *sqlEngine) Write(ctx context.Context, d plug.DocumentValue, mode plug.WriteMode) error {
-	stamp := e.stamp(ctx)
-	c, done, err := e.call(ctx, true)
-	if err != nil {
-		return err
-	}
-	defer done()
-	r := recordFor(d)
-	switch mode {
-	case plug.WriteInsert:
-		err = e.ds.InsertStamped(c, r, stamp)
-	case plug.WriteReplace:
-		err = e.ds.ReplaceStamped(c, r, stamp)
-	default:
-		err = e.ds.PutStamped(c, r, stamp)
-	}
-	if err == nil {
-		e.retold(ctx, e.writtenKey(r))
-	}
-	return err
-}
-
-// writtenKey is r's key, "" when the key function panics: the SDK said why
-// the write failed.
-func (e *sqlEngine) writtenKey(r docRecord) (key string) {
-	defer func() {
-		if recover() != nil {
-			key = ""
-		}
-	}()
-	return e.keyOf(r)
-}
-
-// Update changes the record key with fn, in one write.
-func (e *sqlEngine) Update(ctx context.Context, key string, fn func(d *plug.DocumentValue) error) (plug.DocumentValue, error) {
-	stamp := e.stamp(ctx)
-	c, done, err := e.call(ctx, true)
-	if err != nil {
-		return plug.DocumentValue{}, err
-	}
-	defer done()
-	r, err := e.ds.UpdateStamped(c, key, stamp, func(r *docRecord) error {
-		d := r.value()
-		if err := fn(&d); err != nil {
-			return err
-		}
-		*r = recordFor(d)
-		return nil
-	})
-	if err == nil {
-		e.retold(ctx, key)
-	}
-	return r.value(), err
-}
-
-// Delete removes the record key.
-func (e *sqlEngine) Delete(ctx context.Context, key string) error {
-	c, done, err := e.call(ctx, true)
-	if err != nil {
-		return err
-	}
-	defer done()
-	err = e.ds.Delete(c, key)
-	if err == nil {
-		e.retold(ctx, key)
-	}
-	return err
-}
-
-// retold keeps key for the store's hooks to hear again if kit's transaction
-// rolls its write back: the SDK drops a rolled back write's hooks, and what
-// the write woke — a workflow, a retention — must read the store anew.
-func (e *sqlEngine) retold(ctx context.Context, key string) {
-	if fn := e.onWrite; fn != nil && key != "" {
-		retell(ctx, func() { fn(key) })
-	}
-}
-
-// Watch registers the store's hooks with the SDK, which calls them once a
-// write's transaction commits.
-func (e *sqlEngine) Watch(onWrite, onDelete func(key string)) {
-	e.onWrite = onWrite
-	e.ds.OnWrite(onWrite)
-	e.ds.OnDelete(onDelete)
-}
-
-// Close closes nothing: the pool is the database's.
-func (e *sqlEngine) Close() error { return nil }
-
-// databaseSource is implemented by an engine that may run on a database: the one
-// it runs on, nil for none. A store's writes there take no writer turn, and
-// one that remembers runs in a transaction.
-type databaseSource interface{ onDatabase() *databaseRun }
-
-// onDatabase is the database the engine runs on.
-func (e *sqlEngine) onDatabase() *databaseRun { return e.run }
-
-// onDatabase is the database the engine inside runs on: a store that seals
-// on a database is on it all the same.
-func (e *sealedEngine) onDatabase() *databaseRun {
-	if b, ok := e.inner.(databaseSource); ok {
-		return b.onDatabase()
-	}
-	return nil
-}
-
-// onDatabase is the database the engine a store's history wraps runs on.
-func (h *historied) onDatabase() *databaseRun {
-	if b, ok := h.StoreEngine.(databaseSource); ok {
-		return b.onDatabase()
-	}
-	return nil
-}
 
 // databaseOf is the open database that keeps s, nil when s keeps its data
 // in the data directory or in memory: placed nowhere else, kept in memory,
@@ -468,7 +212,7 @@ func (s *storeCore) startSQL(ctx context.Context, a *App, r *databaseRun) error 
 	if err != nil {
 		return err
 	}
-	s.running(ctx, eng)
+	s.running(ctx, eng, r)
 	return nil
 }
 
@@ -488,7 +232,7 @@ func (s *storeCore) openSQL(ctx context.Context, a *App, at sqlTable, specs []pl
 		if err != nil {
 			return nil, s.sqlOpenRefusal(at.run, "the store cannot be opened on its database", err)
 		}
-		if err := at.reindex(ctx, eng.reindex); err != nil {
+		if err := at.reindex(ctx, reindexOf(eng)); err != nil {
 			return nil, s.sqlOpenRefusal(at.run, "the store's index rows could not be filed again", err)
 		}
 		return eng, nil
@@ -497,31 +241,28 @@ func (s *storeCore) openSQL(ctx context.Context, a *App, at sqlTable, specs []pl
 	if err != nil {
 		return nil, err
 	}
-	var inner *sqlEngine
+	var inner plug.StoreEngine
 	se, err := openSealedEngine(s, a, z, specs, func(cfg *engineConfig) (plug.StoreEngine, error) {
 		var err error
-		if inner, err = openSQLEngine(a, at, cfg); err != nil {
-			return nil, err
-		}
-		return inner, nil
+		inner, err = openSQLEngine(a, at, cfg)
+		return inner, err
 	})
 	if err != nil {
 		return nil, s.sqlOpenRefusal(at.run, "the store cannot be opened on its database", err)
 	}
-	if err := at.reindex(ctx, inner.reindex); err != nil {
+	if err := at.reindex(ctx, reindexOf(inner)); err != nil {
 		return nil, s.sqlOpenRefusal(at.run, "the store's index rows could not be filed again", err)
 	}
 	return se, nil
 }
 
-// reindex files the table's index rows again: a record the refiling could
-// not decode — or open — refuses it, whatever the SDK made of it.
-func (e *sqlEngine) reindex(ctx context.Context) error {
-	err := e.ds.Reindex(ctx)
-	if lerr := e.load.loaded(); lerr != nil {
-		return lerr
+// reindexOf is what files eng's index rows again — nothing for an engine
+// that keeps none.
+func reindexOf(eng plug.StoreEngine) func(ctx context.Context) error {
+	if r, ok := eng.(plug.Reindexer); ok {
+		return r.Reindex
 	}
-	return err
+	return func(context.Context) error { return nil }
 }
 
 // sqlOpenRefusal is why the store did not open on its database, in kit's
@@ -531,10 +272,10 @@ func (s *storeCore) sqlOpenRefusal(r *databaseRun, why string, err error) error 
 	switch {
 	case errs.HasCode(err, CodeSealOpen), errs.HasCode(err, CodeSealKey):
 		return err
-	case errors.Is(err, docstore.IndexBroken):
+	case plug.Refused(err, plug.RefusalIndexBroken):
 		return failure(CodeStoreIndex, "STORE_INDEX_BROKEN", "the stored entities break a unique index", err,
 			errs.String("store", s.id), errs.String("index", fieldOf(err, "index")))
-	case errors.Is(err, docstore.DocumentUndecodable):
+	case plug.Refused(err, plug.RefusalUndecodable):
 		return s.decodeFailure("", err)
 	}
 	return failure(CodeStoreLoad, "STORE_LOAD", why, err, errs.String("store", s.id), errs.String("database", r.d.name))
@@ -546,7 +287,10 @@ func (s *storeCore) sqlOpenRefusal(r *databaseRun, why string, err error) error 
 type sqlTable struct {
 	run   *databaseRun
 	table string
-	// store is the store's node ID, own whether it is kit's (sqlEngine).
+	// store is the store's node ID; own whether it is kit's: a read kit
+	// makes of kit's own stores (kit.Privacy's holds and journal) on the way
+	// — a hold looked up before a deletion — runs on the pool, and never
+	// makes a product's transaction theirs.
 	store       string
 	own         bool
 	indexKey    func(index, key string) []byte
@@ -555,24 +299,34 @@ type sqlTable struct {
 	versions versionsOn
 }
 
-// openSQLEngine opens the SDK's document store over at's table, of records
-// as cfg keys and indexes them: a store's entities, the records a sealing
-// store keeps of them, a store's history, a workflow's journal.
-func openSQLEngine(a *App, at sqlTable, cfg *engineConfig) (*sqlEngine, error) {
-	r := at.run
-	e := &sqlEngine{cfg: cfg, run: r, a: a, store: at.store, own: at.own, keep: at.versions.keep}
-	dcfg := docstore.SQLConfig[docRecord]{Key: e.keyOf, Transactor: r.transactor(), Dialect: r.d.dialect(), Table: at.table, IndexKey: at.indexKey}
-	if vs := at.versions; vs.keep > 0 {
-		// Held is asked inside the write's transaction, with its context: a
-		// hold kit keeps on the same database is read in it.
-		dcfg.Versions, dcfg.Clock, dcfg.Held = vs.keep, vs.clock, vs.held
+// openSQLEngine opens the store subsystem's document store over at's
+// table, of records as cfg keys and indexes them: a store's entities, the
+// records a sealing store keeps of them, a store's history, a workflow's
+// journal. Each call runs on the transaction its context carries for the
+// database, else on the pool, within <name>-timeout (sqlCall); a hold is
+// asked inside the write's transaction, with its context: a hold kit keeps
+// on the same database is read in it.
+func openSQLEngine(a *App, at sqlTable, cfg *engineConfig) (plug.StoreEngine, error) {
+	db := at.run.database()
+	if db == nil {
+		return nil, Unavailable(fmt.Sprintf("database %q is not open", at.run.d.name))
 	}
-	ds, err := docstore.OpenSQL(dcfg, cfg.specs(&e.load)...)
-	if err != nil {
-		return nil, err
+	sc := cfg.storeConfig(at.store, at.versions)
+	sc.Database, sc.Table, sc.IndexKey = db, at.table, at.indexKey
+	sc.Call = sqlCall(a, at.run, at.store, at.own)
+	return openEngine(sc)
+}
+
+// sqlCall is the context of a call of the engine of store on r: on the
+// transaction ctx carries for r, else on the pool — a read of kit's own
+// store always there —, within the database's timeout; done ends it.
+func sqlCall(a *App, r *databaseRun, store string, own bool) func(ctx context.Context, write bool) (context.Context, func(), error) {
+	return func(ctx context.Context, write bool) (context.Context, func(), error) {
+		if own && !write {
+			ctx = withoutUnit(ctx)
+		}
+		return callContext(ctx, a, r, store, write)
 	}
-	e.ds = ds
-	return e, nil
 }
 
 // reindex files the table's index rows again with fn when their
@@ -623,26 +377,16 @@ func uniqueMark(unique bool) string {
 // that failed is Unavailable, one past <name>-timeout deadline_exceeded, a
 // key longer than a column Invalid. Never a driver's text.
 func sqlStoreRefusal(name string, err error) error {
+	failed := plug.Refused(err, plug.RefusalStatement) || plug.Refused(err, plug.RefusalTxFailed)
 	switch {
-	case errors.Is(err, docstore.KeyTooLong):
-		return Invalid(fmt.Sprintf("%s: a key is longer than the database's key columns hold (%d bytes)", name, docstore.MaxSQLKeyLen))
-	case errors.Is(err, context.DeadlineExceeded) && (errors.Is(err, docstore.StatementFailed) || isTxFailure(err)):
+	case plug.Refused(err, plug.RefusalKeyTooLong):
+		return Invalid(fmt.Sprintf("%s: a key is longer than the database's key columns hold (%s bytes)", name, fieldOf(err, "max")))
+	case errors.Is(err, context.DeadlineExceeded) && failed:
 		return (&Error{Status: http.StatusGatewayTimeout, Code: WireTimeout, Message: name + ": the database did not answer in time"}).Wrap(err)
-	case errors.Is(err, docstore.StatementFailed), isTxFailure(err):
+	case failed:
 		return Unavailable(name + ": the database did not complete the call").Wrap(err)
-	case errors.Is(err, sql.TxClosed):
+	case plug.Refused(err, plug.RefusalTxClosed):
 		return failure(CodeDatabaseUnavailable, "TRANSACTION_CLOSED", "a store was called with the context of a transaction that ended", err)
 	}
 	return nil
-}
-
-// isTxFailure reports a failure of the SDK's transactor: a transaction or a
-// savepoint the database would not open, commit or roll back.
-func isTxFailure(err error) bool {
-	for _, s := range []error{sql.BeginFailed, sql.CommitFailed, sql.RollbackFailed, sql.SavepointFailed, sql.TxPoisoned} {
-		if errors.Is(err, s) {
-			return true
-		}
-	}
-	return false
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/kitsunium/sdk/framework/kit"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
+	_ "github.com/kitsunium/sdk/framework/kit/store" // the stores a database keeps (ADR 0179 §4)
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
@@ -40,7 +40,7 @@ type engine struct{}
 func Engine() kit.Engine { return engine{} }
 
 // Dialect is the SQL the database speaks.
-func (engine) Dialect() sql.Dialect { return sql.DialectPostgres }
+func (engine) Dialect() kit.Dialect { return kit.DialectPostgres }
 
 // Describe says where the URL points — host:port, or the socket's
 // directory; the database; the sslmode as the URL writes it — and never who

@@ -78,7 +78,7 @@
       "name": "plug",
       "dir": "framework/internal/kit/plug",
       "layer": "framework",
-      "doc": "Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the\nfrontends' file server and the process sampler of the runtime graph\n(framework/kit/server), the Studio's event stream and its profiler\n(framework/kit/studio). kit reads what they\nregistered through the hooks declared here, and imports none of the SDK\npackages behind them: a product that does not import a subsystem neither\nlinks nor initialises its packages.\n\nIt is also the contract between kit's core and the subsystems ADR 0179\ntakes out of it, as database/sql/driver is between database/sql and a\ndriver: the store subsystem's engine over documents, its siblings and\nkit's scope on a database ([Stores]), which framework/kit/store will set.\nUntil it exists the core runs the stores itself; the start refuses a\ndeclaration whose subsystem the program does not link.\n\nThe package imports the standard library and the framework's model only,\nso that kit and every subsystem can import it.\n"
+      "doc": "Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the\nfrontends' file server and the process sampler of the runtime graph\n(framework/kit/server), the Studio's event stream and its profiler\n(framework/kit/studio), the stores and the databases (framework/kit/store).\nkit reads what they registered through the hooks declared here, and imports\nnone of the SDK packages behind them: a product that does not import a\nsubsystem neither links nor initialises its packages.\n\nIt is also the contract between kit's core and the subsystems ADR 0179\ntakes out of it, as database/sql/driver is between database/sql and a\ndriver: the store subsystem's engine over documents, its siblings, kit's\nscope on a database and its migrations ([Stores]), which framework/kit/store\nsets; the refusals an engine says in kit's terms ([Refusal]); and what kit's\ntransactions offer an engine that takes part in them ([Transaction]).\n\nThe package imports the standard library and the framework's model only,\nso that kit and every subsystem can import it.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/internal/kit/serverkit",
@@ -86,6 +86,13 @@
       "dir": "framework/internal/kit/serverkit",
       "layer": "framework",
       "doc": "Package serverkit is what framework/kit/server plugs into kit: the HTTP\nengine an app in the server profile serves on (the SDK's net/server), the\nfrontends' file server (the SDK's net/static), and the process sampler of\nthe runtime graph a serving app answers (the SDK's proc/process, and through\nit runtime/metrics and the spawn engine). kit imports none of them: a\ndaemon or a CLI neither links nor initialises them (ADR 0172).\n\nPackage serverkit — the compile-time proof that the engine is kit's.\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/framework/internal/kit/storekit",
+      "name": "storekit",
+      "dir": "framework/internal/kit/storekit",
+      "layer": "framework",
+      "doc": "Package storekit is what framework/kit/store plugs into kit: the engines\nkit's stores run on — the SDK's document store in memory, in the data\ndirectory and over SQL —, kit's scope on a database — the SDK's\ntransaction manager, its check and its migrator — and the migrations of\nkit's tables (ADR 0179 §1). kit's core imports neither the SDK's docstore\nnor its sql: it reaches them through plug, and a product that declares no\nstore links none of them.\n\nPackage storekit — the compile-time proof that the engines are kit's.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/internal/kit/studiokit",
@@ -156,6 +163,13 @@
       "dir": "framework/kit/server",
       "layer": "framework",
       "doc": "Package server makes a kit app in the server profile — the default — serve\nHTTP: its endpoints, its frontends and its health probes, on the SDK's\nserver engine. A product that serves HTTP imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/server\"\n\nA daemon or a CLI does not, and links none of the engine. A server that\ndoes not import it is refused at the start, naming the import.\n\nIt also plugs in the process sampler — the SDK's runtime metrics, which the\nruntime graph a serving app answers carries (ADR 0172). Without this\npackage the graph has no process, and the program initialises neither\nruntime/metrics nor the SDK's process package.\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/framework/kit/store",
+      "name": "store",
+      "dir": "framework/kit/store",
+      "layer": "framework",
+      "doc": "Package store plugs kit's stores in: the stores a service declares, the\ndatabases a product keeps them in and their migrations, kit.Transact on a\ndatabase, sealing at rest, history, revisions, trash, retention, holds,\nthe privacy journal, Records and `data copy` — the engines the SDK's\ndocument store and sql run them on. A product that declares a store or a\ndatabase imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/store\"\n\nA product that declares none does not, and links none of those engines; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). A connector —\nframework/connectors/postgres, …/mysql, …/sqlite — imports it itself, and\nframework/kit does too until ADR 0179's last step: no product needs the\nline yet.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/kit/storetest",
@@ -5270,6 +5284,53 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.Dialect",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "Dialect",
+      "spelled": "string",
+      "canonical": "string",
+      "doc": "Dialect is the SQL an [Engine] speaks: [DialectPostgres], [DialectMySQL] or\n[DialectSQLite], kit's own names (ADR 0179 Q5) — the graph names the\nengine by it.\n",
+      "file": "framework/internal/kit/database.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.DialectMySQL",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "DialectMySQL",
+      "spelled": "Dialect",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit.Dialect",
+      "value": "\"mysql\"",
+      "doc": "DialectMySQL is MySQL or MariaDB.\n",
+      "file": "framework/internal/kit/database.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.DialectPostgres",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "DialectPostgres",
+      "spelled": "Dialect",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit.Dialect",
+      "value": "\"postgres\"",
+      "doc": "DialectPostgres is PostgreSQL.\n",
+      "file": "framework/internal/kit/database.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.DialectSQLite",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "DialectSQLite",
+      "spelled": "Dialect",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit.Dialect",
+      "value": "\"sqlite\"",
+      "doc": "DialectSQLite is SQLite.\n",
+      "file": "framework/internal/kit/database.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit.Edit",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/framework/internal/kit",
@@ -5353,8 +5414,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit",
       "name": "Engine",
-      "spelled": "interface{Describe(url secret.Value) (DatabaseURLValue, error); Dialect() sql.Dialect; Open(url secret.Value, current func(context.Context) (secret.Value, error)) (*stdsql.DB, error)}",
-      "canonical": "interface{Describe(url github.com/kitsunium/sdk/pkg/v1/security/secret.Value) (github.com/kitsunium/sdk/framework/internal/kit.DatabaseURLValue, error); Dialect() github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect; Open(url github.com/kitsunium/sdk/pkg/v1/security/secret.Value, current func(context.Context) (github.com/kitsunium/sdk/pkg/v1/security/secret.Value, error)) (*database/sql.DB, error)}",
+      "spelled": "interface{Describe(url secret.Value) (DatabaseURLValue, error); Dialect() Dialect; Open(url secret.Value, current func(context.Context) (secret.Value, error)) (*stdsql.DB, error)}",
+      "canonical": "interface{Describe(url github.com/kitsunium/sdk/pkg/v1/security/secret.Value) (github.com/kitsunium/sdk/framework/internal/kit.DatabaseURLValue, error); Dialect() github.com/kitsunium/sdk/framework/internal/kit.Dialect; Open(url github.com/kitsunium/sdk/pkg/v1/security/secret.Value, current func(context.Context) (github.com/kitsunium/sdk/pkg/v1/security/secret.Value, error)) (*database/sql.DB, error)}",
       "doc": "Engine is an SQL engine a database runs on. An engine module returns one —\ngithub.com/kitsunium/sdk/framework/connectors/postgres, …/mysql, …/sqlite —;\nkit calls it when the database starts. Like an SDK port, it grows by\nsibling interfaces, never by a method.\n",
       "file": "framework/internal/kit/database_interface.go",
       "layer": "framework"
@@ -5377,9 +5438,9 @@
       "package": "github.com/kitsunium/sdk/framework/internal/kit",
       "name": "Dialect",
       "recv": "Engine",
-      "spelled": "func() sql.Dialect",
-      "canonical": "func() github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect",
-      "doc": "Dialect is the SQL the SDK speaks to it.\n",
+      "spelled": "func() Dialect",
+      "canonical": "func() github.com/kitsunium/sdk/framework/internal/kit.Dialect",
+      "doc": "Dialect is the SQL it speaks.\n",
       "file": "framework/internal/kit/database_interface.go",
       "layer": "framework"
     },
@@ -6057,9 +6118,9 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/kit",
       "name": "Migrations",
-      "spelled": "func(m ...sql.Migration) interface{DatabaseConfigurer; ModuleConfigurer}",
-      "canonical": "func(m ...github.com/kitsunium/sdk/pkg/v1/data/sql.Migration) interface{github.com/kitsunium/sdk/framework/internal/kit.DatabaseConfigurer; github.com/kitsunium/sdk/framework/internal/kit.ModuleConfigurer}",
-      "doc": "Migrations are migrations, values of the SDK's sql.Migration, run when\nthe database starts (<name>-migrate: start) or by `<product> migrate up`,\nkit's own first, each set under its own version table — and so its own\nlock. On MySQL a DDL statement commits by itself: write one per migration.\n\nGiven to [Database], they are the product's, under schema_migrations.\nGiven to [NewModule], they are the module's (ADR 0008), for the data it\nkeeps outside kit's stores: run on the database that keeps the module,\nunder <module>_migrations.\n",
+      "spelled": "func(m ...plug.MigrationValue) interface{DatabaseConfigurer; ModuleConfigurer}",
+      "canonical": "func(m ...github.com/kitsunium/sdk/framework/internal/kit/plug.MigrationValue) interface{github.com/kitsunium/sdk/framework/internal/kit.DatabaseConfigurer; github.com/kitsunium/sdk/framework/internal/kit.ModuleConfigurer}",
+      "doc": "Migrations are migrations — the SDK's sql.Migration, as the facade takes\nthem —, run when\nthe database starts (<name>-migrate: start) or by `<product> migrate up`,\nkit's own first, each set under its own version table — and so its own\nlock. On MySQL a DDL statement commits by itself: write one per migration.\n\nGiven to [Database], they are the product's, under schema_migrations.\nGiven to [NewModule], they are the module's (ADR 0008), for the data it\nkeeps outside kit's stores: run on the database that keeps the module,\nunder <module>_migrations.\n",
       "file": "framework/internal/kit/database.go",
       "layer": "framework"
     },
@@ -8544,13 +8605,36 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Checker",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Checker",
+      "spelled": "interface{Check(ctx context.Context) error}",
+      "canonical": "interface{Check(ctx context.Context) error}",
+      "doc": "Checker is a Database that says whether it answers. A sibling of\n[Database].\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Checker.Check",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Check",
+      "recv": "Checker",
+      "spelled": "func(ctx context.Context) error",
+      "canonical": "func(ctx context.Context) error",
+      "doc": "Check asks the database whether it answers, within its check timeout.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Database",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
       "name": "Database",
       "spelled": "interface{Defer(ctx context.Context, fn func()) bool; InTransaction(ctx context.Context) bool; OnAbort(ctx context.Context, fn func(ctx context.Context)) bool; Transact(ctx context.Context, fn func(ctx context.Context) error) error}",
       "canonical": "interface{Defer(ctx context.Context, fn func()) bool; InTransaction(ctx context.Context) bool; OnAbort(ctx context.Context, fn func(ctx context.Context)) bool; Transact(ctx context.Context, fn func(ctx context.Context) error) error}",
-      "doc": "Database is kit's scope on one database (ADR 0179 §2): the transactions\nkit.Transact opens on it, their savepoints, and the functions held until\ntheir end. The core knows a database only through it; the store package\nimplements it over the SDK's sql.\n",
+      "doc": "Database is kit's scope on one database (ADR 0179 §2): the transactions\nkit.Transact opens on it, their savepoints, and the functions held until\ntheir end. The core knows a database only through it; the store package\nimplements it over the SDK's sql. It grows by the siblings below.\n",
       "file": "framework/internal/kit/plug/store_interface.go",
       "layer": "framework"
     },
@@ -8607,8 +8691,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
       "name": "DatabaseConfig",
-      "spelled": "struct{Name string; DB *sql.DB; Dialect string; Timeout time.Duration}",
-      "canonical": "struct{Name string; DB *database/sql.DB; Dialect string; Timeout time.Duration}",
+      "spelled": "struct{Name string; DB *sql.DB; Dialect string; Timeout time.Duration; MaxOpen int; MaxIdle int; MaxLifetime time.Duration; MaxIdleTime time.Duration; CheckTimeout time.Duration}",
+      "canonical": "struct{Name string; DB *database/sql.DB; Dialect string; Timeout time.Duration; MaxOpen int; MaxIdle int; MaxLifetime time.Duration; MaxIdleTime time.Duration; CheckTimeout time.Duration}",
       "fields": [
         {
           "name": "Name",
@@ -8629,10 +8713,93 @@
           "name": "Timeout",
           "type": "time.Duration",
           "doc": "Timeout bounds each call kit makes on the database.\n"
+        },
+        {
+          "name": "MaxOpen",
+          "type": "int",
+          "doc": "MaxOpen and MaxIdle bound the pool's connections.\n"
+        },
+        {
+          "name": "MaxIdle",
+          "type": "int",
+          "doc": "MaxOpen and MaxIdle bound the pool's connections.\n"
+        },
+        {
+          "name": "MaxLifetime",
+          "type": "time.Duration",
+          "doc": "MaxLifetime and MaxIdleTime bound a connection's life.\n"
+        },
+        {
+          "name": "MaxIdleTime",
+          "type": "time.Duration",
+          "doc": "MaxLifetime and MaxIdleTime bound a connection's life.\n"
+        },
+        {
+          "name": "CheckTimeout",
+          "type": "time.Duration",
+          "doc": "CheckTimeout bounds a check of the database.\n"
         }
       ],
-      "doc": "DatabaseConfig is one database a product declares, as kit opened it: its\npool, its dialect and the timeout of each call.\n",
+      "doc": "DatabaseConfig is one database a product declares, as kit opened it: its\npool, its dialect, its tuning and the timeout of each call.\n",
       "file": "framework/internal/kit/plug/store.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentSink",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "DocumentSink",
+      "spelled": "interface{InsertRaw(ctx context.Context, raw json.RawMessage) error; PutDocument(ctx context.Context, key string, versions []VersionValue, trashedAt time.Time) error}",
+      "canonical": "interface{InsertRaw(ctx context.Context, raw encoding/json.RawMessage) error; PutDocument(ctx context.Context, key string, versions []github.com/kitsunium/sdk/framework/internal/kit/plug.VersionValue, trashedAt time.Time) error}",
+      "doc": "DocumentSink is a store's documents on the database a data copy writes. A\nsibling of [Documents].\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentSink.InsertRaw",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "InsertRaw",
+      "recv": "DocumentSink",
+      "spelled": "func(ctx context.Context, raw json.RawMessage) error",
+      "canonical": "func(ctx context.Context, raw encoding/json.RawMessage) error",
+      "doc": "InsertRaw writes a document of a store that keeps no versions, as it\nrests.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentSink.PutDocument",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "PutDocument",
+      "recv": "DocumentSink",
+      "spelled": "func(ctx context.Context, key string, versions []VersionValue, trashedAt time.Time) error",
+      "canonical": "func(ctx context.Context, key string, versions []github.com/kitsunium/sdk/framework/internal/kit/plug.VersionValue, trashedAt time.Time) error",
+      "doc": "PutDocument writes the document key with its versions and its trash\nas they are given.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentSource",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "DocumentSource",
+      "spelled": "interface{Documents() (Documents, bool)}",
+      "canonical": "interface{Documents() (github.com/kitsunium/sdk/framework/internal/kit/plug.Documents, bool)}",
+      "doc": "DocumentSource is an engine that says the document store it runs on: itself,\nor the one what it wraps runs on. A data copy reads and writes a store\nthrough it (ADR 0178 C7). A sibling of [StoreEngine].\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentSource.Documents",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Documents",
+      "recv": "DocumentSource",
+      "spelled": "func() (Documents, bool)",
+      "canonical": "func() (github.com/kitsunium/sdk/framework/internal/kit/plug.Documents, bool)",
+      "doc": "Documents is the document store the engine runs on, and whether there\nis one.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
       "layer": "framework"
     },
     {
@@ -8655,6 +8822,123 @@
         }
       ],
       "doc": "DocumentValue is a record as a store's engine holds it (ADR 0179 §2):\nits JSON as it rests, byte for byte what kit encodes, and the entity\nonce decoded, kept beside it so that a read, an index or a privacy\nwalk does not decode it twice.\n",
+      "file": "framework/internal/kit/plug/store.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Documents",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Documents",
+      "spelled": "interface{Current(ctx context.Context, key string) (json.RawMessage, error); KeepsVersions() bool; KeyList(ctx context.Context) iter.Seq2[string, error]; TombstoneList(ctx context.Context) ([]TombstoneValue, error); VersionList(ctx context.Context, key string) ([]VersionValue, error)}",
+      "canonical": "interface{Current(ctx context.Context, key string) (encoding/json.RawMessage, error); KeepsVersions() bool; KeyList(ctx context.Context) iter.Seq2[string, error]; TombstoneList(ctx context.Context) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.TombstoneValue, error); VersionList(ctx context.Context, key string) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.VersionValue, error)}",
+      "doc": "Documents is a store's documents as they rest, as a data copy reads them.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Documents.Current",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Current",
+      "recv": "Documents",
+      "spelled": "func(ctx context.Context, key string) (json.RawMessage, error)",
+      "canonical": "func(ctx context.Context, key string) (encoding/json.RawMessage, error)",
+      "doc": "Current is the document key as the store keeps it.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Documents.KeepsVersions",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "KeepsVersions",
+      "recv": "Documents",
+      "spelled": "func() bool",
+      "canonical": "func() bool",
+      "doc": "KeepsVersions reports whether the store keeps versions.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Documents.KeyList",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "KeyList",
+      "recv": "Documents",
+      "spelled": "func(ctx context.Context) iter.Seq2[string, error]",
+      "canonical": "func(ctx context.Context) iter.Seq2[string, error]",
+      "doc": "KeyList yields every key the store holds, in key order.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Documents.TombstoneList",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "TombstoneList",
+      "recv": "Documents",
+      "spelled": "func(ctx context.Context) ([]TombstoneValue, error)",
+      "canonical": "func(ctx context.Context) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.TombstoneValue, error)",
+      "doc": "TombstoneList is the trash, in key order: none when the store keeps\nno versions.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Documents.VersionList",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "VersionList",
+      "recv": "Documents",
+      "spelled": "func(ctx context.Context, key string) ([]VersionValue, error)",
+      "canonical": "func(ctx context.Context, key string) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.VersionValue, error)",
+      "doc": "VersionList is the versions of the document key, newest first.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.EntrySource",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "EntrySource",
+      "spelled": "interface{KeyedEntries(ctx context.Context, limit int) ([]EntryValue, error)}",
+      "canonical": "interface{KeyedEntries(ctx context.Context, limit int) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.EntryValue, error)}",
+      "doc": "EntrySource is an engine that lists its records as they rest with their keys:\nwhat a sealing store reads its records by. A sibling of [StoreEngine].\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.EntrySource.KeyedEntries",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "KeyedEntries",
+      "recv": "EntrySource",
+      "spelled": "func(ctx context.Context, limit int) ([]EntryValue, error)",
+      "canonical": "func(ctx context.Context, limit int) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.EntryValue, error)",
+      "doc": "KeyedEntries returns up to limit records as they rest, in key order.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.EntryValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "EntryValue",
+      "spelled": "struct{Key string; JSON json.RawMessage}",
+      "canonical": "struct{Key string; JSON encoding/json.RawMessage}",
+      "fields": [
+        {
+          "name": "Key",
+          "type": "string",
+          "doc": "Key is the record's key.\n"
+        },
+        {
+          "name": "JSON",
+          "type": "json.RawMessage",
+          "doc": "JSON is the record as it rests.\n"
+        }
+      ],
+      "doc": "EntryValue is a record as it rests, with its key: what an engine lists\nfor a reader that cannot key a record itself.\n",
       "file": "framework/internal/kit/plug/store.go",
       "layer": "framework"
     },
@@ -8703,6 +8987,53 @@
       "canonical": "func(data string) error",
       "doc": "Send writes one event's data.\n",
       "file": "framework/internal/kit/plug/plug.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Executor",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Executor",
+      "spelled": "interface{ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error); QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error); QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row}",
+      "canonical": "interface{ExecContext(ctx context.Context, query string, args ...any) (database/sql.Result, error); QueryContext(ctx context.Context, query string, args ...any) (*database/sql.Rows, error); QueryRowContext(ctx context.Context, query string, args ...any) *database/sql.Row}",
+      "doc": "Executor is what a migration's step runs its statements on: the\ntransaction its migration runs in.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Executor.ExecContext",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "ExecContext",
+      "recv": "Executor",
+      "spelled": "func(ctx context.Context, query string, args ...any) (sql.Result, error)",
+      "canonical": "func(ctx context.Context, query string, args ...any) (database/sql.Result, error)",
+      "doc": "ExecContext runs a statement that returns no rows.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Executor.QueryContext",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "QueryContext",
+      "recv": "Executor",
+      "spelled": "func(ctx context.Context, query string, args ...any) (*sql.Rows, error)",
+      "canonical": "func(ctx context.Context, query string, args ...any) (*database/sql.Rows, error)",
+      "doc": "QueryContext runs a query that returns rows.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Executor.QueryRowContext",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "QueryRowContext",
+      "recv": "Executor",
+      "spelled": "func(ctx context.Context, query string, args ...any) *sql.Row",
+      "canonical": "func(ctx context.Context, query string, args ...any) *database/sql.Row",
+      "doc": "QueryRowContext runs a query that returns at most one row.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
       "layer": "framework"
     },
     {
@@ -8865,6 +9196,29 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.HandleProvider",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "HandleProvider",
+      "spelled": "interface{Handle(dst any) bool}",
+      "canonical": "interface{Handle(dst any) bool}",
+      "doc": "HandleProvider is a Database that hands one of the SDK's own handles on: the\nvalue dst points at — its transaction manager, its dialect — set, and\ntrue; false for a handle it has none of. It serves the subsystems still in\nkit's core that take the SDK's types (the SQL broker of a queue, the\nspool of a mailer) until they leave it (ADR 0179, steps 4 and 6), and\nthe core never names the type it asks for. A sibling of [Database].\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.HandleProvider.Handle",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Handle",
+      "recv": "HandleProvider",
+      "spelled": "func(dst any) bool",
+      "canonical": "func(dst any) bool",
+      "doc": "Handle sets what dst points at to the SDK's handle of its type.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.IndexSpec",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
@@ -8940,6 +9294,109 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MigrationValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MigrationValue",
+      "spelled": "struct{Version uint64; Name string; Up Step; Down Step}",
+      "canonical": "struct{Version uint64; Name string; Up github.com/kitsunium/sdk/framework/internal/kit/plug.Step; Down github.com/kitsunium/sdk/framework/internal/kit/plug.Step}",
+      "fields": [
+        {
+          "name": "Version",
+          "type": "uint64",
+          "doc": "Version orders the migration in its set: non-zero and unique.\n"
+        },
+        {
+          "name": "Name",
+          "type": "string",
+          "doc": "Name labels it in the version table.\n"
+        },
+        {
+          "name": "Up",
+          "type": "Step",
+          "doc": "Up applies the change.\n"
+        },
+        {
+          "name": "Down",
+          "type": "Step",
+          "doc": "Down reverses it.\n"
+        }
+      ],
+      "doc": "MigrationValue is one versioned change of a database's schema and its\nreversal, as kit's migrations are written: the SDK's own, on the standard\nlibrary's types.\n",
+      "file": "framework/internal/kit/plug/store.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Migrator",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Migrator",
+      "spelled": "interface{Down(ctx context.Context, version uint64) error; Plan(ctx context.Context) ([]MigrationValue, error); Up(ctx context.Context) error}",
+      "canonical": "interface{Down(ctx context.Context, version uint64) error; Plan(ctx context.Context) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.MigrationValue, error); Up(ctx context.Context) error}",
+      "doc": "Migrator is one set of migrations on a database.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Migrator.Down",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Down",
+      "recv": "Migrator",
+      "spelled": "func(ctx context.Context, version uint64) error",
+      "canonical": "func(ctx context.Context, version uint64) error",
+      "doc": "Down reverses the applied migrations above version, newest first.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Migrator.Plan",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Plan",
+      "recv": "Migrator",
+      "spelled": "func(ctx context.Context) ([]MigrationValue, error)",
+      "canonical": "func(ctx context.Context) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.MigrationValue, error)",
+      "doc": "Plan is the set's pending migrations, oldest first, applying nothing.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Migrator.Up",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Up",
+      "recv": "Migrator",
+      "spelled": "func(ctx context.Context) error",
+      "canonical": "func(ctx context.Context) error",
+      "doc": "Up applies every pending migration, in order.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MigratorProvider",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MigratorProvider",
+      "spelled": "interface{Migrator(table string, ms []MigrationValue) (Migrator, error)}",
+      "canonical": "interface{Migrator(table string, ms []github.com/kitsunium/sdk/framework/internal/kit/plug.MigrationValue) (github.com/kitsunium/sdk/framework/internal/kit/plug.Migrator, error)}",
+      "doc": "MigratorProvider is a Database that runs a set of migrations under a version\ntable of its own, and so a lock of its own. A sibling of [Database].\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MigratorProvider.Migrator",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Migrator",
+      "recv": "MigratorProvider",
+      "spelled": "func(table string, ms []MigrationValue) (Migrator, error)",
+      "canonical": "func(table string, ms []github.com/kitsunium/sdk/framework/internal/kit/plug.MigrationValue) (github.com/kitsunium/sdk/framework/internal/kit/plug.Migrator, error)",
+      "doc": "Migrator is the set ms, under the version table table.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.NewHTTPServer",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
@@ -8996,6 +9453,385 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Refusal",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "Refusal is a kind of refusal of a store's engine or a database, as kit\nwords it.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalClosed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalClosed",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "13",
+      "doc": "RefusalClosed is a call on a closed engine.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalError",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalError",
+      "spelled": "struct{Err error; Kind Refusal}",
+      "canonical": "struct{Err error; Kind github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal}",
+      "fields": [
+        {
+          "name": "Err",
+          "type": "error",
+          "doc": "Err is what the engine met.\n"
+        },
+        {
+          "name": "Kind",
+          "type": "Refusal",
+          "doc": "Kind is how kit words it.\n"
+        }
+      ],
+      "doc": "RefusalError is an engine's refusal of one kind: the error it met, and\nthe kind kit words it by.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.(*RefusalError).Error",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Error",
+      "recv": "RefusalError",
+      "spelled": "func() string",
+      "canonical": "func() string",
+      "doc": "Error is what the engine met's.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.(*RefusalError).Unwrap",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Unwrap",
+      "recv": "RefusalError",
+      "spelled": "func() error",
+      "canonical": "func() error",
+      "doc": "Unwrap is what the engine met.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalExists",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalExists",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "2",
+      "doc": "RefusalExists is a document already under the key an insertion names.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalIndexBroken",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalIndexBroken",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "8",
+      "doc": "RefusalIndexBroken is stored documents that break a unique index.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalIndexNotUnique",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalIndexNotUnique",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "7",
+      "doc": "RefusalIndexNotUnique is a lookup on an index that is not unique.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalIndexUnknown",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalIndexUnknown",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "6",
+      "doc": "RefusalIndexUnknown is an index the store does not declare.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalKeyChanged",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalKeyChanged",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "5",
+      "doc": "RefusalKeyChanged is an update that changes the document's key.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalKeyEmpty",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalKeyEmpty",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "4",
+      "doc": "RefusalKeyEmpty is a document whose key is empty.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalKeyTooLong",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalKeyTooLong",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "18",
+      "doc": "RefusalKeyTooLong is a key longer than a database's key columns hold;\nits \"max\" field says how long they hold.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalLoad",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalLoad",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "12",
+      "doc": "RefusalLoad is a store that could not be loaded; its \"problem\" field\nsays why.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalNone",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalNone",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "0",
+      "doc": "RefusalNone is no refusal kit words.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalNotFound",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalNotFound",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "1",
+      "doc": "RefusalNotFound is no document under the key, or under the index's\nkey.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalNotTrashed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalNotTrashed",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "17",
+      "doc": "RefusalNotTrashed is no record in the trash under the key.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalOutOfOrder",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalOutOfOrder",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "22",
+      "doc": "RefusalOutOfOrder is a migration older than one already applied; its\n\"applied\" field names the newer.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalPersist",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalPersist",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "11",
+      "doc": "RefusalPersist is a write the store could not keep.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalStatement",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalStatement",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "19",
+      "doc": "RefusalStatement is a statement the database did not complete.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalTxClosed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalTxClosed",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "20",
+      "doc": "RefusalTxClosed is a call with the context of a transaction that\nended.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalTxFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalTxFailed",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "21",
+      "doc": "RefusalTxFailed is a transaction or a savepoint the database would\nnot open, commit or roll back.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalUnconfirmed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalUnconfirmed",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "14",
+      "doc": "RefusalUnconfirmed is a write that stands but whose survival across a\npower loss is in doubt.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalUndecodable",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalUndecodable",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "9",
+      "doc": "RefusalUndecodable is a record that does not decode into its type.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalUnencodable",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalUnencodable",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "10",
+      "doc": "RefusalUnencodable is an entity that does not encode.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalUniqueTaken",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalUniqueTaken",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "3",
+      "doc": "RefusalUniqueTaken is another document under a unique index's key.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalVersionsNotKept",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalVersionsNotKept",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "15",
+      "doc": "RefusalVersionsNotKept is a call on the versions of a store that keeps\nnone.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.RefusalVersionsRewrite",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "RefusalVersionsRewrite",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal",
+      "value": "16",
+      "doc": "RefusalVersionsRewrite is a rewrite of versions that adds or\nrenumbers one.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Refuse",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Refuse",
+      "spelled": "func(kind Refusal, err error) error",
+      "canonical": "func(kind github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal, err error) error",
+      "doc": "Refuse is err as a refusal of kind.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Refused",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Refused",
+      "spelled": "func(err error, kind Refusal) bool",
+      "canonical": "func(err error, kind github.com/kitsunium/sdk/framework/internal/kit/plug.Refusal) bool",
+      "doc": "Refused reports whether err, or an error it wraps, is a refusal of kind.\n",
+      "file": "framework/internal/kit/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Reindexer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Reindexer",
+      "spelled": "interface{Reindex(ctx context.Context) error}",
+      "canonical": "interface{Reindex(ctx context.Context) error}",
+      "doc": "Reindexer is an engine on a database that files its index rows again. A\nsibling of [StoreEngine].\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Reindexer.Reindex",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Reindex",
+      "recv": "Reindexer",
+      "spelled": "func(ctx context.Context) error",
+      "canonical": "func(ctx context.Context) error",
+      "doc": "Reindex files every record's index rows again.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.SampleProcess",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
@@ -9018,22 +9854,61 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StampValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "StampValue",
+      "spelled": "struct{Meta map[string]string; InPlace bool}",
+      "canonical": "struct{Meta map[string]string; InPlace bool}",
+      "fields": [
+        {
+          "name": "Meta",
+          "type": "map[string]string",
+          "doc": "Meta is kept with the version the write makes.\n"
+        },
+        {
+          "name": "InPlace",
+          "type": "bool",
+          "doc": "InPlace makes the write change the document without making a version.\n"
+        }
+      ],
+      "doc": "StampValue is what a write says about the version it makes: who made it\nand which command, kept with the version; and whether it changes the\ndocument in place, without a version of its own.\n",
+      "file": "framework/internal/kit/plug/store.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Step",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Step",
+      "spelled": "func(ctx context.Context, ex Executor) error",
+      "canonical": "func(ctx context.Context, ex github.com/kitsunium/sdk/framework/internal/kit/plug.Executor) error",
+      "doc": "Step is one direction of a migration, run on ex.\n",
+      "file": "framework/internal/kit/plug/store.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StoreConfig",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
       "name": "StoreConfig",
-      "spelled": "struct{Name string; Key func(d DocumentValue) string; Decode func(raw json.RawMessage) (any, error); Indexes []IndexSpec; Data fs.FS; Path string; Database Database; Versions int; Clock func() time.Time; Held func(key string) bool}",
-      "canonical": "struct{Name string; Key func(d github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentValue) string; Decode func(raw encoding/json.RawMessage) (any, error); Indexes []github.com/kitsunium/sdk/framework/internal/kit/plug.IndexSpec; Data io/fs.FS; Path string; Database github.com/kitsunium/sdk/framework/internal/kit/plug.Database; Versions int; Clock func() time.Time; Held func(key string) bool}",
+      "spelled": "struct{Name string; Key func(d DocumentValue) string; KeyAtRest func(raw json.RawMessage) (string, bool); Decode func(raw json.RawMessage) (any, error); Indexes []IndexSpec; Data fs.FS; Path string; Database Database; Table string; IndexKey func(index string, key string) []byte; Call func(ctx context.Context, write bool) (call context.Context, done func(), err error); Versions int; Clock func() time.Time; Held func(ctx context.Context, key string) bool; Stamp func(ctx context.Context) StampValue; Transaction Transaction}",
+      "canonical": "struct{Name string; Key func(d github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentValue) string; KeyAtRest func(raw encoding/json.RawMessage) (string, bool); Decode func(raw encoding/json.RawMessage) (any, error); Indexes []github.com/kitsunium/sdk/framework/internal/kit/plug.IndexSpec; Data io/fs.FS; Path string; Database github.com/kitsunium/sdk/framework/internal/kit/plug.Database; Table string; IndexKey func(index string, key string) []byte; Call func(ctx context.Context, write bool) (call context.Context, done func(), err error); Versions int; Clock func() time.Time; Held func(ctx context.Context, key string) bool; Stamp func(ctx context.Context) github.com/kitsunium/sdk/framework/internal/kit/plug.StampValue; Transaction github.com/kitsunium/sdk/framework/internal/kit/plug.Transaction}",
       "fields": [
         {
           "name": "Name",
           "type": "string",
-          "doc": "Name is the store's, as its files and its table name it.\n"
+          "doc": "Name is the store's, as a log line and a rollback name it.\n"
         },
         {
           "name": "Key",
           "type": "func(d DocumentValue) string",
-          "doc": "Key is a document's key: the product's key function on its type,\nwrapped once at the declaration.\n"
+          "doc": "Key is a document's key: the product's key function on its type,\nwrapped once at the declaration. It reads the document's Value, which\nthe engine decodes first unless KeyAtRest gives the key.\n"
+        },
+        {
+          "name": "KeyAtRest",
+          "type": "func(raw json.RawMessage) (string, bool)",
+          "doc": "KeyAtRest, when set, gives the key of a record as it rests, without\ndecoding it; false when it cannot.\n"
         },
         {
           "name": "Decode",
@@ -9058,7 +9933,22 @@
         {
           "name": "Database",
           "type": "Database",
-          "doc": "Database keeps the store, nil when the data directory or memory does.\n"
+          "doc": "Database keeps the store, nil when the data directory or memory does:\na scope the store subsystem's Database opened.\n"
+        },
+        {
+          "name": "Table",
+          "type": "string",
+          "doc": "Table is the store's table on Database.\n"
+        },
+        {
+          "name": "IndexKey",
+          "type": "func(index string, key string) []byte",
+          "doc": "IndexKey is the key a table's index keys are hashed under, nil for\nnone: an index key reaches the table as its keyed hash.\n"
+        },
+        {
+          "name": "Call",
+          "type": "func(ctx context.Context, write bool) (call context.Context, done func(), err error)",
+          "doc": "Call is the context one call of the engine on Database runs with: on\nthe transaction ctx carries for it, else on the pool, within the\ndatabase's timeout; done ends it.\n"
         },
         {
           "name": "Versions",
@@ -9072,11 +9962,21 @@
         },
         {
           "name": "Held",
-          "type": "func(key string) bool",
-          "doc": "Held reports whether a record's versions are held, and no write may\nprune them.\n"
+          "type": "func(ctx context.Context, key string) bool",
+          "doc": "Held reports whether a record's versions are held, and no write may\nprune them: asked with the write's context, on a database inside its\ntransaction.\n"
+        },
+        {
+          "name": "Stamp",
+          "type": "func(ctx context.Context) StampValue",
+          "doc": "Stamp is what a write under ctx says about the version it makes.\n"
+        },
+        {
+          "name": "Transaction",
+          "type": "Transaction",
+          "doc": "Transaction is kit's transaction, which the engine's writes take part\nin.\n"
         }
       ],
-      "doc": "StoreConfig is what kit asks of one store's engine: the store, its key and\nits indexes over documents, where it rests and what it keeps.\n",
+      "doc": "StoreConfig is what kit asks of one store's engine: the store, its key and\nits indexes over documents, where it rests and what it keeps, and how its\nwrites take part in kit's transactions.\n",
       "file": "framework/internal/kit/plug/store.go",
       "layer": "framework"
     },
@@ -9085,8 +9985,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
       "name": "StoreDriverConfig",
-      "spelled": "struct{Open func(cfg StoreConfig) (StoreEngine, error); Database func(cfg DatabaseConfig) (Database, error)}",
-      "canonical": "struct{Open func(cfg github.com/kitsunium/sdk/framework/internal/kit/plug.StoreConfig) (github.com/kitsunium/sdk/framework/internal/kit/plug.StoreEngine, error); Database func(cfg github.com/kitsunium/sdk/framework/internal/kit/plug.DatabaseConfig) (github.com/kitsunium/sdk/framework/internal/kit/plug.Database, error)}",
+      "spelled": "struct{Open func(cfg StoreConfig) (StoreEngine, error); Database func(cfg DatabaseConfig) (Database, error); TableMigration func(dialect string, t TableSpec, version uint64) (MigrationValue, error)}",
+      "canonical": "struct{Open func(cfg github.com/kitsunium/sdk/framework/internal/kit/plug.StoreConfig) (github.com/kitsunium/sdk/framework/internal/kit/plug.StoreEngine, error); Database func(cfg github.com/kitsunium/sdk/framework/internal/kit/plug.DatabaseConfig) (github.com/kitsunium/sdk/framework/internal/kit/plug.Database, error); TableMigration func(dialect string, t github.com/kitsunium/sdk/framework/internal/kit/plug.TableSpec, version uint64) (github.com/kitsunium/sdk/framework/internal/kit/plug.MigrationValue, error)}",
       "fields": [
         {
           "name": "Open",
@@ -9097,9 +9997,14 @@
           "name": "Database",
           "type": "func(cfg DatabaseConfig) (Database, error)",
           "doc": "Database opens kit's scope on one database's pool.\n"
+        },
+        {
+          "name": "TableMigration",
+          "type": "func(dialect string, t TableSpec, version uint64) (MigrationValue, error)",
+          "doc": "TableMigration is the migration that makes the table t on a database\nof the dialect named, at version.\n"
         }
       ],
-      "doc": "StoreDriverConfig is what framework/kit/store plugs into kit: how a\nstore's engine opens, and how kit opens its scope on a database.\n",
+      "doc": "StoreDriverConfig is what framework/kit/store plugs into kit: how a\nstore's engine opens, how kit opens its scope on a database, and the\nmigration that makes one of kit's tables.\n",
       "file": "framework/internal/kit/plug/store.go",
       "layer": "framework"
     },
@@ -9110,7 +10015,7 @@
       "name": "StoreEngine",
       "spelled": "interface{Close() error; Count(ctx context.Context) (int, error); Delete(ctx context.Context, key string) error; Entries(ctx context.Context, limit int) ([]json.RawMessage, error); Filter(ctx context.Context, keep func(d DocumentValue) bool) ([]DocumentValue, error); Find(ctx context.Context, index string, key string) ([]DocumentValue, error); Get(ctx context.Context, key string) (DocumentValue, error); List(ctx context.Context) ([]DocumentValue, error); Lookup(ctx context.Context, index string, key string) (DocumentValue, error); Update(ctx context.Context, key string, fn func(d *DocumentValue) error) (DocumentValue, error); Watch(onWrite func(key string), onDelete func(key string)); Write(ctx context.Context, d DocumentValue, mode WriteMode) error}",
       "canonical": "interface{Close() error; Count(ctx context.Context) (int, error); Delete(ctx context.Context, key string) error; Entries(ctx context.Context, limit int) ([]encoding/json.RawMessage, error); Filter(ctx context.Context, keep func(d github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentValue) bool) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentValue, error); Find(ctx context.Context, index string, key string) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentValue, error); Get(ctx context.Context, key string) (github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentValue, error); List(ctx context.Context) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentValue, error); Lookup(ctx context.Context, index string, key string) (github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentValue, error); Update(ctx context.Context, key string, fn func(d *github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentValue) error) (github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentValue, error); Watch(onWrite func(key string), onDelete func(key string)); Write(ctx context.Context, d github.com/kitsunium/sdk/framework/internal/kit/plug.DocumentValue, mode github.com/kitsunium/sdk/framework/internal/kit/plug.WriteMode) error}",
-      "doc": "StoreEngine is what a store runs on, over documents (ADR 0179 §2): the\nnon-generic engine under Store[T]. Its refusals are kit's: the engine\ntranslates the SDK's before they reach the core. Every call takes the\ncaller's context, which carries the transaction the call joins. It grows by\nthe sibling interfaces below, never by a method (the SDK's ADR 0039).\n",
+      "doc": "StoreEngine is what a store runs on, over documents (ADR 0179 §2): the\nnon-generic engine under Store[T]. Its refusals are kit's ([Refusal]): the\nengine translates the SDK's before they reach the core. Every call takes\nthe caller's context, which carries the transaction the call joins. It\ngrows by the sibling interfaces below, never by a method (the SDK's ADR\n0039).\n",
       "file": "framework/internal/kit/plug/store_interface.go",
       "layer": "framework"
     },
@@ -9265,7 +10170,7 @@
       "name": "Stores",
       "spelled": "atomic.Pointer[StoreDriverConfig]",
       "canonical": "sync/atomic.Pointer[github.com/kitsunium/sdk/framework/internal/kit/plug.StoreDriverConfig]",
-      "doc": "Stores is the store subsystem: the engines kit's stores run on and kit's\nscope on a database; nil until framework/kit/store is imported. Until\nthat package exists (ADR 0179, step 3) the core runs the stores itself\nand nothing sets it; once it does, a product that declares a store or a\ndatabase without it is refused at the start (ADR 0179 §6).\n",
+      "doc": "Stores is the store subsystem: the engines kit's stores run on, kit's\nscope on a database and the migrations of kit's tables; nil until\nframework/kit/store is imported. A product that declares a store or a\ndatabase without it is refused at the start (ADR 0179 §6).\n",
       "file": "framework/internal/kit/plug/store.go",
       "layer": "framework"
     },
@@ -9278,6 +10183,34 @@
       "canonical": "sync/atomic.Pointer[github.com/kitsunium/sdk/framework/internal/kit/plug.ProfilerConfig]",
       "doc": "StudioProfiler is the Studio's profiler; nil until framework/kit/studio\nis imported.\n",
       "file": "framework/internal/kit/plug/plug.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.TableSpec",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "TableSpec",
+      "spelled": "struct{Name string; VersionsOf string; Queue bool}",
+      "canonical": "struct{Name string; VersionsOf string; Queue bool}",
+      "fields": [
+        {
+          "name": "Name",
+          "type": "string",
+          "doc": "Name is the table's.\n"
+        },
+        {
+          "name": "VersionsOf",
+          "type": "string",
+          "doc": "VersionsOf is, for a store's versions, the store's table, from which\nthe versions' table is named.\n"
+        },
+        {
+          "name": "Queue",
+          "type": "bool",
+          "doc": "Queue marks a consumer's queue: the SQL broker's one table.\n"
+        }
+      ],
+      "doc": "TableSpec is one of kit's tables on a database, as its migration makes it:\na store's, a store's versions beside the store's table VersionsOf, or a\nconsumer's queue.\n",
+      "file": "framework/internal/kit/plug/store.go",
       "layer": "framework"
     },
     {
@@ -9301,6 +10234,65 @@
       ],
       "doc": "TombstoneValue is one record in a store's trash: its key, and when it was\ntrashed.\n",
       "file": "framework/internal/kit/plug/store.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Transaction",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Transaction",
+      "spelled": "interface{AtCommit(ctx context.Context, fn func()) bool; Local(ctx context.Context) bool; Retell(ctx context.Context, fn func()); Undo(ctx context.Context, store string, restore func(ctx context.Context) error)}",
+      "canonical": "interface{AtCommit(ctx context.Context, fn func()) bool; Local(ctx context.Context) bool; Retell(ctx context.Context, fn func()); Undo(ctx context.Context, store string, restore func(ctx context.Context) error)}",
+      "doc": "Transaction is kit's transaction as a store's engine takes part in it\n(ADR 0139, ADR 0178): the core implements it, an engine calls it with its\ncaller's context.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Transaction.AtCommit",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "AtCommit",
+      "recv": "Transaction",
+      "spelled": "func(ctx context.Context, fn func()) bool",
+      "canonical": "func(ctx context.Context, fn func()) bool",
+      "doc": "AtCommit holds fn until the transaction ctx carries commits, and\nreports whether it did: false outside one, where the caller runs it\nnow.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Transaction.Local",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Local",
+      "recv": "Transaction",
+      "spelled": "func(ctx context.Context) bool",
+      "canonical": "func(ctx context.Context) bool",
+      "doc": "Local reports whether ctx runs in a transaction that holds the data's\nwriter turn: a write in the data directory or in memory then records\nwhat it replaces.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Transaction.Retell",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Retell",
+      "recv": "Transaction",
+      "spelled": "func(ctx context.Context, fn func())",
+      "canonical": "func(ctx context.Context, fn func())",
+      "doc": "Retell keeps fn, which announces a write on a database again when the\ntransaction ctx carries rolls it back.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Transaction.Undo",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Undo",
+      "recv": "Transaction",
+      "spelled": "func(ctx context.Context, store string, restore func(ctx context.Context) error)",
+      "canonical": "func(ctx context.Context, store string, restore func(ctx context.Context) error)",
+      "doc": "Undo keeps restore, which a rollback of the transaction ctx carries\nruns; nothing outside one. store names the store in a log line.\n",
+      "file": "framework/internal/kit/plug/store_interface.go",
       "layer": "framework"
     },
     {
@@ -9537,6 +10529,17 @@
       "canonical": "func()",
       "doc": "Enable plugs the HTTP engine, the frontends' file server and the process\nsampler into kit.\n",
       "file": "framework/internal/kit/serverkit/serverkit.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/storekit.Enable",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/storekit",
+      "name": "Enable",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "Enable plugs the stores' engines, kit's scope on a database and the\nmigrations of kit's tables into kit.\n",
+      "file": "framework/internal/kit/storekit/storekit.go",
       "layer": "framework"
     },
     {
@@ -12856,6 +13859,57 @@
       "owner": "go:github.com/kitsunium/sdk/framework/internal/kit.DiagnosticsError",
       "doc": "DiagnosticsError is returned by Start when declarations are wrong. It lists\nevery problem at once, each with its position.\n",
       "file": "framework/kit/app.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.Dialect",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "Dialect",
+      "spelled": "ikit.Dialect",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit.Dialect",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/kit.Dialect",
+      "doc": "Dialect is the SQL an [Engine] speaks: [DialectPostgres], [DialectMySQL] or\n[DialectSQLite], kit's own names (ADR 0179 Q5) — the graph names the\nengine by it.\n",
+      "file": "framework/kit/database.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.DialectMySQL",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "DialectMySQL",
+      "spelled": "Dialect",
+      "canonical": "github.com/kitsunium/sdk/framework/kit.Dialect",
+      "value": "\"mysql\"",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/kit.DialectMySQL",
+      "doc": "DialectMySQL is MySQL or MariaDB.\n",
+      "file": "framework/kit/database.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.DialectPostgres",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "DialectPostgres",
+      "spelled": "Dialect",
+      "canonical": "github.com/kitsunium/sdk/framework/kit.Dialect",
+      "value": "\"postgres\"",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/kit.DialectPostgres",
+      "doc": "DialectPostgres is PostgreSQL.\n",
+      "file": "framework/kit/database.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.DialectSQLite",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "DialectSQLite",
+      "spelled": "Dialect",
+      "canonical": "github.com/kitsunium/sdk/framework/kit.Dialect",
+      "value": "\"sqlite\"",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/kit.DialectSQLite",
+      "doc": "DialectSQLite is SQLite.\n",
+      "file": "framework/kit/database.go",
       "layer": "framework"
     },
     {

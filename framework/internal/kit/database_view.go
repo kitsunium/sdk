@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
@@ -57,7 +56,7 @@ func (r *databaseRun) describe() model.Database {
 func (a *App) serveDatabases(w http.ResponseWriter, r *http.Request) {
 	for _, run := range a.databaseRuns() {
 		run.mu.Lock()
-		state, cfg := run.state, run.cfg
+		state, db := run.state, run.db
 		run.mu.Unlock()
 		if state != model.DatabaseOpen {
 			continue
@@ -69,7 +68,7 @@ func (a *App) serveDatabases(w http.ResponseWriter, r *http.Request) {
 		}
 		var sets []model.MigrationSet
 		for _, set := range a.migrationSets(run.d) {
-			m, err := sql.NewMigrator(cfg, sql.MigrateConfig{Migrations: set.migrations, VersionTable: set.table})
+			m, err := migratorOf(db, set)
 			if err != nil {
 				sets = append(sets, model.MigrationSet{Name: set.name, Table: set.table, Problem: errs.PublicOf(err)})
 				continue

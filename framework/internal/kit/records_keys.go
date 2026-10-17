@@ -13,15 +13,10 @@ import (
 // The keys of a store's records (ADR 0178 C6). A module that watches a store
 // may list its keys — to catch up on the writes a crash took the notices of —,
 // and nothing else may: the mark that decides what a module hears decides what
-// it may list. A listing reads the keys alone, never a record: the SDK's
-// document store lists them without copying a document (docstore.KeyLister),
+// it may list. A listing reads the keys alone, never a record: the store
+// subsystem's engines list them without copying a document (plug.Keyser),
 // and each listing is one entry in the privacy journal, however many keys it
 // yields, since a key can be personal data — an e-mail as a key.
-
-// sqlKeysChunk is how many keys one call of a database's engine lists, each
-// under its own <name>-timeout: a long listing is many short calls, never one
-// call the timeout ends halfway.
-const sqlKeysChunk int = 256
 
 // engineKeys are the keys eng lists above after, or its refusal: an engine
 // that lists none says so once.
@@ -47,49 +42,6 @@ func yieldKeys(yield func(string, error) bool, keys []string, failure error) boo
 		return true
 	}
 	return yield("", failure) && failure == nil
-}
-
-// Keys lists the document store's keys above after: in memory, without a
-// document copied.
-//
-//ktn:allow-unused-param: the keyser port passes a context the local document store does not take
-func (e *docEngine) Keys(_ context.Context, after string) iter.Seq2[string, error] {
-	return e.ds.Keys(after)
-}
-
-// Keys lists the table's keys above after, sqlKeysChunk at a time, each
-// chunk one call on the transaction ctx carries for the database, else on
-// the pool, within the database's timeout.
-func (e *sqlEngine) Keys(ctx context.Context, after string) iter.Seq2[string, error] {
-	return func(yield func(string, error) bool) {
-		for {
-			chunk, err := e.keysChunk(ctx, after)
-			if !yieldKeys(yield, chunk, err) || len(chunk) < sqlKeysChunk {
-				return
-			}
-			after = chunk[len(chunk)-1]
-		}
-	}
-}
-
-// keysChunk is at most sqlKeysChunk keys above after, read in one call.
-func (e *sqlEngine) keysChunk(ctx context.Context, after string) ([]string, error) {
-	c, done, err := e.call(ctx, false)
-	if err != nil {
-		return nil, err
-	}
-	defer done()
-	keys := make([]string, 0, sqlKeysChunk)
-	for key, err := range e.ds.Keys(c, after) {
-		if err != nil {
-			return nil, err
-		}
-		keys = append(keys, key)
-		if len(keys) == sqlKeysChunk {
-			break
-		}
-	}
-	return keys, nil
 }
 
 // Keys lists the keys of the records the sealing engine keeps: its inner

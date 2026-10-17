@@ -7,6 +7,11 @@ import (
 	_ "github.com/kitsunium/sdk/framework/kit/config/yaml"
 	// The suite's servers serve HTTP, as a product that imports it does.
 	_ "github.com/kitsunium/sdk/framework/kit/server"
+	// The suite's stores and databases run on the store subsystem, as a
+	// product that imports it does (ADR 0179 §1) — internal tests included:
+	// one binary. subsystems_internal_test.go takes it out to see what a
+	// program that does not import it is refused.
+	_ "github.com/kitsunium/sdk/framework/kit/store"
 	// The suite's dev apps serve the Studio's API, as a product that imports
 	// it does.
 	_ "github.com/kitsunium/sdk/framework/kit/studio"

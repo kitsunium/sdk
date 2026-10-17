@@ -7,7 +7,6 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -111,7 +110,7 @@ func (s *storeCore) versionRef(ctx context.Context, se *sealedEngine, key string
 	}
 	cur, err := se.Get(ctx, key)
 	switch {
-	case errors.Is(err, docstore.DocumentNotFound):
+	case plug.Refused(err, plug.RefusalNotFound):
 		return "", func() {}, nil
 	case err != nil:
 		return "", func() {}, s.said(err, key, "")
@@ -130,9 +129,9 @@ func (s *storeCore) versionRef(ctx context.Context, se *sealedEngine, key string
 // confirmed stands.
 func (s *storeCore) versionsRewritten(err error) error {
 	switch {
-	case err == nil, errors.Is(err, docstore.DocumentNotFound), errors.Is(err, docstore.WriteUnconfirmed):
+	case err == nil, plug.Refused(err, plug.RefusalNotFound), plug.Refused(err, plug.RefusalUnconfirmed):
 		return nil
-	case errors.Is(err, docstore.StoreClosed):
+	case plug.Refused(err, plug.RefusalClosed):
 		return notRunning(&s.nodeBase)
 	}
 	return explain(CodeRevisionWrite, "REVISIONS_REWRITE", "a record's versions could not be rewritten", err, errs.String("store", s.id))

@@ -11,7 +11,6 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -280,9 +279,15 @@ func (s *storeCore) turn(ctx context.Context) (context.Context, func(), error) {
 
 // local reports whether the store keeps its data in the data directory or
 // in memory — not on a database: its writes take the writer turn.
-func (s *storeCore) local() bool {
-	b, ok := s.engine().(databaseSource)
-	return !ok || b.onDatabase() == nil
+func (s *storeCore) local() bool { return s.onDatabase() == nil }
+
+// onDatabase is the database the running store's engine is on, nil for the
+// data directory or memory: a store that seals or remembers on a database is
+// on it all the same.
+func (s *storeCore) onDatabase() *databaseRun {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.on
 }
 
 // apart reports whether the store is in no transaction — its writes land
@@ -396,7 +401,7 @@ func (s *storeCore) docOf(v any) (plug.DocumentValue, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		if s.keyOf(v) == "" {
-			return plug.DocumentValue{}, errs.Wrap(docstore.DocumentKeyEmpty, errs.WrapParams{}, errs.String("store", s.id))
+			return plug.DocumentValue{}, kitRefusal(plug.RefusalKeyEmpty, s.id)
 		}
 		return plug.DocumentValue{}, unencodable(s.id, err)
 	}
@@ -543,40 +548,40 @@ type storeRefusal struct {
 // index names is never quoted: it is often something a caller must not
 // learn back — an e-mail, the hash of a token.
 var storeRefusals = []struct {
-	sentinel error
-	said     func(r *storeRefusal, err error) error
+	kind plug.Refusal
+	said func(r *storeRefusal, err error) error
 }{
-	{docstore.DocumentNotFound, func(r *storeRefusal, _ error) error {
+	{plug.RefusalNotFound, func(r *storeRefusal, _ error) error {
 		return NotFound(fmt.Sprintf("%s: no entity has this key in the index %q", r.name, clip(r.index)))
 	}},
-	{docstore.DocumentExists, func(r *storeRefusal, _ error) error {
+	{plug.RefusalExists, func(r *storeRefusal, _ error) error {
 		return Conflict(fmt.Sprintf("%s: an entity with key %q already exists", r.name, clip(r.key)))
 	}},
-	{docstore.UniqueKeyTaken, func(r *storeRefusal, _ error) error {
+	{plug.RefusalUniqueTaken, func(r *storeRefusal, _ error) error {
 		return Conflict(fmt.Sprintf("%s: another entity already has this key in the unique index %q", r.name, r.index))
 	}},
-	{docstore.DocumentKeyEmpty, func(r *storeRefusal, _ error) error {
+	{plug.RefusalKeyEmpty, func(r *storeRefusal, _ error) error {
 		return Invalid(fmt.Sprintf("%s: an entity's key cannot be empty", r.name))
 	}},
-	{docstore.DocumentKeyChanged, func(r *storeRefusal, _ error) error {
+	{plug.RefusalKeyChanged, func(r *storeRefusal, _ error) error {
 		return Invalid(fmt.Sprintf("%s: an update cannot change the key %q", r.name, clip(r.key)))
 	}},
-	{docstore.IndexUnknown, func(r *storeRefusal, _ error) error {
+	{plug.RefusalIndexUnknown, func(r *storeRefusal, _ error) error {
 		return Invalid(fmt.Sprintf("%s has no index %q", r.name, clip(r.index)))
 	}},
-	{docstore.IndexNotUnique, func(r *storeRefusal, _ error) error {
+	{plug.RefusalIndexNotUnique, func(r *storeRefusal, _ error) error {
 		return Invalid(fmt.Sprintf("%s: the index %q is not unique: read it with Find", r.name, clip(r.index)))
 	}},
-	{docstore.DocumentUnencodable, func(r *storeRefusal, err error) error {
+	{plug.RefusalUnencodable, func(r *storeRefusal, err error) error {
 		return failure(CodeStoreEncode, "STORE_ENCODE", "the entity cannot be stored", err, errs.String("store", r.id), errs.String("key", r.key))
 	}},
-	{docstore.PersistFailed, func(r *storeRefusal, err error) error {
+	{plug.RefusalPersist, func(r *storeRefusal, err error) error {
 		return failure(CodeStorePersist, "STORE_PERSIST", "the store could not be written", err, errs.String("store", r.id))
 	}},
 }
 
-// said is an engine's refusal — the document store's sentinels, which every
-// engine speaks (store_engine.go) — in kit's words: a [NotFound], a
+// said is an engine's refusal — kit's kinds, which every engine speaks
+// (store_engine.go) — in kit's words: a [NotFound], a
 // [Conflict], an [Invalid] or a failure with kit's code — never the SDK's
 // error as it is, and a key quoted only where kit always quoted one. index is
 // the index a Lookup or a Find read. An error of the product's own — what an
@@ -593,7 +598,7 @@ func (s *storeCore) said(err error, key, index string) error {
 	}
 	about := storeRefusal{name: s.name, id: s.id, key: key, index: index}
 	for _, r := range storeRefusals {
-		if errors.Is(err, r.sentinel) {
+		if plug.Refused(err, r.kind) {
 			return r.said(&about, err)
 		}
 	}
@@ -607,18 +612,18 @@ func (s *storeCore) said(err error, key, index string) error {
 // unconfirmed write, a missing key, an undecodable entity, a closed store.
 func (s *storeCore) saidOwn(err error, key, index string) (handled bool, said error) {
 	switch {
-	case errors.Is(err, docstore.WriteUnconfirmed):
+	case plug.Refused(err, plug.RefusalUnconfirmed):
 		// The write stands — the store and its file show it —, only its
 		// survival across a power loss is in doubt: said, not failed.
 		if a := s.app(); a != nil {
 			a.problem(s.id, say("store.unconfirmed", "store", s.id))
 		}
 		return true, nil
-	case errors.Is(err, docstore.DocumentNotFound) && index == "":
+	case plug.Refused(err, plug.RefusalNotFound) && index == "":
 		return true, s.missing(key)
-	case errors.Is(err, docstore.DocumentUndecodable):
+	case plug.Refused(err, plug.RefusalUndecodable):
 		return true, s.decodeFailure(key, err)
-	case errors.Is(err, docstore.StoreClosed):
+	case plug.Refused(err, plug.RefusalClosed):
 		return true, notRunning(&s.nodeBase)
 	default:
 		return false, nil
@@ -663,17 +668,18 @@ func (s *storeCore) start(ctx context.Context, a *App) error {
 	if err != nil {
 		return errors.Join(err, opened.Close())
 	}
-	s.running(ctx, eng)
+	s.running(ctx, eng, nil)
 	return nil
 }
 
-// running makes eng the store's engine: the hooks are kit's lists, read at
-// each write, so that a workflow mounted after the store starts still hears
-// of every write.
-func (s *storeCore) running(ctx context.Context, eng plug.StoreEngine) {
+// running makes eng the store's engine, on the database r — nil for the
+// data directory or memory —: the hooks are kit's lists, read at each
+// write, so that a workflow mounted after the store starts still hears of
+// every write.
+func (s *storeCore) running(ctx context.Context, eng plug.StoreEngine, r *databaseRun) {
 	eng.Watch(func(key string) { s.announce(key, false) }, func(key string) { s.announce(key, true) })
 	s.mu.Lock()
-	s.eng = eng
+	s.eng, s.on = eng, r
 	s.mu.Unlock()
 	if s.started != nil {
 		s.started(ctx)
@@ -688,12 +694,12 @@ func (s *storeCore) openRefusal(where storeFS, err error) error {
 	switch {
 	case errs.HasCode(err, CodeSealOpen), errs.HasCode(err, CodeSealKey):
 		return err
-	case errors.Is(err, docstore.IndexBroken):
+	case plug.Refused(err, plug.RefusalIndexBroken):
 		return failure(CodeStoreIndex, "STORE_INDEX_BROKEN", "the stored entities break a unique index", err,
 			errs.String("store", s.id), errs.String("index", fieldOf(err, "index")))
-	case errors.Is(err, docstore.DocumentUndecodable):
+	case plug.Refused(err, plug.RefusalUndecodable):
 		return s.decodeFailure("", err)
-	case errors.Is(err, docstore.LoadFailed) && strings.Contains(fieldOf(err, "problem"), "keeps versions"):
+	case plug.Refused(err, plug.RefusalLoad) && strings.Contains(fieldOf(err, "problem"), "keeps versions"):
 		// Its files keep versions the store no longer does (ADR 0007 §3):
 		// the document store refuses to drop them unasked.
 		return explain(CodeStoreLoad, "STORE_VERSIONS",
@@ -713,8 +719,8 @@ func (s *storeCore) engineConfig(specs []plug.IndexSpec) *engineConfig {
 	}
 }
 
-// open opens the store's engine where the app places it: the SDK's
-// document store, and — for a store on disk whose entity has a member kit
+// open opens the store's engine where the app places it: the store
+// subsystem's document store, and — for a store on disk whose entity has a member kit
 // seals, or any product store on disk of an app that seals — the document
 // store behind kit's sealing (seal_store.go), which opens what an earlier
 // classification sealed too. A store in memory keeps nothing at rest, and
@@ -724,24 +730,14 @@ func (s *storeCore) engineConfig(specs []plug.IndexSpec) *engineConfig {
 // sealing one around it — and only the store holds it.
 func (s *storeCore) open(ctx context.Context, a *App, where storeFS, specs []plug.IndexSpec) (plug.StoreEngine, error) {
 	if where.fs == nil || !s.opensSealed(a) {
-		eng, err := openDocEngine(s.engineConfig(specs), where, s.versionsOn(a))
-		if err != nil {
-			return nil, err
-		}
-		eng.name = s.id
-		return eng, nil
+		return openLocalEngine(s.id, s.engineConfig(specs), where, s.versionsOn(a))
 	}
 	z, err := a.sealing(ctx)
 	if err != nil {
 		return nil, err
 	}
 	eng, err := openSealedEngine(s, a, z, specs, func(cfg *engineConfig) (plug.StoreEngine, error) {
-		inner, err := openDocEngine(cfg, where, s.versionsOn(a))
-		if err != nil {
-			return nil, err
-		}
-		inner.name = s.id
-		return inner, nil
+		return openLocalEngine(s.id, cfg, where, s.versionsOn(a))
 	})
 	if err != nil {
 		return nil, err
@@ -805,7 +801,7 @@ func (s *storeCore) file() string { return s.svc.name + "/" + s.name + ".json" }
 func (s *storeCore) stop(_ context.Context, _ *App) error {
 	s.mu.Lock()
 	eng := s.eng
-	s.eng = nil
+	s.eng, s.on = nil, nil
 	s.mu.Unlock()
 	if eng == nil {
 		return nil

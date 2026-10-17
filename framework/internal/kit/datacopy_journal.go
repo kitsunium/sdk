@@ -9,7 +9,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -36,7 +36,12 @@ func (w *WorkflowService[E, S]) journalPart(a *App, r *databaseRun) (*copyPart, 
 	if err != nil {
 		return nil, err
 	}
-	return &copyPart{name: w.journalTable(), from: from, to: j.eng}, nil
+	to, ok := documentsOf(j.eng)
+	sink, sinks := to.(copySink)
+	if !ok || !sinks {
+		return nil, failure(CodeDataCopy, "DATA_COPY_STORE", "a workflow's table cannot be written by a copy", nil, errs.String("workflow", w.id))
+	}
+	return &copyPart{name: w.journalTable(), from: from, to: sink}, nil
 }
 
 // journalFile is the workflow's journal under the data directory.
@@ -62,8 +67,8 @@ func readJSONDocs(a *App, name string) (*jsonDocs, error) {
 	return out, nil
 }
 
-// keyList yields the file's keys, sorted.
-func (j *jsonDocs) keyList(_ context.Context) iter.Seq2[string, error] {
+// KeyList yields the file's keys, sorted.
+func (j *jsonDocs) KeyList(_ context.Context) iter.Seq2[string, error] {
 	return func(yield func(string, error) bool) {
 		for _, k := range j.keys {
 			if !yield(k, nil) {
@@ -73,22 +78,22 @@ func (j *jsonDocs) keyList(_ context.Context) iter.Seq2[string, error] {
 	}
 }
 
-// tombstoneList is none: a journal keeps no trash.
-func (*jsonDocs) tombstoneList(_ context.Context) ([]docstore.Tombstone, error) { return nil, nil }
+// TombstoneList is none: a journal keeps no trash.
+func (*jsonDocs) TombstoneList(_ context.Context) ([]plug.TombstoneValue, error) { return nil, nil }
 
-// versionList is none: a journal keeps no versions.
-func (*jsonDocs) versionList(_ context.Context, _ string) ([]docstore.Version, error) {
+// VersionList is none: a journal keeps no versions.
+func (*jsonDocs) VersionList(_ context.Context, _ string) ([]plug.VersionValue, error) {
 	return nil, nil
 }
 
-// current is the document key as the file holds it.
-func (j *jsonDocs) current(_ context.Context, key string) (json.RawMessage, error) {
+// Current is the document key as the file holds it.
+func (j *jsonDocs) Current(_ context.Context, key string) (json.RawMessage, error) {
 	raw, ok := j.docs[key]
 	if !ok {
-		return nil, errs.Wrap(docstore.DocumentNotFound, errs.WrapParams{})
+		return nil, kitRefusal(plug.RefusalNotFound, "workflow journal")
 	}
 	return raw, nil
 }
 
-// keepsVersions reports no: a journal keeps none.
-func (*jsonDocs) keepsVersions() bool { return false }
+// KeepsVersions reports no: a journal keeps none.
+func (*jsonDocs) KeepsVersions() bool { return false }

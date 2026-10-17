@@ -60,7 +60,7 @@ func TestDescribeNamesTheFile(t *testing.T) {
 	if _, err := sqlite.Engine().Describe(secret.FromString("file:?x=1")); err == nil {
 		t.Error("a URL without a file")
 	}
-	if sqlite.Engine().Dialect() != sql.DialectSQLite {
+	if sqlite.Engine().Dialect() != kit.DialectSQLite {
 		t.Error(sqlite.Engine().Dialect())
 	}
 }
