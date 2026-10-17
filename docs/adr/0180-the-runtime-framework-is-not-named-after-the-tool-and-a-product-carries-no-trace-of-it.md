@@ -1,9 +1,10 @@
 # ADR 0180 — the runtime framework is not named after the tool, and a product carries no trace of it
 
-- **Status**: Proposed
+- **Status**: Accepted on 2026-10-17 by the owner, who named the framework `framework/app` (Q1) and retained the recommendation of each of the eleven other questions (Q2 to Q12), as written; no text changed but the status, the header, each question's *Decision* line, and the passages that depended on an open question
 - **Date**: 2026-10-17
-- **Deciders**: SDK maintainers, on the owner's decision of 2026-10-17 (transcribed in §Context, *The owner's decision*); arbitrated by the owner, who answers the questions of §Open questions
-- **Amends** (once accepted): [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) §1 — its sentence "The name `kit` is kept for the runtime package" is withdrawn; [ADR 0179](0179-a-store-is-a-non-generic-engine-under-a-typed-facade-and-a-subsystem-is-imported.md) §Decisions of 17 October — this is "the ADR to come" its last paragraph announces
+- **Accepted**: 2026-10-17
+- **Deciders**: SDK maintainers, on the owner's decision of 2026-10-17 (transcribed in §Context, *The owner's decision*); arbitrated by the owner, whose answers to the twelve questions are §Decisions of 17 October
+- **Amends**: [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) §1 — its sentence "The name `kit` is kept for the runtime package" is withdrawn; [ADR 0179](0179-a-store-is-a-non-generic-engine-under-a-typed-facade-and-a-subsystem-is-imported.md) §Decisions of 17 October — its last paragraph's "ADR to come": the runtime framework is renamed, by this record
 - **Related**: [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the v0 licence), [ADR 0149](0149-a-product-reports-numbers-on-a-port-and-an-exporter-only-emits.md) (the telemetry wire), [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) (a code keeps its value when its declaration moves), [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) and [ADR 0171](0171-a-module-per-family-and-a-version-is-never-reused.md) (the framework is the root module, released on its own), [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md), [ADR 0167](0167-a-doc-comment-is-the-designs-and-a-readme-is-written-from-docs-api.md) and [ADR 0168](0168-a-declaration-is-the-designs-and-a-body-is-the-codes.md) (a rename is a design edit first), [ADR 0172](0172-a-product-initialises-what-it-imports-and-the-stores-stay-in-the-core.md) (a subsystem sits where its reader is); kitsunium/platform's ADR 0007 (`kit.Revisions`, the `history=N` tag), ADR 0008 (a module exports one `*kit.Module`) and ADR 0010 (kit is a design-first tool: D2, D8, D13, D17, D22, the header and the harness)
 
 ## Context
@@ -141,31 +142,31 @@ one of them a trace under the owner's rule.
 
 ## Decision
 
-Proposed. Everything below follows from the owner's decision; where the
-decision leaves a choice, the choice is a question of §Open questions and
-the text names its recommendation without taking it.
+Everything below follows from the owner's decision; where that decision
+left a choice, the choice was a question, answered by the owner on
+2026-10-17 (§Decisions of 17 October), and the text states the answer.
 
 ### 1. The runtime framework takes a name that is not the tool's
 
 `framework/kit` is renamed, with everything beneath it:
 
-- the facade `framework/kit` → `framework/<name>`;
+- the facade `framework/kit` → `framework/app`;
 - its subsystems `framework/kit/{store,queue,workflow,mail,jobs,server,config/yaml,config/toml}`
-  → `framework/<name>/…`, the same leaves; `framework/kit/kittest` →
-  `framework/<name>/<name>test` (the `httptest`/`fstest` convention);
+  → `framework/app/…`, the same leaves; `framework/kit/kittest` →
+  `framework/app/apptest` (the `httptest`/`fstest` convention);
   `framework/kit/storetest` keeps its leaf;
-- the implementation `framework/internal/kit` → `framework/internal/<name>`,
+- the implementation `framework/internal/kit` → `framework/internal/app`,
   its engines renamed so that no path segment ends in `kit`;
 - `framework/model`'s `ProvenanceKit`, `PortOwnerKit`, `SettingKitDev` and
   every value spelled `"kit"` in the graph renamed after the framework; the
   graph's `Version` goes from 5 to 6;
-- the design file `design/framework/kit.yaml` → `design/framework/<name>.yaml`.
+- the design file `design/framework/kit.yaml` → `design/framework/app.yaml`.
 
-`<name>` is Q1. The candidates, measured against the three products:
+The name is `app` (Q1, decided). The candidates, measured against the three products:
 
 | Candidate | For | Against |
 |---|---|---|
-| **`framework/app`** (recommended) | the owner's example; a product writes `app.Service`, `app.Store[T]`, `app.Auth()`, `app.Transact` — the words of the thing it builds, as `http.Handler` is; no standard package of that name; the SDK has no Go package named `app` (`pkg/v1/app` is a family directory with no Go code, ADR 0155) | a local variable `app` shadows the package: **14** files of the three products declare one in a file that imports the facade (renamed in the migration, or the import aliased); `app.App` and `app.AppOption` stutter (Q2) |
+| **`framework/app`** (decided) | the owner's example; a product writes `app.Service`, `app.Store[T]`, `app.Auth()`, `app.Transact` — the words of the thing it builds, as `http.Handler` is; no standard package of that name; the SDK has no Go package named `app` (`pkg/v1/app` is a family directory with no Go code, ADR 0155) | a local variable `app` shadows the package: **14** files of the three products declare one in a file that imports the facade (renamed in the migration, or the import aliased); `app.App` and `app.AppOption` stutter (Q2) |
 | `framework/runtime` | says what it is — the runtime the tool's code runs on | collides with the standard library's `runtime`: every file needing both aliases one, forever (no product file imports both today; any `runtime.GOOS` later does) |
 | `framework/core` | short, neutral | the SDK's layer vocabulary already means `internal/core` (ADR 0155, ADR 0160), so every document would have to say which core; says nothing of what a product builds |
 
@@ -182,7 +183,7 @@ text, a log message, a help line, a refusal — names the framework or the
 product, never the tool: the 13 Public and 20 Private texts naming kit are
 reworded, the help's first line loses "a product built with kit", "a secret
 kit generates" becomes "a secret the product generates". The doc comments of
-`framework/<name>` speak of the framework by its new name; a comment may
+`framework/app` speak of the framework by its new name; a comment may
 name the tool only where it describes the contract between the two (the
 Studio hook of §4), and no such comment is compiled.
 
@@ -192,11 +193,11 @@ Studio hook of §4), and no such comment is compiled.
 |---|---|---|
 | The 16 operator variables `KIT_*` | the product's own prefix, `<PRODUCT>_ADDR`, `<PRODUCT>_DATA_DIR`… — the framework already derives `<PRODUCT>_<NAME>` for a product's settings and secrets, so these names become reserved in that namespace (Q3) | an operator's `KIT_DATA_DIR=/data` ignored would start the product on an empty default directory |
 | The 9 tool variables (`KIT_DEV_*`, `KIT_STUDIO*`, `KIT_ANALYZE`) | read only by the Studio hook (§4), which only a dev build links; the core reads none | — |
-| `/_kit/health/{live,ready,startup}` and the reserved `/_kit/` | a reserved prefix named after the framework, `/_<name>/health/…` (Q4) | an orchestrator's probe on the old path would see 404 and kill the process; for the transition window the old paths answer, logged as deprecated (Q12) |
+| `/_kit/health/{live,ready,startup}` and the reserved `/_kit/` | a reserved prefix named after the framework, `/_app/health/…` (Q4) | an orchestrator's probe on the old path would see 404 and kill the process; for the transition window the old paths answer, logged as deprecated (Q12) |
 | The 18 `/_kit/api/*` Studio reads | under the same reserved prefix, and **moved out of the core** into the Studio subsystem (§4): a release binary does not compile them | — |
-| The struct tag key `kit:"…"` | the framework's name, `<name>:"personal"` (Q7) | a `personal` field whose tag is no longer read would be stored **in clear**: the start refuses a field still tagged `kit:"…"`, naming the new key, every field at once, like `CodeSubsystemMissing` (ADR 0179 §6) |
+| The struct tag key `kit:"…"` | the framework's name, `app:"personal"` (Q7) | a `personal` field whose tag is no longer read would be stored **in clear**: the start refuses a field still tagged `kit:"…"`, naming the new key, every field at once, like `CodeSubsystemMissing` (ADR 0179 §6) |
 | Graph values (`"kit"` field, provenance, port owner, reserved module, `kit.privacy`, `kit_node`, `kit_loop`), the checks named `kit` | the framework's name | a module named after the framework is reserved as `kit` was |
-| The telemetry handshake `kit-telemetry/v1` | a new protocol name, `<name>-telemetry/v1`; the tool's collector accepts both for the transition window | the wire is the tool's to read, the name is the product's to send |
+| The telemetry handshake `kit-telemetry/v1` | a new protocol name, `app-telemetry/v1`; the tool's collector accepts both for the transition window | the wire is the tool's to read, the name is the product's to send |
 | The captured mail's `X-Kit-Attachments` | written by the Studio subsystem, which shows it, under a neutral name | — |
 
 ### 4. The Studio is plugged in by the tool at build time, and nothing of it is in the product's tree
@@ -223,8 +224,8 @@ Studio hook of §4), and no such comment is compiled.
   import in any package of a product (beside the platform's `imports`
   rule); the todo's `kitdev.go` and moderation's import in `main.go` are
   deleted.
-- **Where the hook lives** is Q8; recommended: it stays the framework's
-  (`framework/<name>/studio`), never imported by a product, injected by the
+- **Where the hook lives** was Q8; decided: it stays the framework's
+  (`framework/app/studio`), never imported by a product, injected by the
   tool.
 
 The overlay's limits, as `go help build` states them: overlays "will not
@@ -237,7 +238,8 @@ today.
 ### 5. What the tool leaves in a product's tree carries no tool name
 
 These are the platform's to implement, in an ADR of its own; this record
-states what the SDK's rule requires of them and the recommended shape:
+states what the SDK's rule requires of them and the shape the owner
+retained (Q9, Q10):
 
 - **The generated header** stays Go's convention — the first line matching
   `^// Code generated .* DO NOT EDIT\.$`, which gopls, linters and code
@@ -250,7 +252,9 @@ states what the SDK's rule requires of them and the recommended shape:
   "Written once from the design; this file is yours." (Q9).
 - **A generated test's seed** reads a neutral variable, never `KIT_SEED`.
 - **The design, the lock and the version pin** carry no tool name in their
-  content; where they live is Q10.
+  content; they stay in the product's repository, and the tool's version
+  pin and the CI step that installs the tool leave the product's files
+  (Q10).
 - **File names** stay as they are: `*_gen.go`, `design_gen.go`,
   `wire_gen.go`, `main_gen.go` and `design/` name a convention, not a tool,
   and `go generate`'s ecosystem uses the same.
@@ -268,7 +272,7 @@ out of the mechanical check.
 
 **What holds it**, each a named gate (SDK rule 12):
 
-- **In the SDK**, a test of `framework/<name>` beside the initgraph tests
+- **In the SDK**, a test of `framework/app` beside the initgraph tests
   (ADR 0179 §7), `TestAProductCarriesNoTraceOfTheTool`: it builds
   `testdata/traceprobe` — a product that declares a store, a queue, a
   workflow, a mailer, a job and a server, every subsystem but the Studio —
@@ -278,8 +282,8 @@ out of the mechanical check.
   `config`, and in the names the probe's environment table and route table
   hold. Like the initgraph tests it skips under Bazel; its gate is CI's
   `test-386` job, which runs `go test` over every module. A second check
-  refuses the token in the string literals of `framework/<name>` and
-  `framework/internal/<name>` outside the Studio subsystem, which only a
+  refuses the token in the string literals of `framework/app` and
+  `framework/internal/app` outside the Studio subsystem, which only a
   dev build links. Its allow-list starts empty; an entry names the ADR that
   admits it.
 - **In the platform**, `TestTheReferenceCarriesNoTraceOfTheTool` over
@@ -296,15 +300,15 @@ nothing.
 
 | Step | Where | What |
 |---|---|---|
-| 0 | — | The owner answers §Open questions; this record is accepted with its answers |
+| 0 | — | Done on 2026-10-17: the owner answered the twelve questions, and this record is accepted with its answers |
 | 1 | SDK | The Studio's routes, handlers, capture view and tool variables move from the core into the Studio subsystem; the core keeps the probes (non-breaking: a product that imports `framework/kit/studio` keeps its Studio) |
 | 2 | platform | `kit dev` injects the hook by overlay; the generator stops writing `dev_gen.go`; `kit check` refuses a product's import of the Studio subsystem; the todo deletes `kitdev.go`, moderation its import |
-| 3 | SDK | The rename of §1, a design edit first (ADR 0163, 0167, 0168): `design/framework/<name>.yaml`, `kit gen`, `make api`, `make docs-readme`; the facade's and implementation's paths; `model` `Version` 6; the scripts, `BUILD.bazel`, `//:audit_sources`, `tools/alloc-lane-targets.txt` and `codes.ranges` owners re-pointed; the three database connectors follow; the texts of §2 reworded |
+| 3 | SDK | The rename of §1, a design edit first (ADR 0163, 0167, 0168): `design/framework/app.yaml`, `kit gen`, `make api`, `make docs-readme`; the facade's and implementation's paths; `model` `Version` 6; the scripts, `BUILD.bazel`, `//:audit_sources`, `tools/alloc-lane-targets.txt` and `codes.ranges` owners re-pointed; the three database connectors follow; the texts of §2 reworded |
 | 4 | SDK | The runtime names of §3: the prefix, the routes, the tag key, the graph values, the telemetry name; the refusals of an old name at the start (§3, Q12) |
-| 5 | SDK | The names at rest (Q5, Q6): the tables, the migration set, the secret prefix, the dev data directory — renamed by a framework migration —, the domain-separation labels as Q6 decides |
+| 5 | SDK | The names at rest (Q5, Q6): the tables, the migration set, the secret prefix, the dev data directory — renamed by a framework migration —, the domain-separation labels re-sealed under new ones, the old ones removed in a later minor (Q6) |
 | 6 | SDK | `TestAProductCarriesNoTraceOfTheTool`, with an empty allow-list; it can land earlier with an allow-list shrinking step by step, as ADR 0179's `stillInCore` did |
 | 7 | platform | Its ADR for §5: the header, the digest line, the skeletons, the seed variable, the design's `apiVersion`, the lock, the version pin; the analyzer and `subsystem.Table` on the new paths; `internal/modelts` regenerated for `Version` 6; the Studio's client on the new prefix; the reference regenerated, and its guard |
-| 8 | products | todo, moderation, statusline: the import path and `kit.` → `<name>.` (a rewrite of the import path and the package qualifier, then the 14 shadowing files by hand), the struct tags (moderation's 174), the variables in Dockerfiles, compose files and CI, `.gitignore` |
+| 8 | products | todo, moderation, statusline: the import path and `kit.` → `app.` (a rewrite of the import path and the package qualifier, then the 14 shadowing files by hand), the struct tags (moderation's 174), the variables in Dockerfiles, compose files and CI, `.gitignore` |
 
 ### Impact
 
@@ -331,7 +335,7 @@ nothing.
 | Step 1 (the Studio out of the core) | 1–2 days |
 | Step 2 (overlay, generator, check) | 1–2 days, platform |
 | Step 3 (the rename, design-first, gates) | 2–3 days |
-| Steps 4–5 (runtime names, refusals, migrations at rest) | 2–4 days, Q5 and Q6 deciding the upper half |
+| Steps 4–5 (runtime names, refusals, migrations at rest) | 2–4 days, Q6's re-seal the upper half |
 | Step 6 (the guard) | 1 day |
 | Step 7 (platform, header and paths) | 1–2 days |
 | Step 8 (three products, scripted) | 1 day |
@@ -339,16 +343,17 @@ nothing.
 
 ## Breaking changes
 
-None in this record, which decides nothing yet. Forecast for steps 3 to 5,
+None in this record, which changes no code. Steps 3 to 5 break,
 under ADR 0040's v0 licence, which the root module still holds: a minor of
 the root module (`release:minor`) and of each connector module, each at its
 own version (ADR 0171). Every product changes its imports and its
-qualifier; nothing is kept under the old path unless Q2 decides otherwise.
+qualifier; nothing is kept under the old path (Q2).
 The operator's variables, the probes' paths and the struct tag key change,
 each refused or answered as §3 and Q12 say rather than ignored. The graph's
 `Version` goes to 6, which the platform's Studio reads. What is at rest
-changes only by a migration the framework runs (Q5, Q6); where the owner
-answers "freeze" to Q5 or Q6, a product keeps its bytes.
+changes only by a migration the framework runs: the tables, the migration
+set, the secret prefix and the dev data directory renamed (Q5), the sealed
+data re-sealed under the new labels (Q6).
 
 ## Alternatives considered
 
@@ -374,125 +379,94 @@ answers "freeze" to Q5 or Q6, a product keeps its bytes.
 - **An export command that scrubs the traces** (`kit export`). The shipped
   tree would differ from the tree developed and checked; the rule must hold
   of the tree as it is, so that "copy the repository" is literally true.
-- **A deprecated alias package left at `framework/kit`.** Q2: it keeps
+- **A deprecated alias package left at `framework/kit`.** Refused with Q2: it keeps
   the name in the code of every product that has not moved, which is the
   thing being removed.
 
-## Open questions
+## Decisions of 17 October — the owner's answers to the twelve questions
 
-Each with options and a recommendation; nothing here is decided.
+The owner named the framework (Q1) and retained the recommendation of each
+other question as written.
 
 **Q1 — The framework's name.**
-(a) `framework/app`; (b) `framework/runtime`; (c) `framework/core`.
-*Recommendation*: **(a) `framework/app`** — the owner's example, the word of
-what a product builds, no collision with the standard library or the SDK's
-layer vocabulary; the cost is 14 product files with a local `app`
-(§1's table).
+**Decision.** `framework/app` (option a): the owner's example, the word of
+what a product builds, no collision with the standard library nor with the
+SDK's layer vocabulary; the 14 product files that declare a local `app` are
+renamed in step 8.
 
 **Q2 — The old import path.**
-(a) a hard break under ADR 0040, the three products migrated in step 8;
-(b) a deprecated alias package at `framework/kit` for one minor.
-*Recommendation*: **(a)** — three products, all in-house, a scripted
-rewrite; an alias would carry the name into every product that does not
-move. And keep the identifiers (`app.App`, `app.AppOption`): renaming them
-to `app.New`, `app.Option` is a second break with no rule behind it.
+**Decision.** A hard break under ADR 0040, no alias left at `framework/kit`,
+the identifiers kept (`app.App`, `app.AppOption`) (option a): three in-house
+products and a scripted rewrite, where an alias would carry the name into
+every product that does not move.
 
 **Q3 — The operator's variables.**
-(a) the product's own prefix (`TODO_DATA_DIR`), reserved in the namespace
-the framework already derives for a product's settings; (b) one fixed
-neutral prefix (`APP_DATA_DIR`); (c) no prefix (`DATA_DIR`).
-*Recommendation*: **(a)** — the operator sees only the product's name, and
-the framework already speaks that namespace; (b) still shows a framework
-convention and collides between two products of one environment, (c)
-collides with everything.
+**Decision.** The product's own prefix (`TODO_DATA_DIR`), reserved in the
+namespace the framework already derives for a product's settings (option
+a): the operator sees only the product's name.
 
 **Q4 — The probes' paths and the reserved prefix.**
-(a) `/_<name>/health/{live,ready,startup}`, one reserved prefix, the
-Studio's reads under it in dev; (b) the Kubernetes spellings `/livez`,
-`/readyz`, `/startupz` at the root; (c) a prefix the product configures,
-`/_<name>/` by default.
-*Recommendation*: **(a)** — one reserved prefix, as today, neutral, and no
-root path taken from a product.
+**Decision.** `/_app/health/{live,ready,startup}`, one reserved prefix,
+the Studio's reads under it in dev (option a): neutral, and no root path
+taken from a product.
 
 **Q5 — Names at rest: tables, migration set, secret prefix, dev data directory.**
-(a) renamed by a framework migration (the framework's own migration set
-renames its tables in one transaction where the engine allows — MySQL's DDL
-commits implicitly, ADR 0055 — and its secrets by a rewrite under the new
-prefix); (b) frozen, as documented exceptions of the guard's allow-list;
-(c) renamed for new installations only, the old names read where present.
-*Recommendation*: **(a)** — a database administrator reading
-`kit_migrations` knows; (c) keeps both spellings in every binary for good.
+**Decision.** Renamed by a framework migration (option a): a database
+administrator reading `kit_migrations` would know, and reading both names
+for good would keep both in every binary.
 
-**Q6 — The domain-separation labels (`kit/v1 sealed at rest`…).**
-(a) a re-seal: new data under new labels, a framework command re-sealing
-what exists, then the old labels removed in a later minor; (b) frozen
-forever as opaque format identifiers, in the allow-list; (c) new labels for
-new data, old ones read forever.
-*Recommendation*: **(a)** — the labels are strings in every binary, and
-renaming them without re-sealing makes every sealed value unreadable; (a)
-is the only path to a binary with none, at the cost of one re-seal per
-installation, which the privacy commands already know how to run.
+**Q6 — The domain-separation labels.**
+**Decision.** A re-seal: new data under new labels, a framework command
+re-sealing what exists, the old labels removed in a later minor (option a):
+the only path to a binary without them that leaves every sealed value
+readable.
 
 **Q7 — The struct tag key.**
-(a) the framework's name, `app:"personal"`, as `json:` names its package;
-(b) a word for what it says, `privacy:"personal"`; (c) `data:"personal"`.
-*Recommendation*: **(a)** — the tag also carries `secret`, `public` and
-`history=N`, which (b) misnames; a tag key named after the package that
-reads it is Go's convention.
+**Decision.** The framework's name, `app:"personal"` (option a): the tag
+also carries `secret`, `public` and `history=N`, and a tag key named after
+the package that reads it is Go's convention.
 
 **Q8 — Where the Studio hook lives.**
-(a) in the framework, `framework/<name>/studio`, never imported by a
-product, injected by `kit dev`'s overlay; (b) in the platform, injected
-with a `go.work` written in the tool's state directory; (c) out of process:
-the Studio reads the product through the telemetry port and the collector
-(the platform's D10), no hook at all.
-*Recommendation*: **(a)** — no change of module graph, no platform module in
-a product's build; (c) is the long-term shape and its own ADR.
+**Decision.** In the framework, `framework/app/studio`, never imported by a
+product, injected by `kit dev`'s overlay (option a): no change of module
+graph and no platform module in a product's build.
 
 **Q9 — The generated header and the skeleton comment (the platform's).**
-(a) `// Code generated from design/v1; DO NOT EDIT.` with
-`// design:digest sha256:…`, and a skeleton with no provenance line;
-(b) keep naming kit in the header only; (c) a header the product
-configures.
-*Recommendation*: **(a)** — Go's convention needs "Code generated" and "DO
-NOT EDIT", not a tool's name.
+**Decision.** `// Code generated from design/v1; DO NOT EDIT.` with
+`// design:digest sha256:…`, and a skeleton with no provenance line (option
+a): Go's convention needs "Code generated" and "DO NOT EDIT", not a tool's
+name.
 
 **Q10 — The design, the lock, the version pin and CI.**
-(a) `design/` and its lock stay in the product's repository, with no tool
-name in their content (a neutral `apiVersion`), and the version pin and the
-CI step that installs the tool move to the developer's environment and the
-CI's configuration outside the product's files; (b) the design lives
-outside the exported tree — a repository or a directory the tool points at
-—, the generated tree and the hand-written directories alone being the
-product; (c) as today.
-*Recommendation*: **(a)** — it meets "nobody can tell" with `kit check`
-still running in the product's CI, and keeps (b), the owner's "the
-generated part could be a git repository of its own", open for the
-platform's ADR.
+**Decision.** `design/` and its lock stay in the product's repository with
+no tool name in their content; the version pin and the CI step that
+installs the tool leave the product's files (option a): "nobody can tell"
+holds with `kit check` still run by the product's CI, and a design outside
+the exported tree stays open to the platform's ADR.
 
 **Q11 — Does the rule extend to the SDK's own sources?**
-(a) no: the SDK is a library the tool designs (ADR 0163), its 580 generated
-headers and its design files stay; the rule binds a product and what the
-framework compiles into one; (b) yes: the SDK's headers and docs lose the
-tool's name too.
-*Recommendation*: **(a)** — a product depends on the SDK as on Spring; the
-SDK's sources are not the product's code, and nothing of a header comment
-is compiled.
+**Decision.** No (option a): the SDK is a library the tool designs (ADR
+0163), its generated headers and design files stay, and the rule binds a
+product and what the framework compiles into one.
 
 **Q12 — An old name met at the start.**
-(a) refused, naming the new one, for two minors, then forgotten (a probe
-path answered and logged as deprecated over the same window, since a
-refusal there is a restart loop); (b) silently ignored; (c) accepted beside
-the new one for two minors.
-*Recommendation*: **(a)** — (b) loses a data directory or stores personal
-data in clear (§3); (c) keeps the old names in every binary for longer than
-a refusal does.
+**Decision.** Refused, naming the new one, for two minors, then forgotten;
+an old probe path answered and logged as deprecated over the same window
+(option a): ignoring it loses a data directory or stores personal data in
+clear, and accepting both keeps the old names longer.
+
+## Revision history
+
+| Version | Date | What changed |
+|---|---|---|
+| Proposed | 2026-10-17 | The design, the measured inventory, twelve questions for the owner |
+| Accepted | the owner's decision, 2026-10-17 | Q1 answered `framework/app`, the recommendation of Q2 to Q12 retained as written; each question replaced by its *Decision* line; the status, the header (*Accepted*, *Amends*), the placeholder name replaced by `app`, and the passages that depended on an open question (§1's table, §4's hook, §5, migration step 0 and 5, the cost, §Breaking changes, §Deferred) updated. No other text changed |
 
 ## Deferred
 
 - The platform's ADR for §5 and Q9–Q10.
-- Q8 (c), the Studio out of process, if the owner wants no hook in the
-  framework at all.
+- Q8 (c), the Studio out of process — no hook in the framework at all —,
+  its own ADR if it is ever wanted.
 - The product's prose (README, docs) — its owner's, out of the guard.
 
 ## References
