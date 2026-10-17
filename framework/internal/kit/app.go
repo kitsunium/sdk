@@ -23,7 +23,6 @@ import (
 	"github.com/kitsunium/sdk/framework/telemetry"
 	"github.com/kitsunium/sdk/pkg/v1/app/health"
 	"github.com/kitsunium/sdk/pkg/v1/app/lifecycle"
-	"github.com/kitsunium/sdk/pkg/v1/app/scheduler"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
@@ -183,7 +182,7 @@ type componentGroups struct {
 // loopState is one loop of the daemon, as the Runtime view shows it.
 type loopState struct {
 	model.Loop
-	schedule scheduler.Schedule
+	schedule plug.JobScheduleFunc
 	// active counts the runs going on; the loop is running while it is not
 	// zero.
 	active int
@@ -992,13 +991,14 @@ func (a *App) onTransition(t lifecycle.Transition) {
 	a.componentState(c, state, errText)
 }
 
-// addScheduler registers the daemon's timers: the jobs, on one SDK
-// scheduler, and each workflow's own loop, which sleeps until its next
+// addScheduler registers the daemon's timers: the jobs, on one scheduler —
+// the SDK's, which the jobs subsystem plugs in (jobs_plug.go) —, and each
+// workflow's own loop, which sleeps until its next
 // transition due. They start together, once the mailers and subscriptions a
 // transition's hooks use are up.
 func (a *App) addScheduler(jobs []*Job, workflows []node) error {
-	sched := scheduler.New(scheduler.Config{Clock: a.clock, OnResult: a.onResult})
-	if err := a.addJobs(sched, jobs); err != nil {
+	sched, err := a.openScheduler(jobs)
+	if err != nil {
 		return err
 	}
 	autos, states := a.timerLoops(workflows)
@@ -1022,18 +1022,6 @@ func (a *App) addScheduler(jobs []*Job, workflows []node) error {
 	return a.component("scheduler", "", start, stop)
 }
 
-// addJobs hands every job to the scheduler, each with its loop.
-func (a *App) addJobs(sched scheduler.Scheduler, jobs []*Job) error {
-	for _, j := range jobs {
-		l := a.loop(j.id, j.id, model.LoopJob, j.schedule)
-		l.schedule = j.sched
-		if err := sched.Add(scheduler.Entry{Name: j.id, Schedule: j.sched, Job: a.scheduled(l, j.wake(), j.run(a))}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // timerLoops are the workflows that run timers of their own, each with the
 // loop the Studio shows for them.
 func (a *App) timerLoops(workflows []node) (autos []autoLoop, states []*loopState) {
@@ -1050,7 +1038,7 @@ func (a *App) timerLoops(workflows []node) (autos []autoLoop, states []*loopStat
 }
 
 // onResult receives the scheduler's report of every fire.
-func (a *App) onResult(r scheduler.Result) {
+func (a *App) onResult(r plug.JobResultValue) {
 	l := a.loopNamed(r.Name)
 	if l == nil {
 		return
@@ -1072,7 +1060,7 @@ func (a *App) onResult(r scheduler.Result) {
 
 // counted adds a fire's misses and skip to the loop, and says when it runs
 // next, when its schedule says. The caller holds a.mu.
-func (l *loopState) counted(r *scheduler.Result) *time.Time {
+func (l *loopState) counted(r *plug.JobResultValue) *time.Time {
 	l.Missed += int64(r.Missed)
 	if r.Skipped {
 		l.Skipped++

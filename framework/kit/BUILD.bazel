@@ -65,6 +65,7 @@ go_library(
     deps = [
         "//framework/internal/kit",
         "//framework/internal/kit/plug",
+        "//framework/kit/jobs",
         "//framework/kit/mail",
         "//framework/kit/queue",
         "//framework/kit/store",

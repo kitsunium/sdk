@@ -74,6 +74,13 @@
       "doc": "Package kit — who may call an operation: the principal, the rules and their\nchecks.\n\nPackage kit — activities: what a daemon's idle stop waits for besides its\nconnections, a notion of the product's own — sessions still open, work\nstill queued.\n\nPackage kit — the App: the services a product mounts, served by one process.\n\nPackage kit — the static analysis a product can be given: the platform's\nanalyzer, run in the background in dev (ADR 0147 §1).\n\nPackage kit — process profiles: what an app does with its process (ADR\n0147 §5) — serve, run as a daemon, or run one CLI command — and the\nsingleton lock.\n\nPackage kit — the architecture the graph draws: where each store keeps its\ndata.\n\nPackage kit — authentication: the handler that says who calls, and the user\nit names.\n\nPackage kit — the build a graph describes: the modules and versions it was\nmade of.\n\nPackage kit — the catalog of the generic mechanics a node is built from.\n\nPackage kit — the kit tag: the classes and words a field of personal data\ncarries.\n\nPackage kit — the plan of a Go type's classified members, computed once per\ntype.\n\nPackage kit — the walk of a value along its classification plan.\n\nPackage kit — the warnings for fields whose name suggests personal data left\nunclassified.\n\nPackage kit — CLI commands: a short command of the product that Main runs\nonce, in the CLI profile, and whose status is the process's.\n\nPackage kit — commands: an operation that changes something, with one\nhandler.\n\nPackage kit — the app's options and environments.\n\nPackage kit — the config command: every setting, its value and where it\ncomes from.\n\nPackage kit — the consumer that drains a queue into its handler.\n\nPackage kit — the daemon: what a running app knows of itself beyond its\nnodes.\n\nPackage kit — the daemon's HTTP server as the Studio sees it: its loop,\nits counters, and the middleware every request goes through.\n\nPackage kit — the daemon's loops: their states, the scheduler that fires\nthe jobs, and the goroutine labels that name them.\n\nPackage kit — databases: the SQL engines a store can be kept on.\n\nPackage kit — the start's judgement of the declared databases.\n\nPackage kit — the interfaces of databases: the engine a connector gives, and\nwhat kit asks of it.\n\nPackage kit — the migrations a database runs, and their lock.\n\nPackage kit — the placement of each store: which database keeps its data.\n\nPackage kit — a database in a running app.\n\nPackage kit — the databases as the graph shows them.\n\nPackage kit — the decoding of a request into its typed value.\n\nPackage kit — the dev tools' routes of the Studio, read-only.\n\nPackage kit is the implementation of framework/kit, the framework in which\nevery product is its own diagram. A product imports framework/kit, whose\nnames alias and forward to this package's: here, the types carry the role\ntheir name says — StoreService, EndpointService, AppConfigurer — and the\nfacade keeps the names a product writes — Store, Endpoint, AppOption.\n\nPackage kit — endpoints: an HTTP route and the operation it serves.\n\nPackage kit — the errors a product returns to its callers, and their wire\nmapping.\n\nPackage kit — exposures: an operation an endpoint serves over HTTP.\n\nPackage kit — what an exposure takes, and what it exposes.\n\nPackage kit — the Go modules of the running binary, read from its build\ninfo.\n\nPackage kit — the graph: the product as a diagram of what it mounts.\n\nPackage kit — history: the former values of the fields that keep them.\n\nPackage kit — the history's storage: former values kept beside each record.\n\nPackage kit — reading a record's former values.\n\nPackage kit — the history as the graph and the Studio show it.\n\nPackage kit — what kit's own writes mean to the history.\n\nPackage kit — legal holds: records kept whatever their retention says.\n\nPackage kit — secondary indexes of a store.\n\nPackage kit — the Studio's read API: the graph, the events, the sources.\n\nPackage kit — what the source endpoint needs of the root it reads.\n\nPackage kit — how the source endpoint opens a file on Unix.\n\nPackage kit — how the source endpoint opens a file on Windows: the link\nitself, never its target.\n\nPackage kit — jobs: scheduled work run by the daemon's loop.\n\nPackage kit — the privacy journal: what kit did to personal data, and why.\n\nPackage kit — idempotency keys and their leases.\n\nPackage kit — the compile-time proof of which roles each declaration plays:\nthe interfaces the app reaches its nodes and options through.\n\nPackage kit — listeners: inbound ports that are not HTTP, a private socket\nspeaking a versioned contract (ADR 0148).\n\nPackage kit — the compile-time proof that a listener is a starter.\n\nPackage kit — what a listener needs of the socket it accepts on.\n\nPackage kit — the product's logger and the logs the Studio shows.\n\nPackage kit — loops: work the daemon waits for, woken by time or by events.\n\nPackage kit — mailers: a durable outbox and the transport that empties it.\n\nPackage kit — what building an SMTP transport needs of its URL.\n\nPackage kit — Main: the whole main function of a product.\n\nPackage kit — the migrate command.\n\nPackage kit — modules: a set of services a product mounts as one.\n\nPackage kit — the start's checks of the modules an app mounts.\n\nPackage kit — what a module keeps: its stores and its migrations.\n\nPackage kit — the mount of a module: its prefix and its bindings.\n\nPackage kit — nodes: what every declaration shares, and its source position.\n\nPackage kit — the interfaces of nodes: what every declaration is, and the\nroles some play.\n\nPackage kit — observation: the spans and events of a running product.\n\nPackage kit — operations: a typed request answered by a typed response.\n\nPackage kit — the password policy of a store's fields.\n\nPackage kit — hashing and verifying passwords under their policy.\n\nPackage kit — the warnings for endpoints that set passwords outside a\npolicy.\n\nPackage kit — ports: an operation a service needs and does not implement.\n\nPackage kit — privacy: kit's own service for holds and the journal.\n\nPackage kit — erasure: a record's personal data removed as its retention\nwould.\n\nPackage kit — export: a person's data as kit gives it back.\n\nPackage kit — a store's personal data as the graph shows it.\n\nPackage kit — the keys that index personal data without revealing it.\n\nPackage kit — the Studio's privacy pages: the journal, the holds, the\nregister.\n\nPackage kit — the privacy command.\n\nPackage kit — what the privacy command prints.\n\nPackage kit — `privacy seal`: a whole store sealed now.\n\nPackage kit — the process sample: what the running process uses.\n\nPackage kit — the Studio's profiler: the live heap and the goroutines,\nfolded onto the graph.\n\nPackage kit — queries: an operation that reads and changes nothing.\n\nPackage kit — queued commands: a command run later, from its queue.\n\nPackage kit — rate limits on an endpoint, per client.\n\nPackage kit — records: the product's data as modules and the Studio reach\nit.\n\nPackage kit — redaction: what a value shows once its secrets are hidden.\n\nPackage kit — the register of processing: each store's line.\n\nPackage kit — replacements: a test's substitute for an operation.\n\nPackage kit — the HTTP request and response an endpoint can reach.\n\nPackage kit — retention: how long a store keeps its personal data.\n\nPackage kit — the retention of a store in a running app.\n\nPackage kit — one pass of retention: what is due is erased or deleted.\n\nPackage kit — record revisions: a store's previous versions of each record.\n\nPackage kit — what changed between two versions, and a version written back.\n\nPackage kit — where a store's versions are kept, engine by engine.\n\nPackage kit — what the privacy rules ask of a record's versions.\n\nPackage kit — a record's version written back.\n\nPackage kit — what the Studio sees of a record's versions.\n\nPackage kit — the revisions command: a version of a record written back.\n\nPackage kit — binaries and their process roles: one executable, several\nApps, and the versioned contracts between them (D22).\n\nPackage kit — schemas: the JSON Schema of an operation's types.\n\nPackage kit — scopes: the parts of a singleton's lock or of a socket's\npath that are only known at the start — the user, the executable, a\nconfiguration directory —, so one declaration keeps one process per user,\nper installed copy or per configuration.\n\nPackage kit — the current user outside Windows: the process's UID, read\nfrom the kernel. os/user would ask libc through cgo — linking the program\ndynamically — or read /etc/passwd, for a number the kernel gives at once.\n\nPackage kit — the current user on Windows: its SID, from os/user, which\nreads the process token there without cgo.\n\nPackage kit — sealing at rest: members sealed where kit keeps them.\n\nPackage kit — where the data keys are, against what they seal.\n\nPackage kit — cryptographic erasure: a data key destroyed.\n\nPackage kit — a document as it lies at rest, sealed member by member.\n\nPackage kit — messages at rest: a queue's members sealed.\n\nPackage kit — a store that seals: its records as they rest.\n\nPackage kit — a store that seals, as kit's port sees it.\n\nPackage kit — secrets: the values the product declares and the operator\nprovides.\n\nPackage kit — the secrets command.\n\nPackage kit — where the secrets are kept, per environment.\n\nPackage kit — services: a bounded context and the building blocks it owns.\n\nPackage kit — settings: a value the environment gives a service.\n\nPackage kit — the interfaces of settings: the values a setting holds, and\nwhat kit reads of a declaration.\n\nPackage kit — frontends: static assets the product serves.\n\nPackage kit — stores: a typed, keyed collection of entities.\n\nPackage kit — the engines a store runs on: memory, files or a database.\n\nPackage kit — stores on SQL: the SDK's document store over a database.\n\nPackage kit — kit's own migrations on a database.\n\nPackage kit — telemetry: the numbers a product reports, exported on a\nprivate socket when the deployment asks for them (ADR 0149).\n\nPackage kit — topics and subscriptions: asynchronous messages of one type.\n\nPackage kit — transactions: kit.Transact and its levels.\n\nPackage kit — a transaction on a database, the database's own.\n\nPackage kit — the data's writer turn, where there are no transactions.\n\nPackage kit — a transaction writes one database: the dev warning.\n\nPackage kit — watches: how a module hears the writes of a product's marked\nfields.\n\nPackage kit — a watch in a running app: its queue and its consumer.\n\nPackage kit — the sentences kit says, in every language it speaks.\n\nPackage kit — workflows: a state machine over the entities of one store.\n\nPackage kit — the ports the workflow engine reaches a store through.\n"
     },
     {
+      "path": "github.com/kitsunium/sdk/framework/internal/kit/jobkit",
+      "name": "jobkit",
+      "dir": "framework/internal/kit/jobkit",
+      "layer": "framework",
+      "doc": "Package jobkit is what framework/kit/jobs plugs into kit: the scheduler\nkit's jobs run on — the SDK's scheduler, on the app's clock — and the\nschedules it reads from a job's declaration, a period or a five-field cron\nexpression (ADR 0179 §1, step 7). kit's core imports none of the SDK's\nscheduler: it reaches it through plug, and a product that declares no job\nlinks none of it.\n\nPackage jobkit — the compile-time proof that the scheduler is kit's.\n"
+    },
+    {
       "path": "github.com/kitsunium/sdk/framework/internal/kit/mailkit",
       "name": "mailkit",
       "dir": "framework/internal/kit/mailkit",
@@ -85,7 +92,7 @@
       "name": "plug",
       "dir": "framework/internal/kit/plug",
       "layer": "framework",
-      "doc": "Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the\nfrontends' file server and the process sampler of the runtime graph\n(framework/kit/server), the Studio's event stream and its profiler\n(framework/kit/studio), the stores and the databases (framework/kit/store),\nthe queues (framework/kit/queue), the workflows (framework/kit/workflow),\nthe mailers (framework/kit/mail). kit reads what they registered through the\nhooks declared here, and imports none of the SDK packages behind them: a\nproduct that does not import a subsystem neither links nor initialises its\npackages.\n\nIt is also the contract between kit's core and the subsystems ADR 0179\ntakes out of it, as database/sql/driver is between database/sql and a\ndriver: the store subsystem's engine over documents, its siblings, kit's\nscope on a database and its migrations ([Stores]), which framework/kit/store\nsets; the refusals an engine says in kit's terms ([Refusal]); what kit's\ntransactions offer an engine that takes part in them ([Transaction]); the\nqueue subsystem's brokers and their consumer ([Queues]), which\nframework/kit/queue sets; the workflow subsystem's engine and the ports\nit runs on ([Workflows]), which framework/kit/workflow sets; and the mail\nsubsystem's outbox and transports ([Mail]), which framework/kit/mail sets.\n\nThe package imports the standard library and the framework's model only,\nso that kit and every subsystem can import it.\n"
+      "doc": "Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the\nfrontends' file server and the process sampler of the runtime graph\n(framework/kit/server), the Studio's event stream and its profiler\n(framework/kit/studio), the stores and the databases (framework/kit/store),\nthe queues (framework/kit/queue), the workflows (framework/kit/workflow),\nthe mailers (framework/kit/mail), the jobs (framework/kit/jobs). kit reads\nwhat they registered through the hooks declared here, and imports none of\nthe SDK packages behind them: a product that does not import a subsystem\nneither links nor initialises its packages.\n\nIt is also the contract between kit's core and the subsystems ADR 0179\ntakes out of it, as database/sql/driver is between database/sql and a\ndriver: the store subsystem's engine over documents, its siblings, kit's\nscope on a database and its migrations ([Stores]), which framework/kit/store\nsets; the refusals an engine says in kit's terms ([Refusal]); what kit's\ntransactions offer an engine that takes part in them ([Transaction]); the\nqueue subsystem's brokers and their consumer ([Queues]), which\nframework/kit/queue sets; the workflow subsystem's engine and the ports\nit runs on ([Workflows]), which framework/kit/workflow sets; the mail\nsubsystem's outbox and transports ([Mail]), which framework/kit/mail sets;\nand the jobs subsystem's schedules and scheduler ([Jobs]), which\nframework/kit/jobs sets.\n\nThe package imports the standard library and the framework's model only,\nso that kit and every subsystem can import it.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/internal/kit/queuekit",
@@ -170,6 +177,13 @@
       "dir": "framework/kit/config/yaml",
       "layer": "framework",
       "doc": "Package yaml lets a kit product read YAML configuration files —\nconfig/config.yaml, config/<env>.yaml, and .yml — as it reads JSON ones.\nkit reads JSON itself; importing this package is the whole of what a\nproduct does to read YAML, and what links the YAML codec into it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/config/yaml\"\n\nA product with a YAML file and without this import is refused at the start,\nnaming the import.\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/framework/kit/jobs",
+      "name": "jobs",
+      "dir": "framework/kit/jobs",
+      "layer": "framework",
+      "doc": "Package jobs plugs kit's jobs in: the work a service declares on a\nschedule — every period (Service.Every) or on a five-field cron expression\n(Service.Cron) —, which the SDK's scheduler fires on the app's clock. A\nproduct that declares one imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/jobs\"\n\nA product that declares none does not, and links none of that scheduler; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). framework/kit imports it too\nuntil ADR 0179's last step: no product needs the line yet.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/kit/kittest",
@@ -8658,6 +8672,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/jobkit.Enable",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/jobkit",
+      "name": "Enable",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "Enable plugs the jobs' scheduler and their schedules into kit.\n",
+      "file": "framework/internal/kit/jobkit/jobkit.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/mailkit.Enable",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/mailkit",
@@ -9537,6 +9562,190 @@
       ],
       "doc": "IndexSpec declares one secondary index of a store, over documents: the\nproduct's index function on its type, wrapped once at the declaration.\n",
       "file": "framework/internal/kit/plug/store.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.JobDriverConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "JobDriverConfig",
+      "spelled": "struct{Every func(period time.Duration) (JobScheduleFunc, error); Cron func(expr string) (JobScheduleFunc, error); Open func(cfg *JobSchedulerConfig) JobScheduler}",
+      "canonical": "struct{Every func(period time.Duration) (github.com/kitsunium/sdk/framework/internal/kit/plug.JobScheduleFunc, error); Cron func(expr string) (github.com/kitsunium/sdk/framework/internal/kit/plug.JobScheduleFunc, error); Open func(cfg *github.com/kitsunium/sdk/framework/internal/kit/plug.JobSchedulerConfig) github.com/kitsunium/sdk/framework/internal/kit/plug.JobScheduler}",
+      "fields": [
+        {
+          "name": "Every",
+          "type": "func(period time.Duration) (JobScheduleFunc, error)",
+          "doc": "Every is the schedule of a job that runs every period, first one\nperiod after the scheduler starts; a period that is not positive is\nrefused.\n"
+        },
+        {
+          "name": "Cron",
+          "type": "func(expr string) (JobScheduleFunc, error)",
+          "doc": "Cron is the schedule of a five-field POSIX cron expression, in the\nprocess's local time zone; an expression it cannot read is refused.\n"
+        },
+        {
+          "name": "Open",
+          "type": "func(cfg *JobSchedulerConfig) JobScheduler",
+          "doc": "Open opens the scheduler the app's jobs run on, as cfg says, with no\nentry yet.\n"
+        }
+      ],
+      "doc": "JobDriverConfig is what framework/kit/jobs plugs into kit: how a job's\nschedule is read from its declaration, and how the scheduler that fires\nthe app's jobs opens.\n",
+      "file": "framework/internal/kit/plug/jobs.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.JobEntryValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "JobEntryValue",
+      "spelled": "struct{Name string; Schedule JobScheduleFunc; Run func(ctx context.Context) error}",
+      "canonical": "struct{Name string; Schedule github.com/kitsunium/sdk/framework/internal/kit/plug.JobScheduleFunc; Run func(ctx context.Context) error}",
+      "fields": [
+        {
+          "name": "Name",
+          "type": "string",
+          "doc": "Name names the job; the scheduler refuses a name it holds already.\n"
+        },
+        {
+          "name": "Schedule",
+          "type": "JobScheduleFunc",
+          "doc": "Schedule says when the job runs next.\n"
+        },
+        {
+          "name": "Run",
+          "type": "func(ctx context.Context) error",
+          "doc": "Run runs the job once; its error is the result's.\n"
+        }
+      ],
+      "doc": "JobEntryValue is one job as the scheduler fires it: its name, its\nschedule, and the run.\n",
+      "file": "framework/internal/kit/plug/jobs.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.JobResultValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "JobResultValue",
+      "spelled": "struct{Name string; Scheduled time.Time; Started time.Time; Finished time.Time; Missed int; Skipped bool; Err error}",
+      "canonical": "struct{Name string; Scheduled time.Time; Started time.Time; Finished time.Time; Missed int; Skipped bool; Err error}",
+      "fields": [
+        {
+          "name": "Name",
+          "type": "string",
+          "doc": "Name is the job's.\n"
+        },
+        {
+          "name": "Scheduled",
+          "type": "time.Time",
+          "doc": "Scheduled is the instant the fire was due.\n"
+        },
+        {
+          "name": "Started",
+          "type": "time.Time",
+          "doc": "Started and Finished bound the run; zero for a fire that did not run.\n"
+        },
+        {
+          "name": "Finished",
+          "type": "time.Time",
+          "doc": "Started and Finished bound the run; zero for a fire that did not run.\n"
+        },
+        {
+          "name": "Missed",
+          "type": "int",
+          "doc": "Missed counts the fires that came due while the scheduler could not\nfire them, skipped rather than caught up.\n"
+        },
+        {
+          "name": "Skipped",
+          "type": "bool",
+          "doc": "Skipped says the fire did not run: a run of the same job was going.\n"
+        },
+        {
+          "name": "Err",
+          "type": "error",
+          "doc": "Err is the run's error.\n"
+        }
+      ],
+      "doc": "JobResultValue is one decision of the scheduler: a run of a job, or a fire\nit skipped.\n",
+      "file": "framework/internal/kit/plug/jobs.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.JobScheduleFunc",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "JobScheduleFunc",
+      "spelled": "func(after time.Time) (next time.Time, ok bool)",
+      "canonical": "func(after time.Time) (next time.Time, ok bool)",
+      "doc": "JobScheduleFunc says when a job runs next after an instant: the instant,\nand false when it never runs again.\n",
+      "file": "framework/internal/kit/plug/jobs.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.JobScheduler",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "JobScheduler",
+      "spelled": "interface{Add(entry JobEntryValue) error; Run(ctx context.Context) error}",
+      "canonical": "interface{Add(entry github.com/kitsunium/sdk/framework/internal/kit/plug.JobEntryValue) error; Run(ctx context.Context) error}",
+      "doc": "JobScheduler fires the app's jobs, each on its schedule, on the app's\nclock: a fire due while the previous run of the same job is going is\nskipped, a missed one is counted, never caught up.\n",
+      "file": "framework/internal/kit/plug/jobs_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.JobScheduler.Add",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Add",
+      "recv": "JobScheduler",
+      "spelled": "func(entry JobEntryValue) error",
+      "canonical": "func(entry github.com/kitsunium/sdk/framework/internal/kit/plug.JobEntryValue) error",
+      "doc": "Add registers a job; it is refused while the scheduler runs, for a\nname it holds already, and for an entry with no name, run or\nschedule.\n",
+      "file": "framework/internal/kit/plug/jobs_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.JobScheduler.Run",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Run",
+      "recv": "JobScheduler",
+      "spelled": "func(ctx context.Context) error",
+      "canonical": "func(ctx context.Context) error",
+      "doc": "Run fires the jobs until ctx ends, then waits for the runs going.\n",
+      "file": "framework/internal/kit/plug/jobs_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.JobSchedulerConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "JobSchedulerConfig",
+      "spelled": "struct{Clock Clock; OnResult func(res JobResultValue)}",
+      "canonical": "struct{Clock github.com/kitsunium/sdk/framework/internal/kit/plug.Clock; OnResult func(res github.com/kitsunium/sdk/framework/internal/kit/plug.JobResultValue)}",
+      "fields": [
+        {
+          "name": "Clock",
+          "type": "Clock",
+          "doc": "Clock is the app's clock, which the scheduler stamps and waits on.\n"
+        },
+        {
+          "name": "OnResult",
+          "type": "func(res JobResultValue)",
+          "doc": "OnResult hears every decision of the scheduler — each run, with the\njob's own error, and each fire skipped or missed —, one at a time.\n"
+        }
+      ],
+      "doc": "JobSchedulerConfig is the scheduler the app's jobs run on: the app's clock\nand what kit hears of each fire.\n",
+      "file": "framework/internal/kit/plug/jobs.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Jobs",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Jobs",
+      "spelled": "atomic.Pointer[JobDriverConfig]",
+      "canonical": "sync/atomic.Pointer[github.com/kitsunium/sdk/framework/internal/kit/plug.JobDriverConfig]",
+      "doc": "Jobs is the jobs subsystem: the schedules of kit's jobs and the scheduler\nthat fires them; nil until framework/kit/jobs is imported. A product that\ndeclares a job without it is refused at the start (ADR 0179 §6).\n",
+      "file": "framework/internal/kit/plug/jobs.go",
       "layer": "framework"
     },
     {

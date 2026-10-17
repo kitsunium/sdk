@@ -8,7 +8,8 @@ and `framework/kit/store` (ADR 0179 Q4) — and one mailer declared.
 it and finds linked the mail subsystem's outbox and transports
 (`framework/internal/kit/mailkit`), the SDK's mail spool under them and the
 SDK's SMTP and capture transports beyond their inits, beside the queue and
-store subsystems' engines, and nothing of the workflows' — the half of ADR
+store subsystems' engines, and nothing of the workflows' nor of the jobs'
+(step 7) — the half of ADR
 0179 §7 that keeps the other from passing by testing nothing, for step 6.
 
 ## Contents

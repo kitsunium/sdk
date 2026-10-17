@@ -1,0 +1,46 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "jobkit",
+    srcs = [
+        "clock.go",
+        "doc.go",
+        "jobkit.go",
+        "jobkit_compliance.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/internal/kit/jobkit",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+    deps = [
+        "//framework/internal/kit/plug",
+        "//pkg/v1/app/scheduler",
+        "//pkg/v1/clock",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":jobkit",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+)
+
+go_test(
+    name = "jobkit_test",
+    srcs = [
+        "api_gen_test.go",
+        "jobkit_internal_test.go",
+    ],
+    embed = [":jobkit"],
+    deps = [
+        "//framework/internal/kit/plug",
+        "//pkg/v1/app/scheduler",
+        "//pkg/v1/clock",
+    ],
+)

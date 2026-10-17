@@ -6,9 +6,9 @@
 import "github.com/kitsunium/sdk/framework/internal/kit/plug"
 ```
 
-Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/kit/server), the Studio's event stream and its profiler (framework/kit/studio), the stores and the databases (framework/kit/store), the queues (framework/kit/queue), the workflows (framework/kit/workflow), the mailers (framework/kit/mail). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
+Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/kit/server), the Studio's event stream and its profiler (framework/kit/studio), the stores and the databases (framework/kit/store), the queues (framework/kit/queue), the workflows (framework/kit/workflow), the mailers (framework/kit/mail), the jobs (framework/kit/jobs). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
 
-It is also the contract between kit's core and the subsystems ADR 0179 takes out of it, as database/sql/driver is between database/sql and a driver: the store subsystem's engine over documents, its siblings, kit's scope on a database and its migrations ([Stores](#Stores)), which framework/kit/store sets; the refusals an engine says in kit's terms ([Refusal](#Refusal)); what kit's transactions offer an engine that takes part in them ([Transaction](#Transaction)); the queue subsystem's brokers and their consumer ([Queues](#Queues)), which framework/kit/queue sets; the workflow subsystem's engine and the ports it runs on ([Workflows](#Workflows)), which framework/kit/workflow sets; and the mail subsystem's outbox and transports ([Mail](#Mail)), which framework/kit/mail sets.
+It is also the contract between kit's core and the subsystems ADR 0179 takes out of it, as database/sql/driver is between database/sql and a driver: the store subsystem's engine over documents, its siblings, kit's scope on a database and its migrations ([Stores](#Stores)), which framework/kit/store sets; the refusals an engine says in kit's terms ([Refusal](#Refusal)); what kit's transactions offer an engine that takes part in them ([Transaction](#Transaction)); the queue subsystem's brokers and their consumer ([Queues](#Queues)), which framework/kit/queue sets; the workflow subsystem's engine and the ports it runs on ([Workflows](#Workflows)), which framework/kit/workflow sets; the mail subsystem's outbox and transports ([Mail](#Mail)), which framework/kit/mail sets; and the jobs subsystem's schedules and scheduler ([Jobs](#Jobs)), which framework/kit/jobs sets.
 
 The package imports the standard library and the framework's model only, so that kit and every subsystem can import it.
 
@@ -73,6 +73,14 @@ The package imports the standard library and the framework's model only, so that
   - [func \(HTTPServer\) State\(\) HTTPState](<#HTTPServer.State>)
 - [type HTTPState](<#HTTPState>)
 - [type IndexSpec](<#IndexSpec>)
+- [type JobDriverConfig](<#JobDriverConfig>)
+- [type JobEntryValue](<#JobEntryValue>)
+- [type JobResultValue](<#JobResultValue>)
+- [type JobScheduleFunc](<#JobScheduleFunc>)
+- [type JobScheduler](<#JobScheduler>)
+  - [func \(JobScheduler\) Add\(entry JobEntryValue\) error](<#JobScheduler.Add>)
+  - [func \(JobScheduler\) Run\(ctx context.Context\) error](<#JobScheduler.Run>)
+- [type JobSchedulerConfig](<#JobSchedulerConfig>)
 - [type Keyser](<#Keyser>)
   - [func \(Keyser\) Keys\(ctx context.Context, after string\) iter.Seq2\[string, error\]](<#Keyser.Keys>)
 - [type LiveMessageValue](<#LiveMessageValue>)
@@ -659,6 +667,13 @@ const WriteUpsert WriteMode = 0
 WriteUpsert writes whatever the key holds: a creation or a replacement.
 
 ## Variables
+
+<a name="Jobs"></a>
+```go
+var Jobs atomic.Pointer[JobDriverConfig]
+```
+
+Jobs is the jobs subsystem: the schedules of kit's jobs and the scheduler that fires them; nil until framework/kit/jobs is imported. A product that declares a job without it is refused at the start (ADR 0179 §6).
 
 <a name="Mail"></a>
 ```go
@@ -1425,6 +1440,125 @@ type IndexSpec struct {
 	Unique bool
 	// Keys are a document's keys in the index; an empty key is not indexed.
 	Keys   func(d DocumentValue) []string
+}
+```
+
+<a name="JobDriverConfig"></a>
+## type [JobDriverConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/jobs.go>)
+
+JobDriverConfig is what framework/kit/jobs plugs into kit: how a job's schedule is read from its declaration, and how the scheduler that fires the app's jobs opens.
+
+```go
+type JobDriverConfig struct {
+	// Every is the schedule of a job that runs every period, first one
+	// period after the scheduler starts; a period that is not positive is
+	// refused.
+	Every func(period time.Duration) (JobScheduleFunc, error)
+	// Cron is the schedule of a five-field POSIX cron expression, in the
+	// process's local time zone; an expression it cannot read is refused.
+	Cron  func(expr string) (JobScheduleFunc, error)
+	// Open opens the scheduler the app's jobs run on, as cfg says, with no
+	// entry yet.
+	Open  func(cfg *JobSchedulerConfig) JobScheduler
+}
+```
+
+<a name="JobEntryValue"></a>
+## type [JobEntryValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/jobs.go>)
+
+JobEntryValue is one job as the scheduler fires it: its name, its schedule, and the run.
+
+```go
+type JobEntryValue struct {
+	// Name names the job; the scheduler refuses a name it holds already.
+	Name     string
+	// Schedule says when the job runs next.
+	Schedule JobScheduleFunc
+	// Run runs the job once; its error is the result's.
+	Run      func(ctx context.Context) error
+}
+```
+
+<a name="JobResultValue"></a>
+## type [JobResultValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/jobs.go>)
+
+JobResultValue is one decision of the scheduler: a run of a job, or a fire it skipped.
+
+```go
+type JobResultValue struct {
+	// Name is the job's.
+	Name      string
+	// Scheduled is the instant the fire was due.
+	Scheduled time.Time
+	// Started and Finished bound the run; zero for a fire that did not run.
+	Started   time.Time
+	// Started and Finished bound the run; zero for a fire that did not run.
+	Finished  time.Time
+	// Missed counts the fires that came due while the scheduler could not
+	// fire them, skipped rather than caught up.
+	Missed    int
+	// Skipped says the fire did not run: a run of the same job was going.
+	Skipped   bool
+	// Err is the run's error.
+	Err       error
+}
+```
+
+<a name="JobScheduleFunc"></a>
+## type [JobScheduleFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/jobs.go>)
+
+JobScheduleFunc says when a job runs next after an instant: the instant, and false when it never runs again.
+
+```go
+type JobScheduleFunc func(after time.Time) (next time.Time, ok bool)
+```
+
+<a name="JobScheduler"></a>
+## type [JobScheduler](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/jobs_interface.go>)
+
+JobScheduler fires the app's jobs, each on its schedule, on the app's clock: a fire due while the previous run of the same job is going is skipped, a missed one is counted, never caught up.
+
+```go
+type JobScheduler interface {
+	// Add registers a job; it is refused while the scheduler runs, for a
+	// name it holds already, and for an entry with no name, run or
+	// schedule.
+	Add(entry JobEntryValue) error
+	// Run fires the jobs until ctx ends, then waits for the runs going.
+	Run(ctx context.Context) error
+}
+```
+
+<a name="JobScheduler.Add"></a>
+### func \(JobScheduler\) [Add](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/jobs_interface.go>)
+
+```go
+func (JobScheduler) Add(entry JobEntryValue) error
+```
+
+Add registers a job; it is refused while the scheduler runs, for a name it holds already, and for an entry with no name, run or schedule.
+
+<a name="JobScheduler.Run"></a>
+### func \(JobScheduler\) [Run](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/jobs_interface.go>)
+
+```go
+func (JobScheduler) Run(ctx context.Context) error
+```
+
+Run fires the jobs until ctx ends, then waits for the runs going.
+
+<a name="JobSchedulerConfig"></a>
+## type [JobSchedulerConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/jobs.go>)
+
+JobSchedulerConfig is the scheduler the app's jobs run on: the app's clock and what kit hears of each fire.
+
+```go
+type JobSchedulerConfig struct {
+	// Clock is the app's clock, which the scheduler stamps and waits on.
+	Clock    Clock
+	// OnResult hears every decision of the scheduler — each run, with the
+	// job's own error, and each fire skipped or missed —, one at a time.
+	OnResult func(res JobResultValue)
 }
 ```
 

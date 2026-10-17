@@ -8,10 +8,11 @@ by `framework/kit/server`), the Studio's event stream and profiler
 (`storekit`, set by `framework/kit/store`), the queues (`queuekit`, set by
 `framework/kit/queue`), the workflows (`workflowkit`, set by
 `framework/kit/workflow`), the mailers (`mailkit`, set by
-`framework/kit/mail`). kit imports none of the SDK
+`framework/kit/mail`), the jobs (`jobkit`, set by `framework/kit/jobs`). kit
+imports none of the SDK
 packages behind them — `pkg/v1/net/server`, `net/static`, `net/sse`,
 `profiling`, `proc/process` (and through it `runtime/metrics` and the spawn
-engine, ADR 0172), `data/docstore`, `data/sql`, `data/queue`, `app/statemachine` and `app/mail/spool` (ADR 0179) —, so a product
+engine, ADR 0172), `data/docstore`, `data/sql`, `data/queue`, `app/statemachine`, `app/mail/spool` and `app/scheduler` (ADR 0179) —, so a product
 that does not import a subsystem neither links nor initialises them;
 `framework/kit`'s initgraph tests hold the graph to it.
 
@@ -51,12 +52,22 @@ a `MailSink` the driver builds (SMTP through `ParseSMTP` and `NewSMTP`,
 or `Capture`, a `MailCaptureSource`), asks the SDK's verdict on a mail
 (`Validate`) and tells the spool's refusals apart by kind (`MailRefusal`,
 through `Refused`); a mail crosses as a `MailValue`, the SDK's mail value
-held as `any`, which the core names and plug does not.
+held as `any`, which the core names and plug does not. The jobs'
+(`jobs.go`, `jobs_interface.go`) is written and implemented by `jobkit`
+since step 7: the core reads every job's schedule at the start — never at
+the declaration, which a package's init may run before the subsystem's —
+from its period (`Every`) or its cron expression (`Cron`) as a
+`JobScheduleFunc`, opens the app's scheduler with a `JobSchedulerConfig` —
+the app's `Clock`, and what kit hears of each fire (`OnResult`, a
+`JobResultValue`) —, and holds a `JobScheduler` it adds each job to
+(`JobEntryValue`) and runs.
 
 ## Contents
 
 | File | Holds |
 |---|---|
+| `jobs.go` | the jobs subsystem's contract (ADR 0179 step 7): the hook `Jobs` (`JobDriverConfig`: `Every` and `Cron` — a job's schedule from its period or its cron expression —, `Open` the app's scheduler); `JobScheduleFunc`, `JobSchedulerConfig`, `JobEntryValue`, `JobResultValue` |
+| `jobs_interface.go` | the jobs subsystem's interface: `JobScheduler` (`Add`, `Run`), which `jobkit` implements over the SDK's scheduler and the core's `idleScheduler` for an app that declares no job |
 | `mail.go` | the mail subsystem's contract (ADR 0179 step 6): the hook `Mail` (`MailDriverConfig`: `Open` a mailer's outbox, `Validate` a mail, `Capture`, `ParseSMTP`, `NewSMTP` — the transports —, `Refused` — the refusal of a kind); the enums `MailRefusal` and `MailEvent` and their values; `MailSpoolConfig`, `MailValue`, `MailRelayValue`, `MailAttemptValue`, `MailEventValue` |
 | `mail_interface.go` | the mail subsystem's interfaces: `MailSpool` (`Send`, `SendWithID`, `DeadLetters`, `Run`, `Close`) and `MailSink` (`Send`) with its sibling `MailCaptureSource` (`Composed`: the capture transport's last message), which `mailkit` implements |
 | `plug.go` | the hooks (`NewHTTPServer`, `NewStaticFiles`, `SampleProcess`, `OpenEventStream`, `StudioProfiler`), what they take and return (`HTTPConfig`, `HTTPState`, `HTTPServer`, `EventStream`, `ProfilerConfig`, `SourceFunc`), the pprof labels kit and the profiler share (`LabelNode`, `LabelLoop`) |

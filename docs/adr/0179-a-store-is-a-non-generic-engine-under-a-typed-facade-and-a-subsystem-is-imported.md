@@ -342,7 +342,7 @@ created, until step 10 removes those imports.
 | 4 | `queuekit` + `framework/kit/queue`: the queues' brokers — the code naming the SDK's `queue`, a mailer's sealed outbox on a database among it — move there, behind `plug.Queues`; `framework/kit/queue` imports `framework/kit/store` (Q4) — done (2026-10-17, §Step 4, done) | no (the facade imports it) |
 | 5 | `workflowkit` + `framework/kit/workflow` (Q3): the SDK's `statemachine` instantiated once, behind `plug.Workflows`; `framework/kit/workflow` imports `framework/kit/store` (Q4) — done (2026-10-17, §Step 5, done) | no (the facade imports it) |
 | 6 | `mailkit` + `framework/kit/mail`: the mailers' outbox — the SDK's mail spool — and transports move there, behind `plug.Mail`; `framework/kit/mail` imports `framework/kit/queue` and `framework/kit/store` (Q4); `plug.HandleProvider` goes — done (2026-10-17, §Step 6, done) | no (the facade imports it) |
-| 7 | `jobkit` + `framework/kit/jobs` | no |
+| 7 | `jobkit` + `framework/kit/jobs`: the jobs' scheduler — the SDK's `scheduler` — and the schedules it reads from a job's declaration move there, behind `plug.Jobs`; `framework/kit/jobs` imports no other registration package — done (2026-10-17, §Step 7, done) | no (the facade imports it) |
 | 8 | English a table in kit's core, the other catalogues and the SDK's `i18n` behind `framework/kit/studio` (Q6) | no |
 | 9 | platform: `kit gen` writes the imports, `kit check` checks them; statusline, todo, moderation and platform regenerated or edited to import what they declare — while the facade still imports everything, so nothing breaks yet | no |
 | 10 | `framework/kit` drops its blank imports; the allow-list is gone; a root-module minor under ADR 0040 | **yes** |
@@ -992,6 +992,108 @@ mailer. The init medians are single series of 50 at a 1-minute load of about
 2: within the noise, and not claimed. Not measured: the latency of a fresh
 process.
 
+### Step 7, done (2026-10-17)
+
+The jobs' scheduler is `framework/internal/kit/jobkit`, which
+`framework/kit/jobs` plugs in (`plug.Jobs`) as it is imported, and which
+`framework/kit` itself imports until step 10 (`subsystems.go`, Q8).
+`framework/kit/jobs` imports no other registration package — Q4 names none
+for it: a job runs over nothing the stores, the queues, the workflows or the
+mailers provide —, and `jobkit` imports `plug` and the SDK alone. kit's core
+imports none of `pkg/v1/app/scheduler`: the initgraph test took it off its
+allow-list, which names `i18n` alone now.
+
+§3's contract for the jobs (`plug/jobs.go`, `plug/jobs_interface.go`): a job
+keeps what the product declared — a period (`Every`) or a cron expression
+(`Cron`) —, and the core reads it into a schedule at the start, through the
+hook's `Every` and `Cron` (a `plug.JobScheduleFunc`, the SDK's `Schedule` as
+it is), never at the declaration: a declaration made in a package-level
+variable runs at its package's init, which Go may order before the
+subsystem's (§6). The verdict on a period that is not positive or a cron
+expression of no five fields is the SDK's, given at the start with the other
+declaration problems (`job.period`, `job.cron`, at the declaration's
+position, as before). The core opens the app's scheduler with a
+`plug.JobSchedulerConfig` — the app's `Clock`, a test's manual clock
+included, and what kit hears of each fire (`OnResult`, a
+`plug.JobResultValue`) — and holds a `plug.JobScheduler`, which it adds each
+job to (`plug.JobEntryValue`) and runs. What the scheduler decides about time
+stays the SDK's: an overlapping fire skipped and counted, a missed deadline
+counted, never caught up, a cron expression across a DST change as the SDK's
+`cron` reads it. The scheduler's component, its loop and each job's loop, the
+span of a run and the overlap with a run the Studio started
+(`errOverlapped`, which the SDK reports unwrapped as the run's error) stay
+the core's; so do the workflows' timers, which start with the scheduler's
+component: an app that declares no job runs the core's `idleScheduler`, which
+holds no entry and waits for its end as the SDK's does with none, so a daemon
+without a job needs no subsystem and shows the same loop.
+
+The start's check of §6 gains the jobs row: a job — an interval's or a
+cron's — declared without `framework/kit/jobs` is refused with
+`CodeSubsystemMissing`, every job at once
+(`TestAJobWithoutItsSubsystemIsRefused`), a daemon without a job is not
+(`TestADaemonWithoutJobsNeedsNoJobsSubsystem`), and a scheduler opened for
+jobs without the subsystem — which the check makes unreachable — says the
+import it needs (`jobsMissing`, `TestAJobIsJudgedAtTheStartThroughItsSubsystem`).
+
+`initgraph_external_test.go` follows: `stillInCore` loses `scheduler`,
+`kitEngines` gains `framework/internal/kit/jobkit` for `framework/kit/jobs`;
+`coreprobe` links no symbol of either — not even the scheduler's inits, the
+package being out of its graph —, `storeprobe`, `queueprobe`,
+`workflowprobe` and `mailprobe` none either (`linksNoJobs`), and
+`TestAProductThatImportsTheJobsLinksThem` builds `testdata/jobsprobe`
+(coreprobe with `framework/kit/jobs`, a job every minute and one on a cron
+expression) and requires `jobkit`'s and the SDK's scheduler's code linked,
+beyond its inits, and nothing of the store, queue, workflow and mail
+subsystems nor of kit's own store code.
+
+Measured as the steps before (Go 1.27.2, `-trimpath`, MB = 10⁶ bytes, text
+symbols `T`/`t` by `go tool nm -size`, init medians of 50 runs, at a
+1-minute load of 2.8 to 4.3 — the machine shared), before on `origin/main` at
+293a76b9 — `jobsprobe` before is the same program without the import, its
+scheduler then in the core:
+
+| | coreprobe before | coreprobe after | storeprobe before | storeprobe after | queueprobe before | queueprobe after | workflowprobe before | workflowprobe after | mailprobe before | mailprobe after |
+|---|---|---|---|---|---|---|---|---|---|---|
+| packages (`go list -deps`) | 346 | **343** | 354 | 351 | 360 | 357 | 360 | 357 | 365 | 362 |
+| file | 14.711 | 14.684 | 17.728 | 17.695 | 18.210 | 18.181 | 18.607 | 18.573 | 18.613 | 18.588 |
+| `.text` | 4.619 | 4.610 | 5.648 | 5.639 | 5.829 | 5.820 | 5.899 | 5.889 | 5.979 | 5.970 |
+| text symbols | 4.466 | 4.457 | 5.463 | 5.454 | 5.640 | 5.631 | 5.702 | 5.693 | 5.785 | 5.777 |
+| `.gopclntab` / debug | 3.518 / 3.671 | 3.513 / 3.667 | 4.302 / 4.334 | 4.296 / 4.329 | 4.416 / 4.432 | 4.410 / 4.426 | 4.535 / 4.481 | 4.529 / 4.475 | 4.519 / 4.524 | 4.513 / 4.518 |
+| SDK scheduler (core and service), `jobkit` | 0.0095 (24 symbols), — | **0, 0** | 0.0095, — | 0, 0 | 0.0095, — | 0, 0 | 0.0095, — | 0, 0 | 0.0095, — | 0, 0 |
+| init lines / median of 50 | 140 / 0.81 ms | 139 / 0.83 ms | 146 / 0.84 ms | 145 / 0.95 ms | 149 / 0.99 ms | 148 / 0.94 ms | 149 / 0.94 ms | 148 / 0.96 ms | 152 / 0.94 ms | 151 / 0.93 ms |
+
+| | jobsprobe before | jobsprobe after | cliprobe before | cliprobe after |
+|---|---|---|---|---|
+| packages (`go list -deps`) | 346 | 348 | 371 | 373 |
+| file | 14.760 | 14.778 | 18.967 | **19.030 (+0.06)** |
+| `.text` | 4.634 | 4.639 | 6.059 | 6.075 |
+| text symbols | 4.480 | 4.485 | 5.860 | 5.875 |
+| `.gopclntab` / debug | 3.533 / 3.684 | 3.541 / 3.681 | 4.614 / 4.580 | 4.633 / 4.596 |
+| kit's core | 0.425 | 0.427 | 0.997 | 0.997 |
+| SDK scheduler (core and service) / `jobkit` | 0.0208 / — | 0.0208 / 0.0023 | 0.0095 / — | 0.0208 / 0.0024 |
+| init lines / median of 50 | 140 / 0.78 ms | 141 / 0.87 ms | 156 / 0.93 ms | 157 / 0.98 ms |
+
+**Reading.** On kit's core alone, three packages fewer —
+`pkg/v1/app/scheduler` and its core and service halves —, one init fewer,
+and the scheduler's 0.0095 MB of code: a product that declares no job
+linked `scheduler.New` and its loop all the same, the core opening the
+scheduler whether a job was declared or not. `storeprobe`, `queueprobe`,
+`workflowprobe` and `mailprobe` lose the same. The gain is small, as step 0
+said it would be (0.009 MB of code in the ceiling); what matters is that the
+scheduler leaves the core's graph, which §1 required. A product that declares
+jobs links what it linked, plus `jobkit`'s conversions (+0.005 MB of code,
+two packages more: `jobs` and `jobkit`) — the SDK's scheduler unchanged at
+0.021 MB, its whole engine once a job is added. The price is on the facade
+until step 10, as steps 5 and 6 said of theirs: the hook holds the scheduler,
+so a product of the facade links all of it whether it declares a job or not —
+`cliprobe` +0.015 MB of code and +0.06 MB of file, two packages more —; a
+product that imports only the registration packages it needs, as `kit gen`
+will write them (§5), pays it only with a job. The status line declares two
+jobs in its daemon role: it will import `framework/kit/jobs` at step 9. The
+init medians are single series of 50 at a 1-minute load of 2.8 to 4.3:
+within the noise, and not claimed. Not measured: the latency of a fresh
+process.
+
 ### Risks
 
 - **A read decodes.** The generic engine hands back a `T`; the document engine
@@ -1129,6 +1231,7 @@ release note.
 | Accepted, step 4 done | 2026-10-17 | The migration table marks step 4 done; §Step 4, done records the queues' brokers in `queuekit` behind `framework/kit/queue`, which imports `framework/kit/store` (Q4) — `queuekit` reaching a database through `storekit.SQLOf` —, kit's core importing neither the SDK's `queue` nor, through it, its `sql`, the queues' contract in `plug` (`Queues`, `QueueConfig`, `Broker`, `MessageMover`, `Clock`), the start's check gaining the queue row (a topic, a subscription, a watch, a queued command, a mailer whose outbox is on a database), `plug.HandleProvider` off the queues and kept for the mail spool alone until step 6, and the measure — the smallest product two packages fewer, a product with stores and no queue 0.43 MB of file and 0.17 MB of code less. No decision changed |
 | Accepted, step 5 done | 2026-10-17 | The migration table marks step 5 done; §Step 5, done records the workflows' engine in `workflowkit` behind `framework/kit/workflow`, which imports `framework/kit/store` (Q4), the SDK's statemachine instantiated once at `plug.WorkflowEntityValue` and the state's spelling (Q3), `WorkflowService[E, S]` the typed facade over it with its ports (`plug.WorkflowStore`, `plug.WorkflowJournal`) in the core, kit's core importing none of the SDK's statemachine, the start's check gaining the workflow row, and the measure — the smallest product three packages fewer, a product of 11 workflows 0.62 MB of code and 1.69 MB of file less, the engine linked by a product of the facade until step 10 (+0.11 MB of code). No decision changed |
 | Accepted, step 6 done | 2026-10-17 | The migration table marks step 6 done; §Step 6, done records the mailers' outbox and transports in `mailkit` behind `framework/kit/mail`, which imports `framework/kit/queue` and `framework/kit/store` (Q4) — `mailkit` reaching an outbox on a database through `queuekit.BrokerOf` and `storekit.SQLOf` —, kit's core importing no `mail/spool` and, through it, neither the SDK's `queue` nor its `sql`, `pkg/v1/app/mail` kept in its graph as the type `Mailer.Send` takes, its transports and `net/smtp` unlinked, the mail's contract in `plug` (`Mail`, `MailSpoolConfig`, `MailSpool`, `MailSink`, `MailCaptureSource`, `MailRefusal`), `plug.HandleProvider` and its two ktn exclusions gone, a mailer's sender judged at the start, the start's check gaining the mail row beside the queue row, and the measure — the smallest product eight packages fewer, a product of the facade +0.10 MB of code until step 10. No decision changed |
+| Accepted, step 7 done | 2026-10-17 | The migration table marks step 7 done; §Step 7, done records the jobs' scheduler in `jobkit` behind `framework/kit/jobs`, which imports no other registration package, kit's core importing none of the SDK's scheduler, a job's schedule read from its declaration at the start through the hook (`Every`, `Cron`) — never at the declaration —, the jobs' contract in `plug` (`Jobs`, `JobScheduleFunc`, `JobSchedulerConfig`, `JobScheduler`, `JobEntryValue`, `JobResultValue`), the core's `idleScheduler` for an app that declares no job, the start's check gaining the jobs row, and the measure — the smallest product three packages fewer and 0.009 MB of code less, a product of the facade +0.015 MB of code until step 10. No decision changed |
 
 ## Deferred
 

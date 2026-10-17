@@ -14,7 +14,9 @@ store code (`kitStoreCode`, step 3b), none of the queue subsystem's brokers
 even their inits; nothing of the workflow subsystem's engine nor of the SDK's
 statemachine, out of its graph since step 5; and nothing of the mail
 subsystem's outbox nor of the SDK's spool, out of its graph since step 6, nor
-of the SDK's mail transports beyond their inits. Once step 10 drops the facade's imports, `cliprobe` is that
+of the SDK's mail transports beyond their inits; and nothing of the jobs
+subsystem's scheduler nor of the SDK's scheduler, out of its graph since step
+7, not even its inits. Once step 10 drops the facade's imports, `cliprobe` is that
 program again and this probe can go.
 
 ## Contents
