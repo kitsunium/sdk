@@ -617,7 +617,9 @@ the privacy declarations, and Main's commands on the stores — `migrate`,
 stores and journals the read. Each call site keeps its name and falls back to
 what an app without a store does: nothing to mount, start or warn of. A
 command on the stores, without the subsystem, says the import it needs
-(`subsystem.missing`) and exits 78. The Studio's routes on the stores stay
+(`subsystem.missing`) and exits 78. The classification of the types a
+product shows is not store code: without the subsystem it is judged all the
+same, once (`classificationProblems`). The Studio's routes on the stores stay
 reached through the Studio alone, served only with the subsystem.
 
 Two things the linker needs, found by reading its reachability
@@ -639,13 +641,13 @@ symbols `T`/`t` by `go tool nm -size`), before on `origin/main` at 7b32c0cd:
 | | cliprobe before | cliprobe after | coreprobe before | coreprobe after | storeprobe before | storeprobe after |
 |---|---|---|---|---|---|---|
 | packages (`go list -deps`) | 365 | 365 | 359 | 359 | 364 | 364 |
-| file | 18.209 | 18.217 | 17.252 | **14.645 (−2.61)** | 18.193 | 18.208 |
-| `.text` | 5.828 | 5.831 | 5.519 | **4.580 (−0.94)** | 5.827 | 5.830 |
-| text symbols | 5.639 | 5.642 | 5.339 | **4.429 (−0.91)** | 5.638 | 5.641 |
-| `.gopclntab` / debug | 4.411 / 4.428 | 4.415 / 4.430 | 4.157 / 4.236 | 3.488 / 3.647 | 4.408 / 4.422 | 4.411 / 4.424 |
-| kit's core | 0.991 | 0.993 | 0.988 | **0.397 (−0.59)** | 0.991 | 0.993 |
+| file | 18.209 | 18.220 | 17.252 | **14.792 (−2.46)** | 18.193 | 18.209 |
+| `.text` | 5.828 | 5.831 | 5.519 | **4.635 (−0.88)** | 5.827 | 5.830 |
+| text symbols | 5.639 | 5.642 | 5.339 | **4.482 (−0.86)** | 5.638 | 5.641 |
+| `.gopclntab` / debug | 4.411 / 4.428 | 4.415 / 4.430 | 4.157 / 4.236 | 3.527 / 3.684 | 4.408 / 4.422 | 4.411 / 4.424 |
+| kit's core | 0.991 | 0.993 | 0.988 | **0.420 (−0.57)** | 0.991 | 0.993 |
 | SDK `queue` (core and service) | 0.114 | 0.114 | 0.112 | **0.001** | 0.114 | 0.114 |
-| `slices` (instantiations) | 0.407 | 0.407 | 0.379 | 0.317 | 0.407 | 0.407 |
+| `slices` (instantiations) | 0.407 | 0.407 | 0.379 | 0.320 | 0.407 | 0.407 |
 | SDK `secret` | 0.090 | 0.090 | 0.090 | 0.056 | 0.090 | 0.090 |
 | `database/sql` | 0.061 | 0.061 | 0.050 | 0.028 | 0.061 | 0.061 |
 | SDK `i18n` / `scheduler` (steps 8, 7) | 0.044 / 0.010 | same | 0.044 / 0.010 | same | 0.044 / 0.010 | same |
@@ -653,9 +655,9 @@ symbols `T`/`t` by `go tool nm -size`), before on `origin/main` at 7b32c0cd:
 
 **Reading.** On kit's core alone, against step 0's base (§Step 0, measured:
 the probe's text symbols 6.80 MB, its file 22.06 MB), the code is down by
-**2.37 MB** (6.80 → 4.43) and the file by **7.42 MB** (22.06 → 14.65):
+**2.32 MB** (6.80 → 4.48) and the file by **7.27 MB** (22.06 → 14.79):
 §Measurement's targets — at least 2.15 MB of code and 6.8 MB of file — are
-met, and the probe is within 0.02 MB of code and 0.1 MB of file of step 0's
+met, and the probe is within 0.07 MB of code and 0.24 MB of file of step 0's
 ceiling (4.41 / 14.55), which also took the queues, the scheduler and the
 catalogues out. The SDK's queue went with the store code: nothing but the
 databases and the watches' replay reached its brokers in a product that

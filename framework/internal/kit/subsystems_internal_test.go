@@ -164,6 +164,43 @@ func TestARefusalThatMissesNoSubsystemCarriesNoCode(t *testing.T) {
 	}
 }
 
+// doubleSubject is a message whose type declares two subjects: what the
+// classification refuses, whatever the program keeps.
+type doubleSubject struct {
+	A string `json:"a" kit:"subject"`
+	B string `json:"b" kit:"subject"`
+}
+
+// The classification of a type a topic carries is judged with or without the
+// store subsystem, and once in either: it is not store code (ADR 0179 step
+// 3b).
+func TestTheClassificationIsJudgedWithOrWithoutTheStores(t *testing.T) {
+	judged := func(t *testing.T) {
+		t.Helper()
+		svc := NewService("mail", "Sends.")
+		svc.Topic[doubleSubject]("letters")
+		err := NewApp("mail", svc).With(Profile("daemon"), InMemory(), Logs(io.Discard)).Start(context.Background())
+		var de *DiagnosticsError
+		if !errors.As(err, &de) {
+			t.Fatalf("a type with two subjects starts: %v", err)
+		}
+		n := 0
+		for _, d := range de.Diagnostics {
+			if strings.Contains(d.Message, "has two subject fields") {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("the classification's refusal is said %d times, want once:\n%v", n, de)
+		}
+	}
+	t.Run("with the stores", judged)
+	t.Run("without the stores", func(t *testing.T) {
+		withoutStores(t)
+		judged(t)
+	})
+}
+
 // sealedProbe is the message of a topic whose values are sealed at rest.
 type sealedProbe struct {
 	Token string `json:"token" kit:"secret"`

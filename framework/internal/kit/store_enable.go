@@ -146,13 +146,19 @@ func (a *App) storeProblems() []model.Diagnostic {
 	return nil
 }
 
-// storePrivacyProblems are what the privacy declarations of the stores
-// declare wrong (privacy_info.go); none without the store subsystem.
+// storePrivacyProblems are what the app declares wrong about personal data
+// (privacy_info.go): with the store subsystem, privacyProblems, which judges
+// the classification of every type as well as the stores' retention; without
+// it, the classification alone — a type an endpoint or a topic shows is
+// judged whether the program keeps a store or not —, once in either mode.
 func (a *App) storePrivacyProblems() []model.Diagnostic {
 	if h := stores(); h != nil {
 		return h.privacyProblems(a)
 	}
-	return nil
+	a.privacy.mu.Lock()
+	explain := a.privacy.explain
+	a.privacy.mu.Unlock()
+	return a.classificationProblems(explain)
 }
 
 // storeCodeProblems are what the stores' sealing, kit's index key and the
