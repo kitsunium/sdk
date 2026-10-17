@@ -1,9 +1,10 @@
 // Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the
 // frontends' file server and the process sampler of the runtime graph
-// (framework/kit/server), the Studio's event stream and its profiler
-// (framework/kit/studio), the stores and the databases (framework/kit/store),
-// the queues (framework/kit/queue), the workflows (framework/kit/workflow),
-// the mailers (framework/kit/mail), the jobs (framework/kit/jobs). kit reads
+// (framework/kit/server), the Studio's event stream, its profiler and kit's
+// sentences in the languages after English (framework/kit/studio), the
+// stores and the databases (framework/kit/store), the queues
+// (framework/kit/queue), the workflows (framework/kit/workflow), the mailers
+// (framework/kit/mail), the jobs (framework/kit/jobs). kit reads
 // what they registered through the hooks declared here, and imports none of
 // the SDK packages behind them: a product that does not import a subsystem
 // neither links nor initialises its packages.
@@ -18,8 +19,9 @@
 // framework/kit/queue sets; the workflow subsystem's engine and the ports
 // it runs on ([Workflows]), which framework/kit/workflow sets; the mail
 // subsystem's outbox and transports ([Mail]), which framework/kit/mail sets;
-// and the jobs subsystem's schedules and scheduler ([Jobs]), which
-// framework/kit/jobs sets.
+// the jobs subsystem's schedules and scheduler ([Jobs]), which
+// framework/kit/jobs sets; and kit's catalogues in the languages after
+// English ([Words]), which framework/kit/studio sets.
 //
 // The package imports the standard library and the framework's model only,
 // so that kit and every subsystem can import it.

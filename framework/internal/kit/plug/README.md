@@ -6,9 +6,9 @@
 import "github.com/kitsunium/sdk/framework/internal/kit/plug"
 ```
 
-Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/kit/server), the Studio's event stream and its profiler (framework/kit/studio), the stores and the databases (framework/kit/store), the queues (framework/kit/queue), the workflows (framework/kit/workflow), the mailers (framework/kit/mail), the jobs (framework/kit/jobs). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
+Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/kit/server), the Studio's event stream, its profiler and kit's sentences in the languages after English (framework/kit/studio), the stores and the databases (framework/kit/store), the queues (framework/kit/queue), the workflows (framework/kit/workflow), the mailers (framework/kit/mail), the jobs (framework/kit/jobs). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
 
-It is also the contract between kit's core and the subsystems ADR 0179 takes out of it, as database/sql/driver is between database/sql and a driver: the store subsystem's engine over documents, its siblings, kit's scope on a database and its migrations ([Stores](#Stores)), which framework/kit/store sets; the refusals an engine says in kit's terms ([Refusal](#Refusal)); what kit's transactions offer an engine that takes part in them ([Transaction](#Transaction)); the queue subsystem's brokers and their consumer ([Queues](#Queues)), which framework/kit/queue sets; the workflow subsystem's engine and the ports it runs on ([Workflows](#Workflows)), which framework/kit/workflow sets; the mail subsystem's outbox and transports ([Mail](#Mail)), which framework/kit/mail sets; and the jobs subsystem's schedules and scheduler ([Jobs](#Jobs)), which framework/kit/jobs sets.
+It is also the contract between kit's core and the subsystems ADR 0179 takes out of it, as database/sql/driver is between database/sql and a driver: the store subsystem's engine over documents, its siblings, kit's scope on a database and its migrations ([Stores](#Stores)), which framework/kit/store sets; the refusals an engine says in kit's terms ([Refusal](#Refusal)); what kit's transactions offer an engine that takes part in them ([Transaction](#Transaction)); the queue subsystem's brokers and their consumer ([Queues](#Queues)), which framework/kit/queue sets; the workflow subsystem's engine and the ports it runs on ([Workflows](#Workflows)), which framework/kit/workflow sets; the mail subsystem's outbox and transports ([Mail](#Mail)), which framework/kit/mail sets; the jobs subsystem's schedules and scheduler ([Jobs](#Jobs)), which framework/kit/jobs sets; and kit's catalogues in the languages after English ([Words](#Words)), which framework/kit/studio sets.
 
 The package imports the standard library and the framework's model only, so that kit and every subsystem can import it.
 
@@ -158,6 +158,10 @@ The package imports the standard library and the framework's model only, so that
   - [func \(Transaction\) Retell\(ctx context.Context, fn func\(\)\)](<#Transaction.Retell>)
   - [func \(Transaction\) Undo\(ctx context.Context, store string, restore func\(ctx context.Context\) error\)](<#Transaction.Undo>)
 - [type TransitionSpec](<#TransitionSpec>)
+- [type Translator](<#Translator>)
+  - [func \(Translator\) Keys\(lang string\) \[\]string](<#Translator.Keys>)
+  - [func \(Translator\) Languages\(\) \[\]string](<#Translator.Languages>)
+  - [func \(Translator\) Render\(lang string, key string, args map\[string\]string\) \(string, error\)](<#Translator.Render>)
 - [type Trasher](<#Trasher>)
   - [func \(Trasher\) Purge\(ctx context.Context, key string\) error](<#Trasher.Purge>)
   - [func \(Trasher\) Tombstones\(ctx context.Context\) \(\[\]TombstoneValue, error\)](<#Trasher.Tombstones>)
@@ -170,6 +174,7 @@ The package imports the standard library and the framework's model only, so that
 - [type VersionWeightValue](<#VersionWeightValue>)
 - [type VersionWeighter](<#VersionWeighter>)
   - [func \(VersionWeighter\) VersionWeight\(ctx context.Context\) \(VersionWeightValue, error\)](<#VersionWeighter.VersionWeight>)
+- [type WordsConfig](<#WordsConfig>)
 - [type WorkflowChangeValue](<#WorkflowChangeValue>)
 - [type WorkflowConfig](<#WorkflowConfig>)
 - [type WorkflowDriverConfig](<#WorkflowDriverConfig>)
@@ -730,6 +735,13 @@ var StudioProfiler atomic.Pointer[ProfilerConfig]
 ```
 
 StudioProfiler is the Studio's profiler; nil until framework/kit/studio is imported.
+
+<a name="Words"></a>
+```go
+var Words atomic.Pointer[WordsConfig]
+```
+
+Words is kit's sentences in the languages after English, the catalogues the Studio shows its reader's language from; nil until framework/kit/studio is imported, and kit then speaks English alone. The terminal, the logs and an error read English whatever a program imports (ADR 0179 Q6).
 
 <a name="Workflows"></a>
 ```go
@@ -2635,6 +2647,52 @@ type TransitionSpec struct {
 }
 ```
 
+<a name="Translator"></a>
+## type [Translator](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/words_interface.go>)
+
+Translator says kit's sentences in the languages after English, which only the Studio shows, in its reader's language.
+
+```go
+type Translator interface {
+	// Keys are the keys of lang's catalogue, sorted; nil for a language
+	// it does not speak.
+	Keys(lang string) []string
+	// Languages are the languages it speaks after English, in order.
+	Languages() []string
+	// Render is the sentence of key in lang, its placeholders filled from
+	// args by name; a key the catalogue lacks, or a name the sentence
+	// takes that args does not give, is an error.
+	Render(lang string, key string, args map[string]string) (string, error)
+}
+```
+
+<a name="Translator.Keys"></a>
+### func \(Translator\) [Keys](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/words_interface.go>)
+
+```go
+func (Translator) Keys(lang string) []string
+```
+
+Keys are the keys of lang's catalogue, sorted; nil for a language it does not speak.
+
+<a name="Translator.Languages"></a>
+### func \(Translator\) [Languages](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/words_interface.go>)
+
+```go
+func (Translator) Languages() []string
+```
+
+Languages are the languages it speaks after English, in order.
+
+<a name="Translator.Render"></a>
+### func \(Translator\) [Render](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/words_interface.go>)
+
+```go
+func (Translator) Render(lang string, key string, args map[string]string) (string, error)
+```
+
+Render is the sentence of key in lang, its placeholders filled from args by name; a key the catalogue lacks, or a name the sentence takes that args does not give, is an error.
+
 <a name="Trasher"></a>
 ## type [Trasher](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
 
@@ -2780,6 +2838,21 @@ func (VersionWeighter) VersionWeight(ctx context.Context) (VersionWeightValue, e
 ```
 
 VersionWeight is what the store's versions and trash weigh.
+
+<a name="WordsConfig"></a>
+## type [WordsConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/words.go>)
+
+WordsConfig is what framework/kit/studio plugs into kit: how kit's catalogues in the languages after English open.
+
+```go
+type WordsConfig struct {
+	// Open reads and compiles the catalogue of every language after
+	// English, each falling back to english — kit's own sentences, by
+	// key, as its core holds them; a catalogue that does not decode or
+	// does not compile is refused.
+	Open func(english map[string]string) (Translator, error)
+}
+```
 
 <a name="WorkflowChangeValue"></a>
 ## type [WorkflowChangeValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)

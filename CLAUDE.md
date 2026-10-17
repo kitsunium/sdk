@@ -314,7 +314,8 @@ framework/         the layer above pkg/v1, packages of the root module — ADR 0
                    model (the graph types + the ID grammar, Version 5),
                    kit (the runtime a product imports; beneath it the
                      opt-in subsystems config/{toml,yaml}, server,
-                     studio, store — the stores and databases, ADR
+                     studio — with kit's languages after English,
+                     ADR 0179 step 8 —, store — the stores and databases, ADR
                      0179 —, queue — the queues, step 4 —, workflow
                      — the workflows, step 5 —, mail — the mailers,
                      step 6 — and jobs — the jobs, step 7 —,

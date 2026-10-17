@@ -206,7 +206,8 @@ type DiagnosticMessage struct {
 	// Message says what is wrong and how to fix it, in English.
 	Message string `json:"message"`
 	// Texts is the message in each language kit speaks, by language: "en",
-	// "fr". The Studio shows its reader's.
+	// and "fr" when the program imports framework/kit/studio. The Studio
+	// shows its reader's.
 	Texts map[string]string `json:"texts,omitempty"`
 	// Node is the node concerned, when there is one.
 	Node string `json:"node,omitempty"`

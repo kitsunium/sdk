@@ -12,6 +12,8 @@ Package studio serves, in dev, the read-only API the kit tool's Studio reads: th
 import _ "github.com/kitsunium/sdk/framework/kit/studio"
 ```
 
-Without it a product links none of those routes, the event stream or the profiler; in dev the start warns that the Studio was asked for.
+It also brings kit's sentences in the languages after English — French today —, which only the Studio shows, in its reader's language: with it a diagnostic of the graph carries its text in each of them, without it in English alone. The terminal, the logs and an error read English either way (ADR 0179 step 8, Q6).
+
+Without it a product links none of those routes, the event stream, the profiler, the catalogues after English or the SDK's i18n; in dev the start warns that the Studio was asked for.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

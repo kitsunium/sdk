@@ -272,7 +272,7 @@ Package kit — watches: how a module hears the writes of a product's marked fie
 
 Package kit — a watch in a running app: its queue and its consumer.
 
-Package kit — the sentences kit says, in every language it speaks.
+Package kit — the sentences kit says: English from its own table, the languages after it from framework/kit/studio's catalogues.
 
 Package kit — workflows: a state machine over the entities of one store.
 

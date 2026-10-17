@@ -12,6 +12,10 @@ store subsystems' engines, and nothing of the workflows' nor of the jobs'
 (step 7) — the half of ADR
 0179 §7 that keeps the other from passing by testing nothing, for step 6.
 
+It holds kit's English table and nothing of its languages after English —
+neither the SDK's i18n, not even its inits, nor the French catalogue: those
+are `framework/kit/studio`'s (step 8, `linksNoWords`).
+
 ## Contents
 
 | File | Holds |

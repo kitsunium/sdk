@@ -5098,7 +5098,8 @@ packages:
               type: string
             - doc: |-
                 Texts is the message in each language kit speaks, by language: "en",
-                "fr". The Studio shows its reader's.
+                and "fr" when the program imports framework/kit/studio. The Studio
+                shows its reader's.
               name: Texts
               tag: json:"texts,omitempty"
               type: map[string]string

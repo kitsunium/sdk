@@ -172,10 +172,7 @@ go_library(
         "workflow_ports.go",
         "workflow_records.go",
     ],
-    embedsrcs = [
-        "locales/en.json",
-        "locales/fr.json",
-    ],
+    embedsrcs = ["locales/en.json"],
     importpath = "github.com/kitsunium/sdk/framework/internal/kit",
     visibility = ["//visibility:public"],
     deps = [
@@ -185,7 +182,6 @@ go_library(
         "//framework/telemetry",
         "//pkg/v1/app/config",
         "//pkg/v1/app/health",
-        "//pkg/v1/app/i18n",
         "//pkg/v1/app/id",
         "//pkg/v1/app/lifecycle",
         "//pkg/v1/app/lock",
@@ -383,6 +379,7 @@ go_test(
         "//framework/kit/studio",
         "//framework/kit/workflow",
         "//framework/model",
+        "//pkg/v1/app/i18n",
         "//pkg/v1/app/lock",
         "//pkg/v1/app/mail",
         "//pkg/v1/clock",

@@ -343,7 +343,7 @@ created, until step 10 removes those imports.
 | 5 | `workflowkit` + `framework/kit/workflow` (Q3): the SDK's `statemachine` instantiated once, behind `plug.Workflows`; `framework/kit/workflow` imports `framework/kit/store` (Q4) — done (2026-10-17, §Step 5, done) | no (the facade imports it) |
 | 6 | `mailkit` + `framework/kit/mail`: the mailers' outbox — the SDK's mail spool — and transports move there, behind `plug.Mail`; `framework/kit/mail` imports `framework/kit/queue` and `framework/kit/store` (Q4); `plug.HandleProvider` goes — done (2026-10-17, §Step 6, done) | no (the facade imports it) |
 | 7 | `jobkit` + `framework/kit/jobs`: the jobs' scheduler — the SDK's `scheduler` — and the schedules it reads from a job's declaration move there, behind `plug.Jobs`; `framework/kit/jobs` imports no other registration package — done (2026-10-17, §Step 7, done) | no (the facade imports it) |
-| 8 | English a table in kit's core, the other catalogues and the SDK's `i18n` behind `framework/kit/studio` (Q6) | no |
+| 8 | English a table in kit's core, the other catalogues and the SDK's `i18n` behind `framework/kit/studio` (Q6) — done (2026-10-17, §Step 8, done) | no (a graph a program without the Studio writes carries its diagnostics in English alone, Q6) |
 | 9 | platform: `kit gen` writes the imports, `kit check` checks them; statusline, todo, moderation and platform regenerated or edited to import what they declare — while the facade still imports everything, so nothing breaks yet | no |
 | 10 | `framework/kit` drops its blank imports; the allow-list is gone; a root-module minor under ADR 0040 | **yes** |
 
@@ -1094,6 +1094,129 @@ init medians are single series of 50 at a 1-minute load of 2.8 to 4.3:
 within the noise, and not claimed. Not measured: the latency of a fresh
 process.
 
+### Step 8, done (2026-10-17)
+
+kit's English is a table of its core, and its other languages are the
+Studio's (Q6). `words.go` reads `locales/en.json` with `encoding/json` at the
+first sentence kit says — a `sync.OnceValue`, as the SDK's i18n was loaded:
+a start that says nothing pays nothing — and compiles each sentence once in
+the SDK i18n's grammar (`{name}`, `{{` and `}}`), so that the terminal, the
+logs and an error read exactly what they read before:
+`TestKitsEnglishIsTheSDKsEnglish` renders every key of the table with kit's
+renderer and with the SDK's i18n, every placeholder given — values holding
+braces —, and requires the same bytes, the same refusal for each placeholder
+left out and for a key the table lacks, and the same verdict on sentences
+that do not compile. The French catalogue moved to
+`framework/internal/kit/studiokit/locales/fr.json`: `studiokit` compiles it
+with the SDK's i18n, kit's English the fallback, behind `plug.Words`
+(`plug/words.go`, `plug/words_interface.go`: `WordsConfig.Open`, handed kit's
+English table, and the `Translator` it returns — `Languages`, `Keys`,
+`Render`), and `framework/kit/studio` sets the hook as it is imported, beside
+the Studio's event stream and profiler. kit's core imports none of
+`pkg/v1/app/i18n`: the initgraph test took it off its allow-list, which is
+empty now.
+
+A diagnostic is still a `phrase`: its English is written when it is said,
+its other languages when the Studio asks — the key and the values are kept,
+each value written by `fmt.Sprint` at the call as before —, so a sentence a
+product's package-level declaration says before the Studio's package is
+initialised (Go may order that init first, §6) speaks French once the hook is
+set; the hook is read at each sentence, never frozen. The catalogues after
+English open at the first sentence kit says with the hook set, against the
+English table: a language that lacks a key or has one more stops the process
+there (`CATALOGUE_INCOMPLETE`, `TestACatalogueThatLacksAKeyStopsTheFirstSentence`),
+as a sentence of the English table that does not compile does
+(`CATALOGUE_INVALID`, a reason of `CodeCatalogue`, kit's own now that the SDK
+does not compile it). `TestKitSpeaksEveryLanguage` reads the English table and
+`studiokit`'s catalogues, through the hook the suite's binary sets by
+importing the Studio. A phrase is one pointer, as the map of its texts was, so
+that passing one costs its callers no more code.
+
+**What a product sees.** The terminal, the logs, an error, a `DiagnosticsError`
+and the `Message` of every diagnostic are English, byte for byte as before,
+whatever the program imports. The Studio is unchanged: `kit dev` builds a
+product with the platform's `kitdev` tag, under which its `dev_gen.go`
+blank-imports `framework/kit/studio` when a role of its design asks for the
+Studio (`generate.DevTag`, `generate.DevFile`), so the graph the
+Studio reads (`GET /_kit/api/graph`, mounted only with that package) carries
+every diagnostic in English and French, and the Studio shows its reader's. What
+changes is a graph written by a program that does not import the Studio:
+`<product> graph` and the platform's `kit graph` — which runs `go run <pkg>
+graph` without the tag — write each diagnostic's `texts` with `"en"` alone
+where they wrote `"en"` and `"fr"`; the platform's Studio already falls back
+to `message` for a language a diagnostic lacks (`d.texts?.[locale] ??
+d.message`). No environment variable chose a language before (there is no
+`KIT_LANG`, and kit reads no `LANG`): nothing outside the Studio printed
+French, and nothing does now. That is Q6's choice, recorded here and in the
+pull request; the facade does not import the Studio, which stays opt-in.
+
+`initgraph_external_test.go` follows: `leaving`'s `i18n` row names
+`framework/kit/studio`, `stillInCore` is empty; the facade bringing the SDK's
+i18n is refused (`TestTheFacadeImportsNoOptInSubsystem`), as are the core
+importing `studiokit` and the facade importing `framework/kit/studio`;
+`coreprobe`, `storeprobe`, `queueprobe`, `workflowprobe`, `mailprobe` and
+`jobsprobe` link no symbol of the SDK's i18n — not even its inits, the
+package being out of their graphs — nor of `studiokit`, and hold kit's English
+table and not the French catalogue (`linksNoWords`, a sentence of each read in
+the binary's bytes); and `TestAProductThatImportsTheStudioLinksItsLanguages`
+builds `testdata/studioprobe` (coreprobe with `framework/kit/studio`) and
+requires `studiokit`'s `openWords` and the SDK's i18n linked, beyond its
+inits, French in the binary, and nothing of the store, queue, workflow, mail
+and jobs subsystems' engines. Run against the tree before this step, the new
+test fails where it should: the core imports the SDK's i18n, and every probe
+links 68 of its text symbols and holds the French catalogue.
+
+Measured as the steps before (Go 1.27.2, `-trimpath`, MB = 10⁶ bytes, text
+symbols `T`/`t` by `go tool nm -size`, init medians of 50 runs; before at a
+1-minute load of 1.3, after at 2.1 to 2.7 — the machine shared), before on
+`origin/main` at f4f7238f — `studioprobe` before is the same program, the
+catalogues then in the core:
+
+| | coreprobe before | coreprobe after | storeprobe before | storeprobe after | queueprobe before | queueprobe after | workflowprobe before | workflowprobe after |
+|---|---|---|---|---|---|---|---|---|
+| packages (`go list -deps`) | 343 | **340** | 351 | 348 | 357 | 354 | 357 | 354 |
+| file | 14.684 | **14.441 (−0.24)** | 17.695 | 17.444 | 18.181 | 17.933 | 18.573 | 18.338 |
+| `.text` | 4.610 | 4.542 | 5.639 | 5.573 | 5.820 | 5.754 | 5.889 | 5.824 |
+| text symbols | 4.457 | **4.391 (−0.066)** | 5.454 | 5.390 | 5.631 | 5.567 | 5.693 | 5.629 |
+| `.gopclntab` / debug | 3.513 / 3.667 | 3.461 / 3.625 | 4.296 / 4.329 | 4.246 / 4.278 | 4.410 / 4.426 | 4.360 / 4.383 | 4.529 / 4.475 | 4.479 / 4.436 |
+| SDK `i18n` (core, service and facade) | 0.0436 (69 symbols) | **0** | 0.0436 | 0 | 0.0436 | 0 | 0.0436 | 0 |
+| kit's core | 0.4237 | 0.4274 | 0.9906 | 0.9934 | 0.9912 | 0.9941 | 1.1198 | 1.1226 |
+| French catalogue in the binary | yes | **no** | yes | no | yes | no | yes | no |
+| init lines / median of 50 | 139 / 0.79 ms | 136 / 0.78 ms | 145 / 0.85 ms | 142 / 0.85 ms | 148 / 0.82 ms | 145 / 0.96 ms | 148 / 0.82 ms | 145 / 1.11 ms |
+
+| | mailprobe before | mailprobe after | jobsprobe before | jobsprobe after | studioprobe before | studioprobe after | cliprobe before | cliprobe after |
+|---|---|---|---|---|---|---|---|---|
+| packages (`go list -deps`) | 362 | 359 | 348 | 345 | 355 | 355 | 373 | **370** |
+| file | 18.588 | 18.344 | 14.778 | 14.535 | 16.866 | 16.874 | 19.030 | **18.787 (−0.24)** |
+| `.text` | 5.970 | 5.904 | 4.639 | 4.571 | 5.358 | 5.359 | 6.075 | 6.009 |
+| text symbols | 5.777 | 5.712 | 4.485 | 4.418 | 5.182 | 5.182 | 5.875 | **5.811 (−0.064)** |
+| `.gopclntab` / debug | 4.513 / 4.519 | 4.463 / 4.475 | 3.541 / 3.681 | 3.489 / 3.647 | 4.056 / 4.188 | 4.057 / 4.191 | 4.633 / 4.596 | 4.583 / 4.554 |
+| SDK `i18n` / `studiokit` | 0.0436 / 0 | 0 / 0 | 0.0436 / 0 | 0 / 0 | 0.0436 / 0.0088 | 0.0370 / 0.0133 | 0.0436 / 0 | 0 / 0 |
+| kit's core | 1.0197 | 1.0223 | 0.4266 | 0.4303 | 0.7350 | 0.7387 | 0.9974 | 1.0003 |
+| French catalogue in the binary | yes | no | yes | no | yes | yes | yes | no |
+| init lines / median of 50 | 151 / 0.89 ms | 148 / 0.89 ms | 141 / 0.77 ms | 138 / 0.69 ms | 144 / 0.81 ms | 144 / 0.83 ms | 157 / 1.02 ms | 154 / 0.97 ms |
+
+**Reading.** On kit's core alone, three packages fewer — `pkg/v1/app/i18n`
+and its core and service halves —, three inits fewer, 0.066 MB of code and
+0.24 MB of file: the SDK's i18n (0.044 MB, step 0's figure) and the code that
+loaded it go, the French catalogue (37 kB) leaves the binary, and kit's core
+grows by 0.004 MB — its English renderer, and `openOthers`, which checks the
+Studio's catalogues against English: linked, since the core reads the hook,
+and never run by a product without the Studio.
+Every probe that does not import the Studio loses the same, and so does a
+product of the facade (`cliprobe`): the facade does not import
+`framework/kit/studio`, so this step, unlike steps 5 to 7, costs a product of
+the facade nothing and saves it the same 0.24 MB of file. A product shown in
+the Studio links what it linked (`studioprobe` +0.008 MB of file, the
+catalogues' code now in `studiokit`). The SDK's i18n was the last package of
+§1 in the core: with this step the allow-list is empty — the core's graph
+holds none of the SDK packages the initgraph test's `leaving` names, and
+`database/sql` stays by Q5, `pkg/v1/app/mail` and `net/smtp` as the types
+`Mailer.Send` names (step 6). The init medians are single series of 50: within the
+noise at a load that moved between the two series, and not claimed. Not
+measured: the latency of a fresh process, and the status line, which imports
+the facade.
+
 ### Risks
 
 - **A read decodes.** The generic engine hands back a `T`; the document engine
@@ -1126,7 +1249,10 @@ At step 10, under ADR 0040's v0 licence, which the root module still holds:
   accepted before.
 - Nothing for kit's languages (Q6): only the Studio shows a language
   other than English, and a program that mounts the Studio imports
-  `framework/kit/studio` already.
+  `framework/kit/studio` already. Since step 8, a graph written by a program
+  that does not import it — `<product> graph`, the platform's `kit graph` —
+  carries each diagnostic's `texts` in English alone; the terminal, the logs
+  and an error are English, byte for byte, as they were (§Step 8, done).
 - `kit.Engine` keeps its home and returns `*sql.DB` still, but its dialect is
   kit's own type instead of the SDK's `sql.Dialect` (Q5): a connector author
   changes `Dialect`; the three in-tree connectors follow in the same change.
@@ -1232,6 +1358,7 @@ release note.
 | Accepted, step 5 done | 2026-10-17 | The migration table marks step 5 done; §Step 5, done records the workflows' engine in `workflowkit` behind `framework/kit/workflow`, which imports `framework/kit/store` (Q4), the SDK's statemachine instantiated once at `plug.WorkflowEntityValue` and the state's spelling (Q3), `WorkflowService[E, S]` the typed facade over it with its ports (`plug.WorkflowStore`, `plug.WorkflowJournal`) in the core, kit's core importing none of the SDK's statemachine, the start's check gaining the workflow row, and the measure — the smallest product three packages fewer, a product of 11 workflows 0.62 MB of code and 1.69 MB of file less, the engine linked by a product of the facade until step 10 (+0.11 MB of code). No decision changed |
 | Accepted, step 6 done | 2026-10-17 | The migration table marks step 6 done; §Step 6, done records the mailers' outbox and transports in `mailkit` behind `framework/kit/mail`, which imports `framework/kit/queue` and `framework/kit/store` (Q4) — `mailkit` reaching an outbox on a database through `queuekit.BrokerOf` and `storekit.SQLOf` —, kit's core importing no `mail/spool` and, through it, neither the SDK's `queue` nor its `sql`, `pkg/v1/app/mail` kept in its graph as the type `Mailer.Send` takes, its transports and `net/smtp` unlinked, the mail's contract in `plug` (`Mail`, `MailSpoolConfig`, `MailSpool`, `MailSink`, `MailCaptureSource`, `MailRefusal`), `plug.HandleProvider` and its two ktn exclusions gone, a mailer's sender judged at the start, the start's check gaining the mail row beside the queue row, and the measure — the smallest product eight packages fewer, a product of the facade +0.10 MB of code until step 10. No decision changed |
 | Accepted, step 7 done | 2026-10-17 | The migration table marks step 7 done; §Step 7, done records the jobs' scheduler in `jobkit` behind `framework/kit/jobs`, which imports no other registration package, kit's core importing none of the SDK's scheduler, a job's schedule read from its declaration at the start through the hook (`Every`, `Cron`) — never at the declaration —, the jobs' contract in `plug` (`Jobs`, `JobScheduleFunc`, `JobSchedulerConfig`, `JobScheduler`, `JobEntryValue`, `JobResultValue`), the core's `idleScheduler` for an app that declares no job, the start's check gaining the jobs row, and the measure — the smallest product three packages fewer and 0.009 MB of code less, a product of the facade +0.015 MB of code until step 10. No decision changed |
+| Accepted, step 8 done | 2026-10-17 | The migration table marks step 8 done; §Step 8, done records kit's English as a table of its core, read from `locales/en.json` and compiled in the SDK i18n's grammar, byte for byte what the SDK's i18n said (`TestKitsEnglishIsTheSDKsEnglish`), the French catalogue and the SDK's `i18n` in `studiokit` behind `plug.Words` (`WordsConfig`, `Translator`), set by `framework/kit/studio`, which the facade does not import (Q6), kit's core importing none of the SDK's i18n and the allow-list empty, a diagnostic's other languages written when the Studio asks, `CATALOGUE_INVALID` for an English sentence that does not compile, the visible change — a graph a program without the Studio writes (`<product> graph`, `kit graph`) carries its diagnostics' `texts` in English alone — stated in §Step 8 and §Breaking changes, `testdata/studioprobe`, and the measure — every probe without the Studio, a product of the facade included, three packages fewer, 0.066 MB of code and 0.24 MB of file less. No decision changed |
 
 ## Deferred
 
