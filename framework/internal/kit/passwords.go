@@ -45,7 +45,9 @@ type PasswordPolicyService[T any] struct {
 // passwordRule is a password policy as a store's core keeps it: its field
 // and its bounds, read on the entity by reflection.
 type passwordRule struct {
-	decl pos
+	// store is the store whose field the policy is on.
+	store *storeCore
+	decl  pos
 	// member is the field, nil when the declaration is refused.
 	member               *member
 	minLength, notReused int
@@ -123,7 +125,7 @@ func (s *StoreService[T]) Passwords(field func(*T) *string, opts ...PasswordConf
 			opt.passwordConfigure(&o)
 		}
 	}
-	p := &PasswordPolicyService[T]{s: s, passwordRule: passwordRule{decl: callerPos(), minLength: o.minLength, notReused: o.notReused, notCommon: o.notCommon}}
+	p := &PasswordPolicyService[T]{s: s, passwordRule: passwordRule{store: &s.storeCore, decl: callerPos(), minLength: o.minLength, notReused: o.notReused, notCommon: o.notCommon}}
 	p.member = s.passwordField(field, p.decl)
 	s.judgePolicy(&p.passwordRule, o)
 	s.passwords = append(s.passwords, &p.passwordRule)
