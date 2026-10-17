@@ -161,6 +161,9 @@ type App struct {
 // every problem at once, each with its position.
 type DiagnosticsError struct {
 	Diagnostics []model.Diagnostic
+	// Missing are the registration packages the program does not import
+	// and a declaration needs (ADR 0179 §6), sorted; nil when none is.
+	Missing []string
 }
 
 // routes is a ServeMux that remembers which node owns which pattern.
@@ -381,7 +384,7 @@ func (a *App) declarationProblems() []model.Diagnostic {
 	if a.cfg.studio.on && a.serves() && studioMount.Load() == nil {
 		out = append(out, diagnosticOf("warning", "", nil, say("config.studio-missing", "package", studioPackage)))
 	}
-	return slices.Concat(out, a.moduleProblems(), a.appProblems(), a.serverProblems())
+	return slices.Concat(out, a.moduleProblems(), a.appProblems(), a.serverProblems(), a.subsystemProblems())
 }
 
 // serviceProblems are what the service declares wrong, and a second service
@@ -544,7 +547,7 @@ func (a *App) bootDeclarations() (count int, value string, err error) {
 		}
 	}
 	if len(errorsFound) > 0 {
-		return len(errorsFound), "", &DiagnosticsError{Diagnostics: errorsFound}
+		return len(errorsFound), "", &DiagnosticsError{Diagnostics: errorsFound, Missing: a.missingPackages()}
 	}
 	return len(all), "", nil
 }

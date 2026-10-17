@@ -326,6 +326,7 @@ Package kit — workflows: a state machine over the entities of one store.
 - [type DeliveryOption](<#DeliveryOption>)
 - [type DiagnosticsError](<#DiagnosticsError>)
   - [func \(\*DiagnosticsError\) Error\(\) string](<#DiagnosticsError.Error>)
+  - [func \(\*DiagnosticsError\) Unwrap\(\) error](<#DiagnosticsError.Unwrap>)
 - [type Edit](<#Edit>)
 - [type Empty](<#Empty>)
 - [type Endpoint](<#Endpoint>)
@@ -1229,6 +1230,17 @@ CodeStorePersist is CodeStorePersist.
 Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeStorePersist`.
 
 Code `0.4.2.3`
+
+<a name="CodeSubsystemMissing"></a>
+```go
+const CodeSubsystemMissing errs.Code = 262739
+```
+
+CodeSubsystemMissing refuses a start whose declarations need a subsystem the program does not import (ADR 0179 §6): the [DiagnosticsError](#DiagnosticsError) names each declaration and the package to import, and carries this code.
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeSubsystemMissing`.
+
+Code `0.4.2.83`
 
 <a name="CodeTopicEncode"></a>
 ```go
@@ -3263,6 +3275,9 @@ DiagnosticsError is an alias of `github.com/kitsunium/sdk/framework/internal/kit
 ```go
 type DiagnosticsError struct {
 	Diagnostics []model.Diagnostic
+	// Missing are the registration packages the program does not import
+	// and a declaration needs (ADR 0179 §6), sorted; nil when none is.
+	Missing     []string
 }
 ```
 
@@ -3274,6 +3289,15 @@ func (*DiagnosticsError) Error() string
 ```
 
 Error lists every problem the start found, one per line.
+
+<a name="DiagnosticsError.Unwrap"></a>
+### func \(DiagnosticsError\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/subsystem.go>)
+
+```go
+func (*DiagnosticsError) Unwrap() error
+```
+
+Unwrap is what the refusal is, when kit has a code for it: with packages in Missing, an error carrying [CodeSubsystemMissing](#CodeSubsystemMissing) (ADR 0179 §6), which errs.HasCode reads through the refusal; nil otherwise.
 
 <a name="Edit"></a>
 ## type [Edit](<https://github.com/kitsunium/sdk/blob/main/framework/kit/revisions.go>)

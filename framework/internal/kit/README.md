@@ -445,6 +445,7 @@ Package kit — the ports the workflow engine reaches a store through.
 - [type DeliveryOption](<#DeliveryOption>)
 - [type DiagnosticsError](<#DiagnosticsError>)
   - [func \(\*DiagnosticsError\) Error\(\) string](<#DiagnosticsError.Error>)
+  - [func \(\*DiagnosticsError\) Unwrap\(\) error](<#DiagnosticsError.Unwrap>)
 - [type Edit](<#Edit>)
 - [type EmptyValue](<#EmptyValue>)
 - [type EndpointConfigurer](<#EndpointConfigurer>)
@@ -1210,6 +1211,15 @@ const CodeStorePersist errs.Code = 262659
 The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is the framework's, PP 2 this package (ADR 0147 §3) — so a product keeps the whole application range 0x40–0x7F for its own codes. Match them with errs.HasCode. Their Public text is the only part that may reach a caller; none of them is a 4xx, so a caller only ever reads "internal error".
 
 Code `0.4.2.3`
+
+<a name="CodeSubsystemMissing"></a>
+```go
+const CodeSubsystemMissing errs.Code = 262739
+```
+
+CodeSubsystemMissing refuses a start whose declarations need a subsystem the program does not import (ADR 0179 §6): a store or a database without framework/kit/store, a server without framework/kit/server. The refusal is a [DiagnosticsError](#DiagnosticsError) naming every such declaration and the package to import, all at once; it carries this code, which errs.HasCode reads through it.
+
+Code `0.4.2.83`
 
 <a name="CodeTopicEncode"></a>
 ```go
@@ -3253,6 +3263,9 @@ DiagnosticsError is returned by Start when declarations are wrong. It lists ever
 ```go
 type DiagnosticsError struct {
 	Diagnostics []model.Diagnostic
+	// Missing are the registration packages the program does not import
+	// and a declaration needs (ADR 0179 §6), sorted; nil when none is.
+	Missing     []string
 }
 ```
 
@@ -3264,6 +3277,15 @@ func (*DiagnosticsError) Error() string
 ```
 
 Error lists every problem the start found, one per line.
+
+<a name="DiagnosticsError.Unwrap"></a>
+### func \(DiagnosticsError\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/subsystem.go>)
+
+```go
+func (*DiagnosticsError) Unwrap() error
+```
+
+Unwrap is what the refusal is, when kit has a code for it: with packages in Missing, an error carrying [CodeSubsystemMissing](#CodeSubsystemMissing) (ADR 0179 §6), which errs.HasCode reads through the refusal; nil otherwise.
 
 <a name="Edit"></a>
 ## type [Edit](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/revisions.go>)

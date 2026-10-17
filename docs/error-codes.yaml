@@ -3101,6 +3101,10 @@ codes:
     const: CodeTrashList
     hex: "0x00_04_02_52"
     package: framework/internal/kit
+  - code: "0.4.2.83"
+    const: CodeSubsystemMissing
+    hex: "0x00_04_02_53"
+    package: framework/internal/kit
   - code: "0.4.3.1"
     const: CodeMisconfigured
     hex: "0x00_04_03_01"

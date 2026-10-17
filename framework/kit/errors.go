@@ -276,6 +276,11 @@ const (
 	// copy is rolled back, and the first key that differs is named.
 	CodeDataCopyDiverged errs.Code = ikit.CodeDataCopyDiverged
 
+	// CodeSubsystemMissing refuses a start whose declarations need a subsystem
+	// the program does not import (ADR 0179 §6): the [DiagnosticsError] names
+	// each declaration and the package to import, and carries this code.
+	CodeSubsystemMissing errs.Code = ikit.CodeSubsystemMissing
+
 	// The signals kit ends one of its own steps with and catches itself — a
 	// caller never receives one —, typed when the SDK made rule 2 a gate.
 	CodeSealErased errs.Code = ikit.CodeSealErased
