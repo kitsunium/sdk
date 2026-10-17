@@ -40,5 +40,9 @@ alias(
 go_test(
     name = "queuekit_test",
     srcs = ["api_gen_test.go"],
-    deps = [":queuekit"],
+    deps = [
+        ":queuekit",
+        "//framework/internal/kit/plug",
+        "//pkg/v1/data/queue",
+    ],
 )
