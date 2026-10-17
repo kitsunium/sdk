@@ -36,6 +36,7 @@ func TestTheFacadeImportsNoOptInSubsystem(t *testing.T) {
 		{"runtime/metrics", "framework/kit/server"},
 		{"github.com/kitsunium/sdk/pkg/v1/net/sse", "framework/kit/studio"},
 		{"github.com/kitsunium/sdk/pkg/v1/observe/profiling", "framework/kit/studio"},
+		{"github.com/kitsunium/sdk/pkg/v1/app/i18n", "framework/kit/studio"},
 	} {
 		if deps[opt.pkg] {
 			t.Errorf("framework/kit imports %s, which only %s may bring", opt.pkg, opt.by)
@@ -82,16 +83,30 @@ var kitEngines = map[string]string{
 
 // stillInCore is the allow-list while ADR 0179's migration runs: the SDK
 // packages of leaving that framework/internal/kit still imports. Each step
-// takes its own entries out in the same change that moves them — step 3 took
+// took its own entries out in the same change that moved them — step 3
 // docstore and sql, step 4 queue, step 5 statemachine, step 6 mail/spool,
-// step 7 scheduler, step 8 takes i18n —, and step 10, which drops the
-// facade's blank imports, deletes it with this test's allowances. It is held
-// tight both ways: a package still listed that the core no longer imports
-// fails the test as surely as one the core imports and the list does not
-// name.
-var stillInCore = map[string]bool{
-	"pkg/v1/app/i18n": true,
-}
+// step 7 scheduler, step 8 i18n —, so it is empty, and step 10, which drops
+// the facade's blank imports, deletes it with this test's allowances. It is
+// held tight both ways: a package still listed that the core no longer
+// imports fails the test as surely as one the core imports and the list does
+// not name.
+var stillInCore = map[string]bool{}
+
+// studioKit is the implementation package framework/kit/studio alone
+// imports: the Studio's event stream, its profiler and, since ADR 0179's
+// step 8, kit's catalogues after English over the SDK's i18n. Unlike
+// kitEngines, the facade never imports its registration package: the Studio
+// stays opt-in (Q6), and a product of the facade speaks English alone.
+const studioKit = "framework/internal/kit/studiokit."
+
+// frenchSentence and englishSentence are a sentence of kit's French
+// catalogue and the same one of its English table, as a binary holds them:
+// French only when the program imports framework/kit/studio, English
+// always.
+const (
+	frenchSentence  = "doit être une durée positive"
+	englishSentence = "must be a positive duration"
+)
 
 // throughStill are the packages of stillInCore whose own graph holds pkg, or
 // the core or service half of the SDK package pkg names (leaving's code):
@@ -189,6 +204,12 @@ func TestTheCoreImportsOnlyTheSubsystemsStillInIt(t *testing.T) {
 			t.Errorf("framework/kit does not import %s, which it blank-imports until ADR 0179's step 10", by)
 		}
 	}
+	if core[sdk+strings.TrimSuffix(studioKit, ".")] {
+		t.Errorf("framework/internal/kit imports %s, which only framework/kit/studio may bring", strings.TrimSuffix(studioKit, "."))
+	}
+	if facade[sdk+"framework/kit/studio"] {
+		t.Error("framework/kit imports framework/kit/studio: the Studio stays opt-in (ADR 0179 Q6)")
+	}
 	for p := range goList(t, goTool, sdk+"framework/internal/kit/plug", "-f", "{{join .Imports \" \"}}") {
 		if strings.Contains(strings.Split(p, "/")[0], ".") && p != sdk+"framework/model" {
 			t.Errorf("plug imports %s: it imports the standard library and framework/model only", p)
@@ -208,8 +229,9 @@ func registrationOf(pkg string) string {
 }
 
 // textSymbols builds the program at dir and lists its text symbols: an
-// import graph says what is initialised, the symbol table what is linked.
-func textSymbols(t *testing.T, goTool, dir string) map[string]bool {
+// import graph says what is initialised, the symbol table what is linked. It
+// returns the binary's bytes too, for the data it holds.
+func textSymbols(t *testing.T, goTool, dir string) (map[string]bool, []byte) {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), filepath.Base(dir))
 	build := exec.Command(goTool, "build", "-o", bin, dir)
@@ -235,7 +257,11 @@ func textSymbols(t *testing.T, goTool, dir string) map[string]bool {
 	if err := lines.Err(); err != nil {
 		t.Fatal(err)
 	}
-	return syms
+	image, err := os.ReadFile(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return syms, image
 }
 
 // linkedSymbols counts syms by owner: the text symbols under each owner's
@@ -299,6 +325,7 @@ func owners() map[string][]string {
 	for by, engine := range kitEngines {
 		out[by] = []string{engine}
 	}
+	out["framework/kit/studio"] = []string{studioKit}
 	return out
 }
 
@@ -307,14 +334,24 @@ func owners() map[string][]string {
 // that left it, but what the allow-list still names — and what a subsystem
 // still in the core imports, its packages' inits alone (beyondInits); since
 // step 6 took the mail spool out, the SDK's sql and queue are no longer in
-// its graph, not even by their inits, and since step 7 neither is the SDK's
-// scheduler, nor the jobs subsystem's. It builds testdata/coreprobe, the
+// its graph, not even by their inits, since step 7 neither is the SDK's
+// scheduler, nor the jobs subsystem's, and since step 8 neither is the SDK's
+// i18n, nor the French catalogue: kit speaks English from its own table, and
+// the allow-list is empty. It builds testdata/coreprobe, the
 // smallest product on the core alone: the facade imports every registration
 // package until step 10, which a product built on it links.
 func TestTheSmallestProductLinksOnlyTheSubsystemsStillInTheCore(t *testing.T) {
 	goTool := goToList(t)
-	syms := textSymbols(t, goTool, "./testdata/coreprobe")
+	syms, image := textSymbols(t, goTool, "./testdata/coreprobe")
 	linked := linkedSymbols(syms, owners())
+	// kit speaks English from its own table, and no other language: the
+	// catalogues after English are the Studio's (ADR 0179 step 8, Q6).
+	if !bytes.Contains(image, []byte(englishSentence)) {
+		t.Errorf("the smallest product does not hold kit's English table (%q)", englishSentence)
+	}
+	if bytes.Contains(image, []byte(frenchSentence)) {
+		t.Errorf("a product that does not import framework/kit/studio holds kit's French catalogue (%q)", frenchSentence)
+	}
 	for _, fn := range kitStoreCode {
 		if syms[kitStoreSymbol(fn)] {
 			t.Errorf("a product that does not import framework/kit/store links kit's own store code: %s", fn)
@@ -364,7 +401,7 @@ func TestTheSmallestProductLinksOnlyTheSubsystemsStillInTheCore(t *testing.T) {
 // and kit's own store code.
 func TestAProductThatImportsTheStoresLinksThem(t *testing.T) {
 	goTool := goToList(t)
-	syms := textSymbols(t, goTool, "./testdata/storeprobe")
+	syms, image := textSymbols(t, goTool, "./testdata/storeprobe")
 	linked := linkedSymbols(syms, owners())
 	for _, owner := range []string{"framework/kit/store", "pkg/v1/data/docstore", "pkg/v1/data/sql"} {
 		if linked[owner] == 0 {
@@ -393,6 +430,24 @@ func TestAProductThatImportsTheStoresLinksThem(t *testing.T) {
 	}
 	linksNoMail(t, "framework/kit/store", syms, linked)
 	linksNoJobs(t, "framework/kit/store", linked)
+	linksNoWords(t, "framework/kit/store", image, linked)
+}
+
+// linksNoWords fails the test when a product that imports by, and not
+// framework/kit/studio, links anything of kit's languages after English: the
+// SDK's i18n — not even its inits —, the Studio's implementation, or the
+// French catalogue (ADR 0179 step 8; no registration package imports
+// framework/kit/studio).
+func linksNoWords(t *testing.T, by string, image []byte, linked map[string]int) {
+	t.Helper()
+	for _, owner := range []string{"framework/kit/studio", "pkg/v1/app/i18n"} {
+		if n := linked[owner]; n > 0 {
+			t.Errorf("a product that imports %s and not framework/kit/studio links %d text symbols of %s", by, n, owner)
+		}
+	}
+	if bytes.Contains(image, []byte(frenchSentence)) {
+		t.Errorf("a product that imports %s and not framework/kit/studio holds kit's French catalogue", by)
+	}
 }
 
 // linksNoJobs fails the test when a product that imports by, and not
@@ -431,7 +486,7 @@ func linksNoMail(t *testing.T, by string, syms map[string]bool, linked map[strin
 // package imports the store package (ADR 0179 Q4).
 func TestAProductThatImportsTheQueuesLinksThem(t *testing.T) {
 	goTool := goToList(t)
-	syms := textSymbols(t, goTool, "./testdata/queueprobe")
+	syms, image := textSymbols(t, goTool, "./testdata/queueprobe")
 	linked := linkedSymbols(syms, owners())
 	for _, owner := range []string{"framework/kit/queue", "pkg/v1/data/queue", "framework/kit/store", "pkg/v1/data/docstore"} {
 		if linked[owner] == 0 {
@@ -448,6 +503,7 @@ func TestAProductThatImportsTheQueuesLinksThem(t *testing.T) {
 	}
 	linksNoMail(t, "framework/kit/queue", syms, linked)
 	linksNoJobs(t, "framework/kit/queue", linked)
+	linksNoWords(t, "framework/kit/queue", image, linked)
 }
 
 // The same half of §7 for step 5: testdata/workflowprobe, coreprobe with
@@ -458,7 +514,7 @@ func TestAProductThatImportsTheQueuesLinksThem(t *testing.T) {
 // package (Q4), and nothing of the queues.
 func TestAProductThatImportsTheWorkflowsLinksThem(t *testing.T) {
 	goTool := goToList(t)
-	syms := textSymbols(t, goTool, "./testdata/workflowprobe")
+	syms, image := textSymbols(t, goTool, "./testdata/workflowprobe")
 	linked := linkedSymbols(syms, owners())
 	type tc struct {
 		owner  string
@@ -482,6 +538,7 @@ func TestAProductThatImportsTheWorkflowsLinksThem(t *testing.T) {
 	}
 	linksNoMail(t, "framework/kit/workflow", syms, linked)
 	linksNoJobs(t, "framework/kit/workflow", linked)
+	linksNoWords(t, "framework/kit/workflow", image, linked)
 	// The probe's two workflows are compiled — the facade at each of their
 	// types —, and the SDK's machine at kit's entity and the state's
 	// spelling alone: its methods' wrappers name no other type, its shaped
@@ -521,7 +578,7 @@ var mailTransport = []string{sdk + "internal/service/app/mail.", "net/smtp."}
 // the workflows.
 func TestAProductThatImportsTheMailLinksIt(t *testing.T) {
 	goTool := goToList(t)
-	syms := textSymbols(t, goTool, "./testdata/mailprobe")
+	syms, image := textSymbols(t, goTool, "./testdata/mailprobe")
 	linked := linkedSymbols(syms, owners())
 	type tc struct {
 		owner  string
@@ -549,6 +606,7 @@ func TestAProductThatImportsTheMailLinksIt(t *testing.T) {
 		t.Error("a product that imports framework/kit/mail links nothing of the SDK's mail transports beyond their inits")
 	}
 	linksNoJobs(t, "framework/kit/mail", linked)
+	linksNoWords(t, "framework/kit/mail", image, linked)
 }
 
 // The same half of §7 for step 7: testdata/jobsprobe, coreprobe with
@@ -558,7 +616,7 @@ func TestAProductThatImportsTheMailLinksIt(t *testing.T) {
 // subsystems: the jobs package imports no other registration package.
 func TestAProductThatImportsTheJobsLinksThem(t *testing.T) {
 	goTool := goToList(t)
-	syms := textSymbols(t, goTool, "./testdata/jobsprobe")
+	syms, image := textSymbols(t, goTool, "./testdata/jobsprobe")
 	linked := linkedSymbols(syms, owners())
 	type tc struct {
 		owner  string
@@ -591,6 +649,59 @@ func TestAProductThatImportsTheJobsLinksThem(t *testing.T) {
 		if syms[kitStoreSymbol(fn)] {
 			t.Errorf("a product that imports framework/kit/jobs alone links kit's own store code: %s", fn)
 		}
+	}
+	linksNoWords(t, "framework/kit/jobs", image, linked)
+}
+
+// The same half of §7 for step 8: testdata/studioprobe, coreprobe with
+// framework/kit/studio, links kit's catalogues after English — the Studio's
+// implementation opening them, the SDK's i18n compiling them, beyond its
+// inits — and holds the French catalogue, and nothing of the store, queue,
+// workflow, mail and jobs subsystems' engines: the Studio imports no
+// registration package. (Its routes on the stores reach some of kit's own
+// store code, which stays in the core and answers nothing without
+// framework/kit/store — step 3b.)
+func TestAProductThatImportsTheStudioLinksItsLanguages(t *testing.T) {
+	goTool := goToList(t)
+	syms, image := textSymbols(t, goTool, "./testdata/studioprobe")
+	linked := linkedSymbols(syms, owners())
+	type tc struct {
+		owner  string
+		linked bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if n := linked[c.owner]; (n > 0) != c.linked {
+			t.Errorf("a product that imports framework/kit/studio links %d text symbols of %s, want linked %v", n, c.owner, c.linked)
+		}
+	}
+	for _, c := range []tc{
+		{"framework/kit/studio", true},
+		{"pkg/v1/app/i18n", true},
+		{"framework/kit/store", false},
+		{"pkg/v1/data/docstore", false},
+		{"framework/kit/queue", false},
+		{"pkg/v1/data/queue", false},
+		{"framework/kit/workflow", false},
+		{"pkg/v1/app/statemachine", false},
+		{"framework/kit/mail", false},
+		{"pkg/v1/app/mail/spool", false},
+		{"framework/kit/jobs", false},
+		{"pkg/v1/app/scheduler", false},
+	} {
+		t.Run(c.owner, func(t *testing.T) { runCase(t, c) })
+	}
+	if !syms[sdk+studioKit+"openWords"] {
+		t.Error("a product that imports framework/kit/studio does not link the opening of kit's catalogues after English")
+	}
+	if code := beyondInits(syms, owners()["pkg/v1/app/i18n"]); len(code) == 0 {
+		t.Error("a product that imports framework/kit/studio links nothing of the SDK's i18n beyond its inits")
+	}
+	if !bytes.Contains(image, []byte(frenchSentence)) {
+		t.Errorf("a product that imports framework/kit/studio does not hold kit's French catalogue (%q)", frenchSentence)
+	}
+	if !bytes.Contains(image, []byte(englishSentence)) {
+		t.Errorf("a product that imports framework/kit/studio does not hold kit's English table (%q)", englishSentence)
 	}
 }
 

@@ -15,6 +15,10 @@ outbox, the SDK's spool or its transports beyond their inits: nor the mailers
 (step 6), nor the jobs subsystem's scheduler nor the SDK's, not even its
 inits: nor the jobs (step 7).
 
+It holds kit's English table and nothing of its languages after English —
+neither the SDK's i18n, not even its inits, nor the French catalogue: those
+are `framework/kit/studio`'s (step 8, `linksNoWords`).
+
 ## Contents
 
 | File | Holds |

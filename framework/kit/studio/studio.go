@@ -6,8 +6,15 @@
 //
 //	import _ "github.com/kitsunium/sdk/framework/kit/studio"
 //
-// Without it a product links none of those routes, the event stream or the
-// profiler; in dev the start warns that the Studio was asked for.
+// It also brings kit's sentences in the languages after English — French
+// today —, which only the Studio shows, in its reader's language: with it a
+// diagnostic of the graph carries its text in each of them, without it in
+// English alone. The terminal, the logs and an error read English either
+// way (ADR 0179 step 8, Q6).
+//
+// Without it a product links none of those routes, the event stream, the
+// profiler, the catalogues after English or the SDK's i18n; in dev the start
+// warns that the Studio was asked for.
 package studio
 
 import (
@@ -19,7 +26,8 @@ import (
 // rather than an init, the SDK's convention.
 var _ = enable()
 
-// enable turns the Studio's API on for every serving app in dev.
+// enable turns the Studio's API on for every serving app in dev, and kit's
+// sentences in the languages after English for every app.
 func enable() bool {
 	studiokit.Enable()
 	ikit.EnableStudio()

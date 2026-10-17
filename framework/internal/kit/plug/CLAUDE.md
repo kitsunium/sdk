@@ -3,8 +3,8 @@
 
 The hooks kit reads and a subsystem package sets as it is imported: the HTTP
 engine, the frontends' file server and the process sampler (`serverkit`, set
-by `framework/kit/server`), the Studio's event stream and profiler
-(`studiokit`, set by `framework/kit/studio`), the stores and the databases
+by `framework/kit/server`), the Studio's event stream, its profiler and kit's
+catalogues after English (`studiokit`, set by `framework/kit/studio`), the stores and the databases
 (`storekit`, set by `framework/kit/store`), the queues (`queuekit`, set by
 `framework/kit/queue`), the workflows (`workflowkit`, set by
 `framework/kit/workflow`), the mailers (`mailkit`, set by
@@ -12,7 +12,7 @@ by `framework/kit/server`), the Studio's event stream and profiler
 imports none of the SDK
 packages behind them — `pkg/v1/net/server`, `net/static`, `net/sse`,
 `profiling`, `proc/process` (and through it `runtime/metrics` and the spawn
-engine, ADR 0172), `data/docstore`, `data/sql`, `data/queue`, `app/statemachine`, `app/mail/spool` and `app/scheduler` (ADR 0179) —, so a product
+engine, ADR 0172), `data/docstore`, `data/sql`, `data/queue`, `app/statemachine`, `app/mail/spool`, `app/scheduler` and `app/i18n` (ADR 0179) —, so a product
 that does not import a subsystem neither links nor initialises them;
 `framework/kit`'s initgraph tests hold the graph to it.
 
@@ -60,7 +60,13 @@ from its period (`Every`) or its cron expression (`Cron`) as a
 `JobScheduleFunc`, opens the app's scheduler with a `JobSchedulerConfig` —
 the app's `Clock`, and what kit hears of each fire (`OnResult`, a
 `JobResultValue`) —, and holds a `JobScheduler` it adds each job to
-(`JobEntryValue`) and runs.
+(`JobEntryValue`) and runs. kit's catalogues after English (`words.go`,
+`words_interface.go`) are written and implemented by `studiokit` since step 8
+(Q6): the core keeps English as its own table and, once `framework/kit/studio`
+set `Words`, opens the other languages once per hook value with
+`WordsConfig.Open`, handing it that table — the language each falls back to
+—, and holds a `Translator` it asks the languages (`Languages`), their keys
+(`Keys`, which the core checks against English) and a sentence (`Render`).
 
 ## Contents
 
@@ -76,6 +82,8 @@ the app's `Clock`, and what kit hears of each fire (`OnResult`, a
 | `store.go` | the store subsystem's values (ADR 0179 §2, §3): the hook `Stores` (`StoreDriverConfig`: `Open` a store's engine, `Database` kit's scope on a database's pool, `TableMigration` the migration of a store's table or its versions'); `DocumentValue` (the JSON as it rests and the entity decoded, `any`), `EntryValue`, `WriteMode` (`WriteUpsert`, `WriteInsert`, `WriteReplace`), `IndexSpec`, `StoreConfig`, `StampValue`, `DatabaseConfig`, `TableSpec`, `MigrationValue` and its `Step`, `VersionValue`, `VersionWeightValue`, `TombstoneValue` — named with the role suffixes ktn-linter asks for, as the SDK's core docstore names its own |
 | `store_interface.go` | the store subsystem's interfaces: `Database` (the transactions, savepoints and held functions of `kit.Transact` on one database) and its siblings `Checker`, `MigratorProvider` (`Migrator`, `Executor`); `Transaction`, kit's transaction as an engine takes part in it, which the core implements; the engine `StoreEngine` over documents and its siblings `Folder`, `Keyser`, `EntrySource`, `Reindexer`, `VersionKeeper`, `VersionWeighter`, `Trasher`, `DocumentSource` (`Documents`, `DocumentSink`: what a data copy reads and writes) |
 | `store_refusal.go` | an engine's refusals in kit's terms: the kinds (`Refusal`: `RefusalNotFound` … `RefusalOutOfOrder`), `RefusalError` (the kind and the SDK's error inside), `Refuse`, `Refused` (the kind anywhere in an error's tree, as `errors.Is` reads one) |
+| `words.go` | kit's catalogues after English (ADR 0179 step 8, Q6): the hook `Words` (`WordsConfig`: `Open` the catalogues against kit's English table) — nil without `framework/kit/studio`, and kit speaks English alone |
+| `words_interface.go` | the catalogues' interface: `Translator` (`Languages`, `Keys`, `Render`), which `studiokit` implements over the SDK's i18n |
 | `workflow.go` | the workflow subsystem's contract (ADR 0179 step 5): the hook `Workflows` (`WorkflowDriverConfig`: `Open` a workflow's engine, `Failed` — the engine's failure of a kind); `WorkflowCreateEvent`; the enums `WorkflowTrigger`, `WorkflowWake`, `WorkflowLoopEvent`, `WorkflowFailure` and their values; `WorkflowConfig`, `TransitionSpec`, `EnterHookSpec`, `WorkflowEntityValue`, `WorkflowChangeValue`, `WorkflowFiringValue`, `WorkflowRecordValue`, `WorkflowStepValue`, `WorkflowLoopEventValue` |
 | `workflow_interface.go` | the workflow subsystem's interfaces: `WorkflowEngine` (`Start`, `Fire`, `Changed`, `Deleted`, `Census`, `Records`, `Run`), which `workflowkit` implements; `WorkflowStore` and `WorkflowJournal`, the ports the engine runs on, which the core implements |
 | `README.md` | written by `tools/genindex` from `docs/api` (`make docs-readme`, ADR 0167) |

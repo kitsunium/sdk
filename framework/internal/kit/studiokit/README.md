@@ -10,9 +10,11 @@ Package studiokit — the Studio's live events, as a Server-Sent Events stream.
 
 Package studiokit — the Studio's profiler: the live heap folded onto the graph's nodes, and every goroutine grouped.
 
-Package studiokit is what framework/kit/studio plugs into kit: the Studio's event stream (the SDK's net/sse) and its profiler (the SDK's profiling). kit imports neither: a product that does not import the Studio neither links nor initialises them.
+Package studiokit is what framework/kit/studio plugs into kit: the Studio's event stream (the SDK's net/sse), its profiler (the SDK's profiling), and kit's sentences in the languages after English — the catalogues the Studio shows its reader's language from, compiled by the SDK's i18n (ADR 0179 §1, step 8, Q6). kit imports none of them: a product that does not import the Studio neither links nor initialises them, and speaks English alone.
 
 Package studiokit — the compile-time proof that the stream is kit's.
+
+Package studiokit — kit's catalogues after English, over the SDK's i18n.
 
 ## Index
 
@@ -25,6 +27,6 @@ Package studiokit — the compile-time proof that the stream is kit's.
 func Enable()
 ```
 
-Enable plugs the Studio's event stream and profiler into kit.
+Enable plugs the Studio's event stream, its profiler and kit's catalogues after English into kit.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

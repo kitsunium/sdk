@@ -11,6 +11,10 @@ builds it and finds linked the jobs subsystem's scheduler
 nothing of the store, queue, workflow and mail subsystems — the half of ADR
 0179 §7 that keeps the other from passing by testing nothing, for step 7.
 
+It holds kit's English table and nothing of its languages after English —
+neither the SDK's i18n, not even its inits, nor the French catalogue: those
+are `framework/kit/studio`'s (step 8, `linksNoWords`).
+
 ## Contents
 
 | File | Holds |

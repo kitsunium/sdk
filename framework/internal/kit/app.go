@@ -417,7 +417,8 @@ func (a *App) serviceProblems(svc *Service, seen map[string]bool) []model.Diagno
 // diagnosticOf is a diagnostic the graph carries: kit's sentence in English,
 // and in every language kit speaks for the Studio.
 func diagnosticOf(severity, node string, at *model.Source, p phrase) model.Diagnostic {
-	return model.Diagnostic{Severity: severity, Node: node, Source: at, Message: p.String(), Texts: p.texts}
+	message, texts := p.spoken()
+	return model.Diagnostic{Severity: severity, Node: node, Source: at, Message: message, Texts: texts}
 }
 
 // Error lists every problem the start found, one per line.

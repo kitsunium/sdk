@@ -19,6 +19,10 @@ subsystem's scheduler nor of the SDK's scheduler, out of its graph since step
 7, not even its inits. Once step 10 drops the facade's imports, `cliprobe` is that
 program again and this probe can go.
 
+It holds kit's English table and nothing of its languages after English —
+neither the SDK's i18n, not even its inits, nor the French catalogue: those
+are `framework/kit/studio`'s (step 8): the allow-list is empty.
+
 ## Contents
 
 | File | Holds |
