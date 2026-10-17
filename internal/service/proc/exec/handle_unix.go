@@ -21,10 +21,11 @@ import (
 const signalledCode int = -1
 
 // maxRSSKB (in maxrss_rss64_unix.go / maxrss_rss32_unix.go) reports the peak
-// resident set size in kilobytes from the wait4 rusage. Rusage.Maxrss is int64
+// resident set size in KiB from the wait4 rusage. Rusage.Maxrss is int64
 // on a 64-bit GOARCH but int32 on 386/arm, so the widening lives in a per-width
-// file: the 64-bit path passes the value through (no redundant cast), the 32-bit
-// path widens to int64.
+// file: the 64-bit path needs no cast, the 32-bit path widens to int64. Both
+// normalise the unit through peakKiB (maxrss.go): darwin reports bytes, Linux
+// and the BSDs kilobytes.
 
 // handle is the live supervision handle for one spawned process. It owns the
 // *os.Process and the claim on its exit status, remembers the leader pid and

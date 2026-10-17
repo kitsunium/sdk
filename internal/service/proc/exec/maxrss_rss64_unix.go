@@ -4,10 +4,11 @@ package exec
 
 import "syscall"
 
-// maxRSSKB reports the peak resident set size in kilobytes from the wait4
-// rusage. On a 64-bit GOARCH Rusage.Maxrss is already int64, so the value is
-// passed through without a cast (a cast here would be a redundant conversion).
+// maxRSSKB reports the peak resident set size in KiB from the wait4 rusage. On
+// a 64-bit GOARCH Rusage.Maxrss is already int64, so no widening cast is
+// needed; the unit is normalised by peakKiB, which passes a kilobyte figure
+// through and converts darwin's bytes.
 func maxRSSKB(ru *syscall.Rusage) int64 {
-	//: the kernel reports peak RSS in kilobytes on Unix; pass it through.
-	return ru.Maxrss
+	//: Linux and the BSDs report kilobytes, darwin and ios report bytes.
+	return peakKiB(ru.Maxrss, rssUnitsPerKiB)
 }

@@ -45,7 +45,9 @@ process that already exists.
 | `cgroup_placement_other.go` | `unix && !linux` | `validateCgroupPath` rejects a non-empty path with `UnsupportedPlatform`; no cgroup v2 off Linux |
 | `limittable_unix.go` | `unix` | `Resource` → `RLIMIT_*` table (stdlib constants only) |
 | `limittable_as.go` / `limittable_openbsd.go` | `unix && !openbsd` / `openbsd` | `addPlatformLimits`: `RLIMIT_AS` where the stdlib exports it; nothing on OpenBSD, whose kernel has none, so `ResourceAS` is `UnknownResource` there |
-| `maxrss_rss64_unix.go` / `maxrss_rss32_unix.go` | `unix` except / only on `386 \|\| arm \|\| mips \|\| mipsle` | `maxRSSKB`: `Rusage.Maxrss` as `int64`, widened from the `int32` those four 32-bit targets declare |
+| `maxrss_rss64_unix.go` / `maxrss_rss32_unix.go` | `unix` except / only on `386 \|\| arm \|\| mips \|\| mipsle` | `maxRSSKB`: `Rusage.Maxrss` as `int64`, widened from the `int32` those four 32-bit targets declare, then normalised to KiB by `peakKiB` |
+| `maxrss.go` | all | `peakKiB(raw, unitsPerKiB)`: passes a kilobyte figure through, divides a byte figure by 1024 rounding up; platform-neutral so its table test runs on every GOOS |
+| `maxrss_unit_darwin.go` / `maxrss_unit_kib_unix.go` | `darwin` (ios included) / `unix && !darwin` | `rssUnitsPerKiB`: 1024 on darwin, whose `getrusage(2)` reports **bytes** (issue #357); 1 on Linux and the BSDs, which report kilobytes. illumos and Solaris define the field in pages and leave it 0 |
 | `procfile_unix.go` | `unix` | `os.WriteFile` shim for `oom_score_adj` |
 | `wrap.go` | all | `wrap{Spawn,Wait,Signal,Stop,Rlimit,CgroupUnavailable,StdioCapture,UnknownUser,UnknownGroup}` — restate each sentinel's exact fields once |
 
@@ -148,7 +150,10 @@ from the claim when a sweep collected the child:
 `WaitStatus.Exited()/ExitStatus()` → `Code` (−1 when signalled),
 `WaitStatus.Signaled()/Signal()` → `Signal`/`Signaled`, and the wait4
 `*syscall.Rusage` → `UserTime`/`SystemTime` (from `Utime`/`Stime`) and `MaxRSS`
-(`ru.Maxrss`, kilobytes).
+(`ru.Maxrss`, normalised to KiB: darwin's bytes divided by 1024 rounding up,
+Linux's and the BSDs' kilobytes passed through, 0 on illumos and Solaris).
+`TestWait_maxRSSIsKiB` holds the unit on a real child holding 64 MiB: a byte
+figure lands far outside its KiB bounds.
 
 ## Rlimits & Umask: the re-exec trampoline
 
