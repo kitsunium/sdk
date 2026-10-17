@@ -76,29 +76,29 @@ var kitEngines = map[string]string{
 	"framework/kit/store":    "framework/internal/kit/storekit.",
 	"framework/kit/queue":    "framework/internal/kit/queuekit.",
 	"framework/kit/workflow": "framework/internal/kit/workflowkit.",
+	"framework/kit/mail":     "framework/internal/kit/mailkit.",
 }
 
 // stillInCore is the allow-list while ADR 0179's migration runs: the SDK
 // packages of leaving that framework/internal/kit still imports. Each step
 // takes its own entries out in the same change that moves them — step 3 took
-// docstore and sql, step 4 queue, step 5 statemachine, step 6 takes
-// mail/spool, step 7 scheduler, step 8 i18n —, and step 10, which drops the
+// docstore and sql, step 4 queue, step 5 statemachine, step 6 mail/spool,
+// step 7 takes scheduler, step 8 i18n —, and step 10, which drops the
 // facade's blank imports, deletes it with this test's allowances. It is held
 // tight both ways: a package still listed that the core no longer imports
 // fails the test as surely as one the core imports and the list does not
 // name.
 var stillInCore = map[string]bool{
-	"pkg/v1/app/mail/spool": true,
-	"pkg/v1/app/scheduler":  true,
-	"pkg/v1/app/i18n":       true,
+	"pkg/v1/app/scheduler": true,
+	"pkg/v1/app/i18n":      true,
 }
 
 // throughStill are the packages of stillInCore whose own graph holds pkg, or
 // the core or service half of the SDK package pkg names (leaving's code):
 // what the core reaches pkg through, once it imports pkg no more itself —
-// the SDK's sql and the queue's two halves under the mail spool, until step
-// 6 takes it out. A package the core reaches through none of them is the
-// core's own import.
+// the SDK's sql and the queue's two halves were under the mail spool until
+// step 6 took it out, and none is now. A package the core reaches through
+// none of them is the core's own import.
 func throughStill(t *testing.T, goTool, pkg string) []string {
 	t.Helper()
 	halves := []string{sdk + pkg}
@@ -124,10 +124,20 @@ func throughStill(t *testing.T, goTool, pkg string) []string {
 // package's initialisation: what of a package a binary links beyond the init
 // Go runs because something imports it.
 func beyondInits(syms map[string]bool, prefixes []string) []string {
+	full := make([]string, len(prefixes))
+	for i, p := range prefixes {
+		full[i] = sdk + p
+	}
+	return beyondInitsAt(syms, full)
+}
+
+// beyondInitsAt is beyondInits over prefixes written in full, a standard
+// library package's among them.
+func beyondInitsAt(syms map[string]bool, prefixes []string) []string {
 	var code []string
 	for s := range syms {
 		for _, p := range prefixes {
-			rest, ok := strings.CutPrefix(s, sdk+p)
+			rest, ok := strings.CutPrefix(s, p)
 			if ok && rest != "init" && !strings.HasPrefix(rest, "init.") {
 				code = append(code, s)
 			}
@@ -295,11 +305,11 @@ func owners() map[string][]string {
 // A product that imports no registration package links none of the code of
 // the subsystems ADR 0179 §1 takes out of the core, nor the engines of those
 // that left it, but what the allow-list still names — and what a subsystem
-// still in the core imports, the SDK's sql and queue under the mail spool,
-// their packages' inits alone (beyondInits). It
-// builds testdata/coreprobe, the smallest product on the core alone: the
-// facade imports every registration package until step 10, which a product
-// built on it links.
+// still in the core imports, its packages' inits alone (beyondInits); since
+// step 6 took the mail spool out, the SDK's sql and queue are no longer in
+// its graph, not even by their inits. It builds testdata/coreprobe, the
+// smallest product on the core alone: the facade imports every registration
+// package until step 10, which a product built on it links.
 func TestTheSmallestProductLinksOnlyTheSubsystemsStillInTheCore(t *testing.T) {
 	goTool := goToList(t)
 	syms := textSymbols(t, goTool, "./testdata/coreprobe")
@@ -308,6 +318,12 @@ func TestTheSmallestProductLinksOnlyTheSubsystemsStillInTheCore(t *testing.T) {
 		if syms[kitStoreSymbol(fn)] {
 			t.Errorf("a product that does not import framework/kit/store links kit's own store code: %s", fn)
 		}
+	}
+	// The core names the SDK's mail types — Mailer.Send takes a mail.Message
+	// —, so the mail package and its SMTP transport stay in its graph; their
+	// code is the mail subsystem's (ADR 0179 step 6).
+	if code := beyondInitsAt(syms, mailTransport); len(code) > 0 {
+		t.Errorf("a product that does not import framework/kit/mail links the SDK's mail transports beyond their inits: %v", code)
 	}
 	runCase := func(t *testing.T, owner string) {
 		t.Helper()
@@ -360,12 +376,12 @@ func TestAProductThatImportsTheStoresLinksThem(t *testing.T) {
 		}
 	}
 	// The stores do not bring the queues (ADR 0179 Q4: the queue package
-	// imports the store package, never the other way).
-	if n := linked["framework/kit/queue"]; n > 0 {
-		t.Errorf("a product that imports framework/kit/store alone links %d text symbols of the queues' brokers", n)
-	}
-	if code := beyondInits(syms, owners()["pkg/v1/data/queue"]); len(code) > 0 {
-		t.Errorf("a product that imports framework/kit/store alone links the SDK's queue beyond its inits: %v", code)
+	// imports the store package, never the other way) — not even the SDK's
+	// queue's inits, which the mail spool brought until step 6.
+	for _, owner := range []string{"framework/kit/queue", "pkg/v1/data/queue"} {
+		if n := linked[owner]; n > 0 {
+			t.Errorf("a product that imports framework/kit/store alone links %d text symbols of %s", n, owner)
+		}
 	}
 	// Nor the workflows (Q4: the workflow package imports the store
 	// package, never the other way).
@@ -373,6 +389,24 @@ func TestAProductThatImportsTheStoresLinksThem(t *testing.T) {
 		if n := linked[owner]; n > 0 {
 			t.Errorf("a product that imports framework/kit/store alone links %d text symbols of %s", n, owner)
 		}
+	}
+	linksNoMail(t, "framework/kit/store", syms, linked)
+}
+
+// linksNoMail fails the test when a product that imports by, and not
+// framework/kit/mail, links anything of the mail subsystem: its outbox, the
+// SDK's spool — not even its inits —, or the SDK's transports beyond their
+// inits (ADR 0179 step 6; Q4: the mail package imports the store and queue
+// packages, never the other way).
+func linksNoMail(t *testing.T, by string, syms map[string]bool, linked map[string]int) {
+	t.Helper()
+	for _, owner := range []string{"framework/kit/mail", "pkg/v1/app/mail/spool"} {
+		if n := linked[owner]; n > 0 {
+			t.Errorf("a product that imports %s and not framework/kit/mail links %d text symbols of %s", by, n, owner)
+		}
+	}
+	if code := beyondInitsAt(syms, mailTransport); len(code) > 0 {
+		t.Errorf("a product that imports %s and not framework/kit/mail links the SDK's mail transports beyond their inits: %v", by, code)
 	}
 }
 
@@ -397,6 +431,7 @@ func TestAProductThatImportsTheQueuesLinksThem(t *testing.T) {
 			t.Errorf("a product that imports framework/kit/queue links %d text symbols of %s", n, owner)
 		}
 	}
+	linksNoMail(t, "framework/kit/queue", syms, linked)
 }
 
 // The same half of §7 for step 5: testdata/workflowprobe, coreprobe with
@@ -425,9 +460,11 @@ func TestAProductThatImportsTheWorkflowsLinksThem(t *testing.T) {
 		{"framework/kit/store", true},
 		{"pkg/v1/data/docstore", true},
 		{"framework/kit/queue", false},
+		{"pkg/v1/data/queue", false},
 	} {
 		t.Run(c.owner, func(t *testing.T) { runCase(t, c) })
 	}
+	linksNoMail(t, "framework/kit/workflow", syms, linked)
 	// The probe's two workflows are compiled — the facade at each of their
 	// types —, and the SDK's machine at kit's entity and the state's
 	// spelling alone: its methods' wrappers name no other type, its shaped
@@ -450,6 +487,49 @@ func TestAProductThatImportsTheWorkflowsLinksThem(t *testing.T) {
 	}
 	if got, want := instantiated("internal/service/app/statemachine.(*StateMachine["), sdk+"framework/internal/kit/plug.WorkflowEntityValue,string"; !slices.Equal(got, []string{want}) {
 		t.Errorf("the workflow engine is instantiated at %q, want once, at %s", got, want)
+	}
+}
+
+// mailTransport are the symbol prefixes of the SDK's mail transports, which
+// the core no longer links (ADR 0179 step 6): the SDK's mail service half —
+// the SMTP transport, the capture transport, the guards — and net/smtp under
+// it. The core still imports pkg/v1/app/mail for the types Mailer.Send names,
+// and through it both, so their inits stay.
+var mailTransport = []string{sdk + "internal/service/app/mail.", "net/smtp."}
+
+// The same half of §7 for step 6: testdata/mailprobe, coreprobe with
+// framework/kit/mail and a mailer, links the mail subsystem's outbox — the
+// SDK's spool — and its transports, and the queue and store subsystems'
+// engines, since the mail package imports both (ADR 0179 Q4), and nothing of
+// the workflows.
+func TestAProductThatImportsTheMailLinksIt(t *testing.T) {
+	goTool := goToList(t)
+	syms := textSymbols(t, goTool, "./testdata/mailprobe")
+	linked := linkedSymbols(syms, owners())
+	type tc struct {
+		owner  string
+		linked bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if n := linked[c.owner]; (n > 0) != c.linked {
+			t.Errorf("a product that imports framework/kit/mail links %d text symbols of %s, want linked %v", n, c.owner, c.linked)
+		}
+	}
+	for _, c := range []tc{
+		{"framework/kit/mail", true},
+		{"pkg/v1/app/mail/spool", true},
+		{"framework/kit/queue", true},
+		{"pkg/v1/data/queue", true},
+		{"framework/kit/store", true},
+		{"pkg/v1/data/docstore", true},
+		{"framework/kit/workflow", false},
+		{"pkg/v1/app/statemachine", false},
+	} {
+		t.Run(c.owner, func(t *testing.T) { runCase(t, c) })
+	}
+	if code := beyondInitsAt(syms, mailTransport); len(code) == 0 {
+		t.Error("a product that imports framework/kit/mail links nothing of the SDK's mail transports beyond their inits")
 	}
 }
 

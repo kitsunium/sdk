@@ -12,7 +12,17 @@ Package queuekit — the compile-time proof that the brokers are kit's.
 
 ## Index
 
+- [func BrokerOf\(b plug.Broker\) \(queue.Broker, bool\)](<#BrokerOf>)
 - [func Enable\(\)](<#Enable>)
+
+<a name="BrokerOf"></a>
+## func [BrokerOf](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/queuekit/broker.go>)
+
+```go
+func BrokerOf(b plug.Broker) (queue.Broker, bool)
+```
+
+BrokerOf is the SDK's broker behind b, a queue this package opened: what a mailer's spool keeps its outbox in on a database (ADR 0179 step 6) — the sealed outbox, behind a test's wrapper when it set one —; false for a queue it did not open.
 
 <a name="Enable"></a>
 ## func [Enable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/queuekit/queuekit.go>)

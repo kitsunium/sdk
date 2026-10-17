@@ -17,7 +17,9 @@ the store subsystem's transactions — the queues' SQL broker runs on the
 transaction manager `storekit` opened — and a sealed message is sealed under
 data keys kit keeps in a store of its own. Until ADR 0179's step 10,
 `framework/kit` imports this package itself (`subsystems.go`, Q8): no product
-needs the line yet, and `kit gen` will write it (§5).
+needs the line yet, and `kit gen` will write it (§5). `framework/kit/mail`
+imports it too (step 6, Q4): a mailer's outbox on a database is a queue of
+this subsystem, which `mailkit` takes the SDK's broker of (`queuekit.BrokerOf`).
 
 kit's own queue code — the consumers, the topics' publication, the queued
 commands, the watches, the mailer's outbox and the data copy of a queue —

@@ -14,9 +14,9 @@ import (
 // spool's file queue under <data>/<service>/outbox/<mailer>. A mail sent in
 // a transaction on that database is written in it, just before its commit
 // (txn.join): it exists if and only if the transaction commits, and the
-// spool, handed the database's transaction manager (mailspool.Config.
-// Deferrer), tells the mailbox it was queued after the commit and nothing
-// when it rolls back. A mail sent elsewhere — outside a transaction, in one
+// spool, handed the database's transaction manager by the mail subsystem
+// (framework/internal/kit/mailkit, ADR 0179 step 6), tells the mailbox it
+// was queued after the commit and nothing when it rolls back. A mail sent elsewhere — outside a transaction, in one
 // on another database or on the data directory — is put in the outbox at
 // once or after the commit, as before.
 //
@@ -86,8 +86,8 @@ func (m *Mailer) outboxPolicy() plug.QueuePolicyValue {
 // service, when that database is open: the SQL broker behind the sealing,
 // behind a test's wrapper. The spool takes the database's transaction
 // manager too, to announce a mail after the commit and forget it after a
-// rollback (deferrerOf). It returns no database where the outbox stays the
-// spool's own.
+// rollback (mailkit's deferrerOf). It returns no database where the outbox
+// stays the spool's own.
 func (m *Mailer) openOutbox(ctx context.Context, a *App) (db *databaseRun, broker plug.Broker, err error) {
 	r := a.queueDatabase(&m.nodeBase)
 	if r == nil {

@@ -6,6 +6,8 @@ go_library(
     name = "plug",
     srcs = [
         "doc.go",
+        "mail.go",
+        "mail_interface.go",
         "plug.go",
         "queue.go",
         "queue_interface.go",

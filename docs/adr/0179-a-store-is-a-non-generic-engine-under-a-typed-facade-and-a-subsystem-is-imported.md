@@ -341,7 +341,7 @@ created, until step 10 removes those imports.
 | 3b | kit's own store code — the privacy service and its journal, the holds, sealing, history, revisions, trash, retention, the databases' components, migrations and checks, the dev tools and Main's commands on the stores (`migrate`, `privacy`, `revisions`, `data`, `watch`) — reached only through `framework/kit/store` (`EnableStores`, on `EnableServer`'s model), the core keeping call sites that fall back to an app without a store — done (2026-10-17, §Step 3b, done) | no (the facade imports it) |
 | 4 | `queuekit` + `framework/kit/queue`: the queues' brokers — the code naming the SDK's `queue`, a mailer's sealed outbox on a database among it — move there, behind `plug.Queues`; `framework/kit/queue` imports `framework/kit/store` (Q4) — done (2026-10-17, §Step 4, done) | no (the facade imports it) |
 | 5 | `workflowkit` + `framework/kit/workflow` (Q3): the SDK's `statemachine` instantiated once, behind `plug.Workflows`; `framework/kit/workflow` imports `framework/kit/store` (Q4) — done (2026-10-17, §Step 5, done) | no (the facade imports it) |
-| 6 | `mailkit` + `framework/kit/mail` | no |
+| 6 | `mailkit` + `framework/kit/mail`: the mailers' outbox — the SDK's mail spool — and transports move there, behind `plug.Mail`; `framework/kit/mail` imports `framework/kit/queue` and `framework/kit/store` (Q4); `plug.HandleProvider` goes — done (2026-10-17, §Step 6, done) | no (the facade imports it) |
 | 7 | `jobkit` + `framework/kit/jobs` | no |
 | 8 | English a table in kit's core, the other catalogues and the SDK's `i18n` behind `framework/kit/studio` (Q6) | no |
 | 9 | platform: `kit gen` writes the imports, `kit check` checks them; statusline, todo, moderation and platform regenerated or edited to import what they declare — while the facade still imports everything, so nothing breaks yet | no |
@@ -867,6 +867,131 @@ already; a product that imports only the registration packages it needs, as
 are single series of 50 at a 1-minute load under 1.5: within the noise, and
 not claimed. Not measured: the latency of a fresh process.
 
+### Step 6, done (2026-10-17)
+
+The mailers' outbox and transports are `framework/internal/kit/mailkit`,
+which `framework/kit/mail` plugs in (`plug.Mail`) as it is imported, and
+which `framework/kit` itself imports until step 10 (`subsystems.go`, Q8). Per
+Q4, `framework/kit/mail` imports `framework/kit/queue` and
+`framework/kit/store`, and `mailkit` imports `queuekit` and `storekit`: a
+mailer's outbox on a database is the queue subsystem's sealed broker
+(`queuekit.BrokerOf`, typed), joined to the transaction manager of the
+database the store subsystem opened (`storekit.SQLOf`, a `Deferrer` that is
+an `Aborter` too), so that a mail sent in a transaction exists if and only if
+it commits (ADR 0178 C1, C7 item 7); never the other way, and a program that
+imports `framework/kit/store` or `framework/kit/queue` alone links nothing of
+the mailers. kit's core imports no `pkg/v1/app/mail/spool`: the initgraph test
+took it off its allow-list, and with it the SDK's `queue` and `sql`, which
+only the spool still brought into the core's graph, leave it — not even their
+inits remain.
+
+§3's contract for the mail (`plug/mail.go`, `plug/mail_interface.go`): the
+core opens every mailer's outbox with a `plug.MailSpoolConfig` — kit's
+attempt (`Transport`, told a `MailAttemptValue`: the core's span, loop and
+Studio simulation around the delivery), the app's `Clock`, what kit hears of
+each mail (`Observe`, a `MailEventValue`), the backoff's bounds, the attempts,
+and where it keeps its mails: the queue subsystem's `Broker` on a `Database`,
+a directory, or memory — and holds a `plug.MailSpool` (`Send`, `SendWithID`,
+`DeadLetters`, `Run`, `Close`). It hands a mail to a `plug.MailSink` the
+driver builds — the SDK's SMTP transport, through `ParseSMTP` and `NewSMTP`,
+or its capture transport (`Capture`), whose sibling `MailCaptureSource` gives
+the Studio the composed message —, asks the SDK's verdict on a mail
+(`Validate`), and tells the spool's and the URL's refusals apart by kind
+(`MailRefusal`, through the driver's `Refused`), never matching a sentinel
+itself. A mail crosses as a `MailValue`, the SDK's value held as `any`. The
+mailer's refusals keep kit's codes, the core wrapping what the subsystem
+returns where its open and send paths did (`CodeMailQueue` — `OUTBOX_OPEN`,
+`MAIL_QUEUE` —, `CodeMailEncode`, `CodeMailConfig`, `CodeMailPanic`); the
+sender a mailer declares (`From`) is judged by the SDK's rules at the start,
+with the other mailer problems, no longer at the declaration, which a
+package's init may run before the subsystem's. The bytes at rest are
+unchanged: the same spool directories, the same sealed tables
+(`kit_queue__<service>__<mailer>__outbox`).
+
+What §Context and §1 said stays: `Mailer.Send` takes the SDK's
+`mail.Message`, so `pkg/v1/app/mail` stays in the core's graph as a type —
+and with it the SDK's mail service half and `net/smtp`, which that facade
+imports. They are initialised and not linked: `coreprobe` links nothing of
+either beyond their inits (`mailTransport`), where it linked 0.014 MB of the
+SDK's mail code before — the verdict on a sender, now the subsystem's.
+
+`plug.HandleProvider` is gone, and its two function-level ktn exclusions
+(`HandleProvider.Handle`, `databaseRun.handle`) with it: the mail spool was
+its last reason to exist, and a subsystem that needs another's SDK handle now
+asks that subsystem's package, typed (`storekit.SQLOf`, `queuekit.BrokerOf`).
+ktn-linter 1.46.0 passes without them.
+
+The start's check of §6 gains the mail row: a mailer declared without
+`framework/kit/mail` is refused with `CodeSubsystemMissing`, every mailer at
+once; beside the queue row, a mailer whose outbox is on a database is refused
+for both packages when neither is imported, the refusal naming both
+(`TestAMailerWithoutItsSubsystemIsRefused`), and a mailer started without the
+subsystem — which the check makes unreachable — says the import it needs
+(`mailsMissing`).
+
+`initgraph_external_test.go` follows: `stillInCore` loses `mail/spool` —
+`scheduler` and `i18n` remain —, `kitEngines` gains
+`framework/internal/kit/mailkit` for `framework/kit/mail`; `coreprobe` links
+no symbol of the spool, of `mailkit`, nor of the SDK's queue and sql, and
+nothing of the SDK's mail transports beyond their inits; `storeprobe`,
+`queueprobe` and `workflowprobe` link nothing of the mail either
+(`linksNoMail`), `storeprobe` and `workflowprobe` not even the SDK's queue's
+inits; and `TestAProductThatImportsTheMailLinksIt` builds `testdata/mailprobe`
+(coreprobe with `framework/kit/mail` and a mailer) and requires `mailkit`'s,
+the spool's and the transports' code linked, the queue and store subsystems',
+and nothing of the workflows'.
+
+Measured as the steps before (Go 1.27.2, `-trimpath`, MB = 10⁶ bytes, text
+symbols `T`/`t` by `go tool nm -size`, init medians of 50 runs at a 1-minute
+load of about 2), before on `origin/main` at 9d459560 — `mailprobe` before is
+the same program without the import, its mailer then in the core:
+
+| | coreprobe before | coreprobe after | storeprobe before | storeprobe after | queueprobe before | queueprobe after | workflowprobe before | workflowprobe after |
+|---|---|---|---|---|---|---|---|---|
+| packages (`go list -deps`) | 354 | **346** | 360 | 354 | 363 | 360 | 365 | 360 |
+| file | 14.767 | 14.711 | 17.771 | 17.727 | 18.246 | 18.209 | 18.656 | 18.612 |
+| `.text` | 4.633 | 4.619 | 5.660 | 5.648 | 5.841 | 5.829 | 5.911 | 5.899 |
+| text symbols | 4.480 | 4.466 | 5.475 | 5.463 | 5.652 | 5.640 | 5.714 | 5.702 |
+| `.gopclntab` / debug | 3.528 / 3.685 | 3.518 / 3.671 | 4.310 / 4.344 | 4.302 / 4.333 | 4.424 / 4.436 | 4.416 / 4.430 | 4.544 / 4.494 | 4.535 / 4.482 |
+| SDK mail, service half | 0.0137 | **0.0012 (its inits)** | 0.0137 | 0.0012 | 0.0137 | 0.0012 | 0.0137 | 0.0012 |
+| SDK queue / SDK sql | 0.0002 / 0.0009 (inits) | **0 / 0** | 0.0002 / 0.041 | 0 / 0.041 | 0.113 / 0.041 | same | 0.0002 / 0.041 | 0 / 0.041 |
+| SDK mail spool, `mailkit` | 0, — | 0, 0 | 0, — | 0, 0 | 0, — | 0, 0 | 0, — | 0, 0 |
+| init lines / median of 50 | 144 / 0.89 ms | 140 / 0.93 ms | 148 / 0.94 ms | 146 / 0.90 ms | 150 / 0.96 ms | 149 / 0.80 ms | 151 / 1.00 ms | 149 / 0.90 ms |
+
+| | mailprobe before | mailprobe after | cliprobe before | cliprobe after |
+|---|---|---|---|---|
+| packages (`go list -deps`) | 354 | 365 | 369 | 371 |
+| file | 16.172 | 18.612 | 18.684 | **18.967 (+0.28)** |
+| `.text` | 5.112 | 5.979 | 5.956 | 6.059 |
+| text symbols | 4.943 | 5.785 | 5.760 | 5.860 |
+| `.gopclntab` / debug | 3.896 / 4.011 | 4.519 / 4.523 | 4.540 / 4.518 | 4.614 / 4.581 |
+| kit's core | 0.677 | 1.018 | 0.995 | 0.997 |
+| `mailkit` | — | 0.009 | — | 0.007 |
+| SDK mail spool / SDK mail, service half / `net/smtp` | 0.012 / 0.059 / 0.006 | 0.012 / 0.059 / 0.006 | 0 / 0.014 / 0 | 0.010 / 0.057 / 0.006 |
+| SDK queue / SDK sql | 0.057 / 0.001 | 0.121 / 0.041 | 0.113 / 0.041 | 0.121 / 0.041 |
+| `storekit` / `queuekit` | — | 0.046 / 0.017 | 0.046 / 0.017 | 0.046 / 0.017 |
+| init lines / median of 50 | 144 / 0.99 ms | 152 / 0.96 ms | 154 / 0.97 ms | 156 / 0.98 ms |
+
+**Reading.** On kit's core alone, eight packages fewer — `pkg/v1/app/mail/spool`
+and its two halves, and the SDK's `queue` and `sql` with theirs, which only
+the spool still imported —, four inits fewer, and 0.014 MB of code: the SDK's
+verdict on a mail, which the subsystem now gives. `storeprobe`, `queueprobe`
+and `workflowprobe` lose the same SDK mail code and two to six packages each.
+The smallest product's file barely moves (−0.06 MB): since step 3b nothing of
+the spool was reached in a product without a mailer. A product with a mailer
+now links the stores and the queues with it (`mailprobe` +0.84 MB of code,
++2.44 MB of file): Q4's price — an outbox on a database is a queue of the
+store subsystem's database, and a sealed one needs kit's store of data keys —,
+which a product of the facade paid already. The price is on the facade until
+step 10, as step 5 said of the workflows: the hook holds the spool and the
+transports, so a product of the facade links them whether it declares a
+mailer or not — `cliprobe` +0.10 MB of code and +0.28 MB of file, two packages
+more (`mail` and `mailkit`) —; a product that imports only the registration
+packages it needs, as `kit gen` will write them (§5), pays it only with a
+mailer. The init medians are single series of 50 at a 1-minute load of about
+2: within the noise, and not claimed. Not measured: the latency of a fresh
+process.
+
 ### Risks
 
 - **A read decodes.** The generic engine hands back a `T`; the document engine
@@ -1003,6 +1128,7 @@ release note.
 | Accepted, step 3b done | 2026-10-17 | The migration table gains step 3b, done; §Step 3b, done records kit's own store code reached only through `framework/kit/store` (`EnableStores`), the start's check extended to a node that seals at rest, Main's commands on the stores refused without it, and the measure — on kit's core alone, §Measurement's probe target met against step 0's base. No decision changed |
 | Accepted, step 4 done | 2026-10-17 | The migration table marks step 4 done; §Step 4, done records the queues' brokers in `queuekit` behind `framework/kit/queue`, which imports `framework/kit/store` (Q4) — `queuekit` reaching a database through `storekit.SQLOf` —, kit's core importing neither the SDK's `queue` nor, through it, its `sql`, the queues' contract in `plug` (`Queues`, `QueueConfig`, `Broker`, `MessageMover`, `Clock`), the start's check gaining the queue row (a topic, a subscription, a watch, a queued command, a mailer whose outbox is on a database), `plug.HandleProvider` off the queues and kept for the mail spool alone until step 6, and the measure — the smallest product two packages fewer, a product with stores and no queue 0.43 MB of file and 0.17 MB of code less. No decision changed |
 | Accepted, step 5 done | 2026-10-17 | The migration table marks step 5 done; §Step 5, done records the workflows' engine in `workflowkit` behind `framework/kit/workflow`, which imports `framework/kit/store` (Q4), the SDK's statemachine instantiated once at `plug.WorkflowEntityValue` and the state's spelling (Q3), `WorkflowService[E, S]` the typed facade over it with its ports (`plug.WorkflowStore`, `plug.WorkflowJournal`) in the core, kit's core importing none of the SDK's statemachine, the start's check gaining the workflow row, and the measure — the smallest product three packages fewer, a product of 11 workflows 0.62 MB of code and 1.69 MB of file less, the engine linked by a product of the facade until step 10 (+0.11 MB of code). No decision changed |
+| Accepted, step 6 done | 2026-10-17 | The migration table marks step 6 done; §Step 6, done records the mailers' outbox and transports in `mailkit` behind `framework/kit/mail`, which imports `framework/kit/queue` and `framework/kit/store` (Q4) — `mailkit` reaching an outbox on a database through `queuekit.BrokerOf` and `storekit.SQLOf` —, kit's core importing no `mail/spool` and, through it, neither the SDK's `queue` nor its `sql`, `pkg/v1/app/mail` kept in its graph as the type `Mailer.Send` takes, its transports and `net/smtp` unlinked, the mail's contract in `plug` (`Mail`, `MailSpoolConfig`, `MailSpool`, `MailSink`, `MailCaptureSource`, `MailRefusal`), `plug.HandleProvider` and its two ktn exclusions gone, a mailer's sender judged at the start, the start's check gaining the mail row beside the queue row, and the measure — the smallest product eight packages fewer, a product of the facade +0.10 MB of code until step 10. No decision changed |
 
 ## Deferred
 

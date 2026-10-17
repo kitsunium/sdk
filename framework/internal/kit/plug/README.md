@@ -6,9 +6,9 @@
 import "github.com/kitsunium/sdk/framework/internal/kit/plug"
 ```
 
-Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/kit/server), the Studio's event stream and its profiler (framework/kit/studio), the stores and the databases (framework/kit/store), the queues (framework/kit/queue), the workflows (framework/kit/workflow). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
+Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/kit/server), the Studio's event stream and its profiler (framework/kit/studio), the stores and the databases (framework/kit/store), the queues (framework/kit/queue), the workflows (framework/kit/workflow), the mailers (framework/kit/mail). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
 
-It is also the contract between kit's core and the subsystems ADR 0179 takes out of it, as database/sql/driver is between database/sql and a driver: the store subsystem's engine over documents, its siblings, kit's scope on a database and its migrations ([Stores](#Stores)), which framework/kit/store sets; the refusals an engine says in kit's terms ([Refusal](#Refusal)); what kit's transactions offer an engine that takes part in them ([Transaction](#Transaction)); the queue subsystem's brokers and their consumer ([Queues](#Queues)), which framework/kit/queue sets; and the workflow subsystem's engine and the ports it runs on ([Workflows](#Workflows)), which framework/kit/workflow sets.
+It is also the contract between kit's core and the subsystems ADR 0179 takes out of it, as database/sql/driver is between database/sql and a driver: the store subsystem's engine over documents, its siblings, kit's scope on a database and its migrations ([Stores](#Stores)), which framework/kit/store sets; the refusals an engine says in kit's terms ([Refusal](#Refusal)); what kit's transactions offer an engine that takes part in them ([Transaction](#Transaction)); the queue subsystem's brokers and their consumer ([Queues](#Queues)), which framework/kit/queue sets; the workflow subsystem's engine and the ports it runs on ([Workflows](#Workflows)), which framework/kit/workflow sets; and the mail subsystem's outbox and transports ([Mail](#Mail)), which framework/kit/mail sets.
 
 The package imports the standard library and the framework's model only, so that kit and every subsystem can import it.
 
@@ -72,12 +72,28 @@ The package imports the standard library and the framework's model only, so that
   - [func \(HTTPServer\) Start\(ctx context.Context\) error](<#HTTPServer.Start>)
   - [func \(HTTPServer\) State\(\) HTTPState](<#HTTPServer.State>)
 - [type HTTPState](<#HTTPState>)
-- [type HandleProvider](<#HandleProvider>)
-  - [func \(HandleProvider\) Handle\(dst any\) bool](<#HandleProvider.Handle>)
 - [type IndexSpec](<#IndexSpec>)
 - [type Keyser](<#Keyser>)
   - [func \(Keyser\) Keys\(ctx context.Context, after string\) iter.Seq2\[string, error\]](<#Keyser.Keys>)
 - [type LiveMessageValue](<#LiveMessageValue>)
+- [type MailAttemptValue](<#MailAttemptValue>)
+- [type MailCaptureSource](<#MailCaptureSource>)
+  - [func \(MailCaptureSource\) Composed\(\) \[\]byte](<#MailCaptureSource.Composed>)
+- [type MailDriverConfig](<#MailDriverConfig>)
+- [type MailEvent](<#MailEvent>)
+- [type MailEventValue](<#MailEventValue>)
+- [type MailRefusal](<#MailRefusal>)
+- [type MailRelayValue](<#MailRelayValue>)
+- [type MailSink](<#MailSink>)
+  - [func \(MailSink\) Send\(ctx context.Context, msg MailValue\) error](<#MailSink.Send>)
+- [type MailSpool](<#MailSpool>)
+  - [func \(MailSpool\) Close\(\) error](<#MailSpool.Close>)
+  - [func \(MailSpool\) DeadLetters\(ctx context.Context, maxLetters int\) \(int, error\)](<#MailSpool.DeadLetters>)
+  - [func \(MailSpool\) Run\(ctx context.Context\) error](<#MailSpool.Run>)
+  - [func \(MailSpool\) Send\(ctx context.Context, msg MailValue\) \(string, error\)](<#MailSpool.Send>)
+  - [func \(MailSpool\) SendWithID\(ctx context.Context, id string, msg MailValue\) error](<#MailSpool.SendWithID>)
+- [type MailSpoolConfig](<#MailSpoolConfig>)
+- [type MailValue](<#MailValue>)
 - [type MessageMover](<#MessageMover>)
   - [func \(MessageMover\) Messages\(ctx context.Context, after string, maxMessages int\) \(\[\]LiveMessageValue, error\)](<#MessageMover.Messages>)
   - [func \(MessageMover\) PutDeadLetter\(ctx context.Context, dead DeadLetterValue\) \(string, error\)](<#MessageMover.PutDeadLetter>)
@@ -193,6 +209,76 @@ const LabelNode string = "kit_node"
 ```
 
 LabelNode is the pprof label naming the node a goroutine works for.
+
+<a name="MailEventDeadLettered"></a>
+```go
+const MailEventDeadLettered MailEvent = 4
+```
+
+MailEventDeadLettered is a mail given up on after its last attempt.
+
+<a name="MailEventDuplicate"></a>
+```go
+const MailEventDuplicate MailEvent = 5
+```
+
+MailEventDuplicate is a redelivery of a mail already sent, dropped.
+
+<a name="MailEventOther"></a>
+```go
+const MailEventOther MailEvent = 0
+```
+
+MailEventOther is an event of the spool kit shows nothing of.
+
+<a name="MailEventQueued"></a>
+```go
+const MailEventQueued MailEvent = 1
+```
+
+MailEventQueued is a mail put in the outbox.
+
+<a name="MailEventRetrying"></a>
+```go
+const MailEventRetrying MailEvent = 3
+```
+
+MailEventRetrying is a failed attempt that will be retried.
+
+<a name="MailEventSent"></a>
+```go
+const MailEventSent MailEvent = 2
+```
+
+MailEventSent is a mail the transport accepted.
+
+<a name="MailRefusalClosed"></a>
+```go
+const MailRefusalClosed MailRefusal = 1
+```
+
+MailRefusalClosed is a spool that is closed: its mailer is not running.
+
+<a name="MailRefusalInvalidURL"></a>
+```go
+const MailRefusalInvalidURL MailRefusal = 3
+```
+
+MailRefusalInvalidURL is an SMTP URL that is not one of the form smtp://user:password@host:port; its "problem" field says the clause.
+
+<a name="MailRefusalNone"></a>
+```go
+const MailRefusalNone MailRefusal = 0
+```
+
+MailRefusalNone is no refusal kit words.
+
+<a name="MailRefusalUnencodable"></a>
+```go
+const MailRefusalUnencodable MailRefusal = 2
+```
+
+MailRefusalUnencodable is a mail the outbox cannot encode.
 
 <a name="RefusalClosed"></a>
 ```go
@@ -573,6 +659,13 @@ const WriteUpsert WriteMode = 0
 WriteUpsert writes whatever the key holds: a creation or a replacement.
 
 ## Variables
+
+<a name="Mail"></a>
+```go
+var Mail atomic.Pointer[MailDriverConfig]
+```
+
+Mail is the mail subsystem: the outbox kit's mailers keep and the transports that empty it; nil until framework/kit/mail is imported. A product that declares a mailer without it is refused at the start (ADR 0179 §6).
 
 <a name="NewHTTPServer"></a>
 ```go
@@ -1319,27 +1412,6 @@ type HTTPState struct {
 }
 ```
 
-<a name="HandleProvider"></a>
-## type [HandleProvider](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
-
-HandleProvider is a value of a subsystem that hands one of the SDK's own handles on: the value dst points at set, and true; false for a handle it has none of. It serves the mailer's spool, still in kit's core, which takes the SDK's types — a Database's transaction manager as the spool's Deferrer, a queue's broker (Broker) as its outbox — until the mailers leave the core (ADR 0179, step 6), and the core never names the type it asks for. A sibling of [Database](#Database) and of [Broker](#Broker).
-
-```go
-type HandleProvider interface {
-	// Handle sets what dst points at to the SDK's handle of its type.
-	Handle(dst any) bool
-}
-```
-
-<a name="HandleProvider.Handle"></a>
-### func \(HandleProvider\) [Handle](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
-
-```go
-func (HandleProvider) Handle(dst any) bool
-```
-
-Handle sets what dst points at to the SDK's handle of its type.
-
 <a name="IndexSpec"></a>
 ## type [IndexSpec](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)
 
@@ -1392,6 +1464,283 @@ type LiveMessageValue struct {
 	Deliveries int
 	// Leased reports whether a consumer holds it.
 	Leased     bool
+}
+```
+
+<a name="MailAttemptValue"></a>
+## type [MailAttemptValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail.go>)
+
+MailAttemptValue is one delivery attempt of a mail: its outbox ID, its number, when the mail was queued, and what the spool kept of its Send.
+
+```go
+type MailAttemptValue struct {
+	// QueuedAt is when the mail was put in the outbox.
+	QueuedAt time.Time
+	// Meta is what Annotate kept of the Send.
+	Meta     map[string]string
+	// ID is the mail's outbox ID.
+	ID       string
+	// Attempt numbers the attempt, from 1.
+	Attempt  int
+}
+```
+
+<a name="MailCaptureSource"></a>
+## type [MailCaptureSource](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail_interface.go>)
+
+MailCaptureSource is a transport that keeps what it composed: the capture transport, whose last message the Studio's mailbox shows. A sibling of [MailSink](#MailSink).
+
+```go
+type MailCaptureSource interface {
+	// Composed is the last message the transport composed, nil for none.
+	Composed() []byte
+}
+```
+
+<a name="MailCaptureSource.Composed"></a>
+### func \(MailCaptureSource\) [Composed](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail_interface.go>)
+
+```go
+func (MailCaptureSource) Composed() []byte
+```
+
+Composed is the last message the transport composed, nil for none.
+
+<a name="MailDriverConfig"></a>
+## type [MailDriverConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail.go>)
+
+MailDriverConfig is what framework/kit/mail plugs into kit: how a mailer's outbox opens, the SDK's verdict on a mail, the transports a mailer hands its mail to, and how kit tells the spool's refusals apart.
+
+```go
+type MailDriverConfig struct {
+	// Open opens one mailer's outbox as cfg says, closed until it runs.
+	Open      func(cfg *MailSpoolConfig) (MailSpool, error)
+	// Validate is the SDK's verdict on a mail: nil when the outbox takes it,
+	// else what is wrong with it, in the SDK's public words.
+	Validate  func(msg MailValue) error
+	// Capture is a transport that delivers nothing and keeps the last
+	// message it composed (MailCaptureSource).
+	Capture   func() MailSink
+	// ParseSMTP reads an SMTP URL — smtp://user:password@host:port?tls=
+	// starttls|implicit|none, smtps:// for implicit TLS — as the SDK's
+	// SMTP transport would take it.
+	ParseSMTP func(url string) (MailRelayValue, error)
+	// NewSMTP is the SDK's SMTP transport to relay, which dials nothing
+	// until a mail is sent.
+	NewSMTP   func(relay *MailRelayValue) (MailSink, error)
+	// Refused reports whether err, or an error it wraps, is the spool's or
+	// the URL's refusal of kind: the SDK's sentinels stay in the subsystem,
+	// and the error keeps the fields the SDK gave it.
+	Refused   func(err error, kind MailRefusal) bool
+}
+```
+
+<a name="MailEvent"></a>
+## type [MailEvent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail.go>)
+
+MailEvent is what a spool reports of a mail.
+
+```go
+type MailEvent uint8
+```
+
+<a name="MailEventValue"></a>
+## type [MailEventValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail.go>)
+
+MailEventValue is what a spool reports of a mail: its kind, the mail and its outbox ID, the attempt, when, and the failure of a failed attempt.
+
+```go
+type MailEventValue struct {
+	// Err is a failed attempt's failure.
+	Err      error
+	// Meta is what Annotate kept of the Send.
+	Meta     map[string]string
+	// At is when the event happened.
+	At       time.Time
+	// QueuedAt is when the mail was put in the outbox.
+	QueuedAt time.Time
+	// Message is the mail.
+	Message  MailValue
+	// ID is the mail's outbox ID.
+	ID       string
+	// Attempt numbers the attempt the event is about.
+	Attempt  int
+	// Kind is what happened.
+	Kind     MailEvent
+}
+```
+
+<a name="MailRefusal"></a>
+## type [MailRefusal](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail.go>)
+
+MailRefusal is a refusal of the mail subsystem, as kit words it.
+
+```go
+type MailRefusal uint8
+```
+
+<a name="MailRelayValue"></a>
+## type [MailRelayValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail.go>)
+
+MailRelayValue is an SMTP relay as the SDK's transport takes it: its configuration, which holds the password and is handed to NewSMTP and never kept or printed, and what may be shown of it.
+
+```go
+type MailRelayValue struct {
+	// Config is the SDK's SMTP configuration, held as any.
+	Config any
+	// Server is where it delivers, host:port.
+	Server string
+	// TLS is its TLS mode as the URL spells it: starttls, implicit or none.
+	TLS    string
+}
+```
+
+<a name="MailSink"></a>
+## type [MailSink](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail_interface.go>)
+
+MailSink is what a mailer hands a mail to: the SDK's SMTP transport, or its capture transport, which delivers nothing. It grows by the sibling below.
+
+```go
+type MailSink interface {
+	// Send delivers msg.
+	Send(ctx context.Context, msg MailValue) error
+}
+```
+
+<a name="MailSink.Send"></a>
+### func \(MailSink\) [Send](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail_interface.go>)
+
+```go
+func (MailSink) Send(ctx context.Context, msg MailValue) error
+```
+
+Send delivers msg.
+
+<a name="MailSpool"></a>
+## type [MailSpool](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail_interface.go>)
+
+MailSpool is one mailer's outbox as kit's core uses it: a mail put in it at once or under an ID kit minted, the loop that hands each mail to the transport, and its dead letters.
+
+```go
+type MailSpool interface {
+	// Close releases the outbox.
+	Close() error
+	// DeadLetters counts up to maxLetters of the mails earlier runs gave up
+	// on.
+	DeadLetters(ctx context.Context, maxLetters int) (int, error)
+	// Run hands each mail to the transport until ctx ends.
+	Run(ctx context.Context) error
+	// Send puts msg in the outbox — in the transaction ctx carries for its
+	// database, when it lives on one — and returns its outbox ID.
+	Send(ctx context.Context, msg MailValue) (string, error)
+	// SendWithID puts msg in the outbox under id, minted by kit.
+	SendWithID(ctx context.Context, id string, msg MailValue) error
+}
+```
+
+<a name="MailSpool.Close"></a>
+### func \(MailSpool\) [Close](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail_interface.go>)
+
+```go
+func (MailSpool) Close() error
+```
+
+Close releases the outbox.
+
+<a name="MailSpool.DeadLetters"></a>
+### func \(MailSpool\) [DeadLetters](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail_interface.go>)
+
+```go
+func (MailSpool) DeadLetters(ctx context.Context, maxLetters int) (int, error)
+```
+
+DeadLetters counts up to maxLetters of the mails earlier runs gave up on.
+
+<a name="MailSpool.Run"></a>
+### func \(MailSpool\) [Run](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail_interface.go>)
+
+```go
+func (MailSpool) Run(ctx context.Context) error
+```
+
+Run hands each mail to the transport until ctx ends.
+
+<a name="MailSpool.Send"></a>
+### func \(MailSpool\) [Send](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail_interface.go>)
+
+```go
+func (MailSpool) Send(ctx context.Context, msg MailValue) (string, error)
+```
+
+Send puts msg in the outbox — in the transaction ctx carries for its database, when it lives on one — and returns its outbox ID.
+
+<a name="MailSpool.SendWithID"></a>
+### func \(MailSpool\) [SendWithID](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail_interface.go>)
+
+```go
+func (MailSpool) SendWithID(ctx context.Context, id string, msg MailValue) error
+```
+
+SendWithID puts msg in the outbox under id, minted by kit.
+
+<a name="MailSpoolConfig"></a>
+## type [MailSpoolConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail.go>)
+
+MailSpoolConfig is one mailer's outbox: the transport each attempt runs, the app's clock, what kit hears of its mails, its retries, and where it keeps them — a queue on the database that keeps the mailer's service, a directory, or memory.
+
+```go
+type MailSpoolConfig struct {
+	// Transport makes one delivery attempt of msg; the spool retries a
+	// failure, or dead-letters the mail after its last attempt.
+	Transport       func(ctx context.Context, msg MailValue, attempt MailAttemptValue) error
+	// Clock is the app's clock, which the spool stamps and waits on.
+	Clock           Clock
+	// Observe is told each event of each mail.
+	Observe         func(e *MailEventValue)
+	// Annotate is what the spool keeps of a Send for its deliveries, read
+	// from the Send's context.
+	Annotate        func(ctx context.Context) map[string]string
+	// NewID mints a mail's outbox ID.
+	NewID           func() (string, error)
+	// Outbox is the queue the spool keeps its mails in on a database —
+	// the queue subsystem's, sealed —, nil for a directory or memory.
+	Outbox          Broker
+	// Database is the database Outbox is on, whose transaction a mail sent
+	// in one joins; nil for none.
+	Database        Database
+	// From is the sender of every mail that names none: the SDK's
+	// mail.Address, held as any.
+	From            MailValue
+	// Dir is the directory the spool keeps its own queue in; with no Outbox
+	// and no Dir, the outbox is in memory.
+	Dir             string
+	// BackoffBase is the wait after a failed attempt, doubled after each,
+	// up to BackoffMax.
+	BackoffBase     time.Duration
+	// BackoffMax bounds the wait after a failed attempt.
+	BackoffMax      time.Duration
+	// SendTimeout bounds one attempt.
+	SendTimeout     time.Duration
+	// PollInterval bounds an idle wait.
+	PollInterval    time.Duration
+	// MaxAttempts is how many attempts a mail gets before it is
+	// dead-lettered.
+	MaxAttempts     int
+	// MaxMessageBytes bounds one mail in the spool's own queue; zero is the
+	// spool's own bound.
+	MaxMessageBytes int
+}
+```
+
+<a name="MailValue"></a>
+## type [MailValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/mail.go>)
+
+MailValue is a value of the SDK's mail package as it crosses the contract: a mail.Message, or a sender's mail.Address, held as any — kit's core names the SDK's mail types, plug names none.
+
+```go
+type MailValue struct {
+	// Value is the SDK's mail value.
+	Value any
 }
 ```
 

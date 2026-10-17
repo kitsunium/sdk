@@ -5,6 +5,7 @@ package kit
 // (ADR 0179 Q8): a product that imports framework/kit has them all, and none
 // changes before kit gen writes the imports it needs.
 import (
+	_ "github.com/kitsunium/sdk/framework/kit/mail"
 	_ "github.com/kitsunium/sdk/framework/kit/queue"
 	_ "github.com/kitsunium/sdk/framework/kit/store"
 	_ "github.com/kitsunium/sdk/framework/kit/workflow"

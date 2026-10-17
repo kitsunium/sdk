@@ -433,3 +433,114 @@ func TestAWorkflowStartedWithoutItsSubsystemNamesTheImport(t *testing.T) {
 		t.Errorf("a workflow started without framework/kit/workflow: %v", err)
 	}
 }
+
+// withoutMail runs the test as a program that does not import
+// framework/kit/mail: the hook its package sets is nil (ADR 0179 §6, step
+// 6), as the core sees it in such a program; the test binary plugs the
+// subsystem in (subsystems_test.go), and the test takes it out until it
+// ends.
+func withoutMail(t *testing.T) {
+	t.Helper()
+	saved := plug.Mail.Load()
+	plug.Mail.Store(nil)
+	t.Cleanup(func() { plug.Mail.Store(saved) })
+}
+
+// mailProduct declares two mailers: notify, in a service a database keeps —
+// its outbox on that database, a queue —, and remind, in a service none
+// keeps, its outbox in the data directory.
+func mailProduct(t *testing.T) *App {
+	kept := NewService("post", "Posts.")
+	kept.Mailer("notify", From("Post", "post@example.com"))
+	free := NewService("desk", "Desk.")
+	free.Mailer("remind")
+	return NewApp("post", kept, free).With(Profile("daemon"), DataDir(t.TempDir()), Logs(io.Discard),
+		Database("main", NewFakeDB(sql.DialectPostgres).Engine(), Keeps(kept)))
+}
+
+// refusedFor are the nodes de refuses for want of pkg, sorted, each checked
+// to name its declaration at its position.
+func refusedFor(t *testing.T, de *DiagnosticsError, pkg string) []string {
+	t.Helper()
+	var refused []string
+	for _, d := range de.Diagnostics {
+		if !strings.Contains(d.Message, pkg) {
+			continue
+		}
+		refused = append(refused, d.Node)
+		if d.Source == nil || d.Source.Line == 0 || !strings.HasSuffix(d.Source.File, "subsystems_internal_test.go") {
+			t.Errorf("a refusal names no declaration at its position: %+v", d)
+		}
+	}
+	slices.Sort(refused)
+	return refused
+}
+
+// A product that declares a mailer without importing framework/kit/mail is
+// refused at the start (ADR 0179 §6, step 6): every mailer at once, each at
+// its position, naming the package, with CodeSubsystemMissing. The mail row
+// stands beside the queue row, which refuses a mailer whose outbox is on a
+// database without framework/kit/queue: without both, that mailer is refused
+// for each, the other for the mail alone, and the refusal names both
+// packages; with both, neither.
+func TestAMailerWithoutItsSubsystemIsRefused(t *testing.T) {
+	type tc struct {
+		name              string
+		mail, queue, want []string
+		noMail, noQueues  bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if c.noMail {
+			withoutMail(t)
+		}
+		if c.noQueues {
+			withoutQueues(t)
+		}
+		app := mailProduct(t)
+		err := app.Start(context.Background())
+		if err == nil {
+			must(t, app.Stop(context.Background()))
+		}
+		var de *DiagnosticsError
+		if !errors.As(err, &de) {
+			if len(c.want) > 0 {
+				t.Fatalf("the start: %v", err)
+			}
+			return
+		}
+		if got := refusedFor(t, de, mailPackage); !slices.Equal(got, c.mail) {
+			t.Errorf("refused for want of %s: %q, want %q\n%v", mailPackage, got, c.mail, de)
+		}
+		if got := refusedFor(t, de, queuePackage); !slices.Equal(got, c.queue) {
+			t.Errorf("refused for want of %s: %q, want %q\n%v", queuePackage, got, c.queue, de)
+		}
+		if !slices.Equal(de.Missing, c.want) {
+			t.Errorf("the refusal's Missing = %q, want %q", de.Missing, c.want)
+		}
+		if len(c.want) > 0 && !errs.HasCode(err, CodeSubsystemMissing) {
+			t.Errorf("the refusal does not carry CodeSubsystemMissing: %v", err)
+		}
+	}
+	both := []string{"desk/mailer/remind", "post/mailer/notify"}
+	for _, c := range []tc{
+		{name: "without the mail subsystem", noMail: true, mail: both, want: []string{mailPackage}},
+		{
+			name: "without the mail and the queues", noMail: true, noQueues: true, mail: both,
+			queue: []string{"post/mailer/notify"}, want: []string{mailPackage, queuePackage},
+		},
+		{name: "with both"},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// A mailer started without the mail subsystem — which the start's check
+// makes unreachable — says the import it needs.
+func TestAMailerStartedWithoutItsSubsystemNamesTheImport(t *testing.T) {
+	withoutMail(t)
+	err := NewMailer().start(context.Background(), nil)
+	if !errs.HasCode(err, CodeSubsystemMissing) || !strings.Contains(errs.PrivateOf(err), mailPackage) {
+		t.Errorf("a mailer started without framework/kit/mail: %v", err)
+	}
+}

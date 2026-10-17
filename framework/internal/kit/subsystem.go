@@ -53,7 +53,9 @@ type subsystem struct {
 // plug.Stores and kit's own store code (EnableStores, step 3b); the queues'
 // since step 4, linked when framework/kit/queue set plug.Queues; the
 // workflows' since step 5, linked when framework/kit/workflow set
-// plug.Workflows. A test sets
+// plug.Workflows; the mailers' since step 6, linked when framework/kit/mail
+// set plug.Mail — a mailer whose outbox is on a database needs the queues'
+// too, the row above. A test sets
 // the hooks as a program that does not import the package would see them.
 var subsystems = []subsystem{{
 	name: "store", pkg: storePackage,
@@ -66,6 +68,9 @@ var subsystems = []subsystem{{
 }, {
 	name: "workflow", pkg: workflowPackage,
 	kinds: []model.NodeKind{model.KindWorkflow}, linked: workflowsLinked,
+}, {
+	name: "mail", pkg: mailPackage,
+	kinds: []model.NodeKind{model.KindMailer}, linked: mailsLinked,
 }}
 
 // needsQueue reports whether n needs the queue subsystem beside the topics

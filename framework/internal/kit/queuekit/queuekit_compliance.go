@@ -12,10 +12,9 @@ import (
 // sibling kit's core asks for, that a mailer's sealed outbox answers every
 // sibling the SDK's SQL broker does, and that the app's clock is the SDK's.
 var (
-	_ plug.Broker         = (*broker)(nil)
-	_ plug.MessageMover   = (*broker)(nil)
-	_ plug.HandleProvider = (*broker)(nil)
-	_ io.Closer           = (*broker)(nil)
+	_ plug.Broker       = (*broker)(nil)
+	_ plug.MessageMover = (*broker)(nil)
+	_ io.Closer         = (*broker)(nil)
 
 	_ queue.Waker             = (*sealedOutbox)(nil)
 	_ queue.LeaseExtender     = (*sealedOutbox)(nil)

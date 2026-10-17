@@ -109,15 +109,16 @@ func (b *broker) Close() error {
 	return nil
 }
 
-// Handle sets what dst points at to the SDK's broker behind the queue: what
-// a mailer's spool, still in kit's core, takes as its outbox (until ADR
-// 0179's step 6).
-func (b *broker) Handle(dst any) bool {
-	p, ok := dst.(*queue.Broker)
-	if ok {
-		*p = b.q
+// BrokerOf is the SDK's broker behind b, a queue this package opened: what a
+// mailer's spool keeps its outbox in on a database (ADR 0179 step 6) — the
+// sealed outbox, behind a test's wrapper when it set one —; false for a
+// queue it did not open.
+func BrokerOf(b plug.Broker) (queue.Broker, bool) {
+	opened, ok := b.(*broker)
+	if !ok {
+		return nil, false
 	}
-	return ok
+	return opened.q, true
 }
 
 // lacks is the refusal of a capability the SDK's broker behind a queue does

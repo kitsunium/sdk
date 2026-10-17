@@ -10,8 +10,11 @@ on it links every subsystem; this probe imports none, and is what
 `TestTheSmallestProductLinksOnlyTheSubsystemsStillInTheCore` builds and reads
 the symbols of: none of the store subsystem's engines, none of kit's own
 store code (`kitStoreCode`, step 3b), none of the queue subsystem's brokers
-and nothing of the SDK's queue but the `init` of the package the mail spool
-imports (step 4), and nothing of the workflow subsystem's engine nor of the SDK's statemachine, out of its graph since step 5. Once step 10 drops the facade's imports, `cliprobe` is that
+(step 4) nor of the SDK's queue and sql, out of its graph since step 6, not
+even their inits; nothing of the workflow subsystem's engine nor of the SDK's
+statemachine, out of its graph since step 5; and nothing of the mail
+subsystem's outbox nor of the SDK's spool, out of its graph since step 6, nor
+of the SDK's mail transports beyond their inits. Once step 10 drops the facade's imports, `cliprobe` is that
 program again and this probe can go.
 
 ## Contents

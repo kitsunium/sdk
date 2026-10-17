@@ -31,6 +31,5 @@ var (
 	_ plug.Database         = (*database)(nil)
 	_ plug.Checker          = (*database)(nil)
 	_ plug.MigratorProvider = (*database)(nil)
-	_ plug.HandleProvider   = (*database)(nil)
 	_ plug.Migrator         = migrator{}
 )

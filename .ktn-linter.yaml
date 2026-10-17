@@ -558,7 +558,7 @@ rules:
     # identical signature): Node.Propose and the test machines' Apply entries
     # that stood here are gone. The declarations the rule would report in
     # design_gen.go (StateMachine.Apply, Replicated.Propose) are generated and
-    # skipped. Three sites remain, none of them an implementation of a local
+    # skipped. Two sites remain, none of them an implementation of a local
     # interface:
     #   - Node.submit and Node.applied1 carry the value the caller's machine
     #     computed to the proposer's waiter unchanged (the StateMachine port
@@ -571,19 +571,6 @@ rules:
     #     to the implementation behind settingDecl, so it arrives without a
     #     static type and the method asserts it to T. `any` is the type the
     #     value has here, not a missing abstraction.
-    #   - plug.HandleProvider.Handle and its one caller in kit's core,
-    #     databaseRun.handle (ADR 0179, step 3): they hand on one of the SDK's
-    #     own handles to the mail spool still in kit's core, which takes the
-    #     SDK's types — a database's transaction manager as its Deferrer, and
-    #     since step 4 a queue's broker as its outbox (queuekit's broker
-    #     implements Handle; the mailer calls it inline) —, through a pointer
-    #     the core takes from the spool's configuration without naming the
-    #     type: plug imports the standard library alone and the core imports
-    #     neither the SDK's sql nor its queue, so `any` is the one type both
-    #     sides can spell. Step 4 took the queues off it — queuekit reaches a
-    #     database's transaction manager and dialect through storekit.SQLOf,
-    #     typed —; the two go with step 6, which takes the mailers out of the
-    #     core.
     exclude_functions:
       - "**/internal/service/app/consensus/ops.go:Node.submit"
       - "internal/service/app/consensus/ops.go:Node.submit"
@@ -591,10 +578,6 @@ rules:
       - "internal/service/app/consensus/apply.go:Node.applied1"
       - "**/framework/internal/kit/setting_interface.go:settingDecl.fromCode"
       - "framework/internal/kit/setting_interface.go:settingDecl.fromCode"
-      - "**/framework/internal/kit/plug/store_interface.go:HandleProvider.Handle"
-      - "framework/internal/kit/plug/store_interface.go:HandleProvider.Handle"
-      - "**/framework/internal/kit/database_run.go:databaseRun.handle"
-      - "framework/internal/kit/database_run.go:databaseRun.handle"
 
   # KTN-API-MINIF (info) — "prefer the narrowest interface for this parameter".
   #

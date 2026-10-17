@@ -20,7 +20,9 @@ Until ADR 0179's step 10, `framework/kit` imports this package itself
 (`subsystems.go`, Q8), and the three connectors (`framework/connectors/
 {postgres,mysql,sqlite}`) do too (§4), and so does `framework/kit/queue` (step
 4, Q4: a queue on a database joins the stores' transactions), and
-`framework/kit/workflow` (step 5, Q4: a workflow runs over a store): no product
+`framework/kit/workflow` (step 5, Q4: a workflow runs over a store), and
+`framework/kit/mail` (step 6, Q4: a mailer's outbox on a database is on a
+database of the stores', sealed under data keys kept in a store): no product
 needs the line yet, and `kit gen` will write it (§5).
 
 ## Contents

@@ -2,8 +2,8 @@
 // frontends' file server and the process sampler of the runtime graph
 // (framework/kit/server), the Studio's event stream and its profiler
 // (framework/kit/studio), the stores and the databases (framework/kit/store),
-// the queues (framework/kit/queue), the workflows (framework/kit/workflow).
-// kit reads what they registered through the
+// the queues (framework/kit/queue), the workflows (framework/kit/workflow),
+// the mailers (framework/kit/mail). kit reads what they registered through the
 // hooks declared here, and imports none of the SDK packages behind them: a
 // product that does not import a subsystem neither links nor initialises its
 // packages.
@@ -15,8 +15,9 @@
 // sets; the refusals an engine says in kit's terms ([Refusal]); what kit's
 // transactions offer an engine that takes part in them ([Transaction]); the
 // queue subsystem's brokers and their consumer ([Queues]), which
-// framework/kit/queue sets; and the workflow subsystem's engine and the
-// ports it runs on ([Workflows]), which framework/kit/workflow sets.
+// framework/kit/queue sets; the workflow subsystem's engine and the ports
+// it runs on ([Workflows]), which framework/kit/workflow sets; and the mail
+// subsystem's outbox and transports ([Mail]), which framework/kit/mail sets.
 //
 // The package imports the standard library and the framework's model only,
 // so that kit and every subsystem can import it.
