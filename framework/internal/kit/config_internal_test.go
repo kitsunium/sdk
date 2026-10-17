@@ -1,8 +1,6 @@
 package kit
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -35,32 +33,6 @@ func TestConfigIsClosedByDefault(t *testing.T) {
 				t.Errorf("addr %q studio %v remote %v dataDir %q", cfg.addr, cfg.studio.on, cfg.studio.remote, cfg.dataDir)
 			}
 		})
-	}
-}
-
-// The Host header is the client's to choose; the Studio also checks where the
-// request comes from.
-func TestStudioAnswersThisMachineOnly(t *testing.T) {
-	a := &App{cfg: config{allowedHosts: []string{"localhost", "127.0.0.1", "::1"}}}
-	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) })
-	for _, c := range []struct {
-		remote string
-		opt    bool
-		want   int
-	}{
-		{"127.0.0.1:5555", false, http.StatusTeapot},
-		{"[::1]:5555", false, http.StatusTeapot},
-		{"192.168.1.9:5555", false, http.StatusForbidden},
-		{"172.17.0.1:5555", true, http.StatusTeapot},
-	} {
-		a.cfg.studio.remote = c.opt
-		req := httptest.NewRequest("GET", "http://localhost:4000/_kit/api/graph", nil)
-		req.RemoteAddr = c.remote
-		rec := httptest.NewRecorder()
-		a.hostGuard(ok).ServeHTTP(rec, req)
-		if rec.Code != c.want {
-			t.Errorf("%s (opt-in %v): %d, want %d", c.remote, c.opt, rec.Code, c.want)
-		}
 	}
 }
 

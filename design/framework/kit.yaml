@@ -307,9 +307,9 @@ packages:
             name: CodeProfileRead
             note: |-
               Profiles: the process's heap and goroutines, folded onto the graph. The
-              SDK's profiling package captures, decodes, folds and groups them, behind
-              the profiler framework/kit/studio plugs in (plug.StudioProfiler); kit
-              says whose work each sample was. A heap sample is charged to the node
+              SDK's profiling package captures, decodes, folds and groups them, in
+              the Studio framework/kit/studio plugs in (studiokit); kit says whose
+              work each sample was. A heap sample is charged to the node
               whose code is on its stack. Dev only: the routes live behind the Studio's
               guard, which only an app that imports the Studio mounts.
             value: "0x00_04_02_30"
@@ -1411,7 +1411,8 @@ packages:
           - constraint: any
             name: T
       - doc: |-
-          EnableStudio makes a serving app in dev mount the Studio's API.
+          EnableStudio makes a serving app in dev mount the Studio's routes, which
+          framework/kit/studio plugs in (plug.Studio), over a host of the app.
           framework/kit/studio calls it as it is imported; a product never does.
         name: EnableStudio
       - doc: |-
@@ -5565,8 +5566,8 @@ packages:
     doc: |-
       Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the
       frontends' file server and the process sampler of the runtime graph
-      (framework/kit/server), the Studio's event stream, its profiler and kit's
-      sentences in the languages after English (framework/kit/studio), the
+      (framework/kit/server), the Studio — the tool's variables, its routes and
+      kit's sentences in the languages after English (framework/kit/studio) —, the
       stores and the databases (framework/kit/store), the queues
       (framework/kit/queue), the workflows (framework/kit/workflow), the mailers
       (framework/kit/mail), the jobs (framework/kit/jobs). kit reads
@@ -5585,8 +5586,10 @@ packages:
       it runs on ([Workflows]), which framework/kit/workflow sets; the mail
       subsystem's outbox and transports ([Mail]), which framework/kit/mail sets;
       the jobs subsystem's schedules and scheduler ([Jobs]), which
-      framework/kit/jobs sets; and kit's catalogues in the languages after
-      English ([Words]), which framework/kit/studio sets.
+      framework/kit/jobs sets; kit's catalogues in the languages after
+      English ([Words]), and the Studio's routes and the tool's variables
+      ([Studio], ADR 0180 step 1), which framework/kit/studio sets, the routes
+      reading the running app through a [StudioHost] kit gives.
 
       The package imports the standard library and the framework's model only,
       so that kit and every subsystem can import it.
@@ -6042,25 +6045,6 @@ packages:
             - name: Total
             - name: Rejected
               type: uint64
-      - doc: |-
-          ProfilerConfig is the Studio's profiler: the live heap folded onto the graph's
-          nodes, and every goroutine grouped.
-        name: ProfilerConfig
-        struct:
-          fields:
-            - doc: |-
-                Heap folds the live heap onto g's nodes; source says where a function
-                of a module lies, nil when it knows none.
-              name: Heap
-              type: func(g *model.Graph, source SourceFunc) (*model.Profile, error)
-            - doc: Goroutines groups every goroutine of the process, read at at.
-              name: Goroutines
-              type: func(at time.Time) (*model.Goroutines, error)
-      - doc: |-
-          SourceFunc says where the function fn, at file:line, lies in the product,
-          nil when it knows none.
-        name: SourceFunc
-        underlying: func(file string, line int, fn string) *model.Source
       - doc: HTTPServer is the HTTP engine kit starts, reads and stops.
         interface:
           methods:
@@ -6083,25 +6067,6 @@ packages:
               out:
                 - type: error
         name: HTTPServer
-      - doc: "EventStream is one Server-Sent Events stream: the Studio's live events."
-        interface:
-          methods:
-            - doc: Send writes one event's data.
-              in:
-                - name: data
-                  type: string
-              name: Send
-              out:
-                - type: error
-            - doc: Done is closed when the client left.
-              name: Done
-              out:
-                - type: <-chan struct{}
-            - doc: Close ends the stream.
-              name: Close
-              out:
-                - type: error
-        name: EventStream
       - doc: |-
           QueueDriverConfig is what framework/kit/queue plugs into kit: how a
           consumer's queue opens, the migration that makes its table on a database,
@@ -7758,6 +7723,380 @@ packages:
               variadic: true
         name: WorkflowJournal
       - doc: |-
+          StudioDriverConfig is what framework/kit/studio plugs into kit: how the
+          tool's variables are read, and how the Studio's routes mount.
+        name: StudioDriverConfig
+        struct:
+          fields:
+            - doc: Env reads what the tool's variables ask of the Studio in this run.
+              name: Env
+              type: func(getenv func(string) string) StudioEnvValue
+            - doc: |-
+                Settings are the tool's variables as the settings of a run show them,
+                in order, each with its value as the run resolved it and where it
+                came from: the product's code, the environment, or kit's default.
+              name: Settings
+              type: func(getenv func(string) string, state StudioStateValue) []model.Setting
+            - doc: |-
+                Forced are the variables kit dev says it set itself for this launch,
+                as it names them; kit labels only those it lets kit dev set.
+              name: Forced
+              type: func(getenv func(string) string) []string
+            - doc: |-
+                DevBuild is what kit dev said about the build it launched, nil when
+                the process was not started by kit dev.
+              name: DevBuild
+              type: func(getenv func(string) string) *model.DevBuild
+            - doc: |-
+                Mount registers the Studio's routes on mux, each behind the Studio's
+                guard, reading the running app through host.
+              name: Mount
+              type: func(mux *http.ServeMux, host StudioHost)
+      - doc: |-
+          StudioEnvValue is what the tool's variables ask of the Studio: their
+          zero value is a run in which none is set.
+        name: StudioEnvValue
+        struct:
+          fields:
+            - doc: |-
+                Studio is what the environment says of the Studio: on — which
+                production refuses —, off, or empty when it says neither.
+              name: Studio
+              type: string
+            - doc: "Remote: the Studio answers a client that is not on this machine."
+              name: Remote
+              type: bool
+            - doc: "NoAnalysis: the environment turns the static analysis off."
+              name: NoAnalysis
+              type: bool
+      - doc: |-
+          StudioStateValue is what a run resolved of the Studio, and what the
+          product's code chose of it: what the settings show of the tool's
+          variables.
+        name: StudioStateValue
+        struct:
+          fields:
+            - doc: |-
+                StudioOption and AnalyzeOption are the product's code's choice of the
+                Studio and of the static analysis, which wins over the environment;
+                nil when the code chose nothing.
+              name: StudioOption
+            - doc: |-
+                StudioOption and AnalyzeOption are the product's code's choice of the
+                Studio and of the static analysis, which wins over the environment;
+                nil when the code chose nothing.
+              name: AnalyzeOption
+              type: "*bool"
+            - doc: |-
+                Studio, Remote and Analyze are the Studio's switches, as resolved and
+                as the settings spell them: on or off.
+              name: Studio
+            - doc: |-
+                Studio, Remote and Analyze are the Studio's switches, as resolved and
+                as the settings spell them: on or off.
+              name: Remote
+            - doc: |-
+                Studio, Remote and Analyze are the Studio's switches, as resolved and
+                as the settings spell them: on or off.
+              name: Analyze
+              type: string
+      - doc: |-
+          StudioHost is the running app, as the Studio's routes read it and answer
+          through it.
+        interface:
+          methods:
+            - doc: |-
+                Graph is the app's graph, as it is now.
+              name: Graph
+              out:
+                - type: "*model.Graph"
+            - doc: |-
+                Phase is where the app is in its life, as the graph says it.
+              name: Phase
+              out:
+                - type: string
+            - doc: |-
+                Now is the time on the app's clock.
+              name: Now
+              out:
+                - type: time.Time
+            - doc: |-
+                Subscribe streams the app's live events until cancel is called.
+              name: Subscribe
+              out:
+                - name: events
+                  type: <-chan model.Event
+                - name: cancel
+                  type: func()
+            - doc: |-
+                Stopping is closed when the app ends its live streams.
+              name: Stopping
+              out:
+                - type: <-chan struct{}
+            - doc: |-
+                Traces are the latest traces the app keeps, at most limit, those of
+                root's trace or through node when either is given.
+              in:
+                - name: limit
+                  type: int
+                - name: root
+                  type: string
+                - name: node
+                  type: string
+              name: Traces
+              out:
+                - type: "[]model.Trace"
+            - doc: |-
+                Trace is one trace, while the app keeps it.
+              in:
+                - name: id
+                  type: string
+              name: Trace
+              out:
+                - type: model.Trace
+                - type: bool
+            - doc: |-
+                Logs are the latest records the product logged, those of a trace or
+                a node and from a level when given, at most limit — a default when
+                it is empty; a level or a limit the app does not take is refused.
+              in:
+                - name: trace
+                  type: string
+                - name: node
+                  type: string
+                - name: level
+                  type: string
+                - name: limit
+                  type: string
+              name: Logs
+              out:
+                - type: "[]model.LogRecord"
+                - type: error
+            - doc: |-
+                Instances are a workflow's entities and where each is; false for no
+                such workflow.
+              in:
+                - name: workflow
+                  type: string
+              name: Instances
+              out:
+                - type: "[]model.Instance"
+                - type: bool
+            - doc: |-
+                Items are a store's latest entities, redacted as payloads are; false
+                for no such store.
+              in:
+                - name: store
+                  type: string
+              name: Items
+              out:
+                - type: "[]json.RawMessage"
+                - type: bool
+            - doc: |-
+                Source is a file the graph names, of the product's Go module or of
+                the one module names: a regular file within the bound, never a link;
+                false for any other name.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: module
+                  type: string
+                - name: file
+                  type: string
+              name: Source
+              out:
+                - type: "[]byte"
+                - type: bool
+            - doc: |-
+                Locate says where the function fn, at file:line, lies in the
+                product's own module; nil anywhere else.
+              in:
+                - name: file
+                  type: string
+                - name: line
+                  type: int
+                - name: fn
+                  type: string
+              name: Locate
+              out:
+                - type: "*model.Source"
+            - doc: |-
+                Mails are every mailer's latest mails, at most limit of each.
+              in:
+                - name: limit
+                  type: int
+              name: Mails
+              out:
+                - type: "[]model.MailSummary"
+            - doc: |-
+                Mail is one mail, whole when its mailer keeps bodies; false when no
+                mailer remembers it.
+              in:
+                - name: id
+                  type: string
+              name: Mail
+              out:
+                - type: model.MailMessage
+                - type: bool
+            - doc: |-
+                Stores reports whether the app runs on the store subsystem: the
+                Studio's routes on the stores and the databases are mounted only then.
+              name: Stores
+              out:
+                - type: bool
+            - doc: |-
+                Databases are the app's databases, each checked and its migrations
+                read again now.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Databases
+              out:
+                - type: "[]model.Database"
+            - doc: |-
+                Former are the former values of the record under key in store, as
+                the Studio's data view shows them.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: store
+                  type: string
+                - name: key
+                  type: string
+              name: Former
+              out:
+                - type: model.RecordHistory
+                - type: error
+            - doc: |-
+                Revisions are the versions of the record under key in store, and
+                what changed from version from to version to when both are given.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: store
+                  type: string
+                - name: key
+                  type: string
+                - name: from
+                  type: string
+                - name: to
+                  type: string
+              name: Revisions
+              out:
+                - type: model.RecordVersions
+                - type: error
+            - doc: |-
+                Trash is a page of store's trash, from offset and at most limit
+                records — defaults when they are empty.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: store
+                  type: string
+                - name: offset
+                  type: string
+                - name: limit
+                  type: string
+              name: Trash
+              out:
+                - type: model.StoreTrash
+                - type: error
+            - doc: |-
+                Privacy is what the Studio's Privacy page shows.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Privacy
+              out:
+                - type: model.Privacy
+                - type: error
+            - doc: |-
+                Remote reports whether the Studio answers a client that is not on
+                this machine.
+              name: Remote
+              out:
+                - type: bool
+            - doc: |-
+                AllowedHost reports whether a request's Host, its port, brackets and
+                case removed, may reach the Studio.
+              in:
+                - name: host
+                  type: string
+              name: AllowedHost
+              out:
+                - type: bool
+            - doc: |-
+                Reply answers r with body, a JSON document, or with err as kit
+                answers an error.
+              in:
+                - name: w
+                  type: http.ResponseWriter
+                - name: r
+                  type: "*http.Request"
+                - name: body
+                  type: json.RawMessage
+                - name: err
+                  type: error
+              name: Reply
+            - doc: |-
+                Forbid answers that the caller may not reach the Studio, saying
+                message.
+              in:
+                - name: w
+                  type: http.ResponseWriter
+                - name: message
+                  type: string
+              name: Forbid
+            - doc: |-
+                Fail answers an internal error, saying message and nothing of the
+                error.
+              in:
+                - name: w
+                  type: http.ResponseWriter
+                - name: message
+                  type: string
+              name: Fail
+            - doc: |-
+                NotFound is kit's answer to a request for what does not exist,
+                saying message.
+              in:
+                - name: message
+                  type: string
+              name: NotFound
+              out:
+                - type: error
+            - doc: |-
+                Invalid is kit's answer to a request the caller must change, saying
+                message.
+              in:
+                - name: message
+                  type: string
+              name: Invalid
+              out:
+                - type: error
+            - doc: |-
+                ProfileUnreadable is kit's refusal of a profile the process could
+                not read: public says which, cause why, for the logs.
+              in:
+                - name: public
+                  type: string
+                - name: cause
+                  type: error
+              name: ProfileUnreadable
+              out:
+                - type: error
+            - doc: |-
+                Debug logs, at the debug level, a failure nobody is told of.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: message
+                  type: string
+                - name: err
+                  type: error
+              name: Debug
+        name: StudioHost
+      - doc: |-
           WordsConfig is what framework/kit/studio plugs into kit: how kit's
           catalogues in the languages after English open.
         name: WordsConfig
@@ -7836,16 +8175,6 @@ packages:
         name: SampleProcess
         type: atomic.Pointer[func() *model.Process]
       - doc: |-
-          OpenEventStream opens a Server-Sent Events stream on w; nil until
-          framework/kit/studio is imported.
-        name: OpenEventStream
-        type: atomic.Pointer[func(w http.ResponseWriter, r *http.Request) (EventStream, error)]
-      - doc: |-
-          StudioProfiler is the Studio's profiler; nil until framework/kit/studio
-          is imported.
-        name: StudioProfiler
-        type: atomic.Pointer[ProfilerConfig]
-      - doc: |-
           Queues is the queue subsystem: the brokers kit's consumers' queues run on
           and the migration of a queue's table on a database; nil until
           framework/kit/queue is imported. A product that declares a topic, a
@@ -7860,6 +8189,12 @@ packages:
           database without it is refused at the start (ADR 0179 §6).
         name: Stores
         type: atomic.Pointer[StoreDriverConfig]
+      - doc: |-
+          Studio is the Studio subsystem: the tool's variables and the Studio's
+          routes; nil until framework/kit/studio is imported, and kit then reads
+          none of the tool's variables and serves no route of the Studio.
+        name: Studio
+        type: atomic.Pointer[StudioDriverConfig]
       - doc: |-
           Workflows is the workflow subsystem: the engine kit's workflows run on;
           nil until framework/kit/workflow is imported. A product that declares a
@@ -7958,27 +8293,22 @@ packages:
       sql: github.com/kitsunium/sdk/pkg/v1/data/sql
     path: github.com/kitsunium/sdk/framework/internal/kit/storekit
   - doc: |-
-      Package studiokit — the Studio's live events, as a Server-Sent Events
-      stream.
-
-      Package studiokit — the Studio's profiler: the live heap folded onto the
-      graph's nodes, and every goroutine grouped.
-
-      Package studiokit is what framework/kit/studio plugs into kit: the
-      Studio's event stream (the SDK's net/sse), its profiler (the SDK's
-      profiling), and kit's sentences in the languages after English — the
-      catalogues the Studio shows its reader's language from, compiled by the
-      SDK's i18n (ADR 0179 §1, step 8, Q6). kit imports none of them: a product
-      that does not import the Studio neither links nor initialises them, and
-      speaks English alone.
-
-      Package studiokit — the compile-time proof that the stream is kit's.
-
-      Package studiokit — kit's catalogues after English, over the SDK's i18n.
+      Package studiokit is what framework/kit/studio plugs into kit (ADR 0179
+      §1, step 8; ADR 0180 §4, step 1): the Studio's routes, their guard and
+      their handlers — the graph, the live events as a Server-Sent Events
+      stream (the SDK's net/sse), traces, source, instances, items, and the dev
+      tools with the profiler (the SDK's profiling) —, the tool's variables kit
+      dev and the Studio set, and kit's sentences in the languages after
+      English — the catalogues the Studio shows its reader's language from,
+      compiled by the SDK's i18n (Q6). kit's core holds none of them: a product
+      that does not import the Studio neither links nor initialises them, reads
+      none of the tool's variables, and speaks English alone. The routes read
+      the running app through the plug.StudioHost kit's core gives.
     functions:
       - doc: |-
-          Enable plugs the Studio's event stream, its profiler and kit's
-          catalogues after English into kit.
+          Enable plugs the Studio into kit: the tool's variables, the Studio's
+          routes — with its event stream and its profiler — and kit's catalogues
+          after English.
         name: Enable
     path: github.com/kitsunium/sdk/framework/internal/kit/studiokit
   - doc: |-

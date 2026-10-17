@@ -42,7 +42,7 @@ type funcOwners struct {
 // for a CPU profile, by the innermost node code on its stack for the heap —
 // and answers the fold as the Studio reads it: milliseconds of CPU, bytes of
 // heap.
-func foldProfile(p *profiling.Profile, kind string, owners *funcOwners, source plug.SourceFunc) (*model.Profile, error) {
+func foldProfile(p *profiling.Profile, kind string, owners *funcOwners, source sourceFunc) (*model.Profile, error) {
 	cfg := profiling.FoldConfig{
 		SampleType: "cpu", TopFunctions: topFuncs, TopPerOwner: topNodeFuncs, FlameMinShare: flameMinShare, FlameMaxDepth: flameMaxDepth,
 		Attribute: func(s profiling.Sample) string {
@@ -82,7 +82,7 @@ func foldProfile(p *profiling.Profile, kind string, owners *funcOwners, source p
 // funcCosts are the costliest functions, each with the node it belongs to —
 // node, or the one whose code it is — and where it is, when the graph or the
 // product's module knows.
-func funcCosts(top []profiling.FunctionCost, owners *funcOwners, node string, round func(int64) float64, source plug.SourceFunc) []model.FuncCost {
+func funcCosts(top []profiling.FunctionCost, owners *funcOwners, node string, round func(int64) float64, source sourceFunc) []model.FuncCost {
 	out := make([]model.FuncCost, 0, len(top))
 	for _, fn := range top {
 		fc := model.FuncCost{Func: fn.Function, Flat: round(fn.Flat), Cum: round(fn.Cum), Node: node}
@@ -216,11 +216,12 @@ func functionsOf(stack []profiling.Frame) []string {
 	return out
 }
 
-// profiler is the Studio's profiler, as framework/kit/studio plugs it in.
-var profiler = plug.ProfilerConfig{Heap: heap, Goroutines: goroutines}
+// sourceFunc says where the function fn, at file:line, lies in the product,
+// nil when it knows none: the host's Locate.
+type sourceFunc func(file string, line int, fn string) *model.Source
 
 // heap captures the live heap, after a collection, and folds it onto g.
-func heap(g *model.Graph, source plug.SourceFunc) (*model.Profile, error) {
+func heap(g *model.Graph, source sourceFunc) (*model.Profile, error) {
 	p, err := profiling.CaptureHeap()
 	if err != nil {
 		return nil, err

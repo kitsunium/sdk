@@ -1,18 +1,12 @@
-// Package studiokit — the Studio's live events, as a Server-Sent Events
-// stream.
-//
-// Package studiokit — the Studio's profiler: the live heap folded onto the
-// graph's nodes, and every goroutine grouped.
-//
-// Package studiokit is what framework/kit/studio plugs into kit: the
-// Studio's event stream (the SDK's net/sse), its profiler (the SDK's
-// profiling), and kit's sentences in the languages after English — the
-// catalogues the Studio shows its reader's language from, compiled by the
-// SDK's i18n (ADR 0179 §1, step 8, Q6). kit imports none of them: a product
-// that does not import the Studio neither links nor initialises them, and
-// speaks English alone.
-//
-// Package studiokit — the compile-time proof that the stream is kit's.
-//
-// Package studiokit — kit's catalogues after English, over the SDK's i18n.
+// Package studiokit is what framework/kit/studio plugs into kit (ADR 0179
+// §1, step 8; ADR 0180 §4, step 1): the Studio's routes, their guard and
+// their handlers — the graph, the live events as a Server-Sent Events
+// stream (the SDK's net/sse), traces, source, instances, items, and the dev
+// tools with the profiler (the SDK's profiling) —, the tool's variables kit
+// dev and the Studio set, and kit's sentences in the languages after
+// English — the catalogues the Studio shows its reader's language from,
+// compiled by the SDK's i18n (Q6). kit's core holds none of them: a product
+// that does not import the Studio neither links nor initialises them, reads
+// none of the tool's variables, and speaks English alone. The routes read
+// the running app through the plug.StudioHost kit's core gives.
 package studiokit

@@ -1,7 +1,7 @@
 package kit
 
 import (
-	"net/http"
+	"context"
 	"slices"
 	"time"
 
@@ -51,9 +51,10 @@ func (r *databaseRun) describe() model.Database {
 	return db
 }
 
-// serveDatabases answers GET /_kit/api/databases, in dev: each database
-// sampled now — a new check, its migrations read again, its pool.
-func (a *App) serveDatabases(w http.ResponseWriter, r *http.Request) {
+// studioDatabases are the app's databases as the Studio's
+// GET /_kit/api/databases shows them, in dev: each sampled now — a new
+// check, its migrations read again, its pool.
+func (a *App) studioDatabases(ctx context.Context) []model.Database {
 	for _, run := range a.databaseRuns() {
 		run.mu.Lock()
 		state, db := run.state, run.db
@@ -62,8 +63,8 @@ func (a *App) serveDatabases(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		// The check records its verdict on the run, which the answer shows.
-		if err := a.checkDatabase(r.Context(), run); err != nil {
-			logger.Debug(r.Context(), a.log, "a database did not answer the Studio's check", logger.String("database", run.d.name),
+		if err := a.checkDatabase(ctx, run); err != nil {
+			logger.Debug(ctx, a.log, "a database did not answer the Studio's check", logger.String("database", run.d.name),
 				logger.String("error", errs.PublicOf(err)))
 		}
 		var sets []model.MigrationSet
@@ -73,13 +74,13 @@ func (a *App) serveDatabases(w http.ResponseWriter, r *http.Request) {
 				sets = append(sets, model.MigrationSet{Name: set.name, Table: set.table, Problem: errs.PublicOf(err)})
 				continue
 			}
-			sets = append(sets, readSet(r.Context(), set, m))
+			sets = append(sets, readSet(ctx, set, m))
 		}
 		run.mu.Lock()
 		run.sets = sets
 		run.mu.Unlock()
 	}
-	writeJSON(w, http.StatusOK, a.describeDatabases())
+	return a.describeDatabases()
 }
 
 // tlsWords says a database's TLS mode as the diagram and the logs do.

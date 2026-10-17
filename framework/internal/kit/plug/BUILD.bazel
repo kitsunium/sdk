@@ -16,6 +16,8 @@ go_library(
         "store.go",
         "store_interface.go",
         "store_refusal.go",
+        "studio.go",
+        "studio_interface.go",
         "words.go",
         "words_interface.go",
         "workflow.go",

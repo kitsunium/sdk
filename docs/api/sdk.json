@@ -92,7 +92,7 @@
       "name": "plug",
       "dir": "framework/internal/kit/plug",
       "layer": "framework",
-      "doc": "Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the\nfrontends' file server and the process sampler of the runtime graph\n(framework/kit/server), the Studio's event stream, its profiler and kit's\nsentences in the languages after English (framework/kit/studio), the\nstores and the databases (framework/kit/store), the queues\n(framework/kit/queue), the workflows (framework/kit/workflow), the mailers\n(framework/kit/mail), the jobs (framework/kit/jobs). kit reads\nwhat they registered through the hooks declared here, and imports none of\nthe SDK packages behind them: a product that does not import a subsystem\nneither links nor initialises its packages.\n\nIt is also the contract between kit's core and the subsystems ADR 0179\ntakes out of it, as database/sql/driver is between database/sql and a\ndriver: the store subsystem's engine over documents, its siblings, kit's\nscope on a database and its migrations ([Stores]), which framework/kit/store\nsets; the refusals an engine says in kit's terms ([Refusal]); what kit's\ntransactions offer an engine that takes part in them ([Transaction]); the\nqueue subsystem's brokers and their consumer ([Queues]), which\nframework/kit/queue sets; the workflow subsystem's engine and the ports\nit runs on ([Workflows]), which framework/kit/workflow sets; the mail\nsubsystem's outbox and transports ([Mail]), which framework/kit/mail sets;\nthe jobs subsystem's schedules and scheduler ([Jobs]), which\nframework/kit/jobs sets; and kit's catalogues in the languages after\nEnglish ([Words]), which framework/kit/studio sets.\n\nThe package imports the standard library and the framework's model only,\nso that kit and every subsystem can import it.\n"
+      "doc": "Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the\nfrontends' file server and the process sampler of the runtime graph\n(framework/kit/server), the Studio — the tool's variables, its routes and\nkit's sentences in the languages after English (framework/kit/studio) —, the\nstores and the databases (framework/kit/store), the queues\n(framework/kit/queue), the workflows (framework/kit/workflow), the mailers\n(framework/kit/mail), the jobs (framework/kit/jobs). kit reads\nwhat they registered through the hooks declared here, and imports none of\nthe SDK packages behind them: a product that does not import a subsystem\nneither links nor initialises its packages.\n\nIt is also the contract between kit's core and the subsystems ADR 0179\ntakes out of it, as database/sql/driver is between database/sql and a\ndriver: the store subsystem's engine over documents, its siblings, kit's\nscope on a database and its migrations ([Stores]), which framework/kit/store\nsets; the refusals an engine says in kit's terms ([Refusal]); what kit's\ntransactions offer an engine that takes part in them ([Transaction]); the\nqueue subsystem's brokers and their consumer ([Queues]), which\nframework/kit/queue sets; the workflow subsystem's engine and the ports\nit runs on ([Workflows]), which framework/kit/workflow sets; the mail\nsubsystem's outbox and transports ([Mail]), which framework/kit/mail sets;\nthe jobs subsystem's schedules and scheduler ([Jobs]), which\nframework/kit/jobs sets; kit's catalogues in the languages after\nEnglish ([Words]), and the Studio's routes and the tool's variables\n([Studio], ADR 0180 step 1), which framework/kit/studio sets, the routes\nreading the running app through a [StudioHost] kit gives.\n\nThe package imports the standard library and the framework's model only,\nso that kit and every subsystem can import it.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/internal/kit/queuekit",
@@ -120,7 +120,7 @@
       "name": "studiokit",
       "dir": "framework/internal/kit/studiokit",
       "layer": "framework",
-      "doc": "Package studiokit — the Studio's live events, as a Server-Sent Events\nstream.\n\nPackage studiokit — the Studio's profiler: the live heap folded onto the\ngraph's nodes, and every goroutine grouped.\n\nPackage studiokit is what framework/kit/studio plugs into kit: the\nStudio's event stream (the SDK's net/sse), its profiler (the SDK's\nprofiling), and kit's sentences in the languages after English — the\ncatalogues the Studio shows its reader's language from, compiled by the\nSDK's i18n (ADR 0179 §1, step 8, Q6). kit imports none of them: a product\nthat does not import the Studio neither links nor initialises them, and\nspeaks English alone.\n\nPackage studiokit — the compile-time proof that the stream is kit's.\n\nPackage studiokit — kit's catalogues after English, over the SDK's i18n.\n"
+      "doc": "Package studiokit is what framework/kit/studio plugs into kit (ADR 0179\n§1, step 8; ADR 0180 §4, step 1): the Studio's routes, their guard and\ntheir handlers — the graph, the live events as a Server-Sent Events\nstream (the SDK's net/sse), traces, source, instances, items, and the dev\ntools with the profiler (the SDK's profiling) —, the tool's variables kit\ndev and the Studio set, and kit's sentences in the languages after\nEnglish — the catalogues the Studio shows its reader's language from,\ncompiled by the SDK's i18n (Q6). kit's core holds none of them: a product\nthat does not import the Studio neither links nor initialises them, reads\nnone of the tool's variables, and speaks English alone. The routes read\nthe running app through the plug.StudioHost kit's core gives.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/internal/kit/workflowkit",
@@ -232,7 +232,7 @@
       "name": "studio",
       "dir": "framework/kit/studio",
       "layer": "framework",
-      "doc": "Package studio serves, in dev, the read-only API the kit tool's Studio\nreads: the graph and its event stream, traces, instances and items, the\nsource, the dev tools — the process, the databases, goroutines, the heap\nprofile, logs, the mailbox, former values. A server imports it to be seen\nby the Studio:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/studio\"\n\nIt also brings kit's sentences in the languages after English — French\ntoday —, which only the Studio shows, in its reader's language: with it a\ndiagnostic of the graph carries its text in each of them, without it in\nEnglish alone. The terminal, the logs and an error read English either\nway (ADR 0179 step 8, Q6).\n\nWithout it a product links none of those routes, the event stream, the\nprofiler, the catalogues after English or the SDK's i18n; in dev the start\nwarns that the Studio was asked for.\n"
+      "doc": "Package studio serves, in dev, the read-only API the kit tool's Studio\nreads: the graph and its event stream, traces, instances and items, the\nsource, the dev tools — the process, the databases, goroutines, the heap\nprofile, logs, the mailbox, former values. A server imports it to be seen\nby the Studio:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/studio\"\n\nIt also brings kit's sentences in the languages after English — French\ntoday —, which only the Studio shows, in its reader's language: with it a\ndiagnostic of the graph carries its text in each of them, without it in\nEnglish alone. The terminal, the logs and an error read English either\nway (ADR 0179 step 8, Q6). And it reads the variables the kit tool sets —\nwhat kit dev built and set for a launch, whether the Studio is served, to\nwhom, and with the static analysis (ADR 0180 step 1).\n\nWithout it a product links none of those routes, their handlers, the event\nstream, the profiler, the catalogues after English or the SDK's i18n, and\nreads none of the tool's variables; in dev the start warns that the Studio\nwas asked for. The health probes are the product's either way.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/kit/workflow",
@@ -5453,7 +5453,7 @@
       "name": "EnableStudio",
       "spelled": "func()",
       "canonical": "func()",
-      "doc": "EnableStudio makes a serving app in dev mount the Studio's API.\nframework/kit/studio calls it as it is imported; a product never does.\n",
+      "doc": "EnableStudio makes a serving app in dev mount the Studio's routes, which\nframework/kit/studio plugs in (plug.Studio), over a host of the app.\nframework/kit/studio calls it as it is imported; a product never does.\n",
       "file": "framework/internal/kit/introspect.go",
       "layer": "framework"
     },
@@ -9412,53 +9412,6 @@
       "layer": "framework"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.EventStream",
-      "kind": "type",
-      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
-      "name": "EventStream",
-      "spelled": "interface{Close() error; Done() <-chan struct{}; Send(data string) error}",
-      "canonical": "interface{Close() error; Done() <-chan struct{}; Send(data string) error}",
-      "doc": "EventStream is one Server-Sent Events stream: the Studio's live events.\n",
-      "file": "framework/internal/kit/plug/plug.go",
-      "layer": "framework"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.EventStream.Close",
-      "kind": "method",
-      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
-      "name": "Close",
-      "recv": "EventStream",
-      "spelled": "func() error",
-      "canonical": "func() error",
-      "doc": "Close ends the stream.\n",
-      "file": "framework/internal/kit/plug/plug.go",
-      "layer": "framework"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.EventStream.Done",
-      "kind": "method",
-      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
-      "name": "Done",
-      "recv": "EventStream",
-      "spelled": "func() <-chan struct{}",
-      "canonical": "func() <-chan struct{}",
-      "doc": "Done is closed when the client left.\n",
-      "file": "framework/internal/kit/plug/plug.go",
-      "layer": "framework"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.EventStream.Send",
-      "kind": "method",
-      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
-      "name": "Send",
-      "recv": "EventStream",
-      "spelled": "func(data string) error",
-      "canonical": "func(data string) error",
-      "doc": "Send writes one event's data.\n",
-      "file": "framework/internal/kit/plug/plug.go",
-      "layer": "framework"
-    },
-    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Executor",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
@@ -10690,40 +10643,6 @@
       "layer": "framework"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.OpenEventStream",
-      "kind": "var",
-      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
-      "name": "OpenEventStream",
-      "spelled": "atomic.Pointer[func(w http.ResponseWriter, r *http.Request) (EventStream, error)]",
-      "canonical": "sync/atomic.Pointer[func(w net/http.ResponseWriter, r *net/http.Request) (github.com/kitsunium/sdk/framework/internal/kit/plug.EventStream, error)]",
-      "doc": "OpenEventStream opens a Server-Sent Events stream on w; nil until\nframework/kit/studio is imported.\n",
-      "file": "framework/internal/kit/plug/plug.go",
-      "layer": "framework"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.ProfilerConfig",
-      "kind": "type",
-      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
-      "name": "ProfilerConfig",
-      "spelled": "struct{Heap func(g *model.Graph, source SourceFunc) (*model.Profile, error); Goroutines func(at time.Time) (*model.Goroutines, error)}",
-      "canonical": "struct{Heap func(g *github.com/kitsunium/sdk/framework/model.Graph, source github.com/kitsunium/sdk/framework/internal/kit/plug.SourceFunc) (*github.com/kitsunium/sdk/framework/model.Profile, error); Goroutines func(at time.Time) (*github.com/kitsunium/sdk/framework/model.Goroutines, error)}",
-      "fields": [
-        {
-          "name": "Heap",
-          "type": "func(g *model.Graph, source SourceFunc) (*model.Profile, error)",
-          "doc": "Heap folds the live heap onto g's nodes; source says where a function\nof a module lies, nil when it knows none.\n"
-        },
-        {
-          "name": "Goroutines",
-          "type": "func(at time.Time) (*model.Goroutines, error)",
-          "doc": "Goroutines groups every goroutine of the process, read at at.\n"
-        }
-      ],
-      "doc": "ProfilerConfig is the Studio's profiler: the live heap folded onto the graph's\nnodes, and every goroutine grouped.\n",
-      "file": "framework/internal/kit/plug/plug.go",
-      "layer": "framework"
-    },
-    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.QueueConfig",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
@@ -11259,17 +11178,6 @@
       "layer": "framework"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.SourceFunc",
-      "kind": "type",
-      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
-      "name": "SourceFunc",
-      "spelled": "func(file string, line int, fn string) *model.Source",
-      "canonical": "func(file string, line int, fn string) *github.com/kitsunium/sdk/framework/model.Source",
-      "doc": "SourceFunc says where the function fn, at file:line, lies in the product,\nnil when it knows none.\n",
-      "file": "framework/internal/kit/plug/plug.go",
-      "layer": "framework"
-    },
-    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StampValue",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
@@ -11591,14 +11499,477 @@
       "layer": "framework"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioProfiler",
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Studio",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
-      "name": "StudioProfiler",
-      "spelled": "atomic.Pointer[ProfilerConfig]",
-      "canonical": "sync/atomic.Pointer[github.com/kitsunium/sdk/framework/internal/kit/plug.ProfilerConfig]",
-      "doc": "StudioProfiler is the Studio's profiler; nil until framework/kit/studio\nis imported.\n",
-      "file": "framework/internal/kit/plug/plug.go",
+      "name": "Studio",
+      "spelled": "atomic.Pointer[StudioDriverConfig]",
+      "canonical": "sync/atomic.Pointer[github.com/kitsunium/sdk/framework/internal/kit/plug.StudioDriverConfig]",
+      "doc": "Studio is the Studio subsystem: the tool's variables and the Studio's\nroutes; nil until framework/kit/studio is imported, and kit then reads\nnone of the tool's variables and serves no route of the Studio.\n",
+      "file": "framework/internal/kit/plug/studio.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioDriverConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "StudioDriverConfig",
+      "spelled": "struct{Env func(getenv func(string) string) StudioEnvValue; Settings func(getenv func(string) string, state StudioStateValue) []model.Setting; Forced func(getenv func(string) string) []string; DevBuild func(getenv func(string) string) *model.DevBuild; Mount func(mux *http.ServeMux, host StudioHost)}",
+      "canonical": "struct{Env func(getenv func(string) string) github.com/kitsunium/sdk/framework/internal/kit/plug.StudioEnvValue; Settings func(getenv func(string) string, state github.com/kitsunium/sdk/framework/internal/kit/plug.StudioStateValue) []github.com/kitsunium/sdk/framework/model.Setting; Forced func(getenv func(string) string) []string; DevBuild func(getenv func(string) string) *github.com/kitsunium/sdk/framework/model.DevBuild; Mount func(mux *net/http.ServeMux, host github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost)}",
+      "fields": [
+        {
+          "name": "Env",
+          "type": "func(getenv func(string) string) StudioEnvValue",
+          "doc": "Env reads what the tool's variables ask of the Studio in this run.\n"
+        },
+        {
+          "name": "Settings",
+          "type": "func(getenv func(string) string, state StudioStateValue) []model.Setting",
+          "doc": "Settings are the tool's variables as the settings of a run show them,\nin order, each with its value as the run resolved it and where it\ncame from: the product's code, the environment, or kit's default.\n"
+        },
+        {
+          "name": "Forced",
+          "type": "func(getenv func(string) string) []string",
+          "doc": "Forced are the variables kit dev says it set itself for this launch,\nas it names them; kit labels only those it lets kit dev set.\n"
+        },
+        {
+          "name": "DevBuild",
+          "type": "func(getenv func(string) string) *model.DevBuild",
+          "doc": "DevBuild is what kit dev said about the build it launched, nil when\nthe process was not started by kit dev.\n"
+        },
+        {
+          "name": "Mount",
+          "type": "func(mux *http.ServeMux, host StudioHost)",
+          "doc": "Mount registers the Studio's routes on mux, each behind the Studio's\nguard, reading the running app through host.\n"
+        }
+      ],
+      "doc": "StudioDriverConfig is what framework/kit/studio plugs into kit: how the\ntool's variables are read, and how the Studio's routes mount.\n",
+      "file": "framework/internal/kit/plug/studio.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioEnvValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "StudioEnvValue",
+      "spelled": "struct{Studio string; Remote bool; NoAnalysis bool}",
+      "canonical": "struct{Studio string; Remote bool; NoAnalysis bool}",
+      "fields": [
+        {
+          "name": "Studio",
+          "type": "string",
+          "doc": "Studio is what the environment says of the Studio: on — which\nproduction refuses —, off, or empty when it says neither.\n"
+        },
+        {
+          "name": "Remote",
+          "type": "bool",
+          "doc": "Remote: the Studio answers a client that is not on this machine.\n"
+        },
+        {
+          "name": "NoAnalysis",
+          "type": "bool",
+          "doc": "NoAnalysis: the environment turns the static analysis off.\n"
+        }
+      ],
+      "doc": "StudioEnvValue is what the tool's variables ask of the Studio: their\nzero value is a run in which none is set.\n",
+      "file": "framework/internal/kit/plug/studio.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "StudioHost",
+      "spelled": "interface{AllowedHost(host string) bool; Databases(ctx context.Context) []model.Database; Debug(ctx context.Context, message string, err error); Fail(w http.ResponseWriter, message string); Forbid(w http.ResponseWriter, message string); Former(ctx context.Context, store string, key string) (model.RecordHistory, error); Graph() *model.Graph; Instances(workflow string) ([]model.Instance, bool); Invalid(message string) error; Items(store string) ([]json.RawMessage, bool); Locate(file string, line int, fn string) *model.Source; Logs(trace string, node string, level string, limit string) ([]model.LogRecord, error); Mail(id string) (model.MailMessage, bool); Mails(limit int) []model.MailSummary; NotFound(message string) error; Now() time.Time; Phase() string; Privacy(ctx context.Context) (model.Privacy, error); ProfileUnreadable(public string, cause error) error; Remote() bool; Reply(w http.ResponseWriter, r *http.Request, body json.RawMessage, err error); Revisions(ctx context.Context, store string, key string, from string, to string) (model.RecordVersions, error); Source(ctx context.Context, module string, file string) ([]byte, bool); Stopping() <-chan struct{}; Stores() bool; Subscribe() (events <-chan model.Event, cancel func()); Trace(id string) (model.Trace, bool); Traces(limit int, root string, node string) []model.Trace; Trash(ctx context.Context, store string, offset string, limit string) (model.StoreTrash, error)}",
+      "canonical": "interface{AllowedHost(host string) bool; Databases(ctx context.Context) []github.com/kitsunium/sdk/framework/model.Database; Debug(ctx context.Context, message string, err error); Fail(w net/http.ResponseWriter, message string); Forbid(w net/http.ResponseWriter, message string); Former(ctx context.Context, store string, key string) (github.com/kitsunium/sdk/framework/model.RecordHistory, error); Graph() *github.com/kitsunium/sdk/framework/model.Graph; Instances(workflow string) ([]github.com/kitsunium/sdk/framework/model.Instance, bool); Invalid(message string) error; Items(store string) ([]encoding/json.RawMessage, bool); Locate(file string, line int, fn string) *github.com/kitsunium/sdk/framework/model.Source; Logs(trace string, node string, level string, limit string) ([]github.com/kitsunium/sdk/framework/model.LogRecord, error); Mail(id string) (github.com/kitsunium/sdk/framework/model.MailMessage, bool); Mails(limit int) []github.com/kitsunium/sdk/framework/model.MailSummary; NotFound(message string) error; Now() time.Time; Phase() string; Privacy(ctx context.Context) (github.com/kitsunium/sdk/framework/model.Privacy, error); ProfileUnreadable(public string, cause error) error; Remote() bool; Reply(w net/http.ResponseWriter, r *net/http.Request, body encoding/json.RawMessage, err error); Revisions(ctx context.Context, store string, key string, from string, to string) (github.com/kitsunium/sdk/framework/model.RecordVersions, error); Source(ctx context.Context, module string, file string) ([]byte, bool); Stopping() <-chan struct{}; Stores() bool; Subscribe() (events <-chan github.com/kitsunium/sdk/framework/model.Event, cancel func()); Trace(id string) (github.com/kitsunium/sdk/framework/model.Trace, bool); Traces(limit int, root string, node string) []github.com/kitsunium/sdk/framework/model.Trace; Trash(ctx context.Context, store string, offset string, limit string) (github.com/kitsunium/sdk/framework/model.StoreTrash, error)}",
+      "doc": "StudioHost is the running app, as the Studio's routes read it and answer\nthrough it.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.AllowedHost",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "AllowedHost",
+      "recv": "StudioHost",
+      "spelled": "func(host string) bool",
+      "canonical": "func(host string) bool",
+      "doc": "AllowedHost reports whether a request's Host, its port, brackets and\ncase removed, may reach the Studio.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Databases",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Databases",
+      "recv": "StudioHost",
+      "spelled": "func(ctx context.Context) []model.Database",
+      "canonical": "func(ctx context.Context) []github.com/kitsunium/sdk/framework/model.Database",
+      "doc": "Databases are the app's databases, each checked and its migrations\nread again now.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Debug",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Debug",
+      "recv": "StudioHost",
+      "spelled": "func(ctx context.Context, message string, err error)",
+      "canonical": "func(ctx context.Context, message string, err error)",
+      "doc": "Debug logs, at the debug level, a failure nobody is told of.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Fail",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Fail",
+      "recv": "StudioHost",
+      "spelled": "func(w http.ResponseWriter, message string)",
+      "canonical": "func(w net/http.ResponseWriter, message string)",
+      "doc": "Fail answers an internal error, saying message and nothing of the\nerror.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Forbid",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Forbid",
+      "recv": "StudioHost",
+      "spelled": "func(w http.ResponseWriter, message string)",
+      "canonical": "func(w net/http.ResponseWriter, message string)",
+      "doc": "Forbid answers that the caller may not reach the Studio, saying\nmessage.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Former",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Former",
+      "recv": "StudioHost",
+      "spelled": "func(ctx context.Context, store string, key string) (model.RecordHistory, error)",
+      "canonical": "func(ctx context.Context, store string, key string) (github.com/kitsunium/sdk/framework/model.RecordHistory, error)",
+      "doc": "Former are the former values of the record under key in store, as\nthe Studio's data view shows them.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Graph",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Graph",
+      "recv": "StudioHost",
+      "spelled": "func() *model.Graph",
+      "canonical": "func() *github.com/kitsunium/sdk/framework/model.Graph",
+      "doc": "Graph is the app's graph, as it is now.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Instances",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Instances",
+      "recv": "StudioHost",
+      "spelled": "func(workflow string) ([]model.Instance, bool)",
+      "canonical": "func(workflow string) ([]github.com/kitsunium/sdk/framework/model.Instance, bool)",
+      "doc": "Instances are a workflow's entities and where each is; false for no\nsuch workflow.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Invalid",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Invalid",
+      "recv": "StudioHost",
+      "spelled": "func(message string) error",
+      "canonical": "func(message string) error",
+      "doc": "Invalid is kit's answer to a request the caller must change, saying\nmessage.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Items",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Items",
+      "recv": "StudioHost",
+      "spelled": "func(store string) ([]json.RawMessage, bool)",
+      "canonical": "func(store string) ([]encoding/json.RawMessage, bool)",
+      "doc": "Items are a store's latest entities, redacted as payloads are; false\nfor no such store.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Locate",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Locate",
+      "recv": "StudioHost",
+      "spelled": "func(file string, line int, fn string) *model.Source",
+      "canonical": "func(file string, line int, fn string) *github.com/kitsunium/sdk/framework/model.Source",
+      "doc": "Locate says where the function fn, at file:line, lies in the\nproduct's own module; nil anywhere else.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Logs",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Logs",
+      "recv": "StudioHost",
+      "spelled": "func(trace string, node string, level string, limit string) ([]model.LogRecord, error)",
+      "canonical": "func(trace string, node string, level string, limit string) ([]github.com/kitsunium/sdk/framework/model.LogRecord, error)",
+      "doc": "Logs are the latest records the product logged, those of a trace or\na node and from a level when given, at most limit — a default when\nit is empty; a level or a limit the app does not take is refused.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Mail",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Mail",
+      "recv": "StudioHost",
+      "spelled": "func(id string) (model.MailMessage, bool)",
+      "canonical": "func(id string) (github.com/kitsunium/sdk/framework/model.MailMessage, bool)",
+      "doc": "Mail is one mail, whole when its mailer keeps bodies; false when no\nmailer remembers it.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Mails",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Mails",
+      "recv": "StudioHost",
+      "spelled": "func(limit int) []model.MailSummary",
+      "canonical": "func(limit int) []github.com/kitsunium/sdk/framework/model.MailSummary",
+      "doc": "Mails are every mailer's latest mails, at most limit of each.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.NotFound",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "NotFound",
+      "recv": "StudioHost",
+      "spelled": "func(message string) error",
+      "canonical": "func(message string) error",
+      "doc": "NotFound is kit's answer to a request for what does not exist,\nsaying message.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Now",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Now",
+      "recv": "StudioHost",
+      "spelled": "func() time.Time",
+      "canonical": "func() time.Time",
+      "doc": "Now is the time on the app's clock.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Phase",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Phase",
+      "recv": "StudioHost",
+      "spelled": "func() string",
+      "canonical": "func() string",
+      "doc": "Phase is where the app is in its life, as the graph says it.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Privacy",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Privacy",
+      "recv": "StudioHost",
+      "spelled": "func(ctx context.Context) (model.Privacy, error)",
+      "canonical": "func(ctx context.Context) (github.com/kitsunium/sdk/framework/model.Privacy, error)",
+      "doc": "Privacy is what the Studio's Privacy page shows.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.ProfileUnreadable",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "ProfileUnreadable",
+      "recv": "StudioHost",
+      "spelled": "func(public string, cause error) error",
+      "canonical": "func(public string, cause error) error",
+      "doc": "ProfileUnreadable is kit's refusal of a profile the process could\nnot read: public says which, cause why, for the logs.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Remote",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Remote",
+      "recv": "StudioHost",
+      "spelled": "func() bool",
+      "canonical": "func() bool",
+      "doc": "Remote reports whether the Studio answers a client that is not on\nthis machine.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Reply",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Reply",
+      "recv": "StudioHost",
+      "spelled": "func(w http.ResponseWriter, r *http.Request, body json.RawMessage, err error)",
+      "canonical": "func(w net/http.ResponseWriter, r *net/http.Request, body encoding/json.RawMessage, err error)",
+      "doc": "Reply answers r with body, a JSON document, or with err as kit\nanswers an error.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Revisions",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Revisions",
+      "recv": "StudioHost",
+      "spelled": "func(ctx context.Context, store string, key string, from string, to string) (model.RecordVersions, error)",
+      "canonical": "func(ctx context.Context, store string, key string, from string, to string) (github.com/kitsunium/sdk/framework/model.RecordVersions, error)",
+      "doc": "Revisions are the versions of the record under key in store, and\nwhat changed from version from to version to when both are given.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Source",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Source",
+      "recv": "StudioHost",
+      "spelled": "func(ctx context.Context, module string, file string) ([]byte, bool)",
+      "canonical": "func(ctx context.Context, module string, file string) ([]byte, bool)",
+      "doc": "Source is a file the graph names, of the product's Go module or of\nthe one module names: a regular file within the bound, never a link;\nfalse for any other name.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Stopping",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Stopping",
+      "recv": "StudioHost",
+      "spelled": "func() <-chan struct{}",
+      "canonical": "func() <-chan struct{}",
+      "doc": "Stopping is closed when the app ends its live streams.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Stores",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Stores",
+      "recv": "StudioHost",
+      "spelled": "func() bool",
+      "canonical": "func() bool",
+      "doc": "Stores reports whether the app runs on the store subsystem: the\nStudio's routes on the stores and the databases are mounted only then.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Subscribe",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Subscribe",
+      "recv": "StudioHost",
+      "spelled": "func() (events <-chan model.Event, cancel func())",
+      "canonical": "func() (events <-chan github.com/kitsunium/sdk/framework/model.Event, cancel func())",
+      "doc": "Subscribe streams the app's live events until cancel is called.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Trace",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Trace",
+      "recv": "StudioHost",
+      "spelled": "func(id string) (model.Trace, bool)",
+      "canonical": "func(id string) (github.com/kitsunium/sdk/framework/model.Trace, bool)",
+      "doc": "Trace is one trace, while the app keeps it.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Traces",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Traces",
+      "recv": "StudioHost",
+      "spelled": "func(limit int, root string, node string) []model.Trace",
+      "canonical": "func(limit int, root string, node string) []github.com/kitsunium/sdk/framework/model.Trace",
+      "doc": "Traces are the latest traces the app keeps, at most limit, those of\nroot's trace or through node when either is given.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioHost.Trash",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Trash",
+      "recv": "StudioHost",
+      "spelled": "func(ctx context.Context, store string, offset string, limit string) (model.StoreTrash, error)",
+      "canonical": "func(ctx context.Context, store string, offset string, limit string) (github.com/kitsunium/sdk/framework/model.StoreTrash, error)",
+      "doc": "Trash is a page of store's trash, from offset and at most limit\nrecords — defaults when they are empty.\n",
+      "file": "framework/internal/kit/plug/studio_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.StudioStateValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "StudioStateValue",
+      "spelled": "struct{StudioOption *bool; AnalyzeOption *bool; Studio string; Remote string; Analyze string}",
+      "canonical": "struct{StudioOption *bool; AnalyzeOption *bool; Studio string; Remote string; Analyze string}",
+      "fields": [
+        {
+          "name": "StudioOption",
+          "type": "*bool",
+          "doc": "StudioOption and AnalyzeOption are the product's code's choice of the\nStudio and of the static analysis, which wins over the environment;\nnil when the code chose nothing.\n"
+        },
+        {
+          "name": "AnalyzeOption",
+          "type": "*bool",
+          "doc": "StudioOption and AnalyzeOption are the product's code's choice of the\nStudio and of the static analysis, which wins over the environment;\nnil when the code chose nothing.\n"
+        },
+        {
+          "name": "Studio",
+          "type": "string",
+          "doc": "Studio, Remote and Analyze are the Studio's switches, as resolved and\nas the settings spell them: on or off.\n"
+        },
+        {
+          "name": "Remote",
+          "type": "string",
+          "doc": "Studio, Remote and Analyze are the Studio's switches, as resolved and\nas the settings spell them: on or off.\n"
+        },
+        {
+          "name": "Analyze",
+          "type": "string",
+          "doc": "Studio, Remote and Analyze are the Studio's switches, as resolved and\nas the settings spell them: on or off.\n"
+        }
+      ],
+      "doc": "StudioStateValue is what a run resolved of the Studio, and what the\nproduct's code chose of it: what the settings show of the tool's\nvariables.\n",
+      "file": "framework/internal/kit/plug/studio.go",
       "layer": "framework"
     },
     {
@@ -13159,7 +13530,7 @@
       "name": "Enable",
       "spelled": "func()",
       "canonical": "func()",
-      "doc": "Enable plugs the Studio's event stream, its profiler and kit's\ncatalogues after English into kit.\n",
+      "doc": "Enable plugs the Studio into kit: the tool's variables, the Studio's\nroutes — with its event stream and its profiler — and kit's catalogues\nafter English.\n",
       "file": "framework/internal/kit/studiokit/studiokit.go",
       "layer": "framework"
     },

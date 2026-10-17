@@ -3,8 +3,8 @@
 
 The hooks kit reads and a subsystem package sets as it is imported: the HTTP
 engine, the frontends' file server and the process sampler (`serverkit`, set
-by `framework/kit/server`), the Studio's event stream, its profiler and kit's
-catalogues after English (`studiokit`, set by `framework/kit/studio`), the stores and the databases
+by `framework/kit/server`), the Studio — its routes, the tool's variables and
+kit's catalogues after English (`studiokit`, set by `framework/kit/studio`) —, the stores and the databases
 (`storekit`, set by `framework/kit/store`), the queues (`queuekit`, set by
 `framework/kit/queue`), the workflows (`workflowkit`, set by
 `framework/kit/workflow`), the mailers (`mailkit`, set by
@@ -67,6 +67,17 @@ set `Words`, opens the other languages once per hook value with
 `WordsConfig.Open`, handing it that table — the language each falls back to
 —, and holds a `Translator` it asks the languages (`Languages`), their keys
 (`Keys`, which the core checks against English) and a sentence (`Render`).
+The Studio's (`studio.go`, `studio_interface.go`) is written and
+implemented by `studiokit` since ADR 0180 step 1: the core reads none of the
+tool's variables — it asks `Env` what they ask of the Studio (a
+`StudioEnvValue`, its zero value a run in which none is set), `Settings`
+for their rows given what the run resolved (`StudioStateValue`), `Forced`
+for what kit dev set and `DevBuild` for what it built — and holds none of
+the Studio's routes: a serving app in dev hands `Mount` its mux and a
+`StudioHost`, the app as the routes read it, which the core implements
+(`studio_host.go`). The event stream and the profiler, behind hooks of
+their own until then (`OpenEventStream`, `StudioProfiler`), are
+`studiokit`'s own, under its routes.
 
 ## Contents
 
@@ -76,12 +87,14 @@ set `Words`, opens the other languages once per hook value with
 | `jobs_interface.go` | the jobs subsystem's interface: `JobScheduler` (`Add`, `Run`), which `jobkit` implements over the SDK's scheduler and the core's `idleScheduler` for an app that declares no job |
 | `mail.go` | the mail subsystem's contract (ADR 0179 step 6): the hook `Mail` (`MailDriverConfig`: `Open` a mailer's outbox, `Validate` a mail, `Capture`, `ParseSMTP`, `NewSMTP` — the transports —, `Refused` — the refusal of a kind); the enums `MailRefusal` and `MailEvent` and their values; `MailSpoolConfig`, `MailValue`, `MailRelayValue`, `MailAttemptValue`, `MailEventValue` |
 | `mail_interface.go` | the mail subsystem's interfaces: `MailSpool` (`Send`, `SendWithID`, `DeadLetters`, `Run`, `Close`) and `MailSink` (`Send`) with its sibling `MailCaptureSource` (`Composed`: the capture transport's last message), which `mailkit` implements |
-| `plug.go` | the hooks (`NewHTTPServer`, `NewStaticFiles`, `SampleProcess`, `OpenEventStream`, `StudioProfiler`), what they take and return (`HTTPConfig`, `HTTPState`, `HTTPServer`, `EventStream`, `ProfilerConfig`, `SourceFunc`), the pprof labels kit and the profiler share (`LabelNode`, `LabelLoop`) |
+| `plug.go` | the hooks (`NewHTTPServer`, `NewStaticFiles`, `SampleProcess`), what they take and return (`HTTPConfig`, `HTTPState`, `HTTPServer`), the pprof labels kit and the profiler share (`LabelNode`, `LabelLoop`) |
 | `queue.go` | the queue subsystem's contract (ADR 0179 step 4): the hook `Queues` (`QueueDriverConfig`: `Open` a queue, `TableMigration` its table on a database, `DoNotRetry` and `NotRetryable` — the mark of a delivery no retry helps); `QueueConfig` (`Name`, `Dir`, `Database`, `Table`, `Policy`, `Clock`, a mailer's `Seal`, `Unseal` and `MaxPayload`, a test's `Wrap`), `QueuePolicyValue`, `ConsumeConfig`, `MessageValue`, `DeliveryValue`, `LiveMessageValue`, `DeadLetterValue` |
 | `queue_interface.go` | the queue subsystem's interfaces: `Broker` (`Publish`, `Consume`, `DeadLetters`) and its sibling `MessageMover` (`Messages`, `PutMessage`, `PutDeadLetter`: what a data copy reads and writes as it lies); `Clock`, `Timer`, `Ticker` — the app's clock in standard-library types, a test's manual clock included |
 | `store.go` | the store subsystem's values (ADR 0179 §2, §3): the hook `Stores` (`StoreDriverConfig`: `Open` a store's engine, `Database` kit's scope on a database's pool, `TableMigration` the migration of a store's table or its versions'); `DocumentValue` (the JSON as it rests and the entity decoded, `any`), `EntryValue`, `WriteMode` (`WriteUpsert`, `WriteInsert`, `WriteReplace`), `IndexSpec`, `StoreConfig`, `StampValue`, `DatabaseConfig`, `TableSpec`, `MigrationValue` and its `Step`, `VersionValue`, `VersionWeightValue`, `TombstoneValue` — named with the role suffixes ktn-linter asks for, as the SDK's core docstore names its own |
 | `store_interface.go` | the store subsystem's interfaces: `Database` (the transactions, savepoints and held functions of `kit.Transact` on one database) and its siblings `Checker`, `MigratorProvider` (`Migrator`, `Executor`); `Transaction`, kit's transaction as an engine takes part in it, which the core implements; the engine `StoreEngine` over documents and its siblings `Folder`, `Keyser`, `EntrySource`, `Reindexer`, `VersionKeeper`, `VersionWeighter`, `Trasher`, `DocumentSource` (`Documents`, `DocumentSink`: what a data copy reads and writes) |
 | `store_refusal.go` | an engine's refusals in kit's terms: the kinds (`Refusal`: `RefusalNotFound` … `RefusalOutOfOrder`), `RefusalError` (the kind and the SDK's error inside), `Refuse`, `Refused` (the kind anywhere in an error's tree, as `errors.Is` reads one) |
+| `studio.go` | the Studio's contract (ADR 0180 step 1): the hook `Studio` (`StudioDriverConfig`: `Env`, `Settings`, `Forced`, `DevBuild` — the tool's variables — and `Mount`, the Studio's routes) — nil without `framework/kit/studio`, and kit reads none of the tool's variables and serves no route of the Studio; `StudioEnvValue` (`Asked`, `Off`, `Remote`, `NoAnalysis`), `StudioStateValue` |
+| `studio_interface.go` | the Studio's interface: `StudioHost`, the running app as the Studio's routes read it and answer through it — the graph, the phase, the clock, the live events, traces, logs, instances, items, a source file, where a function lies, the mailbox, the store tools' reads, the guard's facts, and kit's answers (`Reply`, `Forbid`, `Fail`, `NotFound`, `Invalid`, `ProfileUnreadable`, `Debug`) —, which the core implements (`studioHost`) |
 | `words.go` | kit's catalogues after English (ADR 0179 step 8, Q6): the hook `Words` (`WordsConfig`: `Open` the catalogues against kit's English table) — nil without `framework/kit/studio`, and kit speaks English alone |
 | `words_interface.go` | the catalogues' interface: `Translator` (`Languages`, `Keys`, `Render`), which `studiokit` implements over the SDK's i18n |
 | `workflow.go` | the workflow subsystem's contract (ADR 0179 step 5): the hook `Workflows` (`WorkflowDriverConfig`: `Open` a workflow's engine, `Failed` — the engine's failure of a kind); `WorkflowCreateEvent`; the enums `WorkflowTrigger`, `WorkflowWake`, `WorkflowLoopEvent`, `WorkflowFailure` and their values; `WorkflowConfig`, `TransitionSpec`, `EnterHookSpec`, `WorkflowEntityValue`, `WorkflowChangeValue`, `WorkflowFiringValue`, `WorkflowRecordValue`, `WorkflowStepValue`, `WorkflowLoopEventValue` |

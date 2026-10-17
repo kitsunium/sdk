@@ -1848,7 +1848,7 @@ EnableStores makes kit's own store code reachable: what kit mounts, starts and a
 func EnableStudio()
 ```
 
-EnableStudio makes a serving app in dev mount the Studio's API. framework/kit/studio calls it as it is imported; a product never does.
+EnableStudio makes a serving app in dev mount the Studio's routes, which framework/kit/studio plugs in (plug.Studio), over a host of the app. framework/kit/studio calls it as it is imported; a product never does.
 
 <a name="Env"></a>
 ## func [Env](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/config.go>)
