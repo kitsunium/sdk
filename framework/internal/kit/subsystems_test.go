@@ -12,6 +12,11 @@ import (
 	// one binary. subsystems_internal_test.go takes it out to see what a
 	// program that does not import it is refused.
 	_ "github.com/kitsunium/sdk/framework/kit/store"
+	// The suite's topics, subscriptions, watches, queued commands and
+	// outboxes on a database run on the queue subsystem, as a product that
+	// imports it does (ADR 0179 step 4); subsystems_internal_test.go takes it
+	// out too.
+	_ "github.com/kitsunium/sdk/framework/kit/queue"
 	// The suite's dev apps serve the Studio's API, as a product that imports
 	// it does.
 	_ "github.com/kitsunium/sdk/framework/kit/studio"

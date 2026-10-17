@@ -106,8 +106,8 @@ type kitTable struct {
 	// versionsOf is, for a store's versions, the store's table: the SDK
 	// derives the versions' table from it (docstore.SQLVersionsMigration).
 	versionsOf string
-	// queue marks a consumer's queue: the SDK's SQL broker's one table
-	// (queue.SQLMigration), not a document store's.
+	// queue marks a consumer's queue: the SDK's SQL broker's one table, which
+	// the queue subsystem migrates, not a document store's.
 	queue bool
 }
 

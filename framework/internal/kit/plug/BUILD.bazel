@@ -7,6 +7,8 @@ go_library(
     srcs = [
         "doc.go",
         "plug.go",
+        "queue.go",
+        "queue_interface.go",
         "store.go",
         "store_interface.go",
         "store_refusal.go",

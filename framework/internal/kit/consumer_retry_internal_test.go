@@ -51,10 +51,10 @@ func TestAnUndecodableMessageIsDeadLetteredAtOnceBySubscription(t *testing.T) {
 	svc.Subscribe("read", letters, func(context.Context, letter2) error { return nil }, MaxDeliveries(5))
 	startUndecodable(t, svc)
 	sub := letters.subs[0]
-	if _, err := sub.broker.Publish(t.Context(), undecodablePayload); err != nil {
+	if err := sub.broker.Publish(t.Context(), undecodablePayload); err != nil {
 		t.Fatal(err)
 	}
-	deadAtOnce(t, sub.broker)
+	deadAtOnce(t, sdkQueue(t, sub.broker))
 }
 
 func TestAnUndecodableMessageIsDeadLetteredAtOnceByWatch(t *testing.T) {
@@ -65,10 +65,10 @@ func TestAnUndecodableMessageIsDeadLetteredAtOnceByWatch(t *testing.T) {
 	if r == nil {
 		t.Fatal("the watch does not run")
 	}
-	if _, err := r.broker.Publish(t.Context(), undecodablePayload); err != nil {
+	if err := r.broker.Publish(t.Context(), undecodablePayload); err != nil {
 		t.Fatal(err)
 	}
-	deadAtOnce(t, r.broker)
+	deadAtOnce(t, sdkQueue(t, r.broker))
 }
 
 // A queued command's dispatch that does not decode is dead-lettered at once
@@ -99,10 +99,10 @@ func TestAnUndecodableMessageIsDeadLetteredAtOnceByQueuedCommand(t *testing.T) {
 	q.pending["k"] = true
 	q.mu.Unlock()
 	// The envelope decodes, its key with it; its input does not.
-	if _, err := q.broker.Publish(t.Context(), []byte(`{"key":"k","input":"not an object"}`)); err != nil {
+	if err := q.broker.Publish(t.Context(), []byte(`{"key":"k","input":"not an object"}`)); err != nil {
 		t.Fatal(err)
 	}
-	deadAtOnce(t, q.broker)
+	deadAtOnce(t, sdkQueue(t, q.broker))
 	eventuallyInternal(t, "the key given back", func() bool {
 		q.mu.Lock()
 		defer q.mu.Unlock()
@@ -116,8 +116,9 @@ func TestAnUndecodableMessageIsDeadLetteredAtOnceByQueuedCommand(t *testing.T) {
 func TestAConsumersRetryDelayGrows(t *testing.T) {
 	clk := clock.NewManualClock(time.Date(2026, 10, 14, 9, 0, 0, 0, time.UTC))
 	a := &App{clock: clk}
-	b, err := a.openQueue("", 10)
+	pb, err := a.openQueue(&nodeBase{}, "", 10)
 	must(t, err)
+	b := sdkQueue(t, pb)
 	ctx := t.Context()
 	if _, err := b.Publish(ctx, []byte("work")); err != nil {
 		t.Fatal(err)

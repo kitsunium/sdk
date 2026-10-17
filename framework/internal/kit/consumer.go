@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/lifecycle"
-	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
@@ -19,7 +19,8 @@ import (
 
 // A queue's consumer, whoever's queue it is — a subscription's, a watch's
 // (watch.go), a queued command's (queued.go): where its queue lies, and the
-// one way a subscription and a watch run a delivery.
+// one way a subscription and a watch run a delivery. The queue itself is the
+// queue subsystem's (queue_plug.go).
 
 // pollInterval bounds how long an idle consumer waits before it looks
 // again. The SDK wakes it at once on a publication or a nack in this
@@ -86,9 +87,9 @@ func queueTable(b *nodeBase, under string) string {
 // wait doubling after each — the queue's own growing delay (ADR 0151 §D7),
 // never more than kit's backoff ceiling, a minute —, and dead-lettered after
 // maxDeliveries attempts, or at its first failure when no retry can help
-// (queue.DoNotRetry).
-func consumerPolicy(maxDeliveries int) queue.Policy {
-	return queue.Policy{VisibilityTimeout: 30 * time.Second, RetryDelay: 500 * time.Millisecond, MaxRetryDelay: loopBackoffMax, MaxDeliveries: maxDeliveries}
+// (doNotRetry).
+func consumerPolicy(maxDeliveries int) plug.QueuePolicyValue {
+	return plug.QueuePolicyValue{VisibilityTimeout: 30 * time.Second, RetryDelay: 500 * time.Millisecond, MaxRetryDelay: loopBackoffMax, MaxDeliveries: maxDeliveries}
 }
 
 // openConsumerQueue opens the queue of the consumer b — a subscription's, a
@@ -96,26 +97,31 @@ func consumerPolicy(maxDeliveries int) queue.Policy {
 // keeps the consumer when it is open (ADR 0178 C1), one table of the SDK's
 // SQL broker, and the database it returns is where a publication made in a
 // transaction on it joins that transaction; else a file or a memory queue
-// (openQueue), and no database.
-func (a *App) openConsumerQueue(b *nodeBase, under string, maxDeliveries int) (queue.Broker, *databaseRun, error) {
+// (openQueue), and no database. A test's wrapper stands in front of either.
+func (a *App) openConsumerQueue(b *nodeBase, under string, maxDeliveries int) (plug.Broker, *databaseRun, error) {
 	r := a.queueDatabase(b)
 	if r == nil {
-		broker, err := a.openQueue(filepath.Join(b.svc.name, under, b.name), maxDeliveries)
+		broker, err := a.openQueue(b, filepath.Join(b.svc.name, under, b.name), maxDeliveries)
 		return broker, nil, err
 	}
-	broker, err := a.openSQLQueue(b, under, r, consumerPolicy(maxDeliveries))
+	broker, err := a.openSQLQueue(b, under, r, plug.QueueConfig{Policy: consumerPolicy(maxDeliveries)})
 	if err != nil {
 		return nil, nil, err
 	}
-	return a.wrapped(broker), r, nil
+	return broker, r, nil
 }
 
 // openSQLQueue opens the queue of the consumer b, kept under under, on the
-// open database r under policy — one table of the SDK's SQL broker, which
-// joins the transaction its context carries —, and says when b's queue left
-// messages in the data directory it moved from.
-func (a *App) openSQLQueue(b *nodeBase, under string, r *databaseRun, policy queue.Policy) (queue.Broker, error) {
-	broker, err := a.newSQLQueue(r, queueTable(b, under), policy)
+// open database r as cfg says the rest — one table of the SDK's SQL broker,
+// which joins the transaction its context carries —, and says when b's
+// queue left messages in the data directory it moved from. A test's wrapper
+// stands in front of it.
+func (a *App) openSQLQueue(b *nodeBase, under string, r *databaseRun, cfg plug.QueueConfig) (plug.Broker, error) {
+	if err := sqlQueueConfig(&cfg, b, r, queueTable(b, under)); err != nil {
+		return nil, err
+	}
+	cfg.Wrap = a.wrapQueue
+	broker, err := a.openQueueWith(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -123,17 +129,16 @@ func (a *App) openSQLQueue(b *nodeBase, under string, r *databaseRun, policy que
 	return broker, nil
 }
 
-// newSQLQueue is the SDK's SQL broker over table on the open database r,
-// under policy: it joins the transaction its context carries, on the
-// transaction manager and in the dialect the store subsystem hands on
-// (plug.HandleProvider) — kit's core names neither, until the queues leave it (ADR
-// 0179, step 4).
-func (a *App) newSQLQueue(r *databaseRun, table string, policy queue.Policy) (queue.Broker, error) {
-	cfg := queue.SQLConfig{Table: table, Policy: policy, Clock: a.clock}
-	if !r.handle(&cfg.Transactor) || !r.handle(&cfg.Dialect) {
-		return nil, Unavailable(fmt.Sprintf("database %q is not open", r.d.name))
+// sqlQueueConfig places the queue of cfg, the consumer b's, in table on the
+// open database r: the SDK's SQL broker over the database the store
+// subsystem opened, which a publication in a transaction on it joins.
+func sqlQueueConfig(cfg *plug.QueueConfig, b *nodeBase, r *databaseRun, table string) error {
+	db := r.database()
+	if db == nil {
+		return Unavailable(fmt.Sprintf("database %q is not open", r.d.name))
 	}
-	return queue.NewSQL(cfg)
+	cfg.Name, cfg.Database, cfg.Table = b.id, db, table
+	return nil
 }
 
 // warnFileQueueLeft says, at its start, that a consumer's queue moved from
@@ -166,32 +171,15 @@ func fileQueueHolds(dir string) bool {
 	return false
 }
 
-// openQueue opens a consumer's queue that no open database keeps: a file
-// queue at dir under the data directory, memory without one, under
-// consumerPolicy.
-func (a *App) openQueue(dir string, maxDeliveries int) (queue.Broker, error) {
-	policy := consumerPolicy(maxDeliveries)
-	var (
-		b   queue.Broker
-		err error
-	)
-	if a.dataDir == "" {
-		b, err = queue.NewMemory(queue.MemoryConfig{Clock: a.clock, Policy: policy})
-	} else {
-		b, err = queue.NewFile(queue.FileConfig{Clock: a.clock, Dir: filepath.Join(a.dataDir, dir), Policy: policy})
+// openQueue opens the queue of the consumer b that no open database keeps:
+// a file queue at dir under the data directory, memory without one, under
+// consumerPolicy, behind a test's wrapper.
+func (a *App) openQueue(b *nodeBase, dir string, maxDeliveries int) (plug.Broker, error) {
+	cfg := plug.QueueConfig{Name: b.id, Policy: consumerPolicy(maxDeliveries), Wrap: a.wrapQueue}
+	if a.dataDir != "" {
+		cfg.Dir = filepath.Join(a.dataDir, dir)
 	}
-	if err != nil {
-		return b, err
-	}
-	return a.wrapped(b), nil
-}
-
-// wrapped is b behind the test's wrapper, when a test set one.
-func (a *App) wrapped(b queue.Broker) queue.Broker {
-	if a.wrapQueue == nil {
-		return b
-	}
-	return a.wrapQueue(b)
+	return a.openQueueWith(cfg)
 }
 
 // consumer is who runs a queue's deliveries — a subscription, a watch —:
@@ -210,7 +198,7 @@ type origin struct{ trace, node string }
 // the consumer's node from the node the message came from, over a delivers
 // edge, and reports it to the consumer's loop. A panic in handle is the
 // handler's failure.
-func (c *consumer) deliver(ctx context.Context, d *queue.Delivery, from origin, handle func(context.Context, *span) error) (err error) {
+func (c *consumer) deliver(ctx context.Context, d *plug.DeliveryValue, from origin, handle func(context.Context, *span) error) (err error) {
 	if from.trace != "" {
 		if sc, perr := trace.ParseTraceParent(from.trace); perr == nil {
 			ctx = trace.ContextWithSpanContext(ctx, sc)
@@ -232,7 +220,7 @@ func (c *consumer) deliver(ctx context.Context, d *queue.Delivery, from origin, 
 	return handle(ctx, sp)
 }
 
-// supervise runs consume — the consumer's queue.Consume — under the SDK's
+// supervise runs consume — its queue's Consume — under the SDK's
 // supervisor (ADR 0112) until the returned supervisor is stopped. Consume
 // returns when its queue's storage fails, which no poll gets out of: the
 // supervisor runs it again after kit's backoff — one second, doubling, up

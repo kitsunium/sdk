@@ -63,7 +63,8 @@ func (r *databaseRun) database() plug.Database {
 
 // handle sets what dst points at to the SDK's handle of its type, as the
 // store subsystem hands it on (plug.HandleProvider): false while the database is
-// not open, or for a handle it has none of.
+// not open, or for a handle it has none of. A mailer's spool, still in kit's
+// core, takes its Deferrer so, until ADR 0179's step 6.
 func (r *databaseRun) handle(dst any) bool {
 	h, ok := r.database().(plug.HandleProvider)
 	return ok && h.Handle(dst)

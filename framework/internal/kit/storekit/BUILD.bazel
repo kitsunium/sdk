@@ -24,7 +24,6 @@ go_library(
         "//framework/model",
         "//pkg/v1/clock",
         "//pkg/v1/data/docstore",
-        "//pkg/v1/data/queue",
         "//pkg/v1/data/sql",
         "//pkg/v1/data/vfs",
         "//pkg/v1/errs",
@@ -43,5 +42,9 @@ alias(
 go_test(
     name = "storekit_test",
     srcs = ["api_gen_test.go"],
-    deps = [":storekit"],
+    deps = [
+        ":storekit",
+        "//framework/internal/kit/plug",
+        "//pkg/v1/data/sql",
+    ],
 )

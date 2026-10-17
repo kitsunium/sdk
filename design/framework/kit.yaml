@@ -5209,17 +5209,20 @@ packages:
       Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the
       frontends' file server and the process sampler of the runtime graph
       (framework/kit/server), the Studio's event stream and its profiler
-      (framework/kit/studio), the stores and the databases (framework/kit/store).
-      kit reads what they registered through the hooks declared here, and imports
-      none of the SDK packages behind them: a product that does not import a
-      subsystem neither links nor initialises its packages.
+      (framework/kit/studio), the stores and the databases (framework/kit/store),
+      the queues (framework/kit/queue). kit reads what they registered through the
+      hooks declared here, and imports none of the SDK packages behind them: a
+      product that does not import a subsystem neither links nor initialises its
+      packages.
 
       It is also the contract between kit's core and the subsystems ADR 0179
       takes out of it, as database/sql/driver is between database/sql and a
       driver: the store subsystem's engine over documents, its siblings, kit's
       scope on a database and its migrations ([Stores]), which framework/kit/store
-      sets; the refusals an engine says in kit's terms ([Refusal]); and what kit's
-      transactions offer an engine that takes part in them ([Transaction]).
+      sets; the refusals an engine says in kit's terms ([Refusal]); what kit's
+      transactions offer an engine that takes part in them ([Transaction]); and
+      the queue subsystem's brokers and their consumer ([Queues]), which
+      framework/kit/queue sets.
 
       The package imports the standard library and the framework's model only,
       so that kit and every subsystem can import it.
@@ -5358,6 +5361,364 @@ packages:
               out:
                 - type: error
         name: EventStream
+      - doc: |-
+          QueueDriverConfig is what framework/kit/queue plugs into kit: how a
+          consumer's queue opens, the migration that makes its table on a database,
+          and how a delivery's handler says that no retry can help.
+        name: QueueDriverConfig
+        struct:
+          fields:
+            - doc: |-
+                Open opens one queue, as cfg places it: on a database, in a
+                directory, or in memory.
+              name: Open
+              type: func(cfg QueueConfig) (Broker, error)
+            - doc: |-
+                TableMigration is the migration that makes the queue table on a
+                database of the dialect named, at version.
+              name: TableMigration
+              type: func(dialect, table string, version uint64) (MigrationValue, error)
+            - doc: |-
+                DoNotRetry is err as a delivery's handler returns it when no retry
+                can help: its queue dead-letters the message at once.
+              name: DoNotRetry
+              type: func(err error) error
+            - doc: |-
+                NotRetryable reports whether err, a delivery's handler's, says that no
+                retry can help: what DoNotRetry returned, the product's own included.
+              name: NotRetryable
+              type: func(err error) bool
+      - doc: |-
+          QueueConfig is what kit asks of one queue: where it lies, its policy, the
+          app's clock, and for a mailer's outbox the sealing of what it keeps.
+        name: QueueConfig
+        struct:
+          fields:
+            - doc: |-
+                Name names the queue's node in a refusal: the consumer's or the
+                mailer's node ID.
+              name: Name
+              type: string
+            - doc: |-
+                Dir is the directory a file queue lies in; with no Database and no
+                Dir, the queue is in memory.
+              name: Dir
+              type: string
+            - doc: |-
+                Database keeps the queue, nil when Dir or memory does: a scope the
+                store subsystem's Database opened, whose transaction a publication in
+                it joins.
+              name: Database
+              type: Database
+            - doc: Table is the queue's table on Database.
+              name: Table
+              type: string
+            - doc: Policy is how the queue leases, retries and bounds its messages.
+              name: Policy
+              type: QueuePolicyValue
+            - doc: Clock is the app's clock, which the queue stamps and waits on.
+              name: Clock
+              type: Clock
+            - doc: |-
+                Seal, when set, seals every payload on its way in — a mail's, in a
+                mailer's outbox on a database —, and Unseal opens one on its way out;
+                MaxPayload bounds a payload before it is sealed.
+              name: Seal
+              type: func(ctx context.Context, payload []byte) ([]byte, error)
+            - doc: |-
+                Unseal is the payload a box holds, the box as it lies when it does
+                not open.
+              name: Unseal
+              type: func(ctx context.Context, box []byte) []byte
+            - doc: MaxPayload bounds a payload Seal seals.
+              name: MaxPayload
+              type: int
+            - doc: |-
+                Wrap, when a test sets it, stands in front of the queue the subsystem
+                opens: a func(queue.Broker) queue.Broker of the SDK's queue, which
+                kit's core does not name. Nil in every app a product builds.
+              name: Wrap
+              type: any
+      - doc: |-
+          QueuePolicyValue is how a queue leases, retries and bounds its messages:
+          the SDK's queue policy, in kit's terms.
+        name: QueuePolicyValue
+        struct:
+          fields:
+            - doc: VisibilityTimeout is how long a delivery is leased.
+              name: VisibilityTimeout
+              type: time.Duration
+            - doc: |-
+                RetryDelay is the wait after a message's first failure, doubled after
+                each, up to MaxRetryDelay.
+              name: RetryDelay
+              type: time.Duration
+            - doc: MaxRetryDelay bounds the wait before a retry; zero leaves it unbound.
+              name: MaxRetryDelay
+              type: time.Duration
+            - doc: |-
+                MaxDeliveries is how often a message is delivered before it is
+                dead-lettered.
+              name: MaxDeliveries
+              type: int
+            - doc: MaxMessageBytes bounds a message; zero is the queue's own bound.
+              name: MaxMessageBytes
+              type: int
+      - doc: |-
+          ConsumeConfig is how a queue's consumer runs: its handler, how long it
+          waits idle, how many messages it handles at once and takes at a time.
+        name: ConsumeConfig
+        struct:
+          fields:
+            - doc: |-
+                Handler handles one delivery: nil acknowledges it, an error has it
+                retried or, through DoNotRetry, dead-lettered at once. Every handler
+                kit runs tolerates a redelivery.
+              name: Handler
+              type: func(ctx context.Context, d DeliveryValue) error
+            - doc: PollInterval bounds an idle wait.
+              name: PollInterval
+              type: time.Duration
+            - doc: Parallelism is how many deliveries are handled at once.
+              name: Parallelism
+              type: int
+            - doc: BatchSize is how many messages the consumer takes at a time.
+              name: BatchSize
+              type: int
+      - doc: |-
+          MessageValue is one message of a queue: its identifier, its payload as
+          kit encoded it, and when it was published.
+        name: MessageValue
+        struct:
+          fields:
+            - doc: EnqueuedAt is when the message was published.
+              name: EnqueuedAt
+              type: time.Time
+            - doc: ID identifies the message in its queue.
+              name: ID
+              type: string
+            - doc: Payload is the message as kit encoded it.
+              name: Payload
+              type: "[]byte"
+      - doc: |-
+          DeliveryValue is one delivery of a message: the message, and how many
+          times it has been delivered, this one included.
+        name: DeliveryValue
+        struct:
+          fields:
+            - doc: Message is what is delivered.
+              name: Message
+              type: MessageValue
+            - doc: Deliveries counts the deliveries, this one included.
+              name: Deliveries
+              type: int
+      - doc: |-
+          LiveMessageValue is a message waiting in its queue, as it lies: when it
+          is next visible, how many times it was delivered, and whether a consumer
+          holds it.
+        name: LiveMessageValue
+        struct:
+          fields:
+            - doc: VisibleAt is when the message is next delivered.
+              name: VisibleAt
+              type: time.Time
+            - doc: Message is the message.
+              name: Message
+              type: MessageValue
+            - doc: Deliveries counts its deliveries so far.
+              name: Deliveries
+              type: int
+            - doc: Leased reports whether a consumer holds it.
+              name: Leased
+              type: bool
+      - doc: |-
+          DeadLetterValue is a message its queue gave up on: when, why, and how
+          many times it was delivered.
+        name: DeadLetterValue
+        struct:
+          fields:
+            - doc: FailedAt is when its last attempt failed.
+              name: FailedAt
+              type: time.Time
+            - doc: Reason is the failure's identifier.
+              name: Reason
+              type: string
+            - doc: Cause is the failure's public text, "" for none.
+              name: Cause
+              type: string
+            - doc: Message is the message, unmodified.
+              name: Message
+              type: MessageValue
+            - doc: Code is the failure's error code, 0 for none.
+              name: Code
+              type: uint32
+            - doc: Deliveries counts its deliveries.
+              name: Deliveries
+              type: int
+      - doc: |-
+          Broker is one queue as kit's core uses it: a publication, the consumer
+          that delivers it, and its dead letters. It grows by the sibling below.
+        interface:
+          methods:
+            - doc: |-
+                Publish puts payload in the queue: in the transaction ctx carries for
+                its database, when it lives on one.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: payload
+                  type: "[]byte"
+              name: Publish
+              out:
+                - type: error
+            - doc: |-
+                Consume delivers the queue's messages to cfg's handler until ctx ends
+                or the queue's storage fails.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: cfg
+                  type: ConsumeConfig
+              name: Consume
+              out:
+                - type: error
+            - doc: |-
+                DeadLetters are up to maxLetters of the queue's dead letters, oldest
+                first.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: maxLetters
+                  type: int
+              name: DeadLetters
+              out:
+                - type: "[]DeadLetterValue"
+                - type: error
+        name: Broker
+      - doc: |-
+          MessageMover is a Broker whose messages a data copy reads and writes as
+          they lie, without a lease, with their counts and their instants. A
+          sibling of [Broker].
+        interface:
+          methods:
+            - doc: |-
+                Messages are up to maxMessages live messages after the identifier
+                after, "" for the first, in their queue's order.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: after
+                  type: string
+                - name: maxMessages
+                  type: int
+              name: Messages
+              out:
+                - type: "[]LiveMessageValue"
+                - type: error
+            - doc: |-
+                PutMessage writes live under an identifier of the queue's own, and
+                returns it.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: live
+                  type: LiveMessageValue
+              name: PutMessage
+              out:
+                - type: string
+                - type: error
+            - doc: |-
+                PutDeadLetter writes dead, with its cause, under an identifier of the
+                queue's own, and returns it.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: dead
+                  type: DeadLetterValue
+              name: PutDeadLetter
+              out:
+                - type: string
+                - type: error
+        name: MessageMover
+      - doc: |-
+          Clock is the app's clock as a queue stamps and waits on it: kit's core
+          hands the one its app runs on, a test's manual clock included.
+        interface:
+          methods:
+            - doc: Now is the clock's instant.
+              name: Now
+              out:
+                - type: time.Time
+            - doc: Since is how long ago t was, on the clock.
+              in:
+                - name: t
+                  type: time.Time
+              name: Since
+              out:
+                - type: time.Duration
+            - doc: After is a channel that receives the clock's instant once d passed.
+              in:
+                - name: d
+                  type: time.Duration
+              name: After
+              out:
+                - type: <-chan time.Time
+            - doc: NewTimer is a timer that fires once d passed.
+              in:
+                - name: d
+                  type: time.Duration
+              name: NewTimer
+              out:
+                - type: Timer
+            - doc: NewTicker is a ticker that fires every d.
+              in:
+                - name: d
+                  type: time.Duration
+              name: NewTicker
+              out:
+                - type: Ticker
+            - doc: Sleep waits until d passed.
+              in:
+                - name: d
+                  type: time.Duration
+              name: Sleep
+        name: Clock
+      - doc: Timer is a timer of a [Clock].
+        interface:
+          methods:
+            - doc: C receives the clock's instant when the timer fires.
+              name: C
+              out:
+                - type: <-chan time.Time
+            - doc: Stop stops the timer, and reports whether it had not fired.
+              name: Stop
+              out:
+                - type: bool
+            - doc: |-
+                Reset makes the timer fire once d passed, and reports whether it had
+                not fired.
+              in:
+                - name: d
+                  type: time.Duration
+              name: Reset
+              out:
+                - type: bool
+        name: Timer
+      - doc: Ticker is a ticker of a [Clock].
+        interface:
+          methods:
+            - doc: C receives the clock's instant at each tick.
+              name: C
+              out:
+                - type: <-chan time.Time
+            - doc: Stop stops the ticker.
+              name: Stop
+            - doc: Reset makes the ticker fire every d.
+              in:
+                - name: d
+                  type: time.Duration
+              name: Reset
+        name: Ticker
       - doc: |-
           StoreDriverConfig is what framework/kit/store plugs into kit: how a
           store's engine opens, how kit opens its scope on a database, and the
@@ -5550,9 +5911,10 @@ packages:
               name: CheckTimeout
               type: time.Duration
       - doc: |-
-          TableSpec is one of kit's tables on a database, as its migration makes it:
-          a store's, a store's versions beside the store's table VersionsOf, or a
-          consumer's queue.
+          TableSpec is one of kit's tables on a database, as the store subsystem's
+          migration makes it: a store's, or a store's versions beside the store's
+          table VersionsOf. A consumer's queue's table is the queue subsystem's
+          (QueueDriverConfig's TableMigration).
         name: TableSpec
         struct:
           fields:
@@ -5564,9 +5926,6 @@ packages:
                 the versions' table is named.
               name: VersionsOf
               type: string
-            - doc: "Queue marks a consumer's queue: the SQL broker's one table."
-              name: Queue
-              type: bool
       - doc: |-
           MigrationValue is one versioned change of a database's schema and its
           reversal, as kit's migrations are written: the SDK's own, on the standard
@@ -5790,12 +6149,13 @@ packages:
               variadic: true
         name: Executor
       - doc: |-
-          HandleProvider is a Database that hands one of the SDK's own handles on: the
-          value dst points at — its transaction manager, its dialect — set, and
-          true; false for a handle it has none of. It serves the subsystems still in
-          kit's core that take the SDK's types (the SQL broker of a queue, the
-          spool of a mailer) until they leave it (ADR 0179, steps 4 and 6), and
-          the core never names the type it asks for. A sibling of [Database].
+          HandleProvider is a value of a subsystem that hands one of the SDK's own
+          handles on: the value dst points at set, and true; false for a handle it
+          has none of. It serves the mailer's spool, still in kit's core, which takes
+          the SDK's types — a Database's transaction manager as the spool's
+          Deferrer, a queue's broker (Broker) as its outbox — until the mailers
+          leave the core (ADR 0179, step 6), and the core never names the type it
+          asks for. A sibling of [Database] and of [Broker].
         interface:
           methods:
             - doc: Handle sets what dst points at to the SDK's handle of its type.
@@ -6275,12 +6635,37 @@ packages:
         name: StudioProfiler
         type: atomic.Pointer[ProfilerConfig]
       - doc: |-
+          Queues is the queue subsystem: the brokers kit's consumers' queues run on
+          and the migration of a queue's table on a database; nil until
+          framework/kit/queue is imported. A product that declares a topic, a
+          subscription, a watch, a queued command or a mailer whose outbox is on a
+          database without it is refused at the start (ADR 0179 §6).
+        name: Queues
+        type: atomic.Pointer[QueueDriverConfig]
+      - doc: |-
           Stores is the store subsystem: the engines kit's stores run on, kit's
           scope on a database and the migrations of kit's tables; nil until
           framework/kit/store is imported. A product that declares a store or a
           database without it is refused at the start (ADR 0179 §6).
         name: Stores
         type: atomic.Pointer[StoreDriverConfig]
+  - doc: |-
+      Package queuekit is what framework/kit/queue plugs into kit: the brokers
+      kit's consumers' queues run on — the SDK's queue in memory, in the data
+      directory and over SQL, a mailer's outbox on a database sealed in front of
+      the SQL one —, the consumer that delivers them, and the migration of a
+      queue's table (ADR 0179 §1, step 4). kit's core imports none of the SDK's
+      queue: it reaches it through plug, and a product that declares no topic,
+      no subscription, no watch, no queued command and no outbox on a database
+      links none of it.
+
+      Package queuekit — the compile-time proof that the brokers are kit's.
+    functions:
+      - doc: |-
+          Enable plugs the queues' brokers, their consumer and the migration of a
+          queue's table into kit.
+        name: Enable
+    path: github.com/kitsunium/sdk/framework/internal/kit/queuekit
   - doc: |-
       Package serverkit is what framework/kit/server plugs into kit: the HTTP
       engine an app in the server profile serves on (the SDK's net/server), the
@@ -6308,9 +6693,28 @@ packages:
       Package storekit — the compile-time proof that the engines are kit's.
     functions:
       - doc: |-
+          SQLOf is the SDK's transaction manager and dialect of db, a database this
+          package opened: what the queues' SQL broker runs on, so that a
+          publication joins the transaction its context carries (ADR 0179 step 4);
+          false for a database it did not open.
+        in:
+          - name: db
+            type: plug.Database
+        name: SQLOf
+        out:
+          - name: tm
+            type: sql.Transactor
+          - name: dialect
+            type: sql.Dialect
+          - name: ok
+            type: bool
+      - doc: |-
           Enable plugs the stores' engines, kit's scope on a database and the
           migrations of kit's tables into kit.
         name: Enable
+    imports:
+      plug: github.com/kitsunium/sdk/framework/internal/kit/plug
+      sql: github.com/kitsunium/sdk/pkg/v1/data/sql
     path: github.com/kitsunium/sdk/framework/internal/kit/storekit
   - doc: |-
       Package studiokit — the Studio's live events, as a Server-Sent Events

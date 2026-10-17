@@ -74,40 +74,67 @@ type leavingCase struct {
 // symbols in a binary are the subsystem's (ADR 0179 §1, step 3 on).
 var kitEngines = map[string]string{
 	"framework/kit/store": "framework/internal/kit/storekit.",
+	"framework/kit/queue": "framework/internal/kit/queuekit.",
 }
 
 // stillInCore is the allow-list while ADR 0179's migration runs: the SDK
 // packages of leaving that framework/internal/kit still imports. Each step
 // takes its own entries out in the same change that moves them — step 3 took
-// docstore and sql, step 4 takes queue, step 5 statemachine, step 6
+// docstore and sql, step 4 queue, step 5 takes statemachine, step 6
 // mail/spool, step 7 scheduler, step 8 i18n —, and step 10, which drops the
 // facade's blank imports, deletes it with this test's allowances. It is held
 // tight both ways: a package still listed that the core no longer imports
 // fails the test as surely as one the core imports and the list does not
 // name.
 var stillInCore = map[string]bool{
-	"pkg/v1/data/queue":       true,
 	"pkg/v1/app/statemachine": true,
 	"pkg/v1/app/mail/spool":   true,
 	"pkg/v1/app/scheduler":    true,
 	"pkg/v1/app/i18n":         true,
 }
 
-// throughStill are the packages of stillInCore whose own graph holds pkg:
+// throughStill are the packages of stillInCore whose own graph holds pkg, or
+// the core or service half of the SDK package pkg names (leaving's code):
 // what the core reaches pkg through, once it imports pkg no more itself —
-// the SDK's sql under its queue's SQL broker and its mail spool, until steps
-// 4 and 6 take those out. A package the core reaches through none of them is
-// the core's own import.
+// the SDK's sql and the queue's two halves under the mail spool, until step
+// 6 takes it out. A package the core reaches through none of them is the
+// core's own import.
 func throughStill(t *testing.T, goTool, pkg string) []string {
 	t.Helper()
+	halves := []string{sdk + pkg}
+	for _, l := range leaving {
+		if l.pkg == pkg {
+			for _, c := range l.code {
+				halves = append(halves, sdk+strings.TrimSuffix(c, "."))
+			}
+		}
+	}
 	var via []string
 	for p := range stillInCore {
-		if listDeps(t, goTool, sdk+p)[sdk+pkg] {
+		deps := listDeps(t, goTool, sdk+p)
+		if slices.ContainsFunc(halves, func(h string) bool { return deps[h] }) {
 			via = append(via, p)
 		}
 	}
 	slices.Sort(via)
 	return via
+}
+
+// beyondInits are the text symbols of syms under prefixes that are not a
+// package's initialisation: what of a package a binary links beyond the init
+// Go runs because something imports it.
+func beyondInits(syms map[string]bool, prefixes []string) []string {
+	var code []string
+	for s := range syms {
+		for _, p := range prefixes {
+			rest, ok := strings.CutPrefix(s, sdk+p)
+			if ok && rest != "init" && !strings.HasPrefix(rest, "init.") {
+				code = append(code, s)
+			}
+		}
+	}
+	slices.Sort(code)
+	return code
 }
 
 // The core imports none of the subsystems ADR 0179 §1 takes out of it, but
@@ -157,6 +184,17 @@ func TestTheCoreImportsOnlyTheSubsystemsStillInIt(t *testing.T) {
 			t.Errorf("plug imports %s: it imports the standard library and framework/model only", p)
 		}
 	}
+}
+
+// registrationOf is the registration package that brings the SDK package
+// pkg of leaving.
+func registrationOf(pkg string) string {
+	for _, l := range leaving {
+		if l.pkg == pkg {
+			return l.by
+		}
+	}
+	return pkg
 }
 
 // textSymbols builds the program at dir and lists its text symbols: an
@@ -257,7 +295,8 @@ func owners() map[string][]string {
 // A product that imports no registration package links none of the code of
 // the subsystems ADR 0179 §1 takes out of the core, nor the engines of those
 // that left it, but what the allow-list still names — and what a subsystem
-// still in the core reaches, the SDK's sql under the queues' SQL broker. It
+// still in the core imports, the SDK's sql and queue under the mail spool,
+// their packages' inits alone (beyondInits). It
 // builds testdata/coreprobe, the smallest product on the core alone: the
 // facade imports every registration package until step 10, which a product
 // built on it links.
@@ -286,7 +325,14 @@ func TestTheSmallestProductLinksOnlyTheSubsystemsStillInTheCore(t *testing.T) {
 				t.Errorf("the smallest product links %d text symbols of %s, which only its registration package may bring", n, owner)
 				return
 			}
-			t.Logf("%s: %d text symbols linked through %s, still in the core (ADR 0179 allow-list)", owner, n, strings.Join(via, ", "))
+			// What a subsystem still in the core imports is initialised, and
+			// nothing more of it is linked: its code is its registration
+			// package's.
+			if code := beyondInits(syms, owners()[owner]); len(code) > 0 {
+				t.Errorf("the smallest product links code of %s beyond its packages' inits, which only %s may bring: %v", owner, registrationOf(owner), code)
+				return
+			}
+			t.Logf("%s: %d text symbols linked through %s, still in the core, its packages' inits alone (ADR 0179 allow-list)", owner, n, strings.Join(via, ", "))
 		}
 	}
 	for owner := range owners() {
@@ -312,6 +358,32 @@ func TestAProductThatImportsTheStoresLinksThem(t *testing.T) {
 		if !syms[kitStoreSymbol(fn)] {
 			t.Errorf("a product that imports framework/kit/store does not link kit's own store code: %s", fn)
 		}
+	}
+	// The stores do not bring the queues (ADR 0179 Q4: the queue package
+	// imports the store package, never the other way).
+	if n := linked["framework/kit/queue"]; n > 0 {
+		t.Errorf("a product that imports framework/kit/store alone links %d text symbols of the queues' brokers", n)
+	}
+	if code := beyondInits(syms, owners()["pkg/v1/data/queue"]); len(code) > 0 {
+		t.Errorf("a product that imports framework/kit/store alone links the SDK's queue beyond its inits: %v", code)
+	}
+}
+
+// The same half of §7 for step 4: testdata/queueprobe, coreprobe with
+// framework/kit/queue, links the queue subsystem's brokers and the SDK's
+// queue under them — and the store subsystem's engines, since the queue
+// package imports the store package (ADR 0179 Q4).
+func TestAProductThatImportsTheQueuesLinksThem(t *testing.T) {
+	goTool := goToList(t)
+	syms := textSymbols(t, goTool, "./testdata/queueprobe")
+	linked := linkedSymbols(syms, owners())
+	for _, owner := range []string{"framework/kit/queue", "pkg/v1/data/queue", "framework/kit/store", "pkg/v1/data/docstore"} {
+		if linked[owner] == 0 {
+			t.Errorf("a product that imports framework/kit/queue links no text symbol of %s", owner)
+		}
+	}
+	if code := beyondInits(syms, owners()["pkg/v1/data/queue"]); len(code) == 0 {
+		t.Error("a product that imports framework/kit/queue links nothing of the SDK's queue beyond its inits")
 	}
 }
 

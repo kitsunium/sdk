@@ -573,13 +573,17 @@ rules:
     #     value has here, not a missing abstraction.
     #   - plug.HandleProvider.Handle and its one caller in kit's core,
     #     databaseRun.handle (ADR 0179, step 3): they hand on one of the SDK's
-    #     own handles — its transaction manager, its dialect — to the queues'
-    #     SQL broker and the mail spool still in kit's core, which take the
-    #     SDK's types, through a pointer the core takes from those packages'
-    #     configuration without naming the type: plug imports the standard
-    #     library alone and the core no longer imports the SDK's sql, so
-    #     `any` is the one type both sides can spell. The two go with steps 4
-    #     and 6, which take those subsystems out of the core.
+    #     own handles to the mail spool still in kit's core, which takes the
+    #     SDK's types — a database's transaction manager as its Deferrer, and
+    #     since step 4 a queue's broker as its outbox (queuekit's broker
+    #     implements Handle; the mailer calls it inline) —, through a pointer
+    #     the core takes from the spool's configuration without naming the
+    #     type: plug imports the standard library alone and the core imports
+    #     neither the SDK's sql nor its queue, so `any` is the one type both
+    #     sides can spell. Step 4 took the queues off it — queuekit reaches a
+    #     database's transaction manager and dialect through storekit.SQLOf,
+    #     typed —; the two go with step 6, which takes the mailers out of the
+    #     core.
     exclude_functions:
       - "**/internal/service/app/consensus/ops.go:Node.submit"
       - "internal/service/app/consensus/ops.go:Node.submit"

@@ -167,17 +167,16 @@ type DatabaseConfig struct {
 	CheckTimeout time.Duration
 }
 
-// TableSpec is one of kit's tables on a database, as its migration makes it:
-// a store's, a store's versions beside the store's table VersionsOf, or a
-// consumer's queue.
+// TableSpec is one of kit's tables on a database, as the store subsystem's
+// migration makes it: a store's, or a store's versions beside the store's
+// table VersionsOf. A consumer's queue's table is the queue subsystem's
+// (QueueDriverConfig's TableMigration).
 type TableSpec struct {
 	// Name is the table's.
 	Name string
 	// VersionsOf is, for a store's versions, the store's table, from which
 	// the versions' table is named.
 	VersionsOf string
-	// Queue marks a consumer's queue: the SQL broker's one table.
-	Queue bool
 }
 
 // MigrationValue is one versioned change of a database's schema and its

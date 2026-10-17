@@ -7,7 +7,6 @@ import (
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
-	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
@@ -110,24 +109,31 @@ func (d *database) Migrator(table string, ms []plug.MigrationValue) (plug.Migrat
 }
 
 // Handle sets what dst points at to the SDK's handle of its type: the
-// transaction manager, the transaction manager as a Deferrer that is an
-// Aborter too — what a mailer's spool takes —, the dialect.
+// transaction manager as a Deferrer that is an Aborter too — what a mailer's
+// spool, still in kit's core, takes (until ADR 0179's step 6).
 func (d *database) Handle(dst any) bool {
-	switch p := dst.(type) {
-	case *sql.Transactor:
-		*p = d.tm
-	case *sql.Deferrer:
-		df, ok := d.tm.(sql.Deferrer)
-		if _, aborts := d.tm.(sql.Aborter); !ok || !aborts {
-			return false
-		}
-		*p = df
-	case *sql.Dialect:
-		*p = d.dialect
-	default:
+	p, ok := dst.(*sql.Deferrer)
+	if !ok {
 		return false
 	}
+	df, defers := d.tm.(sql.Deferrer)
+	if _, aborts := d.tm.(sql.Aborter); !defers || !aborts {
+		return false
+	}
+	*p = df
 	return true
+}
+
+// SQLOf is the SDK's transaction manager and dialect of db, a database this
+// package opened: what the queues' SQL broker runs on, so that a
+// publication joins the transaction its context carries (ADR 0179 step 4);
+// false for a database it did not open.
+func SQLOf(db plug.Database) (tm sql.Transactor, dialect sql.Dialect, ok bool) {
+	d, ok := db.(*database)
+	if !ok {
+		return nil, 0, false
+	}
+	return d.tm, d.dialect, true
 }
 
 // migrator is one set of migrations under the SDK's Migrator.
@@ -195,9 +201,8 @@ func pluggedStep(s sql.Step) plug.Step {
 
 // tableMigration is the migration of one of kit's tables: the SDK's
 // document store's two tables; for a store's versions, the table of
-// versions beside the store's, which the SDK names from it; for a
-// consumer's queue, the SQL broker's one table (ADR 0178 C1) — until the
-// queues leave kit's core (ADR 0179, step 4).
+// versions beside the store's, which the SDK names from it. A consumer's
+// queue's table is the queue subsystem's (framework/internal/kit/queuekit).
 func tableMigration(dialect string, t plug.TableSpec, version uint64) (plug.MigrationValue, error) {
 	d, err := dialectOf(dialect)
 	if err != nil {
@@ -205,8 +210,6 @@ func tableMigration(dialect string, t plug.TableSpec, version uint64) (plug.Migr
 	}
 	var m sql.Migration
 	switch {
-	case t.Queue:
-		m, err = queue.SQLMigration(d, t.Name, version)
 	case t.VersionsOf != "":
 		m, err = docstore.SQLVersionsMigration(d, t.VersionsOf, version)
 	default:

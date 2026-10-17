@@ -78,7 +78,14 @@
       "name": "plug",
       "dir": "framework/internal/kit/plug",
       "layer": "framework",
-      "doc": "Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the\nfrontends' file server and the process sampler of the runtime graph\n(framework/kit/server), the Studio's event stream and its profiler\n(framework/kit/studio), the stores and the databases (framework/kit/store).\nkit reads what they registered through the hooks declared here, and imports\nnone of the SDK packages behind them: a product that does not import a\nsubsystem neither links nor initialises its packages.\n\nIt is also the contract between kit's core and the subsystems ADR 0179\ntakes out of it, as database/sql/driver is between database/sql and a\ndriver: the store subsystem's engine over documents, its siblings, kit's\nscope on a database and its migrations ([Stores]), which framework/kit/store\nsets; the refusals an engine says in kit's terms ([Refusal]); and what kit's\ntransactions offer an engine that takes part in them ([Transaction]).\n\nThe package imports the standard library and the framework's model only,\nso that kit and every subsystem can import it.\n"
+      "doc": "Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the\nfrontends' file server and the process sampler of the runtime graph\n(framework/kit/server), the Studio's event stream and its profiler\n(framework/kit/studio), the stores and the databases (framework/kit/store),\nthe queues (framework/kit/queue). kit reads what they registered through the\nhooks declared here, and imports none of the SDK packages behind them: a\nproduct that does not import a subsystem neither links nor initialises its\npackages.\n\nIt is also the contract between kit's core and the subsystems ADR 0179\ntakes out of it, as database/sql/driver is between database/sql and a\ndriver: the store subsystem's engine over documents, its siblings, kit's\nscope on a database and its migrations ([Stores]), which framework/kit/store\nsets; the refusals an engine says in kit's terms ([Refusal]); what kit's\ntransactions offer an engine that takes part in them ([Transaction]); and\nthe queue subsystem's brokers and their consumer ([Queues]), which\nframework/kit/queue sets.\n\nThe package imports the standard library and the framework's model only,\nso that kit and every subsystem can import it.\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/framework/internal/kit/queuekit",
+      "name": "queuekit",
+      "dir": "framework/internal/kit/queuekit",
+      "layer": "framework",
+      "doc": "Package queuekit is what framework/kit/queue plugs into kit: the brokers\nkit's consumers' queues run on — the SDK's queue in memory, in the data\ndirectory and over SQL, a mailer's outbox on a database sealed in front of\nthe SQL one —, the consumer that delivers them, and the migration of a\nqueue's table (ADR 0179 §1, step 4). kit's core imports none of the SDK's\nqueue: it reaches it through plug, and a product that declares no topic,\nno subscription, no watch, no queued command and no outbox on a database\nlinks none of it.\n\nPackage queuekit — the compile-time proof that the brokers are kit's.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/internal/kit/serverkit",
@@ -156,6 +163,13 @@
       "dir": "framework/kit/kittest",
       "layer": "framework",
       "doc": "Package kittest runs a product in its own tests as production runs it: on\na data directory, where kit seals what it keeps at rest, a transaction\nwrites files and a rollback writes them back, a store's retention erases\nand folds what it overwrote, and a restart reads everything back — none\nof which a product kept in memory (kit.InMemory) ever meets: kit seals\nnothing in memory.\n\nA suite keeps most of its tests in memory, fast and hermetic, and runs on\ndisk those that are about what rests there:\n\n\tfunc TestNothingPersonalRestsInClear(t *testing.T) {\n\t\tdisk := kittest.NewDisk(t)\n\t\tapp := start(t, disk) // the suite's own helper, in memory unless told otherwise\n\t\tfileReport(t, app, \"ann@example.com\")\n\t\tif files := disk.Holding(t, \"ann@example.com\"); len(files) > 0 {\n\t\t\tt.Errorf(\"in clear on disk: %v\", files)\n\t\t}\n\t}\n\nA Disk is an AppOption: kit.DataDir(disk.Dir), which wins over a\nkit.InMemory given before it. Given to the product started again — once\nthe first app stopped — it is the same data and the same secrets: a\nrestart.\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/framework/kit/queue",
+      "name": "queue",
+      "dir": "framework/kit/queue",
+      "layer": "framework",
+      "doc": "Package queue plugs kit's queues in: the queues of the topics a service\ndeclares and of their subscriptions, of its watches and of its queued\ncommands, and the outbox of a mailer on a database — the brokers the SDK's\nqueue runs them on, in memory, in the data directory or on a database, and\ntheir consumers. A product that declares one imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/queue\"\n\nA product that declares none does not, and links none of those brokers; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). It imports framework/kit/store:\na queue on a database joins the store subsystem's transactions, and a\nsealed message is sealed under data keys kit keeps in a store of its own.\nframework/kit imports it too until ADR 0179's last step: no product needs\nthe line yet.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/kit/server",
@@ -8616,6 +8630,53 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Broker",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Broker",
+      "spelled": "interface{Consume(ctx context.Context, cfg ConsumeConfig) error; DeadLetters(ctx context.Context, maxLetters int) ([]DeadLetterValue, error); Publish(ctx context.Context, payload []byte) error}",
+      "canonical": "interface{Consume(ctx context.Context, cfg github.com/kitsunium/sdk/framework/internal/kit/plug.ConsumeConfig) error; DeadLetters(ctx context.Context, maxLetters int) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.DeadLetterValue, error); Publish(ctx context.Context, payload []byte) error}",
+      "doc": "Broker is one queue as kit's core uses it: a publication, the consumer\nthat delivers it, and its dead letters. It grows by the sibling below.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Broker.Consume",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Consume",
+      "recv": "Broker",
+      "spelled": "func(ctx context.Context, cfg ConsumeConfig) error",
+      "canonical": "func(ctx context.Context, cfg github.com/kitsunium/sdk/framework/internal/kit/plug.ConsumeConfig) error",
+      "doc": "Consume delivers the queue's messages to cfg's handler until ctx ends\nor the queue's storage fails.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Broker.DeadLetters",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "DeadLetters",
+      "recv": "Broker",
+      "spelled": "func(ctx context.Context, maxLetters int) ([]DeadLetterValue, error)",
+      "canonical": "func(ctx context.Context, maxLetters int) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.DeadLetterValue, error)",
+      "doc": "DeadLetters are up to maxLetters of the queue's dead letters, oldest\nfirst.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Broker.Publish",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Publish",
+      "recv": "Broker",
+      "spelled": "func(ctx context.Context, payload []byte) error",
+      "canonical": "func(ctx context.Context, payload []byte) error",
+      "doc": "Publish puts payload in the queue: in the transaction ctx carries for\nits database, when it lives on one.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Checker",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
@@ -8636,6 +8697,122 @@
       "canonical": "func(ctx context.Context) error",
       "doc": "Check asks the database whether it answers, within its check timeout.\n",
       "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Clock",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Clock",
+      "spelled": "interface{After(d time.Duration) <-chan time.Time; NewTicker(d time.Duration) Ticker; NewTimer(d time.Duration) Timer; Now() time.Time; Since(t time.Time) time.Duration; Sleep(d time.Duration)}",
+      "canonical": "interface{After(d time.Duration) <-chan time.Time; NewTicker(d time.Duration) github.com/kitsunium/sdk/framework/internal/kit/plug.Ticker; NewTimer(d time.Duration) github.com/kitsunium/sdk/framework/internal/kit/plug.Timer; Now() time.Time; Since(t time.Time) time.Duration; Sleep(d time.Duration)}",
+      "doc": "Clock is the app's clock as a queue stamps and waits on it: kit's core\nhands the one its app runs on, a test's manual clock included.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Clock.After",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "After",
+      "recv": "Clock",
+      "spelled": "func(d time.Duration) <-chan time.Time",
+      "canonical": "func(d time.Duration) <-chan time.Time",
+      "doc": "After is a channel that receives the clock's instant once d passed.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Clock.NewTicker",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "NewTicker",
+      "recv": "Clock",
+      "spelled": "func(d time.Duration) Ticker",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/kit/plug.Ticker",
+      "doc": "NewTicker is a ticker that fires every d.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Clock.NewTimer",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "NewTimer",
+      "recv": "Clock",
+      "spelled": "func(d time.Duration) Timer",
+      "canonical": "func(d time.Duration) github.com/kitsunium/sdk/framework/internal/kit/plug.Timer",
+      "doc": "NewTimer is a timer that fires once d passed.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Clock.Now",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Now",
+      "recv": "Clock",
+      "spelled": "func() time.Time",
+      "canonical": "func() time.Time",
+      "doc": "Now is the clock's instant.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Clock.Since",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Since",
+      "recv": "Clock",
+      "spelled": "func(t time.Time) time.Duration",
+      "canonical": "func(t time.Time) time.Duration",
+      "doc": "Since is how long ago t was, on the clock.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Clock.Sleep",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Sleep",
+      "recv": "Clock",
+      "spelled": "func(d time.Duration)",
+      "canonical": "func(d time.Duration)",
+      "doc": "Sleep waits until d passed.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.ConsumeConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "ConsumeConfig",
+      "spelled": "struct{Handler func(ctx context.Context, d DeliveryValue) error; PollInterval time.Duration; Parallelism int; BatchSize int}",
+      "canonical": "struct{Handler func(ctx context.Context, d github.com/kitsunium/sdk/framework/internal/kit/plug.DeliveryValue) error; PollInterval time.Duration; Parallelism int; BatchSize int}",
+      "fields": [
+        {
+          "name": "Handler",
+          "type": "func(ctx context.Context, d DeliveryValue) error",
+          "doc": "Handler handles one delivery: nil acknowledges it, an error has it\nretried or, through DoNotRetry, dead-lettered at once. Every handler\nkit runs tolerates a redelivery.\n"
+        },
+        {
+          "name": "PollInterval",
+          "type": "time.Duration",
+          "doc": "PollInterval bounds an idle wait.\n"
+        },
+        {
+          "name": "Parallelism",
+          "type": "int",
+          "doc": "Parallelism is how many deliveries are handled at once.\n"
+        },
+        {
+          "name": "BatchSize",
+          "type": "int",
+          "doc": "BatchSize is how many messages the consumer takes at a time.\n"
+        }
+      ],
+      "doc": "ConsumeConfig is how a queue's consumer runs: its handler, how long it\nwaits idle, how many messages it handles at once and takes at a time.\n",
+      "file": "framework/internal/kit/plug/queue.go",
       "layer": "framework"
     },
     {
@@ -8753,6 +8930,72 @@
       ],
       "doc": "DatabaseConfig is one database a product declares, as kit opened it: its\npool, its dialect, its tuning and the timeout of each call.\n",
       "file": "framework/internal/kit/plug/store.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.DeadLetterValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "DeadLetterValue",
+      "spelled": "struct{FailedAt time.Time; Reason string; Cause string; Message MessageValue; Code uint32; Deliveries int}",
+      "canonical": "struct{FailedAt time.Time; Reason string; Cause string; Message github.com/kitsunium/sdk/framework/internal/kit/plug.MessageValue; Code uint32; Deliveries int}",
+      "fields": [
+        {
+          "name": "FailedAt",
+          "type": "time.Time",
+          "doc": "FailedAt is when its last attempt failed.\n"
+        },
+        {
+          "name": "Reason",
+          "type": "string",
+          "doc": "Reason is the failure's identifier.\n"
+        },
+        {
+          "name": "Cause",
+          "type": "string",
+          "doc": "Cause is the failure's public text, \"\" for none.\n"
+        },
+        {
+          "name": "Message",
+          "type": "MessageValue",
+          "doc": "Message is the message, unmodified.\n"
+        },
+        {
+          "name": "Code",
+          "type": "uint32",
+          "doc": "Code is the failure's error code, 0 for none.\n"
+        },
+        {
+          "name": "Deliveries",
+          "type": "int",
+          "doc": "Deliveries counts its deliveries.\n"
+        }
+      ],
+      "doc": "DeadLetterValue is a message its queue gave up on: when, why, and how\nmany times it was delivered.\n",
+      "file": "framework/internal/kit/plug/queue.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.DeliveryValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "DeliveryValue",
+      "spelled": "struct{Message MessageValue; Deliveries int}",
+      "canonical": "struct{Message github.com/kitsunium/sdk/framework/internal/kit/plug.MessageValue; Deliveries int}",
+      "fields": [
+        {
+          "name": "Message",
+          "type": "MessageValue",
+          "doc": "Message is what is delivered.\n"
+        },
+        {
+          "name": "Deliveries",
+          "type": "int",
+          "doc": "Deliveries counts the deliveries, this one included.\n"
+        }
+      ],
+      "doc": "DeliveryValue is one delivery of a message: the message, and how many\ntimes it has been delivered, this one included.\n",
+      "file": "framework/internal/kit/plug/queue.go",
       "layer": "framework"
     },
     {
@@ -9213,7 +9456,7 @@
       "name": "HandleProvider",
       "spelled": "interface{Handle(dst any) bool}",
       "canonical": "interface{Handle(dst any) bool}",
-      "doc": "HandleProvider is a Database that hands one of the SDK's own handles on: the\nvalue dst points at — its transaction manager, its dialect — set, and\ntrue; false for a handle it has none of. It serves the subsystems still in\nkit's core that take the SDK's types (the SQL broker of a queue, the\nspool of a mailer) until they leave it (ADR 0179, steps 4 and 6), and\nthe core never names the type it asks for. A sibling of [Database].\n",
+      "doc": "HandleProvider is a value of a subsystem that hands one of the SDK's own\nhandles on: the value dst points at set, and true; false for a handle it\nhas none of. It serves the mailer's spool, still in kit's core, which takes\nthe SDK's types — a Database's transaction manager as the spool's\nDeferrer, a queue's broker (Broker) as its outbox — until the mailers\nleave the core (ADR 0179, step 6), and the core never names the type it\nasks for. A sibling of [Database] and of [Broker].\n",
       "file": "framework/internal/kit/plug/store_interface.go",
       "layer": "framework"
     },
@@ -9302,6 +9545,114 @@
       "value": "\"kit_node\"",
       "doc": "LabelNode is the pprof label naming the node a goroutine works for.\n",
       "file": "framework/internal/kit/plug/plug.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.LiveMessageValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "LiveMessageValue",
+      "spelled": "struct{VisibleAt time.Time; Message MessageValue; Deliveries int; Leased bool}",
+      "canonical": "struct{VisibleAt time.Time; Message github.com/kitsunium/sdk/framework/internal/kit/plug.MessageValue; Deliveries int; Leased bool}",
+      "fields": [
+        {
+          "name": "VisibleAt",
+          "type": "time.Time",
+          "doc": "VisibleAt is when the message is next delivered.\n"
+        },
+        {
+          "name": "Message",
+          "type": "MessageValue",
+          "doc": "Message is the message.\n"
+        },
+        {
+          "name": "Deliveries",
+          "type": "int",
+          "doc": "Deliveries counts its deliveries so far.\n"
+        },
+        {
+          "name": "Leased",
+          "type": "bool",
+          "doc": "Leased reports whether a consumer holds it.\n"
+        }
+      ],
+      "doc": "LiveMessageValue is a message waiting in its queue, as it lies: when it\nis next visible, how many times it was delivered, and whether a consumer\nholds it.\n",
+      "file": "framework/internal/kit/plug/queue.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MessageMover",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MessageMover",
+      "spelled": "interface{Messages(ctx context.Context, after string, maxMessages int) ([]LiveMessageValue, error); PutDeadLetter(ctx context.Context, dead DeadLetterValue) (string, error); PutMessage(ctx context.Context, live LiveMessageValue) (string, error)}",
+      "canonical": "interface{Messages(ctx context.Context, after string, maxMessages int) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.LiveMessageValue, error); PutDeadLetter(ctx context.Context, dead github.com/kitsunium/sdk/framework/internal/kit/plug.DeadLetterValue) (string, error); PutMessage(ctx context.Context, live github.com/kitsunium/sdk/framework/internal/kit/plug.LiveMessageValue) (string, error)}",
+      "doc": "MessageMover is a Broker whose messages a data copy reads and writes as\nthey lie, without a lease, with their counts and their instants. A\nsibling of [Broker].\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MessageMover.Messages",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Messages",
+      "recv": "MessageMover",
+      "spelled": "func(ctx context.Context, after string, maxMessages int) ([]LiveMessageValue, error)",
+      "canonical": "func(ctx context.Context, after string, maxMessages int) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.LiveMessageValue, error)",
+      "doc": "Messages are up to maxMessages live messages after the identifier\nafter, \"\" for the first, in their queue's order.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MessageMover.PutDeadLetter",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "PutDeadLetter",
+      "recv": "MessageMover",
+      "spelled": "func(ctx context.Context, dead DeadLetterValue) (string, error)",
+      "canonical": "func(ctx context.Context, dead github.com/kitsunium/sdk/framework/internal/kit/plug.DeadLetterValue) (string, error)",
+      "doc": "PutDeadLetter writes dead, with its cause, under an identifier of the\nqueue's own, and returns it.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MessageMover.PutMessage",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "PutMessage",
+      "recv": "MessageMover",
+      "spelled": "func(ctx context.Context, live LiveMessageValue) (string, error)",
+      "canonical": "func(ctx context.Context, live github.com/kitsunium/sdk/framework/internal/kit/plug.LiveMessageValue) (string, error)",
+      "doc": "PutMessage writes live under an identifier of the queue's own, and\nreturns it.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MessageValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MessageValue",
+      "spelled": "struct{EnqueuedAt time.Time; ID string; Payload []byte}",
+      "canonical": "struct{EnqueuedAt time.Time; ID string; Payload []byte}",
+      "fields": [
+        {
+          "name": "EnqueuedAt",
+          "type": "time.Time",
+          "doc": "EnqueuedAt is when the message was published.\n"
+        },
+        {
+          "name": "ID",
+          "type": "string",
+          "doc": "ID identifies the message in its queue.\n"
+        },
+        {
+          "name": "Payload",
+          "type": "[]byte",
+          "doc": "Payload is the message as kit encoded it.\n"
+        }
+      ],
+      "doc": "MessageValue is one message of a queue: its identifier, its payload as\nkit encoded it, and when it was published.\n",
+      "file": "framework/internal/kit/plug/queue.go",
       "layer": "framework"
     },
     {
@@ -9461,6 +9812,151 @@
       ],
       "doc": "ProfilerConfig is the Studio's profiler: the live heap folded onto the graph's\nnodes, and every goroutine grouped.\n",
       "file": "framework/internal/kit/plug/plug.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.QueueConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "QueueConfig",
+      "spelled": "struct{Name string; Dir string; Database Database; Table string; Policy QueuePolicyValue; Clock Clock; Seal func(ctx context.Context, payload []byte) ([]byte, error); Unseal func(ctx context.Context, box []byte) []byte; MaxPayload int; Wrap any}",
+      "canonical": "struct{Name string; Dir string; Database github.com/kitsunium/sdk/framework/internal/kit/plug.Database; Table string; Policy github.com/kitsunium/sdk/framework/internal/kit/plug.QueuePolicyValue; Clock github.com/kitsunium/sdk/framework/internal/kit/plug.Clock; Seal func(ctx context.Context, payload []byte) ([]byte, error); Unseal func(ctx context.Context, box []byte) []byte; MaxPayload int; Wrap any}",
+      "fields": [
+        {
+          "name": "Name",
+          "type": "string",
+          "doc": "Name names the queue's node in a refusal: the consumer's or the\nmailer's node ID.\n"
+        },
+        {
+          "name": "Dir",
+          "type": "string",
+          "doc": "Dir is the directory a file queue lies in; with no Database and no\nDir, the queue is in memory.\n"
+        },
+        {
+          "name": "Database",
+          "type": "Database",
+          "doc": "Database keeps the queue, nil when Dir or memory does: a scope the\nstore subsystem's Database opened, whose transaction a publication in\nit joins.\n"
+        },
+        {
+          "name": "Table",
+          "type": "string",
+          "doc": "Table is the queue's table on Database.\n"
+        },
+        {
+          "name": "Policy",
+          "type": "QueuePolicyValue",
+          "doc": "Policy is how the queue leases, retries and bounds its messages.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "Clock",
+          "doc": "Clock is the app's clock, which the queue stamps and waits on.\n"
+        },
+        {
+          "name": "Seal",
+          "type": "func(ctx context.Context, payload []byte) ([]byte, error)",
+          "doc": "Seal, when set, seals every payload on its way in — a mail's, in a\nmailer's outbox on a database —, and Unseal opens one on its way out;\nMaxPayload bounds a payload before it is sealed.\n"
+        },
+        {
+          "name": "Unseal",
+          "type": "func(ctx context.Context, box []byte) []byte",
+          "doc": "Unseal is the payload a box holds, the box as it lies when it does\nnot open.\n"
+        },
+        {
+          "name": "MaxPayload",
+          "type": "int",
+          "doc": "MaxPayload bounds a payload Seal seals.\n"
+        },
+        {
+          "name": "Wrap",
+          "type": "any",
+          "doc": "Wrap, when a test sets it, stands in front of the queue the subsystem\nopens: a func(queue.Broker) queue.Broker of the SDK's queue, which\nkit's core does not name. Nil in every app a product builds.\n"
+        }
+      ],
+      "doc": "QueueConfig is what kit asks of one queue: where it lies, its policy, the\napp's clock, and for a mailer's outbox the sealing of what it keeps.\n",
+      "file": "framework/internal/kit/plug/queue.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.QueueDriverConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "QueueDriverConfig",
+      "spelled": "struct{Open func(cfg QueueConfig) (Broker, error); TableMigration func(dialect string, table string, version uint64) (MigrationValue, error); DoNotRetry func(err error) error; NotRetryable func(err error) bool}",
+      "canonical": "struct{Open func(cfg github.com/kitsunium/sdk/framework/internal/kit/plug.QueueConfig) (github.com/kitsunium/sdk/framework/internal/kit/plug.Broker, error); TableMigration func(dialect string, table string, version uint64) (github.com/kitsunium/sdk/framework/internal/kit/plug.MigrationValue, error); DoNotRetry func(err error) error; NotRetryable func(err error) bool}",
+      "fields": [
+        {
+          "name": "Open",
+          "type": "func(cfg QueueConfig) (Broker, error)",
+          "doc": "Open opens one queue, as cfg places it: on a database, in a\ndirectory, or in memory.\n"
+        },
+        {
+          "name": "TableMigration",
+          "type": "func(dialect string, table string, version uint64) (MigrationValue, error)",
+          "doc": "TableMigration is the migration that makes the queue table on a\ndatabase of the dialect named, at version.\n"
+        },
+        {
+          "name": "DoNotRetry",
+          "type": "func(err error) error",
+          "doc": "DoNotRetry is err as a delivery's handler returns it when no retry\ncan help: its queue dead-letters the message at once.\n"
+        },
+        {
+          "name": "NotRetryable",
+          "type": "func(err error) bool",
+          "doc": "NotRetryable reports whether err, a delivery's handler's, says that no\nretry can help: what DoNotRetry returned, the product's own included.\n"
+        }
+      ],
+      "doc": "QueueDriverConfig is what framework/kit/queue plugs into kit: how a\nconsumer's queue opens, the migration that makes its table on a database,\nand how a delivery's handler says that no retry can help.\n",
+      "file": "framework/internal/kit/plug/queue.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.QueuePolicyValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "QueuePolicyValue",
+      "spelled": "struct{VisibilityTimeout time.Duration; RetryDelay time.Duration; MaxRetryDelay time.Duration; MaxDeliveries int; MaxMessageBytes int}",
+      "canonical": "struct{VisibilityTimeout time.Duration; RetryDelay time.Duration; MaxRetryDelay time.Duration; MaxDeliveries int; MaxMessageBytes int}",
+      "fields": [
+        {
+          "name": "VisibilityTimeout",
+          "type": "time.Duration",
+          "doc": "VisibilityTimeout is how long a delivery is leased.\n"
+        },
+        {
+          "name": "RetryDelay",
+          "type": "time.Duration",
+          "doc": "RetryDelay is the wait after a message's first failure, doubled after\neach, up to MaxRetryDelay.\n"
+        },
+        {
+          "name": "MaxRetryDelay",
+          "type": "time.Duration",
+          "doc": "MaxRetryDelay bounds the wait before a retry; zero leaves it unbound.\n"
+        },
+        {
+          "name": "MaxDeliveries",
+          "type": "int",
+          "doc": "MaxDeliveries is how often a message is delivered before it is\ndead-lettered.\n"
+        },
+        {
+          "name": "MaxMessageBytes",
+          "type": "int",
+          "doc": "MaxMessageBytes bounds a message; zero is the queue's own bound.\n"
+        }
+      ],
+      "doc": "QueuePolicyValue is how a queue leases, retries and bounds its messages:\nthe SDK's queue policy, in kit's terms.\n",
+      "file": "framework/internal/kit/plug/queue.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Queues",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Queues",
+      "spelled": "atomic.Pointer[QueueDriverConfig]",
+      "canonical": "sync/atomic.Pointer[github.com/kitsunium/sdk/framework/internal/kit/plug.QueueDriverConfig]",
+      "doc": "Queues is the queue subsystem: the brokers kit's consumers' queues run on\nand the migration of a queue's table on a database; nil until\nframework/kit/queue is imported. A product that declares a topic, a\nsubscription, a watch, a queued command or a mailer whose outbox is on a\ndatabase without it is refused at the start (ADR 0179 §6).\n",
+      "file": "framework/internal/kit/plug/queue.go",
       "layer": "framework"
     },
     {
@@ -10201,8 +10697,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
       "name": "TableSpec",
-      "spelled": "struct{Name string; VersionsOf string; Queue bool}",
-      "canonical": "struct{Name string; VersionsOf string; Queue bool}",
+      "spelled": "struct{Name string; VersionsOf string}",
+      "canonical": "struct{Name string; VersionsOf string}",
       "fields": [
         {
           "name": "Name",
@@ -10213,15 +10709,104 @@
           "name": "VersionsOf",
           "type": "string",
           "doc": "VersionsOf is, for a store's versions, the store's table, from which\nthe versions' table is named.\n"
-        },
-        {
-          "name": "Queue",
-          "type": "bool",
-          "doc": "Queue marks a consumer's queue: the SQL broker's one table.\n"
         }
       ],
-      "doc": "TableSpec is one of kit's tables on a database, as its migration makes it:\na store's, a store's versions beside the store's table VersionsOf, or a\nconsumer's queue.\n",
+      "doc": "TableSpec is one of kit's tables on a database, as the store subsystem's\nmigration makes it: a store's, or a store's versions beside the store's\ntable VersionsOf. A consumer's queue's table is the queue subsystem's\n(QueueDriverConfig's TableMigration).\n",
       "file": "framework/internal/kit/plug/store.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Ticker",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Ticker",
+      "spelled": "interface{C() <-chan time.Time; Reset(d time.Duration); Stop()}",
+      "canonical": "interface{C() <-chan time.Time; Reset(d time.Duration); Stop()}",
+      "doc": "Ticker is a ticker of a [Clock].\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Ticker.C",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "C",
+      "recv": "Ticker",
+      "spelled": "func() <-chan time.Time",
+      "canonical": "func() <-chan time.Time",
+      "doc": "C receives the clock's instant at each tick.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Ticker.Reset",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Reset",
+      "recv": "Ticker",
+      "spelled": "func(d time.Duration)",
+      "canonical": "func(d time.Duration)",
+      "doc": "Reset makes the ticker fire every d.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Ticker.Stop",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Stop",
+      "recv": "Ticker",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "Stop stops the ticker.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Timer",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Timer",
+      "spelled": "interface{C() <-chan time.Time; Reset(d time.Duration) bool; Stop() bool}",
+      "canonical": "interface{C() <-chan time.Time; Reset(d time.Duration) bool; Stop() bool}",
+      "doc": "Timer is a timer of a [Clock].\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Timer.C",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "C",
+      "recv": "Timer",
+      "spelled": "func() <-chan time.Time",
+      "canonical": "func() <-chan time.Time",
+      "doc": "C receives the clock's instant when the timer fires.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Timer.Reset",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Reset",
+      "recv": "Timer",
+      "spelled": "func(d time.Duration) bool",
+      "canonical": "func(d time.Duration) bool",
+      "doc": "Reset makes the timer fire once d passed, and reports whether it had\nnot fired.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Timer.Stop",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Stop",
+      "recv": "Timer",
+      "spelled": "func() bool",
+      "canonical": "func() bool",
+      "doc": "Stop stops the timer, and reports whether it had not fired.\n",
+      "file": "framework/internal/kit/plug/queue_interface.go",
       "layer": "framework"
     },
     {
@@ -10532,6 +11117,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/queuekit.Enable",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/queuekit",
+      "name": "Enable",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "Enable plugs the queues' brokers, their consumer and the migration of a\nqueue's table into kit.\n",
+      "file": "framework/internal/kit/queuekit/queuekit.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/serverkit.Enable",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/serverkit",
@@ -10551,6 +11147,17 @@
       "canonical": "func()",
       "doc": "Enable plugs the stores' engines, kit's scope on a database and the\nmigrations of kit's tables into kit.\n",
       "file": "framework/internal/kit/storekit/storekit.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/storekit.SQLOf",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/storekit",
+      "name": "SQLOf",
+      "spelled": "func(db plug.Database) (tm sql.Transactor, dialect sql.Dialect, ok bool)",
+      "canonical": "func(db github.com/kitsunium/sdk/framework/internal/kit/plug.Database) (tm github.com/kitsunium/sdk/pkg/v1/data/sql.Transactor, dialect github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect, ok bool)",
+      "doc": "SQLOf is the SDK's transaction manager and dialect of db, a database this\npackage opened: what the queues' SQL broker runs on, so that a\npublication joins the transaction its context carries (ADR 0179 step 4);\nfalse for a database it did not open.\n",
+      "file": "framework/internal/kit/storekit/database.go",
       "layer": "framework"
     },
     {

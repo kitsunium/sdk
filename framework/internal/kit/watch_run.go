@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"slices"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 )
@@ -51,7 +51,7 @@ func (w *Watch) start(ctx context.Context, a *App) error {
 	loop := a.loop(w.id+" consumer", w.id, model.LoopConsumer, consumerHow)
 	c := consumer{a: a, loop: loop, node: w.id, name: w.name, wake: model.WakeChange}
 	handler := w.deliver(&c, r)
-	r.sup, err = c.supervise(func(ctx context.Context) error { return w.consume(ctx, a, r, handler) })
+	r.sup, err = c.supervise(func(ctx context.Context) error { return w.consume(ctx, r, handler) })
 	if err != nil {
 		for _, unfeed := range r.unfeed {
 			unfeed()
@@ -68,14 +68,12 @@ func (w *Watch) queueUnder() string { return underQueues }
 // notice at a time per worker, as a queued command's consumer does — a
 // watch's handler reads and may call out, and a batch would hold notices
 // behind a slow one, their leases lapsing.
-func (w *Watch) consume(ctx context.Context, a *App, r *watchRun, handler queue.Handler) error {
-	return queue.Consume(ctx, r.broker, queue.ConsumerConfig{
-		Handler:             handler,
-		Clock:               a.clock,
-		PollInterval:        pollInterval,
-		Parallelism:         w.parallelism,
-		BatchSize:           1,
-		HandlerIsIdempotent: true,
+func (w *Watch) consume(ctx context.Context, r *watchRun, handler deliveryHandler) error {
+	return r.broker.Consume(ctx, plug.ConsumeConfig{
+		Handler:      handler,
+		PollInterval: pollInterval,
+		Parallelism:  w.parallelism,
+		BatchSize:    1,
 	})
 }
 
@@ -86,8 +84,8 @@ func (w *Watch) consume(ctx context.Context, a *App, r *watchRun, handler queue.
 // a watch that hears its own module's stores does not hear back. A notice
 // that does not decode is dead-lettered on its first delivery (ADR 0151
 // §D8).
-func (w *Watch) deliver(c *consumer, r *watchRun) queue.Handler {
-	return func(ctx context.Context, d queue.Delivery) error {
+func (w *Watch) deliver(c *consumer, r *watchRun) deliveryHandler {
+	return func(ctx context.Context, d plug.DeliveryValue) error {
 		var n watchNotice
 		decodeErr := json.Unmarshal(d.Message.Payload, &n)
 		if decodeErr != nil {
@@ -95,7 +93,7 @@ func (w *Watch) deliver(c *consumer, r *watchRun) queue.Handler {
 		}
 		return c.deliver(ctx, &d, origin{trace: n.Trace, node: n.Store}, func(ctx context.Context, sp *span) error {
 			if decodeErr != nil {
-				return queue.DoNotRetry(failure(CodeUndecodable, "MESSAGE_UNDECODABLE", "the notice does not decode", decodeErr,
+				return doNotRetry(failure(CodeUndecodable, "MESSAGE_UNDECODABLE", "the notice does not decode", decodeErr,
 					errs.String("watch", w.id), errs.String("message", d.Message.ID)))
 			}
 			written := WrittenEvent{Store: n.Store, Key: n.Key, Deleted: n.Deleted, Fields: slices.Clone(r.fields[n.Store])}
@@ -148,7 +146,7 @@ func (w *Watch) notice(ctx context.Context, r *watchRun, store string, payload [
 // when it carries the one of the database r lives on (ADR 0178 C1). Its
 // refusal is the watch's.
 func (w *Watch) post(ctx context.Context, r *watchRun, store string, payload []byte) error {
-	if _, err := r.broker.Publish(ctx, payload); err != nil {
+	if err := r.broker.Publish(ctx, payload); err != nil {
 		return failure(CodeWatchQueue, "WATCH_NOTICE_REFUSED", "the watch's queue refused the notice", err,
 			errs.String("watch", w.id), errs.String("store", store))
 	}

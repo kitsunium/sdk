@@ -13,6 +13,7 @@ Package storekit — the compile-time proof that the engines are kit's.
 ## Index
 
 - [func Enable\(\)](<#Enable>)
+- [func SQLOf\(db plug.Database\) \(tm sql.Transactor, dialect sql.Dialect, ok bool\)](<#SQLOf>)
 
 <a name="Enable"></a>
 ## func [Enable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/storekit/storekit.go>)
@@ -22,5 +23,14 @@ func Enable()
 ```
 
 Enable plugs the stores' engines, kit's scope on a database and the migrations of kit's tables into kit.
+
+<a name="SQLOf"></a>
+## func [SQLOf](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/storekit/database.go>)
+
+```go
+func SQLOf(db plug.Database) (tm sql.Transactor, dialect sql.Dialect, ok bool)
+```
+
+SQLOf is the SDK's transaction manager and dialect of db, a database this package opened: what the queues' SQL broker runs on, so that a publication joins the transaction its context carries (ADR 0179 step 4); false for a database it did not open.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

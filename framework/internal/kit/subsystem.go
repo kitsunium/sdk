@@ -40,6 +40,9 @@ type subsystem struct {
 	kinds     []model.NodeKind
 	databases bool
 	sealing   bool
+	// needs, when set, reports whether the node n, of no kind of kinds,
+	// needs the subsystem all the same.
+	needs func(a *App, n node) bool
 	// linked reports whether the program links the subsystem.
 	linked func() bool
 }
@@ -47,13 +50,31 @@ type subsystem struct {
 // subsystems are the subsystems the start checks, one per registration
 // package of ADR 0179 §1, each added by the step that takes its subsystem out
 // of the core: the stores' since step 3, linked when framework/kit/store set
-// plug.Stores and kit's own store code (EnableStores, step 3b). A test sets
+// plug.Stores and kit's own store code (EnableStores, step 3b); the queues'
+// since step 4, linked when framework/kit/queue set plug.Queues. A test sets
 // the hooks as a program that does not import the package would see them.
 var subsystems = []subsystem{{
 	name: "store", pkg: storePackage,
 	kinds: []model.NodeKind{model.KindStore}, databases: true, sealing: true,
 	linked: storesLinked,
+}, {
+	name: "queue", pkg: queuePackage,
+	kinds: []model.NodeKind{model.KindTopic, model.KindSubscription},
+	needs: needsQueue, linked: queuesLinked,
 }}
+
+// needsQueue reports whether n needs the queue subsystem beside the topics
+// and the subscriptions — a watch is one —: a queued command, and a mailer
+// whose outbox is on a database, the queues' SQL broker (ADR 0178 C1).
+func needsQueue(a *App, n node) bool {
+	switch q := n.(type) {
+	case *Mailer:
+		return queueWhere(a, &q.nodeBase) == "sql"
+	case interface{ queued() bool }:
+		return q.queued()
+	}
+	return false
+}
 
 // storesLinked reports whether the program imports framework/kit/store: the
 // store subsystem is plugged in, its engines and kit's own store code.
@@ -114,7 +135,7 @@ func (a *App) unlinkedNodes(svc *Service, missing []subsystem) []unlinkedDecl {
 	for _, n := range nodes {
 		b := n.base()
 		for _, s := range missing {
-			if slices.Contains(s.kinds, b.kind) || s.sealing && sealsAtRest(a, n) {
+			if slices.Contains(s.kinds, b.kind) || s.sealing && sealsAtRest(a, n) || s.needs != nil && s.needs(a, n) {
 				out = append(out, unlinkedDecl{node: b.id, at: a.source(&b.decl), sub: s})
 			}
 		}
