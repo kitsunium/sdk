@@ -31,7 +31,7 @@ const (
 
 // diff is what changed from version from to version to of the record under
 // key.
-func (s *StoreService[T]) diff(ctx context.Context, key string, from, to uint64) ([]Edit, error) {
+func (s *storeCore) diff(ctx context.Context, key string, from, to uint64) ([]Edit, error) {
 	all, err := s.openedVersions(ctx, key)
 	if err != nil {
 		return nil, err

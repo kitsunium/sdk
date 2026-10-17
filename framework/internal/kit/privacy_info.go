@@ -12,7 +12,7 @@ import (
 // privacyInfo describes the store's personal data for the model: its
 // subject, purpose and retention, and on a runtime graph what is held and
 // due and what this run erased and deleted.
-func (s *StoreService[T]) privacyInfo(a *App) *model.StorePrivacy {
+func (s *storeCore) privacyInfo(a *App) *model.StorePrivacy {
 	plan, p := s.plan(), s.privacy
 	if !plan.personal() && p == nil {
 		return nil
@@ -28,7 +28,7 @@ func (s *StoreService[T]) privacyInfo(a *App) *model.StorePrivacy {
 }
 
 // describe fills info with what the store declares.
-func (p *storePrivacy[T]) describe(a *App, info *model.StorePrivacy) {
+func (p *storePrivacy) describe(a *App, info *model.StorePrivacy) {
 	info.Purpose, info.DeleteOnErasure = p.purpose, p.erasureDelete
 	info.Erase, info.Delete = retentionInfo(a, p.erase), retentionInfo(a, p.delete)
 	if p.byProduct != nil {
@@ -43,7 +43,7 @@ func (p *storePrivacy[T]) describe(a *App, info *model.StorePrivacy) {
 // describeRun fills info with what the running store holds and did: how
 // many of its records are held, when the next is due, what this run erased
 // and deleted.
-func (s *StoreService[T]) describeRun(a *App, info *model.StorePrivacy) {
+func (s *storeCore) describeRun(a *App, info *model.StorePrivacy) {
 	info.Held = new(s.heldCount(a))
 	if r := s.retention(); r != nil {
 		if first := r.earliest(); !first.IsZero() {

@@ -69,24 +69,28 @@ type leavingCase struct {
 	code    []string
 }
 
-// storeEngines are kit's generic store engines, which ADR 0179's step 2 makes
-// one non-generic engine and step 3 moves to framework/internal/kit/storekit:
-// their symbols, instantiated per record type, in a binary.
+// storeEngines are the symbols of kit's store engines instantiated per
+// record type, in a binary: none since ADR 0179's step 2 made them one
+// non-generic engine over documents — and the agendas of the retention and
+// the trash with them —, which step 3 moves to framework/internal/kit/storekit.
+// StoreService[T] is not among them: it is the typed facade that stays
+// generic (ADR 0179 §2), a few lines per method, linked for kit's own
+// stores and each a product declares.
 var storeEngines = []string{
-	"framework/internal/kit.(*StoreService[", "framework/internal/kit.(*docEngine[",
-	"framework/internal/kit.(*sqlEngine[", "framework/internal/kit.(*sealedEngine[",
-	"framework/internal/kit.(*historied[",
+	"framework/internal/kit.(*docEngine[", "framework/internal/kit.(*sqlEngine[",
+	"framework/internal/kit.(*sealedEngine[", "framework/internal/kit.(*historied[",
+	"framework/internal/kit.(*retentionRun[", "framework/internal/kit.(*trashRun[",
 }
 
 // stillInCore is the allow-list while ADR 0179's migration runs: the SDK
-// packages of leaving that framework/internal/kit still imports, and whether
-// kit's generic store engines are still in it. Each step takes its own
-// entries out in the same change that moves them — step 2 the engines, step
-// 3 docstore and sql, step 4 queue, step 5 statemachine, step 6 mail/spool,
-// step 7 scheduler, step 8 i18n —, and step 10, which drops the facade's
-// blank imports, deletes it with this test's allowances. It is held tight
-// both ways: a package still listed that the core no longer imports fails
-// the test as surely as one the core imports and the list does not name.
+// packages of leaving that framework/internal/kit still imports. Each step
+// takes its own entries out in the same change that moves them — step 2 took
+// kit's generic store engines ("store engines"), step 3 docstore and sql,
+// step 4 queue, step 5 statemachine, step 6 mail/spool, step 7 scheduler,
+// step 8 i18n —, and step 10, which drops the facade's blank imports,
+// deletes it with this test's allowances. It is held tight both ways: a
+// package still listed that the core no longer imports fails the test as
+// surely as one the core imports and the list does not name.
 var stillInCore = map[string]bool{
 	"pkg/v1/data/docstore":    true,
 	"pkg/v1/data/sql":         true,
@@ -95,7 +99,6 @@ var stillInCore = map[string]bool{
 	"pkg/v1/app/mail/spool":   true,
 	"pkg/v1/app/scheduler":    true,
 	"pkg/v1/app/i18n":         true,
-	"store engines":           true,
 }
 
 // The core imports none of the subsystems ADR 0179 §1 takes out of it, but

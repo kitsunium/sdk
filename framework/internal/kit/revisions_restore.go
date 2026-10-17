@@ -18,23 +18,22 @@ import (
 // restore writes version number of the record under key back, whole or the
 // fields named, through the store's own update: a new version, refused by a
 // unique index it breaks as any write.
-func (s *StoreService[T]) restore(ctx context.Context, key string, number uint64, fields []string) (T, error) {
-	var zero T
+func (s *storeCore) restore(ctx context.Context, key string, number uint64, fields []string) (any, error) {
 	if _, err := s.keeper(); err != nil {
-		return zero, err
+		return nil, err
 	}
 	kept := s.keptOnRestore()
 	if err := s.restorable(fields, kept); err != nil {
-		return zero, err
+		return nil, err
 	}
 	ver, err := s.openedVersion(ctx, key, number)
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
-	return s.modify(ctx, key, func(cur *T) error {
-		now, err := json.Marshal(*cur)
+	return s.modify(ctx, key, func(cur any) (any, error) {
+		now, err := json.Marshal(cur)
 		if err != nil {
-			return failure(CodeStoreEncode, "STORE_ENCODE", "the entity cannot be stored", err, errs.String("store", s.id))
+			return nil, failure(CodeStoreEncode, "STORE_ENCODE", "the entity cannot be stored", err, errs.String("store", s.id))
 		}
 		next := slices.Clone([]byte(ver.JSON))
 		if len(fields) > 0 {
@@ -46,19 +45,18 @@ func (s *StoreService[T]) restore(ctx context.Context, key string, number uint64
 		for _, p := range kept {
 			next = copyMember(next, now, p)
 		}
-		var v T
-		if err := json.Unmarshal(next, &v); err != nil {
-			return s.versionDecodeFailure(key, number, err)
+		v, err := s.ent.decode(next)
+		if err != nil {
+			return nil, s.versionDecodeFailure(key, number, err)
 		}
-		*cur = v
-		return nil
+		return v, nil
 	})
 }
 
 // keptOnRestore are the members a restore keeps as the record holds them:
 // every secret member — a collection that holds one, whole — and the state
 // of every workflow over the store.
-func (s *StoreService[T]) keptOnRestore() []string {
+func (s *storeCore) keptOnRestore() []string {
 	var out []string
 	for _, m := range s.plan().members {
 		if m.tag.effective() != model.ClassSecret {
@@ -83,8 +81,8 @@ func (s *StoreService[T]) keptOnRestore() []string {
 // restorable refuses the fields a restore names that it cannot restore: a
 // pointer that names no member of the entity, and one that lies in what the
 // restore keeps — a secret member, a workflow's state.
-func (s *StoreService[T]) restorable(fields, kept []string) error {
-	t := reflect.TypeFor[T]()
+func (s *storeCore) restorable(fields, kept []string) error {
+	t := s.ent.typ
 	for _, p := range fields {
 		if !strings.HasPrefix(p, "/") || !typeHas(t, splitPointer(p)) {
 			return Invalid(fmt.Sprintf("%s: %q names no field of the record: name one by its JSON pointer, \"/title\"", s.name, clip(p)))

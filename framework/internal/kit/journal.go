@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/crypto/hash"
 )
@@ -102,7 +103,7 @@ func (a *App) appendJournal(ctx context.Context, j *StoreService[journalRecord],
 	}
 	e.Seq = a.privacy.seq + 1
 	e.Hash = chainHash(a.privacy.last, e)
-	if err := j.write(ctx, e, insertOnly); err != nil {
+	if err := j.write(ctx, e, plug.WriteInsert); err != nil {
 		return failure(CodePrivacyJournal, "JOURNAL_WRITE", "the privacy journal could not be written", err)
 	}
 	a.privacy.seq, a.privacy.last = e.Seq, e.Hash

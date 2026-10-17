@@ -115,16 +115,16 @@ func (p *PasswordPolicyService[T]) Verify(ctx context.Context, key string, passw
 }
 
 // run runs one of the policy's calls in a span on its store's node.
-func (p *PasswordPolicyService[T]) run(ctx context.Context, edge model.EdgeKind, name string, fn func(context.Context) error) error {
-	a := p.s.app()
+func (p *passwordRule) run(ctx context.Context, edge model.EdgeKind, name string, fn func(context.Context) error) error {
+	a := p.store.app()
 	if a == nil || p.member == nil {
-		return notRunning(&p.s.nodeBase)
+		return notRunning(&p.store.nodeBase)
 	}
 	op := model.OpWrite
 	if edge == model.EdgeReads {
 		op = model.OpRead
 	}
-	ctx, sp := a.begin(ctx, &spanStart{node: p.s.id, from: currentNode(ctx), edge: edge, label: policyLabel, op: op, name: name})
+	ctx, sp := a.begin(ctx, &spanStart{node: p.store.id, from: currentNode(ctx), edge: edge, label: policyLabel, op: op, name: name})
 	err := fn(ctx)
 	sp.end(err)
 	return err
@@ -136,28 +136,28 @@ func (p *PasswordPolicyService[T]) run(ctx context.Context, edge model.EdgeKind,
 // answers false; so does a hash the SDK cannot read, which is an error.
 // The hash of nothing is made before anything is read, so that even the
 // process's first call costs the same whatever the key.
-func (p *PasswordPolicyService[T]) verified(ctx context.Context, key string, password []byte) (string, bool, error) {
+func (p *passwordRule) verified(ctx context.Context, key string, password []byte) (string, bool, error) {
 	nothing := dummyHash()
-	v, err := p.s.read(ctx, key)
+	v, err := p.store.read(ctx, key)
 	if err != nil && !isNotFound(err) {
 		return "", false, err
 	}
 	hash := ""
 	if err == nil {
-		hash, _ = p.hashOf(&v)
+		hash, _ = p.hashOf(v)
 	}
 	if hash == "" {
 		// A missing record costs what a wrong password costs; a dummy that
 		// cannot be verified is a hashing that no longer works.
 		if _, err := verifyPassword(password, nothing); err != nil {
-			return "", false, failure(CodePasswordHash, "PASSWORD_UNREADABLE", "the password hashing does not work", err, errs.String("store", p.s.id))
+			return "", false, failure(CodePasswordHash, "PASSWORD_UNREADABLE", "the password hashing does not work", err, errs.String("store", p.store.id))
 		}
 		return "", false, nil
 	}
 	ok, err := verifyPassword(password, hash)
 	if err != nil {
 		_, dummyErr := verifyPassword(password, nothing)
-		return hash, false, failure(CodePasswordHash, "PASSWORD_UNREADABLE", "the stored password hash cannot be read", errors.Join(err, dummyErr), errs.String("store", p.s.id))
+		return hash, false, failure(CodePasswordHash, "PASSWORD_UNREADABLE", "the stored password hash cannot be read", errors.Join(err, dummyErr), errs.String("store", p.store.id))
 	}
 	return hash, ok, nil
 }
@@ -165,7 +165,7 @@ func (p *PasswordPolicyService[T]) verified(ctx context.Context, key string, pas
 // set checks, hashes and stores a password. verified is the hash Change
 // verified the current password against: when another write changed it
 // since, the change is a [Conflict]. Set reads a moved hash again.
-func (p *PasswordPolicyService[T]) set(ctx context.Context, key string, password []byte, verified *string) error {
+func (p *passwordRule) set(ctx context.Context, key string, password []byte, verified *string) error {
 	if utf8.RuneCount(password) < p.minLength {
 		return Invalid(fmt.Sprintf("a password has at least %d characters", p.minLength))
 	}
@@ -186,12 +186,12 @@ func (p *PasswordPolicyService[T]) set(ctx context.Context, key string, password
 
 // attempt is one try of set: the hash read, the password checked against it
 // and its former ones, then stored if the hash is still the one read.
-func (p *PasswordPolicyService[T]) attempt(ctx context.Context, key string, password []byte, verified *string) error {
-	v, err := p.s.read(ctx, key)
+func (p *passwordRule) attempt(ctx context.Context, key string, password []byte, verified *string) error {
+	v, err := p.store.read(ctx, key)
 	if err != nil {
 		return err
 	}
-	cur, _ := p.hashOf(&v)
+	cur, _ := p.hashOf(v)
 	if verified != nil && cur != *verified {
 		return errPasswordMoved
 	}
@@ -200,7 +200,7 @@ func (p *PasswordPolicyService[T]) attempt(ctx context.Context, key string, pass
 	}
 	hash, err := hashPassword(password)
 	if err != nil {
-		return failure(CodePasswordHash, "PASSWORD_HASH", "the password could not be hashed", err, errs.String("store", p.s.id))
+		return failure(CodePasswordHash, "PASSWORD_HASH", "the password could not be hashed", err, errs.String("store", p.store.id))
 	}
 	return p.replace(ctx, key, cur, hash)
 }
@@ -208,7 +208,7 @@ func (p *PasswordPolicyService[T]) attempt(ctx context.Context, key string, pass
 // fresh refuses, under NotReused(n), a password that the current hash or
 // one of the n former ones verifies. All are verified whichever matches, and
 // the refusal never says which.
-func (p *PasswordPolicyService[T]) fresh(ctx context.Context, key, cur string, password []byte) error {
+func (p *passwordRule) fresh(ctx context.Context, key, cur string, password []byte) error {
 	if p.notReused == 0 {
 		return nil
 	}
@@ -227,10 +227,10 @@ func (p *PasswordPolicyService[T]) fresh(ctx context.Context, key, cur string, p
 
 // formerHashes are the policy's field's n newest former hashes. A held
 // record keeps more; the policy reads n.
-func (p *PasswordPolicyService[T]) formerHashes(ctx context.Context, key string) ([]string, error) {
-	h := p.s.historied()
+func (p *passwordRule) formerHashes(ctx context.Context, key string) ([]string, error) {
+	h := p.store.historied()
 	if h == nil {
-		return nil, notRunning(&p.s.nodeBase)
+		return nil, notRunning(&p.store.nodeBase)
 	}
 	all, err := h.formerAll(ctx, key)
 	if err != nil {
@@ -251,13 +251,14 @@ func (p *PasswordPolicyService[T]) formerHashes(ctx context.Context, key string)
 
 // replace stores hash in the record under key if its hash is still was:
 // errPasswordMoved otherwise.
-func (p *PasswordPolicyService[T]) replace(ctx context.Context, key, was, hash string) error {
-	_, err := p.s.modify(ctx, key, func(v *T) error {
+func (p *passwordRule) replace(ctx context.Context, key, was, hash string) error {
+	_, err := p.store.modify(ctx, key, func(v any) (any, error) {
 		if cur, _ := p.hashOf(v); cur != was {
-			return errPasswordMoved
+			return nil, errPasswordMoved
 		}
-		p.setHash(v, hash)
-		return nil
+		rv := p.store.addressable(v)
+		p.setHash(rv.Addr().Interface(), hash)
+		return rv.Interface(), nil
 	})
 	return err
 }
@@ -265,14 +266,14 @@ func (p *PasswordPolicyService[T]) replace(ctx context.Context, key, was, hash s
 // rehash stores the password again, hashed under the SDK's policy now: the
 // same password, so the field's history records nothing. A failure leaves
 // the older hash, which still verifies: kit logs it, and the login stands.
-func (p *PasswordPolicyService[T]) rehash(ctx context.Context, key string, password []byte, was string) {
+func (p *passwordRule) rehash(ctx context.Context, key string, password []byte, was string) {
 	hash, err := hashPassword(password)
 	if err == nil {
 		err = p.replace(withIntent(ctx, historyIntent{same: p.member.pointer}), key, was, hash)
 	}
 	if err != nil && !errors.Is(err, errPasswordMoved) {
-		if a := p.s.app(); a != nil {
-			logger.Warn(ctx, a.log, "a password's hash could not be upgraded", logger.String("store", p.s.id), logger.String("error", describeText(err)))
+		if a := p.store.app(); a != nil {
+			logger.Warn(ctx, a.log, "a password's hash could not be upgraded", logger.String("store", p.store.id), logger.String("error", describeText(err)))
 		}
 	}
 }

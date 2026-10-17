@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
+
 	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
@@ -25,7 +27,7 @@ type page struct {
 
 // memorySink is a document store in memory, written as a copy writes a
 // table: through PutDocument, which the file engine has too.
-type memorySink struct{ *docEngine[page] }
+type memorySink struct{ *docEngine }
 
 func (m memorySink) putDocument(_ context.Context, key string, versions []docstore.Version, trashedAt time.Time) error {
 	return m.ds.PutDocument(key, versions, trashedAt)
@@ -36,14 +38,36 @@ func (m memorySink) insertRaw(_ context.Context, raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return err
 	}
-	return m.ds.Insert(p)
+	return m.ds.Insert(pageDoc(p))
+}
+
+// pageConfig is the engine of a store of pages, keyed by their ID.
+var pageConfig = &engineConfig{
+	key: func(d plug.DocumentValue) string {
+		p, _ := d.Value.(page)
+		return p.ID
+	},
+	decode: func(raw json.RawMessage) (any, error) {
+		var p page
+		err := json.Unmarshal(raw, &p)
+		return p, err
+	},
+}
+
+// pageDoc is p as the engine's document store keeps it.
+func pageDoc(p page) docRecord {
+	raw, err := json.Marshal(p)
+	if err != nil {
+		panic(err)
+	}
+	return recordFor(plug.DocumentValue{JSON: raw, Value: p})
 }
 
 // pages opens a store of pages in memory, keeping two former versions on
 // clk.
-func pages(t *testing.T, clk clock.Clock) *docEngine[page] {
+func pages(t *testing.T, clk clock.Clock) *docEngine {
 	t.Helper()
-	e, err := openDocEngine(func(p page) string { return p.ID }, storeFS{}, nil, versionsOn{keep: 2, clock: clk})
+	e, err := openDocEngine(pageConfig, storeFS{}, versionsOn{keep: 2, clock: clk})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,18 +75,18 @@ func pages(t *testing.T, clk clock.Clock) *docEngine[page] {
 }
 
 // history writes pages with versions — renamed, stamped — and trashes one.
-func history(t *testing.T, e *docEngine[page], clk *clock.ManualClock) {
+func history(t *testing.T, e *docEngine, clk *clock.ManualClock) {
 	t.Helper()
 	for _, title := range []string{"draft", "review", "final"} {
-		if err := e.ds.PutStamped(page{ID: "p1", Title: title}, docstore.Stamp{Meta: map[string]string{"by": title}}); err != nil {
+		if err := e.ds.PutStamped(pageDoc(page{ID: "p1", Title: title}), docstore.Stamp{Meta: map[string]string{"by": title}}); err != nil {
 			t.Fatal(err)
 		}
 		clk.Advance(time.Minute)
 	}
-	if err := e.ds.Put(page{ID: "p2", Title: "kept"}); err != nil {
+	if err := e.ds.Put(pageDoc(page{ID: "p2", Title: "kept"})); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.ds.Put(page{ID: "p3", Title: "trashed"}); err != nil {
+	if err := e.ds.Put(pageDoc(page{ID: "p3", Title: "trashed"})); err != nil {
 		t.Fatal(err)
 	}
 	clk.Advance(time.Hour)
@@ -106,12 +130,12 @@ func TestADivergenceIsCaughtAndItsFirstKeyNamed(t *testing.T) {
 		key   string
 	}{
 		{key: "p2", alter: func(t *testing.T, to memorySink) {
-			if err := to.ds.Put(page{ID: "p2", Title: "tampered"}); err != nil {
+			if err := to.ds.Put(pageDoc(page{ID: "p2", Title: "tampered"})); err != nil {
 				t.Fatal(err)
 			}
 		}},
 		{key: "p0", alter: func(t *testing.T, to memorySink) {
-			if err := to.ds.Put(page{ID: "p0", Title: "extra"}); err != nil {
+			if err := to.ds.Put(pageDoc(page{ID: "p0", Title: "extra"})); err != nil {
 				t.Fatal(err)
 			}
 		}},

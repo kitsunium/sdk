@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
+
 	"github.com/kitsunium/sdk/pkg/v1/clock"
 )
 
@@ -170,7 +172,7 @@ func legacyEntry(t *testing.T, app *App, j *StoreService[journalRecord], keys *r
 	se := j.sealing()
 	sealed, err := se.seal(ctx, raw, e.key(), keys.ownRef(j.id, e.key()), nil)
 	must(t, err)
-	must(t, se.inner.Write(ctx, sealedDoc{raw: sealed, open: &openedDoc{v: e, key: e.key(), ok: true}}, insertOnly))
+	must(t, se.inner.Write(ctx, plug.DocumentValue{JSON: sealed, Value: e}, plug.WriteInsert))
 	app.privacy.seq, app.privacy.last = e.Seq, e.Hash
 	return e
 }

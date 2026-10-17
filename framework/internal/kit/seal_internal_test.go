@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/data/sql"
@@ -94,12 +95,19 @@ func sealedCards(t *testing.T, name, dir string) (*App, *StoreService[card]) {
 	return app, cards
 }
 
+// openCard is the card raw holds as it rests under key, opened.
+func openCard(ctx context.Context, se *sealedEngine, key string, raw []byte) (card, error) {
+	v, _, err := se.openRecord(ctx, key, raw)
+	c, _ := v.(card)
+	return c, err
+}
+
 // restingAt is the record under key as its store keeps it at rest.
 func restingAt(t *testing.T, s *StoreService[card], key string) []byte {
 	t.Helper()
 	d, err := s.sealing().inner.Get(t.Context(), key)
 	must(t, err)
-	return d.raw
+	return d.JSON
 }
 
 // A box opens only where it was sealed: moved into another record, or into
@@ -122,11 +130,11 @@ func TestABoxOpensOnlyWhereItLies(t *testing.T) {
 		if strings.Contains(what, "own") {
 			key = "c1"
 		}
-		if _, err := se.openRecord(ctx, key, moved); !errs.HasCode(err, CodeSealOpen) {
+		if _, err := openCard(ctx, se, key, moved); !errs.HasCode(err, CodeSealOpen) {
 			t.Errorf("a box moved %s: %v", what, err)
 		}
 	}
-	if c, err := se.openRecord(ctx, "c1", c1); err != nil || c.Note != "n1" || c.Secret != "s1" {
+	if c, err := openCard(ctx, se, "c1", c1); err != nil || c.Note != "n1" || c.Secret != "s1" {
 		t.Errorf("the box where it lies: %+v, %v", c, err)
 	}
 }
@@ -154,8 +162,8 @@ func TestAKeyThatReadsASealedMemberStaysInClear(t *testing.T) {
 	must(t, badges.Insert(ctx, badge{ID: "holder-2", Name: "Bob Holder"}))
 	d, err := badges.sealing().inner.Get(ctx, "holder-2")
 	must(t, err)
-	if !bytes.Contains(d.raw, []byte(`"id":"holder-2"`)) || bytes.Contains(d.raw, []byte("Bob")) {
-		t.Errorf("at rest: %s", d.raw)
+	if !bytes.Contains(d.JSON, []byte(`"id":"holder-2"`)) || bytes.Contains(d.JSON, []byte("Bob")) {
+		t.Errorf("at rest: %s", d.JSON)
 	}
 	said := 0
 	for _, dg := range app.Graph().Diagnostics {
@@ -178,7 +186,7 @@ func TestAKeyThatReadsASealedMemberStaysInClear(t *testing.T) {
 // and storing it without a lock, as it did before the SDK's snapshot.Value,
 // let the second publish drop the first's members.
 func TestConcurrentLearnsKeepEveryMember(t *testing.T) {
-	e := &sealedEngine[badge]{}
+	e := &sealedEngine{}
 	e.warned.Store(true) // already said: learn reaches no app
 	const writers int = 32
 	var wg sync.WaitGroup
@@ -216,7 +224,7 @@ func TestADeletedRecordTakesItsOwnKey(t *testing.T) {
 	if n := count(); n != 1 {
 		t.Errorf("%d data keys after the deletions, want the person's", n)
 	}
-	if c, err := cards.sealing().openRecord(ctx, "orphan", orphan); err != nil || c.Note != "" {
+	if c, err := openCard(ctx, cards.sealing(), "orphan", orphan); err != nil || c.Note != "" {
 		t.Errorf("a copy of the deleted record: %+v, %v", c, err)
 	}
 }
@@ -281,7 +289,7 @@ func restingOf[T any](t *testing.T, s *StoreService[T], key string) []byte {
 	t.Helper()
 	d, err := s.sealing().inner.Get(t.Context(), key)
 	must(t, err)
-	return d.raw
+	return d.JSON
 }
 
 // restingFiles lists the files under dir, the secrets' aside, that hold any
@@ -513,7 +521,7 @@ func TestErasingAPersonsLastRecordDestroysTheirKey(t *testing.T) {
 	}
 	copyOfC2 := restingAt(t, cards, "c2")
 	must(t, cards.Erase(ctx, "c2", "asked"))
-	if c, err := cards.sealing().openRecord(ctx, "c2", copyOfC2); err != nil || c.Note != "" || c.Owner != "" {
+	if c, err := openCard(ctx, cards.sealing(), "c2", copyOfC2); err != nil || c.Note != "" || c.Owner != "" {
 		t.Errorf("a copy of ann's last record, after its erasure: %+v, %v", c, err)
 	}
 	shreds := 0
@@ -586,7 +594,7 @@ func TestDeletingAPersonsLastRecordDestroysTheirKey(t *testing.T) {
 	// opens: whether its person's key is still kept.
 	opens := func(key string, copyOf []byte) bool {
 		t.Helper()
-		c, err := cards.sealing().openRecord(ctx, key, copyOf)
+		c, err := openCard(ctx, cards.sealing(), key, copyOf)
 		must(t, err)
 		return c.Note != ""
 	}
@@ -679,20 +687,25 @@ func TestAnUnreadableBoxKeepsAPersonsKey(t *testing.T) {
 	_, err := cards.Update(ctx, "c3", func(c *card) error { c.Owner, c.Note = "cid", "cid's words"; return nil })
 	must(t, err)
 	h := cards.historied()
-	_, err = h.hist.Update(ctx, "c3", func(doc *historyRecord) error {
+	_, err = h.hist.Update(ctx, "c3", func(d *plug.DocumentValue) error {
+		doc, err := historyOf(*d)
+		if err != nil {
+			return err
+		}
 		for p, list := range doc.Fields {
 			for i := range list {
 				list[i].Value = json.RawMessage(`"` + boxPrefix + `!!! not a box !!!"`)
 			}
 			doc.Fields[p] = list
 		}
-		return nil
+		*d, err = historyDoc(doc)
+		return err
 	})
 	must(t, err)
 	must(t, cards.Insert(ctx, card{ID: "c1", Owner: "ann", Note: "ann's"}))
 	copyOfC1 := restingAt(t, cards, "c1")
 	must(t, cards.Delete(ctx, "c1"))
-	if c, err := cards.sealing().openRecord(ctx, "c1", copyOfC1); err != nil || c.Note != "ann's" {
+	if c, err := openCard(ctx, cards.sealing(), "c1", copyOfC1); err != nil || c.Note != "ann's" {
 		t.Errorf("ann's key went though a box kit cannot read might need it: %+v, %v", c, err)
 	}
 }

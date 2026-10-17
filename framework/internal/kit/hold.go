@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
@@ -135,7 +136,7 @@ func (a *App) holdSubjectIn(ctx context.Context, st privacyStore, reason string,
 }
 
 // holdKey holds the record under key.
-func (s *StoreService[T]) holdKey(ctx context.Context, a *App, key, reason string) error {
+func (s *storeCore) holdKey(ctx context.Context, a *App, key, reason string) error {
 	if strings.TrimSpace(reason) == "" {
 		return Invalid("a hold needs a reason")
 	}
@@ -164,7 +165,7 @@ func (s *StoreService[T]) holdKey(ctx context.Context, a *App, key, reason strin
 	if id := s.subjectOf(v); id != "" {
 		h.Subject = keys.subjectRef(id)
 	}
-	if err := holds.write(ctx, h, upsert); err != nil {
+	if err := holds.write(ctx, h, plug.WriteUpsert); err != nil {
 		return err
 	}
 	s.reschedule(key)
@@ -175,7 +176,7 @@ func (s *StoreService[T]) holdKey(ctx context.Context, a *App, key, reason strin
 }
 
 // release lifts the hold on the record under key.
-func (s *StoreService[T]) release(ctx context.Context, a *App, key string) error {
+func (s *storeCore) release(ctx context.Context, a *App, key string) error {
 	holds, _ := a.privacyStores()
 	if holds == nil {
 		return noPrivacy()
@@ -250,7 +251,7 @@ func (a *App) holdOf(ctx context.Context, store, key string) (holdRecord, bool, 
 // store holds it until and the legal ground it declares —, never a placed
 // hold's reason. When kit cannot tell whether the record is held, it is the
 // error that keeps it from telling: the caller stops as surely.
-func (s *StoreService[T]) holdRefusal(ctx context.Context, a *App, key string) error {
+func (s *storeCore) holdRefusal(ctx context.Context, a *App, key string) error {
 	h, held, err := a.holdOf(ctx, s.id, key)
 	switch {
 	case err != nil:
@@ -264,7 +265,7 @@ func (s *StoreService[T]) holdRefusal(ctx context.Context, a *App, key string) e
 
 // heldUntilRefusal is the Conflict of a record the store's HeldUntil holds
 // at the app's now.
-func (s *StoreService[T]) heldUntilRefusal(ctx context.Context, a *App, key string) error {
+func (s *storeCore) heldUntilRefusal(ctx context.Context, a *App, key string) error {
 	p := s.privacy
 	if p == nil || p.heldUntil == nil {
 		return nil
@@ -289,7 +290,7 @@ func (s *StoreService[T]) heldUntilRefusal(ctx context.Context, a *App, key stri
 // as with an erasure or a retention's deletion — at the commit in a
 // transaction —, once nothing kit keeps needs it (shredIfLast); a key that
 // could not be destroyed is said in the log, and the deletion stands.
-func (s *StoreService[T]) removeUnlessHeld(ctx context.Context, a *App, key string) error {
+func (s *storeCore) removeUnlessHeld(ctx context.Context, a *App, key string) error {
 	unlock := a.lockHolds(s.id)
 	defer unlock()
 	if err := s.holdRefusal(ctx, a, key); err != nil {
@@ -313,7 +314,7 @@ func (s *StoreService[T]) removeUnlessHeld(ctx context.Context, a *App, key stri
 // kit knows it: not when kit keeps no data keys a deletion may leave
 // behind, the store has no subject, or the record cannot be read — its
 // deletion then says why.
-func (s *StoreService[T]) subjectAt(ctx context.Context, a *App, key string) (subject string, known bool) {
+func (s *storeCore) subjectAt(ctx context.Context, a *App, key string) (subject string, known bool) {
 	if a.privacyKeyStore() == nil || s.plan().subject == nil {
 		return "", false
 	}
@@ -325,7 +326,7 @@ func (s *StoreService[T]) subjectAt(ctx context.Context, a *App, key string) (su
 }
 
 // heldCount is how many of the store's records a hold keeps, for the graph.
-func (s *StoreService[T]) heldCount(a *App) int {
+func (s *storeCore) heldCount(a *App) int {
 	all, err := a.allHolds(context.Background())
 	if err != nil {
 		return 0

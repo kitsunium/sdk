@@ -1,6 +1,7 @@
 package kit
 
 import (
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/pkg/v1/app/statemachine"
 	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 )
@@ -27,7 +28,10 @@ var (
 	_ Operation[struct{}, struct{}] = (*PortService[struct{}, struct{}])(nil)
 	_ Operation[struct{}, struct{}] = (*Query[struct{}, struct{}])(nil)
 
-	_ storeEngine[struct{}] = (*docEngine[struct{}])(nil)
+	_ plug.StoreEngine = (*docEngine)(nil)
+	_ plug.StoreEngine = (*sqlEngine)(nil)
+	_ plug.StoreEngine = (*sealedEngine)(nil)
+	_ plug.StoreEngine = (*historied)(nil)
 
 	_ statemachine.Store[struct{}] = storePort[struct{}]{}
 	_ statemachine.Journal[string] = (*workflowJournal[struct{}, string])(nil)
@@ -85,12 +89,12 @@ var (
 	_ queueReader             = (*sealedOutbox)(nil)
 	_ queueWriter             = (*sealedOutbox)(nil)
 
-	_ documenter = (*historied[struct{}])(nil)
-	_ documenter = (*sealedEngine[struct{}])(nil)
-	_ documenter = (*docEngine[struct{}])(nil)
-	_ documenter = (*sqlEngine[struct{}])(nil)
-	_ copyDocs   = (*docEngine[struct{}])(nil)
-	_ copySink   = (*sqlEngine[struct{}])(nil)
+	_ documenter = (*historied)(nil)
+	_ documenter = (*sealedEngine)(nil)
+	_ documenter = (*docEngine)(nil)
+	_ documenter = (*sqlEngine)(nil)
+	_ copyDocs   = (*docEngine)(nil)
+	_ copySink   = (*sqlEngine)(nil)
 	_ copyDocs   = (*jsonDocs)(nil)
 
 	_ copyPartser   = (*StoreService[struct{}])(nil)
@@ -116,37 +120,58 @@ var (
 	_ sealAller       = (*StoreService[struct{}])(nil)
 	_ tabled          = (*StoreService[struct{}])(nil)
 
-	_ folder = (*docEngine[struct{}])(nil)
-	_ folder = (*historied[struct{}])(nil)
-	_ folder = (*sealedEngine[struct{}])(nil)
+	// A store's roles are its core's (store_core.go, ADR 0179 §2): the
+	// typed facade above has them by embedding it.
+	_ Keeper          = (*storeCore)(nil)
+	_ copyPartser     = (*storeCore)(nil)
+	_ feeder          = (*storeCore)(nil)
+	_ formerSource    = (*storeCore)(nil)
+	_ itemsSource     = (*storeCore)(nil)
+	_ marking         = (*storeCore)(nil)
+	_ node            = (*storeCore)(nil)
+	_ placementSource = (*storeCore)(nil)
+	_ recordsPort     = (*storeCore)(nil)
+	_ retentionRunner = (*storeCore)(nil)
+	_ revisionsSource = (*storeCore)(nil)
+	_ sealAller       = (*storeCore)(nil)
+	_ sealingSource   = (*storeCore)(nil)
+	_ starter         = (*storeCore)(nil)
+	_ tabled          = (*storeCore)(nil)
+	_ trashRunner     = (*storeCore)(nil)
+	_ trashSource     = (*storeCore)(nil)
+	_ typeSource      = (*storeCore)(nil)
 
-	_ entriesSource = (*docEngine[struct{}])(nil)
-	_ entriesSource = (*sqlEngine[struct{}])(nil)
+	_ plug.Folder = (*docEngine)(nil)
+	_ plug.Folder = (*historied)(nil)
+	_ plug.Folder = (*sealedEngine)(nil)
 
-	_ keyser = (*docEngine[struct{}])(nil)
-	_ keyser = (*sqlEngine[struct{}])(nil)
-	_ keyser = (*sealedEngine[struct{}])(nil)
-	_ keyser = (*historied[struct{}])(nil)
+	_ entriesSource = (*docEngine)(nil)
+	_ entriesSource = (*sqlEngine)(nil)
 
-	_ databaseSource = (*historied[struct{}])(nil)
-	_ databaseSource = (*sealedEngine[struct{}])(nil)
-	_ databaseSource = (*sqlEngine[struct{}])(nil)
+	_ plug.Keyser = (*docEngine)(nil)
+	_ plug.Keyser = (*sqlEngine)(nil)
+	_ plug.Keyser = (*sealedEngine)(nil)
+	_ plug.Keyser = (*historied)(nil)
 
-	_ versionKeeper = (*docEngine[struct{}])(nil)
-	_ versionKeeper = (*historied[struct{}])(nil)
-	_ versionKeeper = (*sealedEngine[struct{}])(nil)
-	_ versionKeeper = (*sqlEngine[struct{}])(nil)
+	_ databaseSource = (*historied)(nil)
+	_ databaseSource = (*sealedEngine)(nil)
+	_ databaseSource = (*sqlEngine)(nil)
+
+	_ plug.VersionKeeper = (*docEngine)(nil)
+	_ plug.VersionKeeper = (*historied)(nil)
+	_ plug.VersionKeeper = (*sealedEngine)(nil)
+	_ plug.VersionKeeper = (*sqlEngine)(nil)
 
 	// The engines that keep a trash, and those that hand it on (trash.go).
-	_ trasher = (*docEngine[struct{}])(nil)
-	_ trasher = (*historied[struct{}])(nil)
-	_ trasher = (*sealedEngine[struct{}])(nil)
-	_ trasher = (*sqlEngine[struct{}])(nil)
+	_ plug.Trasher = (*docEngine)(nil)
+	_ plug.Trasher = (*historied)(nil)
+	_ plug.Trasher = (*sealedEngine)(nil)
+	_ plug.Trasher = (*sqlEngine)(nil)
 
-	_ versionWeighter = (*docEngine[struct{}])(nil)
-	_ versionWeighter = (*historied[struct{}])(nil)
-	_ versionWeighter = (*sealedEngine[struct{}])(nil)
-	_ versionWeighter = (*sqlEngine[struct{}])(nil)
+	_ plug.VersionWeighter = (*docEngine)(nil)
+	_ plug.VersionWeighter = (*historied)(nil)
+	_ plug.VersionWeighter = (*sealedEngine)(nil)
+	_ plug.VersionWeighter = (*sqlEngine)(nil)
 
 	_ sealingSource = (*TopicService[struct{}])(nil)
 	_ topicWaker    = (*TopicService[struct{}])(nil)

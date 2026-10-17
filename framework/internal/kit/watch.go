@@ -255,7 +255,7 @@ func (w *Watch) describe(a *App, out *model.Node) []model.Edge {
 // own, never another's. Each is one read-modify-write of the copy-on-write
 // list, serialised with every other, so two watches starting at once both
 // stay.
-func (s *StoreService[T]) feed(w *Watch) (unfeed func()) {
+func (s *storeCore) feed(w *Watch) (unfeed func()) {
 	s.feeds.Update(func(cur *[]*Watch) *[]*Watch {
 		return feedsOf(append(watchesIn(cur), w))
 	})
@@ -290,7 +290,7 @@ func feedsOf(ws []*Watch) *[]*Watch {
 // rollback drops it —, at once outside any; a watch that hears its own
 // module's stores is not told of its own handler's write. A store no watch
 // hears pays this one load.
-func (s *StoreService[T]) notify(ctx context.Context, key string, deleted bool) {
+func (s *storeCore) notify(ctx context.Context, key string, deleted bool) {
 	feeds := s.feeds.Load()
 	if feeds == nil {
 		return

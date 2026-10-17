@@ -3,7 +3,7 @@ package kit
 import (
 	"context"
 
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -35,7 +35,7 @@ type copyPart struct {
 // started under the data directory, and written through the engine the
 // start would open on r: its index keys hashed, its records sealed as they
 // rest.
-func (s *StoreService[T]) copyParts(ctx context.Context, a *App, r *databaseRun) ([]copyPart, error) {
+func (s *storeCore) copyParts(ctx context.Context, a *App, r *databaseRun) ([]copyPart, error) {
 	from, ok := documentsOf(s.engine())
 	if !ok {
 		return nil, failure(CodeDataCopy, "DATA_COPY_STORE", "a store is not on the data directory: it cannot be copied", nil,
@@ -51,7 +51,7 @@ func (s *StoreService[T]) copyParts(ctx context.Context, a *App, r *databaseRun)
 		return nil, failure(CodeDataCopy, "DATA_COPY_STORE", "a store's table cannot be written by a copy", nil, errs.String("store", s.id))
 	}
 	part := copyPart{name: s.table(), from: from, to: sink}
-	if _, seals := opened.(*sealedEngine[T]); seals {
+	if _, seals := opened.(*sealedEngine); seals {
 		part.sample = func(ctx context.Context) error { return sampleOpened(ctx, opened, sink) }
 	}
 	parts := []copyPart{part}
@@ -71,7 +71,7 @@ func (s *StoreService[T]) copyParts(ctx context.Context, a *App, r *databaseRun)
 //
 // IFACE-OPAQUE: the engine is kit's own port — the SQL engine, or the
 // sealing one around it — as openSQL returns it.
-func (s *StoreService[T]) openCopyTarget(ctx context.Context, a *App, r *databaseRun) (storeEngine[T], error) {
+func (s *storeCore) openCopyTarget(ctx context.Context, a *App, r *databaseRun) (plug.StoreEngine, error) {
 	own, err := s.kitIndexes(ctx, a)
 	if err != nil {
 		return nil, err
@@ -91,8 +91,8 @@ func (s *StoreService[T]) openCopyTarget(ctx context.Context, a *App, r *databas
 // historyPart is the store's records' former values, when it keeps any:
 // read from its history under the data directory, written in its history's
 // table on r.
-func (s *StoreService[T]) historyPart(r *databaseRun) (*copyPart, error) {
-	h, ok := s.engine().(*historied[T])
+func (s *storeCore) historyPart(r *databaseRun) (*copyPart, error) {
+	h, ok := s.engine().(*historied)
 	if !ok || h.hist == nil {
 		return nil, nil
 	}
@@ -100,21 +100,17 @@ func (s *StoreService[T]) historyPart(r *databaseRun) (*copyPart, error) {
 	if !ok {
 		return nil, nil
 	}
-	ds, err := docstore.OpenSQL(docstore.SQLConfig[historyRecord]{
-		Key: historyRecord.key, Transactor: r.transactor(), Dialect: r.d.dialect(), Table: s.historyTable(),
-	})
+	to, err := s.historyOnSQL(r)
 	if err != nil {
-		return nil, failure(CodeHistoryLoad, "HISTORY_LOAD", "the store's history cannot be opened on its database", err,
-			errs.String("store", s.id), errs.String("database", r.d.name))
+		return nil, err
 	}
-	to := &sqlEngine[historyRecord]{ds: ds, key: historyRecord.key, run: r, a: s.app(), store: s.id}
 	return &copyPart{name: s.historyTable(), from: from, to: to}, nil
 }
 
 // sampleOpened reads the first records of the table through the store's
 // engine, which opens them: a box whose key did not come across, or does
 // not open, fails the copy.
-func sampleOpened[T any](ctx context.Context, eng storeEngine[T], keys copyDocs) error {
+func sampleOpened(ctx context.Context, eng plug.StoreEngine, keys copyDocs) error {
 	read := 0
 	for key, err := range keys.keyList(ctx) {
 		if err != nil {

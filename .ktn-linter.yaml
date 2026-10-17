@@ -509,6 +509,49 @@ rules:
       # file alone, the bench's two signatures, nothing else of the package.
       - "**/internal/kernel/collections/heap/heap_bench_test.go"
       - "internal/kernel/collections/heap/heap_bench_test.go"
+      # framework/internal/kit's store core (ADR 0179 §2): one engine for every
+      # entity type a product declares a store of. Go methods cannot take type
+      # parameters, and a store generic in its entity was compiled once per
+      # record shape — 0.41 MB of machine code per type, measured at step 2 —,
+      # which is what the ADR takes out. So the core carries the entity as the
+      # `any` holding the product's T (never a *T), and StoreService[T], the
+      # typed facade, asserts it back; the product's functions on T — its key,
+      # its indexes, a retention's instants, HeldUntil, Anonymise — are wrapped
+      # once at the declaration to take that `any`. The rule's suggestion, a
+      # specific interface, would make every entity type of every product
+      # implement one of kit's, which a store of plain structs must not need:
+      # `any` is the type the entity has here, as for the events bus above.
+      # Scoped to the files of the store's core that carry an entity.
+      - "**/framework/internal/kit/history_read.go"
+      - "framework/internal/kit/history_read.go"
+      - "**/framework/internal/kit/history_write.go"
+      - "framework/internal/kit/history_write.go"
+      - "**/framework/internal/kit/index.go"
+      - "framework/internal/kit/index.go"
+      - "**/framework/internal/kit/passwords.go"
+      - "framework/internal/kit/passwords.go"
+      - "**/framework/internal/kit/privacy_erase.go"
+      - "framework/internal/kit/privacy_erase.go"
+      - "**/framework/internal/kit/privacy_keys.go"
+      - "framework/internal/kit/privacy_keys.go"
+      - "**/framework/internal/kit/retention.go"
+      - "framework/internal/kit/retention.go"
+      - "**/framework/internal/kit/retention_loop.go"
+      - "framework/internal/kit/retention_loop.go"
+      - "**/framework/internal/kit/retention_run.go"
+      - "framework/internal/kit/retention_run.go"
+      - "**/framework/internal/kit/revisions_restore.go"
+      - "framework/internal/kit/revisions_restore.go"
+      - "**/framework/internal/kit/seal_store.go"
+      - "framework/internal/kit/seal_store.go"
+      - "**/framework/internal/kit/store.go"
+      - "framework/internal/kit/store.go"
+      - "**/framework/internal/kit/store_core.go"
+      - "framework/internal/kit/store_core.go"
+      - "**/framework/internal/kit/trash.go"
+      - "framework/internal/kit/trash.go"
+      - "**/framework/internal/kit/workflow_ports.go"
+      - "framework/internal/kit/workflow_ports.go"
     # Function-level, never a file. Since ktn-linter v1.45.7 (#726, #732) the
     # finding sits on the DECLARATION of a module-local interface that pins an
     # `any`, and the methods that must honour it are exempt (Go requires the
@@ -1724,8 +1767,9 @@ rules:
   # UnmarshalText assigns and must take a pointer. time.Time, which they sit
   # beside, has exactly this method set. Scoped to the one file.
   #
-  # framework/internal/kit's sealedDoc (seal_store.go) is the same case as
-  # the two above: the SDK's document store encodes a sealing store's records
+  # framework/internal/kit's docRecord (store_document.go, ADR 0179 §2 —
+  # sealedDoc's shape generalised to every store) is the same case as
+  # the two above: the SDK's document store encodes a store's records
   # BY VALUE — json.Marshal(v) in internal/service/data/docstore/write.go:123 —, so its
   # MarshalJSON — the record as it rests — must be a value method, while its
   # UnmarshalJSON keeps what it reads and must take a pointer. Scoped to the
@@ -1753,8 +1797,8 @@ rules:
       - "internal/core/security/secret/**"
       - "**/internal/service/data/codec/toml/localtime.go"
       - "internal/service/data/codec/toml/localtime.go"
-      - "**/framework/internal/kit/seal_store.go"
-      - "framework/internal/kit/seal_store.go"
+      - "**/framework/internal/kit/store_document.go"
+      - "framework/internal/kit/store_document.go"
       - "**/internal/service/data/codec/bson/types.go"
       - "internal/service/data/codec/bson/types.go"
       - "**/internal/service/data/codec/bson/objectid.go"
@@ -1775,6 +1819,8 @@ rules:
       - "internal/service/data/codec/bson/decimal.go"
       - "**/internal/service/data/codec/toml/localtime.go"
       - "internal/service/data/codec/toml/localtime.go"
+      - "**/framework/internal/kit/store_document.go"
+      - "framework/internal/kit/store_document.go"
 
   # KTN-TEST-PARALLEL (phase 8) — genuine false positive, fix pending upstream.
   #

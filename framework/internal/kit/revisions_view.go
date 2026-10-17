@@ -28,7 +28,7 @@ type revisionsSource interface {
 // under key, and of what changed from version from to version to when both
 // are given. It reads the store as the data browser does, in no span: the
 // Studio is no caller of the product's.
-func (s *StoreService[T]) revisionsShown(ctx context.Context, key string, from, to uint64) (model.RecordVersions, error) {
+func (s *storeCore) revisionsShown(ctx context.Context, key string, from, to uint64) (model.RecordVersions, error) {
 	resting, err := s.restingVersions(ctx, key)
 	if err != nil {
 		return model.RecordVersions{}, err

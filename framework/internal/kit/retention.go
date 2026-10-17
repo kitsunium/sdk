@@ -3,7 +3,6 @@ package kit
 import (
 	"fmt"
 	"os"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -63,13 +62,16 @@ type privacyOption struct {
 }
 
 // storePrivacy is what a store declares about personal data, checked for its
-// entity type, and its retention while the app runs.
-type storePrivacy[T any] struct {
-	erase, delete *retentionRule[T]
-	heldUntil     func(T) (time.Time, bool)
+// entity type — each function wrapped once to take the entity as an any —,
+// and its retention while the app runs.
+type storePrivacy struct {
+	erase, delete *retentionRule
+	heldUntil     func(v any) (time.Time, bool)
 	heldAt        *pos
 	heldReason    string
-	anonymise     func(*T)
+	// anonymise is the store's Anonymise function on a copy of the entity,
+	// which it returns changed.
+	anonymise     func(v any) any
 	anonymiseAt   *pos
 	purpose       string
 	erasureDelete bool
@@ -78,7 +80,7 @@ type storePrivacy[T any] struct {
 	byProduct *model.ProductRetention
 
 	mu  sync.Mutex
-	run *retentionRun[T]
+	run *retentionRun
 	// erased and deleted count what this run erased and deleted, for the
 	// graph; rekeyed says a key built from personal data was met.
 	erased, deleted int
@@ -86,22 +88,57 @@ type storePrivacy[T any] struct {
 }
 
 // retentionRule is when a store erases or deletes a record.
-type retentionRule[T any] struct {
+type retentionRule struct {
 	delay   time.Duration
 	setting *SettingService[time.Duration]
 	// since gives the instant the delay counts from; at, without a delay,
 	// the instant itself.
-	since, at func(T) (time.Time, bool)
+	since, at func(v any) (time.Time, bool)
 	fnAt      *pos
 }
 
 // privacyDecl checks a store's privacy options, one by one: each function
 // must read the store's own entity type, each rule be given once, each delay
 // be positive. A mistake is a declaration problem at the store's position.
-type privacyDecl[T any] struct {
-	s   *StoreService[T]
+type privacyDecl struct {
+	s   *storeCore
 	svc *Service
-	p   *storePrivacy[T]
+	p   *storePrivacy
+	// fns reads an option's function as one of the store's entity type.
+	fns privacyFuncs
+}
+
+// privacyFuncs are an option's function read for one entity type, and
+// wrapped to take the entity as an any: an instant of a record — a
+// retention's, a hold's —, or an anonymiser. ok is false for a function of
+// another type.
+type privacyFuncs struct {
+	instant   func(fn any) (wrapped func(v any) (time.Time, bool), ok, isNil bool)
+	anonymise func(fn any) (wrapped func(v any) any, ok, isNil bool)
+}
+
+// privacyFuncsOf are the option functions of an entity of type T.
+func privacyFuncsOf[T any]() privacyFuncs {
+	return privacyFuncs{
+		instant: func(fn any) (wrapped func(v any) (time.Time, bool), ok, isNil bool) {
+			typed, ok := fn.(func(T) (time.Time, bool))
+			if !ok || typed == nil {
+				return nil, ok, typed == nil
+			}
+			return func(v any) (time.Time, bool) { return typed(as[T](v)) }, true, false
+		},
+		anonymise: func(fn any) (wrapped func(v any) any, ok, isNil bool) {
+			typed, ok := fn.(func(*T))
+			if !ok || typed == nil {
+				return nil, ok, typed == nil
+			}
+			return func(v any) any {
+				t := as[T](v)
+				typed(&t)
+				return t
+			}, true, false
+		},
+	}
 }
 
 // storeConfigure sets the option on what it configures.
@@ -191,7 +228,7 @@ func RetentionByProduct(limits string) StoreConfigurer {
 
 // wait is the rule's delay: its setting's value in the app that runs it, or
 // the duration it was declared with.
-func (r *retentionRule[T]) wait() time.Duration {
+func (r *retentionRule) wait() time.Duration {
 	if r.setting != nil {
 		return r.setting.Get()
 	}
@@ -200,7 +237,7 @@ func (r *retentionRule[T]) wait() time.Duration {
 
 // due is when the rule makes v due, and whether it does. A function that
 // panics makes nothing due: the loop says so.
-func (r *retentionRule[T]) due(v T) (at time.Time, ok bool, err error) {
+func (r *retentionRule) due(v any) (at time.Time, ok bool, err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			at, ok, err = time.Time{}, false, failure(CodeRetentionPanic, "RETENTION_PANICKED", "a retention function panicked", nil, errs.String("panic", fmt.Sprint(p)))
@@ -220,10 +257,16 @@ func (r *retentionRule[T]) due(v T) (at time.Time, ok bool, err error) {
 // declarePrivacy checks a store's privacy options once it is registered,
 // and keeps them.
 func (s *StoreService[T]) declarePrivacy(svc *Service, opts []*privacyOption) {
+	s.declarePrivacyOf(svc, opts, privacyFuncsOf[T]())
+}
+
+// declarePrivacyOf checks a store's privacy options, their functions read as
+// fns reads them, and keeps them.
+func (s *storeCore) declarePrivacyOf(svc *Service, opts []*privacyOption, fns privacyFuncs) {
 	if len(opts) == 0 {
 		return
 	}
-	d := privacyDecl[T]{s: s, svc: svc, p: &storePrivacy[T]{}}
+	d := privacyDecl{s: s, svc: svc, p: &storePrivacy{}, fns: fns}
 	for _, o := range opts {
 		d.take(o)
 	}
@@ -234,7 +277,7 @@ func (s *StoreService[T]) declarePrivacy(svc *Service, opts []*privacyOption) {
 }
 
 // take checks one option and keeps it.
-func (d *privacyDecl[T]) take(o *privacyOption) {
+func (d *privacyDecl) take(o *privacyOption) {
 	if d.takeWords(o) {
 		return
 	}
@@ -255,7 +298,7 @@ func (d *privacyDecl[T]) take(o *privacyOption) {
 // takeWords keeps an option that says something of the store rather than
 // a function of its records — its purpose, its deletion on erasure, the
 // retention its product keeps — and reports whether o was one.
-func (d *privacyDecl[T]) takeWords(o *privacyOption) bool {
+func (d *privacyDecl) takeWords(o *privacyOption) bool {
 	switch o.kind {
 	case optionPurpose:
 		d.p.purpose = strings.TrimSpace(o.text)
@@ -272,38 +315,38 @@ func (d *privacyDecl[T]) takeWords(o *privacyOption) bool {
 }
 
 // anonymiser keeps the store's Anonymise function.
-func (d *privacyDecl[T]) anonymiser(o *privacyOption) {
-	fn, ok := o.fn.(func(*T))
-	if d.refused(o, ok, fn == nil, d.p.anonymise != nil) {
+func (d *privacyDecl) anonymiser(o *privacyOption) {
+	fn, ok, isNil := d.fns.anonymise(o.fn)
+	if d.refused(o, ok, isNil, d.p.anonymise != nil) {
 		return
 	}
 	d.p.anonymise = fn
-	if at, _ := funcInfo(fn); at.file() != "" {
+	if at, _ := funcInfo(o.fn); at.file() != "" {
 		d.p.anonymiseAt = &at
 	}
 }
 
 // held keeps the store's HeldUntil and its legal ground.
-func (d *privacyDecl[T]) held(o *privacyOption) {
-	fn, ok := o.fn.(func(T) (time.Time, bool))
-	if d.refused(o, ok, fn == nil, d.p.heldUntil != nil) {
+func (d *privacyDecl) held(o *privacyOption) {
+	fn, ok, isNil := d.fns.instant(o.fn)
+	if d.refused(o, ok, isNil, d.p.heldUntil != nil) {
 		return
 	}
 	d.p.heldUntil, d.p.heldReason = fn, strings.TrimSpace(o.text)
-	if at, _ := funcInfo(fn); at.file() != "" {
+	if at, _ := funcInfo(o.fn); at.file() != "" {
 		d.p.heldAt = &at
 	}
 }
 
 // rule checks an erasure's or a deletion's option and returns the store's
 // rule: the one it builds, or prev when the option is refused.
-func (d *privacyDecl[T]) rule(o *privacyOption, prev *retentionRule[T]) *retentionRule[T] {
-	fn, ok := o.fn.(func(T) (time.Time, bool))
-	if d.refused(o, ok, fn == nil, prev != nil) {
+func (d *privacyDecl) rule(o *privacyOption, prev *retentionRule) *retentionRule {
+	fn, ok, isNil := d.fns.instant(o.fn)
+	if d.refused(o, ok, isNil, prev != nil) {
 		return prev
 	}
-	r := &retentionRule[T]{}
-	if at, _ := funcInfo(fn); at.file() != "" {
+	r := &retentionRule{}
+	if at, _ := funcInfo(o.fn); at.file() != "" {
 		r.fnAt = &at
 	}
 	if !o.delayed {
@@ -317,7 +360,7 @@ func (d *privacyDecl[T]) rule(o *privacyOption, prev *retentionRule[T]) *retenti
 // delayed gives a rule its delay — a setting's, which then says the rule
 // waits on it, or a positive duration — and returns it; prev when the delay
 // is refused.
-func (d *privacyDecl[T]) delayed(o *privacyOption, r, prev *retentionRule[T]) *retentionRule[T] {
+func (d *privacyDecl) delayed(o *privacyOption, r, prev *retentionRule) *retentionRule {
 	s := d.s
 	switch {
 	case o.setting != nil:
@@ -335,11 +378,11 @@ func (d *privacyDecl[T]) delayed(o *privacyOption, r, prev *retentionRule[T]) *r
 // refused says what is wrong with an option's function, when something is:
 // it reads another type than the store's entity, it is nil, or the option
 // was given before.
-func (d *privacyDecl[T]) refused(o *privacyOption, typed, isNil, twice bool) bool {
+func (d *privacyDecl) refused(o *privacyOption, typed, isNil, twice bool) bool {
 	s := d.s
 	switch {
 	case !typed:
-		d.svc.problem(s.decl, s.id, "privacy.option-type", "store", s.name, "type", reflect.TypeFor[T](), "option", optionName(o), "reads", keyType(o.fn))
+		d.svc.problem(s.decl, s.id, "privacy.option-type", "store", s.name, "type", s.ent.typ, "option", optionName(o), "reads", keyType(o.fn))
 	case isNil:
 		d.svc.problem(s.decl, s.id, "privacy.option-nil", "store", s.name, "option", optionName(o))
 	case twice:
@@ -385,7 +428,7 @@ func twiceName(o *privacyOption) string {
 }
 
 // hasRetention reports whether the store erases or deletes on its own.
-func (p *storePrivacy[T]) hasRetention() bool {
+func (p *storePrivacy) hasRetention() bool {
 	return p != nil && (p.erase != nil || p.delete != nil)
 }
 

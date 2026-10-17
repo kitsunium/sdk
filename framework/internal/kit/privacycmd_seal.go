@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 )
@@ -121,7 +122,7 @@ func (a *App) sealStore(ctx context.Context, id string, stdout io.Writer) error 
 // clear, and every former value and version kept in clear, then folds the
 // store: what was in clear leaves its files. It says how many records it sealed, of how
 // many.
-func (s *StoreService[T]) sealAll(ctx context.Context) (sealed, total int, err error) {
+func (s *storeCore) sealAll(ctx context.Context) (sealed, total int, err error) {
 	a, se := s.app(), s.sealing()
 	if a == nil || se == nil {
 		return 0, 0, nil
@@ -150,7 +151,7 @@ func (s *StoreService[T]) sealAll(ctx context.Context) (sealed, total int, err e
 
 // sealOne seals the record under key and its former values, when it keeps
 // one in clear, and reports whether it did.
-func (s *StoreService[T]) sealOne(ctx context.Context, se *sealedEngine[T], key string) (bool, error) {
+func (s *storeCore) sealOne(ctx context.Context, se *sealedEngine, key string) (bool, error) {
 	record, err := se.inClear(ctx, key)
 	switch {
 	case errors.Is(err, docstore.DocumentNotFound):
@@ -185,10 +186,10 @@ func partsOf(record, former, versions bool) clearParts {
 
 // sealInClear seals the parts of the record under key that keep a member
 // in clear.
-func (s *StoreService[T]) sealInClear(ctx context.Context, se *sealedEngine[T], key string, parts clearParts) error {
+func (s *storeCore) sealInClear(ctx context.Context, se *sealedEngine, key string, parts clearParts) error {
 	if parts&clearRecord != 0 {
 		// A write that changes nothing: the engine seals what it writes.
-		if _, err := s.engine().Update(ctx, key, func(*T) error { return nil }); err != nil {
+		if _, err := s.engine().Update(ctx, key, func(*plug.DocumentValue) error { return nil }); err != nil {
 			return s.said(err, key, "")
 		}
 	}
@@ -200,12 +201,12 @@ func (s *StoreService[T]) sealInClear(ctx context.Context, se *sealedEngine[T], 
 
 // sealKept seals, under the record's data key, what the record under key
 // keeps beside it in clear: its former values, its versions.
-func (s *StoreService[T]) sealKept(ctx context.Context, se *sealedEngine[T], key string, former, versions bool) error {
+func (s *storeCore) sealKept(ctx context.Context, se *sealedEngine, key string, former, versions bool) error {
 	v, err := se.Get(ctx, key)
 	if err != nil {
 		return s.said(err, key, "")
 	}
-	ref, err := se.refOf(ctx, key, v)
+	ref, err := se.refOf(ctx, key, v.Value)
 	if err != nil {
 		return err
 	}

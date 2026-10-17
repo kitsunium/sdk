@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"slices"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 )
 
 // Secondary indexes of a store.
@@ -56,21 +56,41 @@ func Index[T any](name string, keys func(T) []string) StoreConfigurer {
 	return indexOption{name: name, key: keys}
 }
 
-// indexDecl is one index a store declared, once its declaration checked.
-type indexDecl[T any] struct {
+// indexDecl is one index a store declared, once its declaration checked:
+// its key function, wrapped to take the entity as an any.
+type indexDecl struct {
 	name   string
 	unique bool
-	keys   func(T) []string
+	keys   func(v any) []string
 }
 
 // Lookup returns the entity whose key in the unique index is key, or a
 // [NotFound] error. Asking a non-unique index is an [Invalid] error: use
 // [StoreService.Find].
 func (s *StoreService[T]) Lookup(ctx context.Context, index, key string) (T, error) {
-	var zero T
+	v, err := s.lookupIn(ctx, index, key)
+	return as[T](v), err
+}
+
+// Find returns the entities indexed under key, ordered by their store key. It
+// reads any index, unique or not; no entity is an empty slice, not an error.
+func (s *StoreService[T]) Find(ctx context.Context, index, key string) ([]T, error) {
+	vs, err := s.findIn(ctx, index, key)
+	return asAll[T](vs), err
+}
+
+// Filter returns the entities keep accepts, ordered by key. It reads every
+// entity: an index is the way to avoid it.
+func (s *StoreService[T]) Filter(ctx context.Context, keep func(T) bool) ([]T, error) {
+	vs, err := s.filterIn(ctx, func(v any) bool { return keep(as[T](v)) })
+	return asAll[T](vs), err
+}
+
+// lookupIn is Lookup, in a span of its own.
+func (s *storeCore) lookupIn(ctx context.Context, index, key string) (any, error) {
 	a := s.app()
 	if a == nil {
-		return zero, notRunning(&s.nodeBase)
+		return nil, notRunning(&s.nodeBase)
 	}
 	ctx, sp := a.begin(ctx, &spanStart{node: s.id, from: currentNode(ctx), edge: model.EdgeReads, op: model.OpRead, name: "Lookup"})
 	v, err := s.lookup(ctx, index, key)
@@ -79,19 +99,21 @@ func (s *StoreService[T]) Lookup(ctx context.Context, index, key string) (T, err
 }
 
 // lookup is the entity whose index names key, by a unique index.
-func (s *StoreService[T]) lookup(ctx context.Context, index, key string) (T, error) {
-	var zero T
+func (s *storeCore) lookup(ctx context.Context, index, key string) (any, error) {
 	eng := s.engine()
 	if eng == nil {
-		return zero, notRunning(&s.nodeBase)
+		return nil, notRunning(&s.nodeBase)
 	}
-	v, err := eng.Lookup(ctx, index, key)
+	d, err := eng.Lookup(ctx, index, key)
+	if err != nil {
+		return nil, s.said(err, "", index)
+	}
+	v, err := s.valueOf(d)
 	return v, s.said(err, "", index)
 }
 
-// Find returns the entities indexed under key, ordered by their store key. It
-// reads any index, unique or not; no entity is an empty slice, not an error.
-func (s *StoreService[T]) Find(ctx context.Context, index, key string) ([]T, error) {
+// findIn is Find, in a span of its own.
+func (s *storeCore) findIn(ctx context.Context, index, key string) ([]any, error) {
 	a := s.app()
 	if a == nil {
 		return nil, notRunning(&s.nodeBase)
@@ -103,32 +125,39 @@ func (s *StoreService[T]) Find(ctx context.Context, index, key string) ([]T, err
 }
 
 // find is every entity whose index names key.
-func (s *StoreService[T]) find(ctx context.Context, index, key string) ([]T, error) {
+func (s *storeCore) find(ctx context.Context, index, key string) ([]any, error) {
 	eng := s.engine()
 	if eng == nil {
 		return nil, notRunning(&s.nodeBase)
 	}
-	out, err := eng.Find(ctx, index, key)
+	ds, err := eng.Find(ctx, index, key)
+	if err != nil {
+		return nil, s.said(err, "", index)
+	}
+	out, err := s.valuesOf(ds)
 	if err != nil {
 		return nil, s.said(err, "", index)
 	}
 	return out, nil
 }
 
-// Filter returns the entities keep accepts, ordered by key. It reads every
-// entity: an index is the way to avoid it.
-func (s *StoreService[T]) Filter(ctx context.Context, keep func(T) bool) ([]T, error) {
+// filterIn is Filter, in a span of its own: every entity read, then kept or
+// left.
+func (s *storeCore) filterIn(ctx context.Context, keep func(v any) bool) ([]any, error) {
 	a := s.app()
 	if a == nil {
 		return nil, notRunning(&s.nodeBase)
 	}
 	ctx, sp := a.begin(ctx, &spanStart{node: s.id, from: currentNode(ctx), edge: model.EdgeReads, op: model.OpRead, name: "Filter"})
-	var out []T
-	err := error(nil)
-	if eng := s.engine(); eng == nil {
-		err = notRunning(&s.nodeBase)
-	} else if out, err = eng.Filter(ctx, keep); err != nil {
-		err = s.said(err, "", "")
+	all, err := s.all(ctx)
+	var out []any
+	if err == nil {
+		out = all[:0]
+		for _, v := range all {
+			if keep(v) {
+				out = append(out, v)
+			}
+		}
 	}
 	sp.end(err)
 	return out, err
@@ -144,14 +173,14 @@ func (s *StoreService[T]) declareIndexes(svc *Service, opts []indexOption) {
 		switch keys, ok := o.key.(func(T) []string); {
 		case !model.ValidName(o.name):
 			svc.problem(s.decl, s.id, "index.name", "store", s.name, "name", o.name)
-		case slices.ContainsFunc(s.decls, func(d indexDecl[T]) bool { return d.name == o.name }):
+		case slices.ContainsFunc(s.decls, func(d indexDecl) bool { return d.name == o.name }):
 			svc.problem(s.decl, s.id, "index.twice", "store", s.name, "name", o.name)
 		case !ok:
 			svc.problem(s.decl, s.id, "index.type", "store", s.name, "type", want, "name", o.name, "reads", keyType(o.key))
 		case keys == nil:
 			svc.problem(s.decl, s.id, "index.nil", "store", s.name, "name", o.name)
 		default:
-			s.decls = append(s.decls, indexDecl[T]{name: o.name, unique: o.unique, keys: keys})
+			s.decls = append(s.decls, indexDecl{name: o.name, unique: o.unique, keys: func(v any) []string { return keys(as[T](v)) }})
 		}
 	}
 }
@@ -159,21 +188,22 @@ func (s *StoreService[T]) declareIndexes(svc *Service, opts []indexOption) {
 // indexed reports whether the store files index keys: an index it
 // declares, or kit's subject index (privacy_keys.go) — what a database's
 // table files under kit's index key.
-func (s *StoreService[T]) indexed() bool {
+func (s *storeCore) indexed() bool {
 	return len(s.decls) > 0 || (s.plan().subject != nil && !kitOwn(s.svc))
 }
 
-// specs are the declared indexes as the engine takes them: the document
-// store's IndexSpec, which the SQL engine will take too.
-func (s *StoreService[T]) specs() []docstore.IndexSpec[T] {
-	out := make([]docstore.IndexSpec[T], len(s.decls))
+// specs are the declared indexes as the engine takes them, over documents:
+// a document whose entity no longer decodes is filed under no key.
+func (s *storeCore) specs() []plug.IndexSpec {
+	out := make([]plug.IndexSpec, len(s.decls))
 	for i, d := range s.decls {
-		if d.unique {
-			keys := d.keys
-			out[i] = docstore.IndexSpec[T]{Name: d.name, Unique: true, Keys: keys}
-			continue
-		}
-		out[i] = docstore.Index(d.name, d.keys)
+		keys := d.keys
+		out[i] = plug.IndexSpec{Name: d.name, Unique: d.unique, Keys: func(doc plug.DocumentValue) []string {
+			if doc.Value == nil {
+				return nil
+			}
+			return keys(doc.Value)
+		}}
 	}
 	return out
 }
@@ -187,7 +217,7 @@ func keyType(key any) string {
 }
 
 // indexInfo describes the indexes, in declaration order.
-func (s *StoreService[T]) indexInfo() []model.IndexInfo {
+func (s *storeCore) indexInfo() []model.IndexInfo {
 	if len(s.decls) == 0 {
 		return nil
 	}

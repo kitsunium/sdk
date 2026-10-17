@@ -8,20 +8,11 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/concur/snapshot"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-)
-
-const (
-	upsert      writeMode = iota // anything: create or replace
-	insertOnly                   // nothing: a Conflict otherwise
-	replaceOnly                  // an entity: a NotFound otherwise, never a resurrection
 )
 
 // StoreService is a typed, keyed collection of entities. Every read returns a copy
@@ -39,53 +30,9 @@ const (
 // the graph, observes every call, and speaks for its refusals. Its writes
 // join the transaction their context carries ([Transact]).
 type StoreService[T any] struct {
-	nodeBase
-	key      func(T) string
-	inMemory bool
-	// readModel marks the store as derived from others (ReadModel).
-	readModel bool
-	// decls are the secondary indexes the declaration asked for (index.go).
-	decls []indexDecl[T]
-
-	mu sync.RWMutex
-	// eng is the engine the store runs on, nil while the app is not running.
-	eng storeEngine[T]
-	// onWrite is told the key of every entity written, once it is stored,
-	// and onDelete the key of every entity deleted: a workflow over the store
-	// hears of what it did not write itself (watch).
-	onWrite, onDelete []*storeHook
-	// privacy is what the store declares about personal data, its retention
-	// included (retention.go); nil when it declares nothing.
-	privacy *storePrivacy[T]
-	// passwords are the password policies of its fields (passwords.go).
-	passwords []*PasswordPolicyService[T]
-	// feeds are the watches (Service.Watch, watch.go) its writes are told
-	// of, with the write's context — which the engine's announcements to
-	// onWrite and onDelete do not carry —; nil while none hears it: the one
-	// load a write pays for them. Copy-on-write, the SDK's snapshot.Value: a
-	// write reads them with no lock, and a watch that starts or stops
-	// publishes a new list, serialised with every other.
-	feeds snapshot.Value[[]*Watch]
-	// started runs once the store is open: kit's own store of data keys
-	// finishes the re-wrap a stop interrupted (seal.go). nil for a product's
-	// store.
-	started func(ctx context.Context)
-	// role says whether the store is kit's own store of data keys (seal.go):
-	// apart from every transaction, and so never on SQLite (placementOf).
-	role storeRole
-	// revisions is how many former versions each record keeps
-	// (kit.Revisions, revisions.go): none when zero.
-	revisions int
-	// trashFor is the store's <store>-trash, declared with its revisions:
-	// how long the trash keeps what the product deletes (trash.go).
-	trashFor *SettingService[time.Duration]
-	// bin is the running trash's agenda and loop (trash_run.go); nil while
-	// none runs.
-	bin atomic.Pointer[trashRun[T]]
-	// states name the state field of each workflow over the store: a
-	// restore keeps them as they are, and a transition that changes only
-	// one makes no version (revisions.go).
-	states []func() string
+	// storeCore is the store without its entity type (store_core.go).
+	storeCore
+	key func(T) string
 }
 
 // storeRole is what a store is kept for: a product's data, or kit's own
@@ -118,9 +65,6 @@ type storeOptions struct {
 
 // readModelOption is ReadModel's StoreOption.
 type readModelOption struct{}
-
-// writeMode says what a write expects to find under the key.
-type writeMode int
 
 // itemsSource is implemented by stores, whatever their entity type.
 type itemsSource interface {
@@ -171,52 +115,65 @@ func notRunning(n *nodeBase) error {
 	return Unavailable(fmt.Sprintf("%s %q is not running: is service %q mounted in the app, and the app started?", n.kind, n.name, n.svc.name))
 }
 
-// engine is the engine the store runs on, or nil while its app does not run.
-//
-// IFACE-PLUGIN: the store runs on any engine — documents, history, SQL — each
-// behind this port.
-func (s *StoreService[T]) engine() storeEngine[T] {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.eng
+// The typed facade ----------------------------------------------------------------
+
+// as is v as the store's type: the zero value for none — what the core
+// returns beside a refusal.
+func as[T any](v any) T {
+	switch t := v.(type) {
+	case T:
+		return t
+	default:
+		var zero T
+		return zero
+	}
+}
+
+// asAll is vs as the store's type.
+func asAll[T any](vs []any) []T {
+	if vs == nil {
+		return nil
+	}
+	out := make([]T, len(vs))
+	for i, v := range vs {
+		out[i] = as[T](v)
+	}
+	return out
+}
+
+// changing is fn, a change of the store's type, as the core applies it: to
+// the entity as an any, a copy of which it changes and returns.
+func changing[T any](fn func(*T) error) func(v any) (any, error) {
+	return func(v any) (any, error) {
+		t := as[T](v)
+		err := fn(&t)
+		return t, err
+	}
 }
 
 // Get returns the entity with the given key, or a [NotFound] error.
 func (s *StoreService[T]) Get(ctx context.Context, key string) (T, error) {
-	return s.get(ctx, key, model.EdgeReads)
+	v, err := s.get(ctx, key, model.EdgeReads)
+	return as[T](v), err
 }
 
 // List returns every entity, ordered by key.
 func (s *StoreService[T]) List(ctx context.Context) ([]T, error) {
-	return s.list(ctx, model.EdgeReads, "List")
+	vs, err := s.list(ctx, model.EdgeReads, "List")
+	return asAll[T](vs), err
 }
 
 // Count returns how many entities the store holds.
-func (s *StoreService[T]) Count(ctx context.Context) (int, error) {
-	a := s.app()
-	if a == nil {
-		return 0, notRunning(&s.nodeBase)
-	}
-	ctx, sp := a.begin(ctx, &spanStart{node: s.id, from: currentNode(ctx), edge: model.EdgeReads, op: model.OpRead, name: "Count"})
-	n, err := 0, error(nil)
-	if eng := s.engine(); eng != nil {
-		n, err = eng.Count(ctx)
-		err = s.said(err, "", "")
-	} else {
-		err = notRunning(&s.nodeBase)
-	}
-	sp.end(err)
-	return n, err
-}
+func (s *StoreService[T]) Count(ctx context.Context) (int, error) { return s.countAll(ctx) }
 
 // Put stores the entity, replacing any entity with the same key.
 func (s *StoreService[T]) Put(ctx context.Context, v T) error {
-	return s.put(ctx, v, upsert, model.EdgeWrites, "Put")
+	return s.put(ctx, v, plug.WriteUpsert, model.EdgeWrites, "Put")
 }
 
 // Insert stores a new entity; it is a [Conflict] error when the key exists.
 func (s *StoreService[T]) Insert(ctx context.Context, v T) error {
-	return s.put(ctx, v, insertOnly, model.EdgeWrites, "Insert")
+	return s.put(ctx, v, plug.WriteInsert, model.EdgeWrites, "Insert")
 }
 
 // Update applies fn to the entity with the given key and stores the result,
@@ -228,7 +185,8 @@ func (s *StoreService[T]) Insert(ctx context.Context, v T) error {
 // not write to it, nor fire a workflow over it — either would wait for the
 // write fn is part of.
 func (s *StoreService[T]) Update(ctx context.Context, key string, fn func(*T) error) (T, error) {
-	return s.update(ctx, key, fn, model.EdgeWrites)
+	v, err := s.update(ctx, key, changing(fn), model.EdgeWrites)
+	return as[T](v), err
 }
 
 // Delete removes the entity with the given key, or returns a [NotFound] error.
@@ -259,11 +217,60 @@ func (s *StoreService[T]) Delete(ctx context.Context, key string) error {
 	return err
 }
 
+// read decodes one entity, without observing it.
+func (s *StoreService[T]) read(ctx context.Context, key string) (T, error) {
+	v, err := s.storeCore.read(ctx, key)
+	return as[T](v), err
+}
+
+// all decodes every entity, ordered by key, without observing it.
+func (s *StoreService[T]) all(ctx context.Context) ([]T, error) {
+	vs, err := s.storeCore.all(ctx)
+	return asAll[T](vs), err
+}
+
+// modify runs a read-modify-write, atomic with respect to every other
+// write.
+func (s *StoreService[T]) modify(ctx context.Context, key string, fn func(*T) error) (T, error) {
+	v, err := s.storeCore.modify(ctx, key, changing(fn))
+	return as[T](v), err
+}
+
+// The core ------------------------------------------------------------------------
+
+// engine is the engine the store runs on, or nil while its app does not run.
+//
+// IFACE-PLUGIN: the store runs on any engine — documents, history, SQL — each
+// behind this port.
+func (s *storeCore) engine() plug.StoreEngine {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.eng
+}
+
+// countAll is how many entities the store holds, in a span of its own.
+func (s *storeCore) countAll(ctx context.Context) (int, error) {
+	a := s.app()
+	if a == nil {
+		return 0, notRunning(&s.nodeBase)
+	}
+	ctx, sp := a.begin(ctx, &spanStart{node: s.id, from: currentNode(ctx), edge: model.EdgeReads, op: model.OpRead, name: "Count"})
+	n, err := 0, error(nil)
+	if eng := s.engine(); eng != nil {
+		n, err = eng.Count(ctx)
+		err = s.said(err, "", "")
+	} else {
+		err = notRunning(&s.nodeBase)
+	}
+	sp.end(err)
+	return n, err
+}
+
 // turn is what a write of the store needs before it runs: the data's
 // writer turn, for a store in the data directory or in memory
 // (transact_turn.go); nothing for a store on a database, nor for a store
 // apart.
-func (s *StoreService[T]) turn(ctx context.Context) (context.Context, func(), error) {
+func (s *storeCore) turn(ctx context.Context) (context.Context, func(), error) {
 	a := s.app()
 	if a == nil || s.apart() {
 		return ctx, func() {}, nil
@@ -273,7 +280,7 @@ func (s *StoreService[T]) turn(ctx context.Context) (context.Context, func(), er
 
 // local reports whether the store keeps its data in the data directory or
 // in memory — not on a database: its writes take the writer turn.
-func (s *StoreService[T]) local() bool {
+func (s *storeCore) local() bool {
 	b, ok := s.engine().(databaseSource)
 	return !ok || b.onDatabase() == nil
 }
@@ -284,11 +291,11 @@ func (s *StoreService[T]) local() bool {
 // store of data keys (seal.go), since a key a rollback took back would still
 // seal from the SDK's cache what could then never be opened. A store apart
 // is never on SQLite, whose one writer a transaction holds (placementOf).
-func (s *StoreService[T]) apart() bool { return s.inMemory || s.role == dataKeysRole }
+func (s *storeCore) apart() bool { return s.inMemory || s.role == dataKeysRole }
 
 // outside is ctx for a call on the store's engine: outside any transaction
 // for a store apart.
-func (s *StoreService[T]) outside(ctx context.Context) context.Context {
+func (s *storeCore) outside(ctx context.Context) context.Context {
 	if s.apart() {
 		return withoutUnit(ctx)
 	}
@@ -298,7 +305,7 @@ func (s *StoreService[T]) outside(ctx context.Context) context.Context {
 // remove deletes the entity under key: one of the four funnels every write
 // goes through, which tell the store's watches once kit confirms it
 // (watch.go).
-func (s *StoreService[T]) remove(ctx context.Context, key string) error {
+func (s *storeCore) remove(ctx context.Context, key string) error {
 	eng := s.engine()
 	if eng == nil {
 		return notRunning(&s.nodeBase)
@@ -317,16 +324,15 @@ func (s *StoreService[T]) remove(ctx context.Context, key string) error {
 }
 
 // missing is the error of a read of key the store does not hold.
-func (s *StoreService[T]) missing(key string) error {
+func (s *storeCore) missing(key string) error {
 	return NotFound(fmt.Sprintf("%s: no entity with key %q", s.name, clip(key)))
 }
 
 // get reads the entity key along an edge of kind edge.
-func (s *StoreService[T]) get(ctx context.Context, key string, edge model.EdgeKind) (T, error) {
-	var zero T
+func (s *storeCore) get(ctx context.Context, key string, edge model.EdgeKind) (any, error) {
 	a := s.app()
 	if a == nil {
-		return zero, notRunning(&s.nodeBase)
+		return nil, notRunning(&s.nodeBase)
 	}
 	ctx, sp := a.begin(ctx, &spanStart{node: s.id, from: currentNode(ctx), edge: edge, op: model.OpRead, name: "Get"})
 	v, err := s.read(ctx, key)
@@ -335,25 +341,77 @@ func (s *StoreService[T]) get(ctx context.Context, key string, edge model.EdgeKi
 }
 
 // read decodes one entity, without observing it.
-func (s *StoreService[T]) read(ctx context.Context, key string) (T, error) {
-	var zero T
+func (s *storeCore) read(ctx context.Context, key string) (any, error) {
 	eng := s.engine()
 	if eng == nil {
-		return zero, notRunning(&s.nodeBase)
+		return nil, notRunning(&s.nodeBase)
 	}
-	v, err := eng.Get(ctx, key)
+	d, err := eng.Get(ctx, key)
+	if err != nil {
+		return nil, s.said(err, key, "")
+	}
+	v, err := s.valueOf(d)
 	return v, s.said(err, key, "")
+}
+
+// valueOf is the entity d holds: the engine's, when it decoded it, else
+// decoded now — a fresh copy either way, which no other caller holds.
+func (s *storeCore) valueOf(d plug.DocumentValue) (any, error) {
+	if d.Value != nil {
+		return d.Value, nil
+	}
+	return s.decodeEntity(d.JSON)
+}
+
+// valuesOf are the entities ds hold.
+func (s *storeCore) valuesOf(ds []plug.DocumentValue) ([]any, error) {
+	out := make([]any, len(ds))
+	for i, d := range ds {
+		v, err := s.valueOf(d)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = v
+	}
+	return out, nil
+}
+
+// decodeEntity decodes a record's JSON into a fresh entity, or refuses it
+// as the SDK's document store refuses one: DocumentUndecodable.
+func (s *storeCore) decodeEntity(raw json.RawMessage) (any, error) {
+	if s.ent.decode == nil {
+		return nil, undecodable(s.id, errors.ErrUnsupported)
+	}
+	v, err := s.ent.decode(raw)
+	if err != nil {
+		return nil, undecodable(s.id, err)
+	}
+	return v, nil
+}
+
+// docOf is v as the store's engine takes it: its JSON, as kit encodes it,
+// and v beside it. An entity that does not encode is DocumentUnencodable —
+// but one whose key is empty, which the document store refuses first.
+func (s *storeCore) docOf(v any) (plug.DocumentValue, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		if s.keyOf(v) == "" {
+			return plug.DocumentValue{}, errs.Wrap(docstore.DocumentKeyEmpty, errs.WrapParams{}, errs.String("store", s.id))
+		}
+		return plug.DocumentValue{}, unencodable(s.id, err)
+	}
+	return plug.DocumentValue{JSON: raw, Value: v}, nil
 }
 
 // decodeFailure reports a stored entity that no longer fits its type: the
 // type changed under data written by an older version of the product.
-func (s *StoreService[T]) decodeFailure(key string, err error) error {
+func (s *storeCore) decodeFailure(key string, err error) error {
 	return failure(CodeStoreDecode, "STORE_DECODE", "a stored entity does not match its type", err,
 		errs.String("store", s.id), errs.String("key", key))
 }
 
 // list reads every entity along an edge of kind edge, for the operation name.
-func (s *StoreService[T]) list(ctx context.Context, edge model.EdgeKind, name string) ([]T, error) {
+func (s *storeCore) list(ctx context.Context, edge model.EdgeKind, name string) ([]any, error) {
 	a := s.app()
 	if a == nil {
 		return nil, notRunning(&s.nodeBase)
@@ -365,17 +423,21 @@ func (s *StoreService[T]) list(ctx context.Context, edge model.EdgeKind, name st
 }
 
 // all decodes every entity, ordered by key, without observing it.
-func (s *StoreService[T]) all(ctx context.Context) ([]T, error) {
+func (s *storeCore) all(ctx context.Context) ([]any, error) {
 	eng := s.engine()
 	if eng == nil {
 		return nil, notRunning(&s.nodeBase)
 	}
-	out, err := eng.List(ctx)
+	ds, err := eng.List(ctx)
+	if err != nil {
+		return nil, s.said(err, "", "")
+	}
+	out, err := s.valuesOf(ds)
 	return out, s.said(err, "", "")
 }
 
 // put writes v in mode along an edge of kind edge, for the operation name.
-func (s *StoreService[T]) put(ctx context.Context, v T, mode writeMode, edge model.EdgeKind, name string) error {
+func (s *storeCore) put(ctx context.Context, v any, mode plug.WriteMode, edge model.EdgeKind, name string) error {
 	a := s.app()
 	if a == nil {
 		return notRunning(&s.nodeBase)
@@ -389,7 +451,7 @@ func (s *StoreService[T]) put(ctx context.Context, v T, mode writeMode, edge mod
 // write stores one entity; the engine keeps it before returning, and a
 // failed write changes nothing. A funnel: a write kit confirms is told to
 // the store's watches.
-func (s *StoreService[T]) write(ctx context.Context, v T, mode writeMode) error {
+func (s *storeCore) write(ctx context.Context, v any, mode plug.WriteMode) error {
 	eng := s.engine()
 	if eng == nil {
 		return notRunning(&s.nodeBase)
@@ -401,31 +463,22 @@ func (s *StoreService[T]) write(ctx context.Context, v T, mode writeMode) error 
 	}
 	ctx = s.outside(ctx)
 	key := s.keyOf(v)
-	err = s.said(eng.Write(ctx, v, mode), key, "")
+	d, err := s.docOf(v)
 	if err == nil {
+		err = eng.Write(ctx, d, mode)
+	}
+	if err = s.said(err, key, ""); err == nil {
 		s.notify(ctx, key, false)
 	}
 	return err
 }
 
-// keyOf is v's key, or "" when the key function panics: the document store
-// says why the write failed.
-func (s *StoreService[T]) keyOf(v T) (key string) {
-	defer func() {
-		if recover() != nil {
-			key = ""
-		}
-	}()
-	return s.key(v)
-}
-
 // update changes the entity key with fn, under the store's lock, along an edge
 // of kind edge.
-func (s *StoreService[T]) update(ctx context.Context, key string, fn func(*T) error, edge model.EdgeKind) (T, error) {
-	var v T
+func (s *storeCore) update(ctx context.Context, key string, fn func(v any) (any, error), edge model.EdgeKind) (any, error) {
 	a := s.app()
 	if a == nil {
-		return v, notRunning(&s.nodeBase)
+		return nil, notRunning(&s.nodeBase)
 	}
 	ctx, sp := a.begin(ctx, &spanStart{node: s.id, from: currentNode(ctx), edge: edge, op: model.OpWrite, name: "Update"})
 	v, err := s.modify(ctx, key, fn)
@@ -436,23 +489,48 @@ func (s *StoreService[T]) update(ctx context.Context, key string, fn func(*T) er
 // modify runs a read-modify-write, atomic with respect to every other write.
 // A funnel: a write kit confirms is told to the store's watches — not one
 // fn refused.
-func (s *StoreService[T]) modify(ctx context.Context, key string, fn func(*T) error) (T, error) {
-	var zero T
+func (s *storeCore) modify(ctx context.Context, key string, fn func(v any) (any, error)) (any, error) {
 	eng := s.engine()
 	if eng == nil {
-		return zero, notRunning(&s.nodeBase)
+		return nil, notRunning(&s.nodeBase)
 	}
 	ctx, release, err := s.turn(ctx)
 	defer release()
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	ctx = s.outside(ctx)
-	v, err := eng.Update(ctx, key, fn)
+	d, err := eng.Update(ctx, key, s.changingDoc(fn))
+	var v any
+	if err == nil {
+		v, err = s.valueOf(d)
+	}
 	if err = s.said(err, key, ""); err == nil {
 		s.notify(ctx, key, false)
 	}
 	return v, err
+}
+
+// changingDoc is fn, a change of an entity, as an engine's update applies it
+// to a document: decoded, changed, encoded again. An entity that does not
+// decode is refused as the document store refuses one.
+func (s *storeCore) changingDoc(fn func(v any) (any, error)) func(d *plug.DocumentValue) error {
+	return func(d *plug.DocumentValue) error {
+		v, err := s.valueOf(*d)
+		if err != nil {
+			return err
+		}
+		next, err := fn(v)
+		if err != nil {
+			return err
+		}
+		nd, err := s.docOf(next)
+		if err != nil {
+			return err
+		}
+		*d = nd
+		return nil
+	}
 }
 
 // storeRefusal is what a store's refusal quotes: the store, and the key and
@@ -503,7 +581,7 @@ var storeRefusals = []struct {
 // error as it is, and a key quoted only where kit always quoted one. index is
 // the index a Lookup or a Find read. An error of the product's own — what an
 // Update's function returned — comes back as it is.
-func (s *StoreService[T]) said(err error, key, index string) error {
+func (s *storeCore) said(err error, key, index string) error {
 	if err == nil {
 		return nil
 	}
@@ -527,7 +605,7 @@ func (s *StoreService[T]) said(err error, key, index string) error {
 
 // saidOwn is kit's word for the refusals the store words itself: an
 // unconfirmed write, a missing key, an undecodable entity, a closed store.
-func (s *StoreService[T]) saidOwn(err error, key, index string) (handled bool, said error) {
+func (s *storeCore) saidOwn(err error, key, index string) (handled bool, said error) {
 	switch {
 	case errors.Is(err, docstore.WriteUnconfirmed):
 		// The write stands — the store and its file show it —, only its
@@ -561,8 +639,8 @@ func fieldOf(err error, key string) string {
 // that keeps it, once open (store_sql.go); else the document store under
 // the data directory, loaded — the snapshot, what was written since
 // replayed on it, the indexes rebuilt — or in memory.
-func (s *StoreService[T]) start(ctx context.Context, a *App) error {
-	if r := a.databaseOf(s); r != nil {
+func (s *storeCore) start(ctx context.Context, a *App) error {
+	if r := a.databaseOf(s.self); r != nil {
 		return s.startSQL(ctx, a, r)
 	}
 	var where storeFS
@@ -585,8 +663,14 @@ func (s *StoreService[T]) start(ctx context.Context, a *App) error {
 	if err != nil {
 		return errors.Join(err, opened.Close())
 	}
-	// The hooks are kit's lists, read at each write: a workflow mounted
-	// after the store starts still hears of every write.
+	s.running(ctx, eng)
+	return nil
+}
+
+// running makes eng the store's engine: the hooks are kit's lists, read at
+// each write, so that a workflow mounted after the store starts still hears
+// of every write.
+func (s *storeCore) running(ctx context.Context, eng plug.StoreEngine) {
 	eng.Watch(func(key string) { s.announce(key, false) }, func(key string) { s.announce(key, true) })
 	s.mu.Lock()
 	s.eng = eng
@@ -594,14 +678,13 @@ func (s *StoreService[T]) start(ctx context.Context, a *App) error {
 	if s.started != nil {
 		s.started(ctx)
 	}
-	return nil
 }
 
 // openRefusal is why the store did not open in the data directory or in
 // memory, in kit's words: a record sealing could not open says so, a unique
 // index the data breaks, a record that does not decode, files that keep
 // versions the store no longer does; anything else is kit's CodeStoreLoad.
-func (s *StoreService[T]) openRefusal(where storeFS, err error) error {
+func (s *storeCore) openRefusal(where storeFS, err error) error {
 	switch {
 	case errs.HasCode(err, CodeSealOpen), errs.HasCode(err, CodeSealKey):
 		return err
@@ -620,6 +703,16 @@ func (s *StoreService[T]) openRefusal(where storeFS, err error) error {
 	return failure(CodeStoreLoad, "STORE_LOAD", "the store cannot be opened", err, errs.String("store", s.id), errs.String("file", where.path))
 }
 
+// engineConfig is the configuration of the store's engine: its key and its
+// entity, the product's functions wrapped once, and specs, its indexes.
+func (s *storeCore) engineConfig(specs []plug.IndexSpec) *engineConfig {
+	return &engineConfig{
+		key:     func(d plug.DocumentValue) string { return s.ent.key(d.Value) },
+		decode:  func(raw json.RawMessage) (any, error) { return s.decodeEntity(raw) },
+		indexes: specs,
+	}
+}
+
 // open opens the store's engine where the app places it: the SDK's
 // document store, and — for a store on disk whose entity has a member kit
 // seals, or any product store on disk of an app that seals — the document
@@ -629,9 +722,9 @@ func (s *StoreService[T]) openRefusal(where storeFS, err error) error {
 //
 // IFACE-OPAQUE: the engine is kit's own port — the document store, or the
 // sealing one around it — and only the store holds it.
-func (s *StoreService[T]) open(ctx context.Context, a *App, where storeFS, specs []docstore.IndexSpec[T]) (storeEngine[T], error) {
+func (s *storeCore) open(ctx context.Context, a *App, where storeFS, specs []plug.IndexSpec) (plug.StoreEngine, error) {
 	if where.fs == nil || !s.opensSealed(a) {
-		eng, err := openDocEngine(s.key, where, specs, s.versionsOn(a))
+		eng, err := openDocEngine(s.engineConfig(specs), where, s.versionsOn(a))
 		if err != nil {
 			return nil, err
 		}
@@ -642,8 +735,8 @@ func (s *StoreService[T]) open(ctx context.Context, a *App, where storeFS, specs
 	if err != nil {
 		return nil, err
 	}
-	eng, err := openSealedEngine(s, a, z, specs, func(key func(sealedDoc) string, specs []docstore.IndexSpec[sealedDoc]) (storeEngine[sealedDoc], error) {
-		inner, err := openDocEngine(key, where, specs, s.versionsOn(a))
+	eng, err := openSealedEngine(s, a, z, specs, func(cfg *engineConfig) (plug.StoreEngine, error) {
+		inner, err := openDocEngine(cfg, where, s.versionsOn(a))
 		if err != nil {
 			return nil, err
 		}
@@ -660,19 +753,19 @@ func (s *StoreService[T]) open(ctx context.Context, a *App, where storeFS, specs
 // rests — on disk, or on a database —: its entity has a member kit seals, or
 // it is a product store of an app that keeps data keys, which opens what an
 // earlier classification sealed.
-func (s *StoreService[T]) opensSealed(a *App) bool {
+func (s *storeCore) opensSealed(a *App) bool {
 	return s.plan().sealsAny() || (a.privacyKeyStore() != nil && !kitOwn(s.svc))
 }
 
 // sealsAtRest reports whether the store seals what it keeps: its entity has
 // a member kit seals, and the app keeps the store on disk — a store in
 // memory keeps nothing at rest.
-func (s *StoreService[T]) sealsAtRest(a *App) bool {
-	return a != nil && s.plan().sealsAny() && !a.placementOf(s).memory
+func (s *storeCore) sealsAtRest(a *App) bool {
+	return a != nil && s.plan().sealsAny() && !a.placementOf(s.self).memory
 }
 
 // announce tells the hooks a key was written or deleted, outside every lock.
-func (s *StoreService[T]) announce(key string, deleted bool) {
+func (s *storeCore) announce(key string, deleted bool) {
 	s.mu.RLock()
 	hooks := s.onWrite
 	if deleted {
@@ -689,7 +782,7 @@ func (s *StoreService[T]) announce(key string, deleted bool) {
 // deletion, and returns the function that removes exactly these two: a
 // workflow that fails to start, or stops, takes back its own hooks and no
 // one else's.
-func (s *StoreService[T]) watch(onWrite, onDelete func(key string)) (unwatch func()) {
+func (s *storeCore) watch(onWrite, onDelete func(key string)) (unwatch func()) {
 	w, d := &storeHook{fn: onWrite}, &storeHook{fn: onDelete}
 	s.mu.Lock()
 	s.onWrite = append(s.onWrite, w)
@@ -705,11 +798,11 @@ func (s *StoreService[T]) watch(onWrite, onDelete func(key string)) (unwatch fun
 
 // file is where the store lives under the data directory: its snapshot,
 // beside which the document store keeps what was written since.
-func (s *StoreService[T]) file() string { return s.svc.name + "/" + s.name + ".json" }
+func (s *storeCore) file() string { return s.svc.name + "/" + s.name + ".json" }
 
 // stop closes the store's engine: the document store folds what was
 // written into its snapshot first.
-func (s *StoreService[T]) stop(_ context.Context, _ *App) error {
+func (s *storeCore) stop(_ context.Context, _ *App) error {
 	s.mu.Lock()
 	eng := s.eng
 	s.eng = nil
@@ -725,14 +818,14 @@ func (s *StoreService[T]) stop(_ context.Context, _ *App) error {
 
 // describe fills the graph node out with what the Store declares, and returns
 // its edges.
-func (s *StoreService[T]) describe(a *App, out *model.Node) []model.Edge {
+func (s *storeCore) describe(a *App, out *model.Node) []model.Edge {
 	backend, location, database := s.whereKept(a)
 	table := ""
 	if database != "" {
 		table = s.table()
 	}
 	out.Store = &model.StoreInfo{
-		Entity: keptSchemaOf(reflect.TypeFor[T](), s.sealsAtRest(a)), Backend: backend, Location: location, Database: database, Table: table,
+		Entity: keptSchemaOf(s.ent.typ, s.sealsAtRest(a)), Backend: backend, Location: location, Database: database, Table: table,
 		Indexes: s.indexInfo(), Privacy: s.privacyInfo(a), History: s.historyInfo(a), ReadModel: s.readModel,
 	}
 	if a != nil && a.running() {
@@ -743,7 +836,7 @@ func (s *StoreService[T]) describe(a *App, out *model.Node) []model.Edge {
 
 // whereKept says where app a keeps the store's data: in memory or in a file,
 // and in which database when one keeps it.
-func (s *StoreService[T]) whereKept(a *App) (backend, location, database string) {
+func (s *storeCore) whereKept(a *App) (backend, location, database string) {
 	backend = "memory"
 	if a == nil {
 		return backend, "", ""
@@ -751,7 +844,7 @@ func (s *StoreService[T]) whereKept(a *App) (backend, location, database string)
 	if a.data != nil && !s.inMemory {
 		backend, location = "file", s.file()
 	}
-	if p := a.placementOf(s); p.db != nil {
+	if p := a.placementOf(s.self); p.db != nil {
 		database = p.db.name
 		if !p.memory && a.storesOnDatabase(p.db) {
 			backend, location = p.db.engineName(), ""
@@ -762,7 +855,7 @@ func (s *StoreService[T]) whereKept(a *App) (backend, location, database string)
 
 // count is how many entities the running store holds; nil when it cannot
 // say.
-func (s *StoreService[T]) count() *int {
+func (s *storeCore) count() *int {
 	eng := s.engine()
 	if eng == nil {
 		return nil
@@ -775,7 +868,7 @@ func (s *StoreService[T]) count() *int {
 }
 
 // items returns up to limit raw entities, ordered by key, for the Studio.
-func (s *StoreService[T]) items(limit int) []json.RawMessage {
+func (s *storeCore) items(limit int) []json.RawMessage {
 	eng := s.engine()
 	if eng == nil {
 		return nil
@@ -790,4 +883,12 @@ func (s *StoreService[T]) items(limit int) []json.RawMessage {
 // NewStoreService is a store no service declares yet, keying its entities
 // with key: [Service.Store] makes one and declares it, which is how a product
 // gets one.
-func NewStoreService[T any](key func(T) string) *StoreService[T] { return &StoreService[T]{key: key} }
+func NewStoreService[T any](key func(T) string) *StoreService[T] {
+	ent := entityType{typ: reflect.TypeFor[T]()}
+	if key != nil {
+		ent = entityOf(key)
+	}
+	st := &StoreService[T]{key: key, ent: ent}
+	st.self = st
+	return st
+}

@@ -6,9 +6,10 @@ import (
 	"iter"
 )
 
-// The store subsystem's engine and its siblings (ADR 0179 §2, §3): the
-// non-generic forms of the core's storeEngine[T], folder, keyser,
-// versionKeeper, versionWeighter and trasher, and kit's scope on a database.
+// The store subsystem's engine and its siblings (ADR 0179 §2, §3), which
+// the core's engines implement since step 2 — in place of its former
+// storeEngine[T], folder, keyser, versionKeeper, versionWeighter and
+// trasher —, and kit's scope on a database.
 
 // Database is kit's scope on one database (ADR 0179 §2): the transactions
 // kit.Transact opens on it, their savepoints, and the functions held until

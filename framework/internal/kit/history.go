@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
@@ -71,23 +72,23 @@ type formerEntry struct {
 // historied is a store's engine with what kit adds to its writes: the former
 // values of the fields that keep them, and the check of its password
 // policies (passwords.go). Reads pass through to the engine.
-type historied[T any] struct {
-	storeEngine[T]
-	s *StoreService[T]
+type historied struct {
+	plug.StoreEngine
+	s *storeCore
 	// hist keeps the records' histories; nil when no field keeps one — a
 	// password policy that refuses no former password.
-	hist storeEngine[historyRecord]
+	hist plug.StoreEngine
 	// keeps is how many former values each field keeps, by JSON pointer.
 	keeps map[string]int
 	// seal is the store's sealing engine, nil when it seals nothing: former
 	// values are sealed as their fields are.
-	seal *sealedEngine[T]
+	seal *sealedEngine
 }
 
 // keeps is how many former values each field of the store keeps, by JSON
 // pointer: its history=N, or the former passwords its policy refuses — the
 // larger (a smaller tag is refused at the declaration).
-func (s *StoreService[T]) keeps() map[string]int {
+func (s *storeCore) keeps() map[string]int {
 	out := s.plan().historyFields()
 	for _, p := range s.passwords {
 		if p.member != nil && p.notReused > out[p.member.pointer] {
@@ -111,7 +112,7 @@ func (p *classPlan) historyFields() map[string]int {
 
 // historyFile is where the store keeps its records' histories, beside its
 // own snapshot.
-func (s *StoreService[T]) historyFile() string { return s.svc.name + "/" + s.name + ".history.json" }
+func (s *storeCore) historyFile() string { return s.svc.name + "/" + s.name + ".history.json" }
 
 // historyOn is where a store keeps its records' former values: beside its
 // files — in memory for a store in memory —, or on the database that keeps
@@ -119,6 +120,44 @@ func (s *StoreService[T]) historyFile() string { return s.svc.name + "/" + s.nam
 type historyOn struct {
 	files storeFS
 	sql   *databaseRun
+}
+
+// historyConfig is the engine of a store's history: its records, keyed by
+// the record they remember.
+var historyConfig = &engineConfig{
+	key: func(d plug.DocumentValue) string {
+		rec, _ := d.Value.(historyRecord)
+		return rec.Key
+	},
+	decode: func(raw json.RawMessage) (any, error) {
+		var rec historyRecord
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			return nil, undecodable("history", err)
+		}
+		return rec, nil
+	},
+}
+
+// historyOf is the history d holds.
+func historyOf(d plug.DocumentValue) (historyRecord, error) {
+	if rec, ok := d.Value.(historyRecord); ok {
+		return rec, nil
+	}
+	v, err := historyConfig.decode(d.JSON)
+	if err != nil {
+		return historyRecord{}, err
+	}
+	rec, _ := v.(historyRecord)
+	return rec, nil
+}
+
+// historyDoc is rec as the history's engine keeps it.
+func historyDoc(rec historyRecord) (plug.DocumentValue, error) {
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		return plug.DocumentValue{}, unencodable("history", err)
+	}
+	return plug.DocumentValue{JSON: raw, Value: rec}, nil
 }
 
 // withHistory is the engine the store runs on: eng itself when the store
@@ -130,33 +169,29 @@ type historyOn struct {
 //
 // IFACE-PLUGIN: the store runs on any engine — documents, history, SQL — each
 // behind this port.
-func (s *StoreService[T]) withHistory(ctx context.Context, eng storeEngine[T], where historyOn) (storeEngine[T], error) {
+func (s *storeCore) withHistory(ctx context.Context, eng plug.StoreEngine, where historyOn) (plug.StoreEngine, error) {
 	keeps := s.keeps()
 	if len(keeps) == 0 && len(s.passwords) == 0 {
 		return eng, nil
 	}
-	h := &historied[T]{storeEngine: eng, s: s, keeps: keeps}
-	h.seal, _ = eng.(*sealedEngine[T])
+	h := &historied{StoreEngine: eng, s: s, keeps: keeps}
+	h.seal, _ = eng.(*sealedEngine)
 	if len(keeps) == 0 {
 		return h, nil
 	}
 	if r := where.sql; r != nil {
-		ds, err := docstore.OpenSQL(docstore.SQLConfig[historyRecord]{
-			Key: historyRecord.key, Transactor: r.transactor(),
-			Dialect: r.d.dialect(), Table: s.historyTable(),
-		})
+		hist, err := s.historyOnSQL(r)
 		if err != nil {
-			return nil, failure(CodeHistoryLoad, "HISTORY_LOAD", "the store's history cannot be opened on its database", err,
-				errs.String("store", s.id), errs.String("database", r.d.name))
+			return nil, err
 		}
-		h.hist = &sqlEngine[historyRecord]{ds: ds, key: historyRecord.key, run: r, a: s.app(), store: s.id}
+		h.hist = hist
 		return h, nil
 	}
 	files := where.files
 	if files.fs != nil {
 		files.path = s.historyFile()
 	}
-	hist, err := openDocEngine(historyRecord.key, files, nil, versionsOn{})
+	hist, err := openDocEngine(historyConfig, files, versionsOn{})
 	if err == nil {
 		hist.name = s.id + " history"
 		h.hist = hist
@@ -171,15 +206,29 @@ func (s *StoreService[T]) withHistory(ctx context.Context, eng storeEngine[T], w
 	return h, nil
 }
 
+// historyOnSQL opens the store's history in its table on r.
+func (s *storeCore) historyOnSQL(r *databaseRun) (*sqlEngine, error) {
+	hist, err := openSQLEngine(s.app(), sqlTable{run: r, table: s.historyTable(), store: s.id}, historyConfig)
+	if err != nil {
+		return nil, failure(CodeHistoryLoad, "HISTORY_LOAD", "the store's history cannot be opened on its database", err,
+			errs.String("store", s.id), errs.String("database", r.d.name))
+	}
+	return hist, nil
+}
+
 // reconcile removes, at start, the histories whose record is gone — a crash
 // between a record's deletion and its history's — and those that keep
 // nothing.
-func (h *historied[T]) reconcile(ctx context.Context) error {
+func (h *historied) reconcile(ctx context.Context) error {
 	docs, err := h.hist.List(ctx)
 	if err != nil {
 		return err
 	}
-	for _, doc := range docs {
+	for _, d := range docs {
+		doc, err := historyOf(d)
+		if err != nil {
+			return err
+		}
 		if len(doc.Fields) > 0 && h.recordExists(ctx, doc.Key) {
 			continue
 		}
@@ -193,22 +242,22 @@ func (h *historied[T]) reconcile(ctx context.Context) error {
 // recordExists reports whether the store holds a record under key; one it
 // cannot decode is there, and so is one in the trash (trash.go), whose
 // former values its restoration brings back.
-func (h *historied[T]) recordExists(ctx context.Context, key string) bool {
+func (h *historied) recordExists(ctx context.Context, key string) bool {
 	_, err := h.Get(ctx, key)
 	if !errors.Is(err, docstore.DocumentNotFound) {
 		return true
 	}
-	vk, ok := h.storeEngine.(versionKeeper)
+	vk, ok := h.StoreEngine.(plug.VersionKeeper)
 	if !ok {
 		return false
 	}
-	_, err = vk.storedVersions(ctx, key)
+	_, err = vk.StoredVersions(ctx, key)
 	return err == nil
 }
 
 // Close closes the store's engine, then its history's.
-func (h *historied[T]) Close() error {
-	err := h.storeEngine.Close()
+func (h *historied) Close() error {
+	err := h.StoreEngine.Close()
 	if h.hist != nil {
 		err = errors.Join(err, h.hist.Close())
 	}
@@ -217,10 +266,10 @@ func (h *historied[T]) Close() error {
 
 // Fold folds the files of the store and of its history: what an erasure
 // overwrote leaves both.
-func (h *historied[T]) Fold(ctx context.Context) error {
+func (h *historied) Fold(ctx context.Context) error {
 	var failed []error
-	for _, e := range []any{h.storeEngine, h.hist} {
-		if f, ok := e.(folder); ok {
+	for _, e := range []any{h.StoreEngine, h.hist} {
+		if f, ok := e.(plug.Folder); ok {
 			failed = append(failed, f.Fold(ctx))
 		}
 	}
@@ -230,7 +279,7 @@ func (h *historied[T]) Fold(ctx context.Context) error {
 // failed is a refusal of the history's engine as the store's caller reads
 // it: kit's failure, its cause for the logs only — Store.said words the
 // record's own refusals, and must never take the history's for them.
-func (h *historied[T]) failed(code errs.Code, err error) error {
+func (h *historied) failed(code errs.Code, err error) error {
 	if errors.Is(err, docstore.StoreClosed) {
 		return notRunning(&h.s.nodeBase)
 	}
@@ -243,7 +292,7 @@ func (h *historied[T]) failed(code errs.Code, err error) error {
 
 // warn says, on kit's log, what went wrong with a history kit could not put
 // back: its record's write was refused all the same.
-func (h *historied[T]) warn(ctx context.Context, err error) {
+func (h *historied) warn(ctx context.Context, err error) {
 	if a := h.s.app(); a != nil {
 		logger.Warn(ctx, a.log, "a store's history could not be put back after a refused write",
 			logger.String("store", h.s.id), logger.String("error", err.Error()))

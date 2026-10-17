@@ -30,7 +30,7 @@ import (
 // not the product's processing and are left out.
 
 // registerLine is the store's line in the register.
-func (s *StoreService[T]) registerLine(a *App) model.RegisterStore {
+func (s *storeCore) registerLine(a *App) model.RegisterStore {
 	plan := s.plan()
 	line := model.RegisterStore{Store: s.id, Subject: plan.subjectPointer(), Security: securityOf(plan, s.sealsAtRest(a))}
 	line.Personal, line.Special, line.Secret = fieldsOf(plan)
@@ -55,7 +55,7 @@ func securityOf(plan *classPlan, sealed bool) []string {
 
 // registerDeclared fills a register line with what the store declares: its
 // purpose, and its time limits.
-func (p *storePrivacy[T]) registerDeclared(a *App, line *model.RegisterStore) {
+func (p *storePrivacy) registerDeclared(a *App, line *model.RegisterStore) {
 	line.Purpose = p.purpose
 	line.Erase, _ = retentionText(a, p.erase)
 	line.Delete, _ = retentionText(a, p.delete)

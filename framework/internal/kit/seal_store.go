@@ -1,18 +1,16 @@
 package kit
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"maps"
 	"slices"
 	"strings"
-	"sync"
 	"sync/atomic"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/pkg/v1/concur/snapshot"
-	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
@@ -34,46 +32,16 @@ import (
 // member in clear, as the key it makes already is in the store's files,
 // and the store says so once.
 
-// sealedDoc is a record as a sealing store's document store holds it: its
-// JSON at rest, and — once kit has it — the record opened, shared by the
-// copies the document store makes of one decoded document. It is one type
-// for every store's record: the engines under it are compiled once, not
-// once per record type.
-type sealedDoc struct {
-	raw  json.RawMessage
-	open *openedDoc
-}
-
-// openedDoc is a record opened, and its key.
-type openedDoc struct {
-	v   any
-	key string
-	ok  bool
-}
-
-// openedAs is the record o holds, as its store's type.
-func openedAs[T any](o *openedDoc) T {
-	v, _ := o.v.(T)
-	return v
-}
-
-// MarshalJSON is the record as it rests.
-func (d sealedDoc) MarshalJSON() ([]byte, error) { return d.raw, nil }
-
-// UnmarshalJSON keeps the record as it rests; opening it is kit's.
-func (d *sealedDoc) UnmarshalJSON(b []byte) error {
-	d.raw = bytes.Clone(b)
-	d.open = &openedDoc{}
-	return nil
-}
-
-// sealedEngine is a store's engine when it seals: an engine of sealedDocs
-// — whichever the app places the store on: the SDK's document store in
-// memory or in the data directory, its store over SQL —, and kit's sealing
-// around it. A sealed member is a string to that engine, kept as it is.
-type sealedEngine[T any] struct {
-	inner storeEngine[sealedDoc]
-	s     *StoreService[T]
+// sealedEngine is a store's engine when it seals: an engine of records as
+// they rest — whichever the app places the store on: the SDK's document
+// store in memory or in the data directory, its store over SQL —, and kit's
+// sealing around it. A sealed member is a string to that engine, kept as it
+// is. The documents it hands its caller are the records opened; those it
+// hands the engine inside are the records as they rest, beside their entity
+// opened — which the engine's key and indexes read.
+type sealedEngine struct {
+	inner plug.StoreEngine
+	s     *storeCore
 	a     *App
 	z     *sealer
 	// clear are the members, by pointer, that the store's key reads: kept
@@ -84,146 +52,114 @@ type sealedEngine[T any] struct {
 	clear snapshot.Value[map[string]bool]
 	// warned says the store said so.
 	warned atomic.Bool
-	// loadErr is the first record the document store's load could not
-	// open: it refuses the start.
-	loadMu  sync.Mutex
-	loadErr error
 }
 
-// sealedOpener opens the engine of sealedDocs a sealing store runs on, keyed
-// and indexed by what sealing gives it.
-type sealedOpener[T any] func(key func(sealedDoc) string, specs []docstore.IndexSpec[sealedDoc]) (storeEngine[sealedDoc], error)
+// sealedOpener opens the engine of records as they rest a sealing store runs
+// on, keyed and indexed as cfg says.
+type sealedOpener func(cfg *engineConfig) (plug.StoreEngine, error)
 
 // openSealedEngine opens the engine of a store that seals, with open — a
-// loading engine's records opened once to key and index them.
-func openSealedEngine[T any](s *StoreService[T], a *App, z *sealer, specs []docstore.IndexSpec[T], open sealedOpener[T]) (*sealedEngine[T], error) {
-	e := &sealedEngine[T]{s: s, a: a, z: z}
-	wrapped := make([]docstore.IndexSpec[sealedDoc], len(specs))
-	for i, spec := range specs {
-		keys := spec.Keys
-		wrapped[i] = docstore.IndexSpec[sealedDoc]{Name: spec.Name, Unique: spec.Unique, Keys: func(d sealedDoc) []string {
-			v, ok := e.plainOf(d)
-			if !ok {
-				return nil
-			}
-			return keys(v)
-		}}
-	}
-	inner, err := open(e.docKey, wrapped)
+// loading engine's records opened once to key and index them, and a record
+// the load could not open refusing the start.
+func openSealedEngine(s *storeCore, a *App, z *sealer, specs []plug.IndexSpec, open sealedOpener) (*sealedEngine, error) {
+	e := &sealedEngine{s: s, a: a, z: z}
+	inner, err := open(&engineConfig{key: e.docKey, keyAtRest: e.keyAtRest, decode: e.decodeAtRest, indexes: specs})
 	if err != nil {
-		// What the load could not open says why better than what it made
-		// the engine say: a record that does not decode, rather than one
-		// under another key.
-		if lerr := e.loaded(); lerr != nil {
-			return nil, lerr
-		}
 		return nil, err
-	}
-	if err := e.loaded(); err != nil {
-		return nil, errors.Join(err, inner.Close())
 	}
 	e.inner = inner
 	return e, nil
 }
 
-// loaded is what the load could not open.
-func (e *sealedEngine[T]) loaded() error {
-	e.loadMu.Lock()
-	defer e.loadMu.Unlock()
-	return e.loadErr
-}
-
-// failedLoad keeps the first record the load could not open.
-func (e *sealedEngine[T]) failedLoad(err error) {
-	e.loadMu.Lock()
-	defer e.loadMu.Unlock()
-	if e.loadErr == nil {
-		e.loadErr = err
+// docKey is the engine inside's key function: the key of the record kit
+// wrote, or of the record loaded.
+func (e *sealedEngine) docKey(d plug.DocumentValue) string {
+	if d.Value != nil {
+		return e.s.keyOf(d.Value)
 	}
-}
-
-// docKey is the document store's key function: the key of the record kit
-// wrote, or read from the members of the record loaded kit does not seal —
-// decoded once when it holds no box, and kept for its indexes.
-func (e *sealedEngine[T]) docKey(d sealedDoc) string {
-	key, _ := e.docKeyOf(d)
+	key, _ := e.restingKey(d.JSON)
 	return key
 }
 
-// docKeyOf is docKey, and false when the record loaded does not decode:
-// the load fails, and its key is none.
-func (e *sealedEngine[T]) docKeyOf(d sealedDoc) (string, bool) {
-	if d.open != nil && d.open.ok {
-		return d.open.key, true
-	}
-	if hasBoxes(d.raw) {
-		return e.s.keyOf(e.lenient(d.raw)), true
-	}
-	var v T
-	if err := json.Unmarshal(d.raw, &v); err != nil {
-		e.failedLoad(errs.Wrap(docstore.DocumentUndecodable, errs.WrapParams{}, errs.String("store", e.s.id), errs.String("cause", err.Error())))
+// keyAtRest is the key of a record as it rests that holds a box, read from
+// the members kit does not seal; false for one that holds none, which is
+// decoded as it is.
+func (e *sealedEngine) keyAtRest(raw json.RawMessage) (string, bool) {
+	if !hasBoxes(raw) {
 		return "", false
 	}
-	key := e.s.keyOf(v)
-	if d.open != nil {
-		d.open.v, d.open.key, d.open.ok = v, key, true
-	}
-	return key, true
+	return e.s.keyOf(e.lenient(raw)), true
 }
 
-// plainOf is the record d, opened: the one kit wrote, or the one loaded,
-// opened now and kept for the document store's next function.
-func (e *sealedEngine[T]) plainOf(d sealedDoc) (T, bool) {
-	if d.open != nil && d.open.ok {
-		return openedAs[T](d.open), true
+// restingKey is the key of a record as it rests: read from its clear
+// members, or from the record decoded; false when it does not decode.
+func (e *sealedEngine) restingKey(raw json.RawMessage) (string, bool) {
+	if key, ok := e.keyAtRest(raw); ok {
+		return key, true
 	}
-	key := e.docKey(d)
-	v, err := e.openRecord(context.Background(), key, d.raw)
+	v, err := e.s.decodeEntity(raw)
 	if err != nil {
-		e.failedLoad(err)
-		var zero T
-		return zero, false
+		return "", false
 	}
-	if d.open != nil {
-		d.open.v, d.open.key, d.open.ok = v, key, true
+	return e.s.keyOf(v), true
+}
+
+// decodeAtRest is the entity a record as it rests holds, opened: what the
+// engine inside's key and indexes read.
+func (e *sealedEngine) decodeAtRest(raw json.RawMessage) (any, error) {
+	key := ""
+	if hasBoxes(raw) {
+		key = e.s.keyOf(e.lenient(raw))
 	}
-	return v, true
+	v, _, err := e.openRecord(context.Background(), key, raw)
+	return v, err
 }
 
 // lenient is the record raw holds without its sealed members: what the
-// store's key reads, since it reads none of them.
-func (e *sealedEngine[T]) lenient(raw []byte) T {
-	var v T
+// store's key reads, since it reads none of them. It is decoded as far as it
+// decodes: the key reads what it can.
+func (e *sealedEngine) lenient(raw []byte) any {
 	doc, _, err := boxWalk(raw, nil, "", false, func(memberAt, []byte) ([]byte, bool, error) { return nil, true, nil })
-	if err != nil {
-		return v
+	if err != nil || e.s.ent.decode == nil {
+		return e.s.addressable(nil).Interface()
 	}
-	if err := json.Unmarshal(doc, &v); err != nil {
+	v, err := e.s.ent.decode(doc)
+	if err != nil {
 		// Decoded as far as it decodes: the key reads what it can.
 		return v
 	}
 	return v
 }
 
-// openRecord is the record under key, raw as it rests, opened and decoded.
-// A member whose data key is destroyed reads as its zero value.
-func (e *sealedEngine[T]) openRecord(ctx context.Context, key string, raw []byte) (T, error) {
-	var v T
+// openRecord is the record under key, raw as it rests, opened and decoded,
+// and its JSON opened. A member whose data key is destroyed reads as its
+// zero value.
+func (e *sealedEngine) openRecord(ctx context.Context, key string, raw []byte) (any, json.RawMessage, error) {
 	doc, err := e.openDoc(ctx, key, raw)
 	if err != nil {
-		return v, err
+		return nil, nil, err
 	}
-	if err := json.Unmarshal(doc, &v); err != nil {
-		return v, errs.Wrap(docstore.DocumentUndecodable, errs.WrapParams{}, errs.String("store", e.s.id), errs.String("cause", err.Error()))
+	v, err := e.s.decodeEntity(doc)
+	if err != nil {
+		return nil, nil, err
 	}
-	return v, nil
+	return v, doc, nil
+}
+
+// opened is the record d holds as it rests, opened.
+func (e *sealedEngine) opened(ctx context.Context, key string, d plug.DocumentValue) (plug.DocumentValue, error) {
+	v, doc, err := e.openRecord(ctx, key, d.JSON)
+	if err != nil {
+		return plug.DocumentValue{}, err
+	}
+	return plug.DocumentValue{JSON: doc, Value: v}, nil
 }
 
 // openDoc opens every box of raw, the record under key as it rests: a
 // member whose data key is destroyed is left out, and decodes as its zero
 // value. A box in a member no longer classified opens all the same: a field
 // whose class changed reads what it held.
-func (e *sealedEngine[T]) openDoc(ctx context.Context, key string, raw []byte) ([]byte, error) {
+func (e *sealedEngine) openDoc(ctx context.Context, key string, raw []byte) ([]byte, error) {
 	doc, _, err := boxWalk(raw, e.s.plan().rules, "", false, func(at memberAt, value []byte) ([]byte, bool, error) {
 		plain, err := e.z.open(ctx, value, e.s.id, key, at.pointer)
 		switch {
@@ -241,33 +177,36 @@ func (e *sealedEngine[T]) openDoc(ctx context.Context, key string, raw []byte) (
 	return doc, err
 }
 
-// sealRecord is v as the store keeps it at rest: its members kit seals
-// sealed under its data key — its subject's, or its own — bound to the
-// store, its key and their pointers. It returns what releases the data
-// key's stripe, held until the write stands: inside a transaction
+// sealRecord is d, a record opened, as the store keeps it at rest: its
+// members kit seals sealed under its data key — its subject's, or its own —
+// bound to the store, its key and their pointers. It returns what releases
+// the data key's stripe, held until the write stands: inside a transaction
 // ([Transact]), until it ends (heldToTheEnd).
-func (e *sealedEngine[T]) sealRecord(ctx context.Context, v T) (sealedDoc, func(), error) {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return sealedDoc{}, func() {}, errs.Wrap(docstore.DocumentUnencodable, errs.WrapParams{}, errs.String("store", e.s.id), errs.String("cause", err.Error()))
+func (e *sealedEngine) sealRecord(ctx context.Context, d plug.DocumentValue) (plug.DocumentValue, func(), error) {
+	raw := d.JSON
+	if raw == nil {
+		var err error
+		if raw, err = json.Marshal(d.Value); err != nil {
+			return plug.DocumentValue{}, func() {}, unencodable(e.s.id, err)
+		}
 	}
-	key := e.s.keyOf(v)
-	d := sealedDoc{raw: raw, open: &openedDoc{v: v, key: key, ok: true}}
+	key := e.s.keyOf(d.Value)
+	out := plug.DocumentValue{JSON: raw, Value: d.Value}
 	if key == "" || !e.s.plan().sealsAny() {
-		return d, func() {}, nil // nothing to seal; an empty key, the document store says why
+		return out, func() {}, nil // nothing to seal; an empty key, the document store says why
 	}
-	ref, err := e.refOf(ctx, key, v)
+	ref, err := e.refOf(ctx, key, d.Value)
 	if err != nil {
-		return sealedDoc{}, func() {}, err
+		return plug.DocumentValue{}, func() {}, err
 	}
 	lock := e.z.locks.of(ref)
 	lock.RLock()
-	d.raw, err = e.sealKeyed(ctx, raw, key, ref)
+	out.JSON, err = e.sealKeyed(ctx, raw, key, ref)
 	if err != nil {
 		lock.RUnlock()
-		return sealedDoc{}, func() {}, err
+		return plug.DocumentValue{}, func() {}, err
 	}
-	return d, heldToTheEnd(ctx, lock.RUnlock), nil
+	return out, heldToTheEnd(ctx, lock.RUnlock), nil
 }
 
 // heldToTheEnd is release — a data key's stripe, held shared since a write
@@ -292,8 +231,8 @@ func heldToTheEnd(ctx context.Context, release func()) func() {
 // of the privacy journal is sealed under its month's key (journalRef): it
 // is about nobody, no hold keeps it, and a key per entry would grow kit's
 // store of keys with every entry (ADR 0178 §C3).
-func (e *sealedEngine[T]) refOf(ctx context.Context, key string, v T) (string, error) {
-	if entry, ok := any(v).(journalRecord); ok {
+func (e *sealedEngine) refOf(ctx context.Context, key string, v any) (string, error) {
+	if entry, ok := v.(journalRecord); ok {
 		return journalRef(entry.At), nil
 	}
 	keys, err := e.a.referenceKeys(ctx)
@@ -310,7 +249,7 @@ func (e *sealedEngine[T]) refOf(ctx context.Context, key string, v T) (string, e
 // held reports whether a hold keeps the record under key, v as it is
 // written: one placed on it, or the store's HeldUntil at the app's now. When
 // kit cannot tell, it is held.
-func (e *sealedEngine[T]) held(ctx context.Context, key string, v T) bool {
+func (e *sealedEngine) held(ctx context.Context, key string, v any) bool {
 	if until, ok := e.s.heldUntil(v); ok && until.After(e.a.clock.Now()) {
 		return true
 	}
@@ -322,7 +261,7 @@ func (e *sealedEngine[T]) held(ctx context.Context, key string, v T) bool {
 // key reads stays readable: when the members kit leaves in clear no longer
 // give the key, the members the key reads are found, kept in clear from now
 // on, and the store says so.
-func (e *sealedEngine[T]) sealKeyed(ctx context.Context, raw []byte, key, ref string) ([]byte, error) {
+func (e *sealedEngine) sealKeyed(ctx context.Context, raw []byte, key, ref string) ([]byte, error) {
 	sealed, err := e.seal(ctx, raw, key, ref, e.clearNow())
 	if err != nil || e.s.keyOf(e.lenient(sealed)) == key {
 		return sealed, err
@@ -341,7 +280,7 @@ func (e *sealedEngine[T]) sealKeyed(ctx context.Context, raw []byte, key, ref st
 // bound to the store, key and each member's pointer. An erasure's write
 // leaves the members it cleared as they are: they hold nothing, and the
 // record says it was erased.
-func (e *sealedEngine[T]) seal(ctx context.Context, raw []byte, key, ref string, clear map[string]bool) ([]byte, error) {
+func (e *sealedEngine) seal(ctx context.Context, raw []byte, key, ref string, clear map[string]bool) ([]byte, error) {
 	erasing := intentOf(ctx).erases != nil
 	out, _, err := sealWalk(raw, e.s.plan().rules, "", false, func(at memberAt, value []byte) ([]byte, bool, error) {
 		switch {
@@ -356,7 +295,7 @@ func (e *sealedEngine[T]) seal(ctx context.Context, raw []byte, key, ref string,
 
 // clearNow is the members the store keeps in clear because its key reads
 // them.
-func (e *sealedEngine[T]) clearNow() map[string]bool {
+func (e *sealedEngine) clearNow() map[string]bool {
 	if m := e.clear.Load(); m != nil {
 		return *m
 	}
@@ -367,7 +306,7 @@ func (e *sealedEngine[T]) clearNow() map[string]bool {
 // store's key reads: those that, left in clear, give the key back when
 // every other member kit seals is left out. It returns nil when no such
 // members do.
-func (e *sealedEngine[T]) keyReads(raw []byte, key string) []string {
+func (e *sealedEngine) keyReads(raw []byte, key string) []string {
 	// Left in clear one by one until the key comes back, then each dropped
 	// again when the key does not need it.
 	var plain []string
@@ -392,7 +331,7 @@ func (e *sealedEngine[T]) keyReads(raw []byte, key string) []string {
 
 // keyCandidates are the members of raw kit seals, outside every list and
 // map and not null: those the store's key may read.
-func (e *sealedEngine[T]) keyCandidates(raw []byte) []string {
+func (e *sealedEngine) keyCandidates(raw []byte) []string {
 	var out []string
 	_, _, err := sealWalk(raw, e.s.plan().rules, "", false, func(at memberAt, value []byte) ([]byte, bool, error) {
 		if !at.inList && !isNull(value) {
@@ -408,7 +347,7 @@ func (e *sealedEngine[T]) keyCandidates(raw []byte) []string {
 
 // keepsKey reports whether raw gives key back with, of the members kit
 // seals, only those at pointers left.
-func (e *sealedEngine[T]) keepsKey(raw []byte, key string, pointers []string) bool {
+func (e *sealedEngine) keepsKey(raw []byte, key string, pointers []string) bool {
 	doc, _, err := sealWalk(raw, e.s.plan().rules, "", false, func(at memberAt, value []byte) ([]byte, bool, error) {
 		return value, !slices.Contains(pointers, at.pointer) || at.inList, nil
 	})
@@ -416,7 +355,7 @@ func (e *sealedEngine[T]) keepsKey(raw []byte, key string, pointers []string) bo
 }
 
 // learn keeps pointers in clear from now on, and says it once.
-func (e *sealedEngine[T]) learn(pointers []string) {
+func (e *sealedEngine) learn(pointers []string) {
 	e.clear.Update(func(cur *map[string]bool) *map[string]bool {
 		var next map[string]bool
 		if cur != nil {

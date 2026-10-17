@@ -3,10 +3,10 @@ package kit
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
@@ -89,7 +89,7 @@ func (s *StoreService[T]) Erase(ctx context.Context, key, reason string) error {
 // Clearing a sealed member removes its box: the erasure's write seals
 // nothing it cleared. The person's data key goes when this was their last
 // record (shredIfLast).
-func (s *StoreService[T]) eraseRecord(ctx context.Context, a *App, key, reason string) (bool, error) {
+func (s *storeCore) eraseRecord(ctx context.Context, a *App, key, reason string) (bool, error) {
 	subject, err := s.clearRecord(ctx, key, a.clock.Now().UTC())
 	switch {
 	case errors.Is(err, errNothingToErase):
@@ -110,37 +110,40 @@ func (s *StoreService[T]) eraseRecord(ctx context.Context, a *App, key, reason s
 // with them (ADR 0007), a record whose members are cleared already but
 // whose history remembers them included. errNothingToErase and errRekeyed
 // say it wrote nothing.
-func (s *StoreService[T]) clearRecord(ctx context.Context, key string, now time.Time) (subject string, err error) {
+func (s *storeCore) clearRecord(ctx context.Context, key string, now time.Time) (subject string, err error) {
 	plan, panicked := s.plan(), false
 	// Read before the update: on a database, a read inside it outside a
 	// transaction of kit's would wait for the update's own.
 	versions := s.versionsErasable(ctx, key)
-	_, err = s.modify(s.erasing(ctx, nil), key, func(v *T) error {
-		rv := reflect.ValueOf(v).Elem()
-		if plan.cleared(rv) && !versions && !s.keepsErasable(ctx, key) {
-			return errNothingToErase
+	_, err = s.modify(s.erasing(ctx, nil), key, func(v any) (any, error) {
+		if rv := s.addressable(v); plan.cleared(rv) && !versions && !s.keepsErasable(ctx, key) {
+			return nil, errNothingToErase
 		}
-		subject, _ = plan.subjectOf(rv)
-		if panicked = !s.anonymise(v); panicked {
-			return errNothingToErase
+		subject = s.subjectOf(v)
+		next, ok := s.anonymise(v)
+		if panicked = !ok; panicked {
+			return nil, errNothingToErase
 		}
+		rv := s.addressable(next)
 		plan.clearSensitive(rv)
 		plan.stampErased(rv, now)
-		if s.keyOf(*v) != key {
-			return errRekeyed
+		next = rv.Interface()
+		if s.keyOf(next) != key {
+			return nil, errRekeyed
 		}
-		return nil
+		return next, nil
 	})
 	if panicked {
 		return "", failure(CodePrivacyErase, "ANONYMISE_PANICKED", "the store's Anonymise function panicked", nil, errs.String("store", s.id))
 	}
 	if err == nil {
 		// The record's versions are cleared as it is (ADR 0007 §4).
-		err = s.eraseVersions(ctx, key, func(v *T) {
-			rv := reflect.ValueOf(v).Elem()
-			s.anonymise(v)
+		err = s.eraseVersions(ctx, key, func(v any) any {
+			next, _ := s.anonymise(v)
+			rv := s.addressable(next)
 			plan.clearSensitive(rv)
 			plan.stampErased(rv, now)
+			return rv.Interface()
 		})
 	}
 	if endedWithoutWriting(err) {
@@ -156,25 +159,24 @@ func endedWithoutWriting(err error) bool {
 	return err == nil || errors.Is(err, errNothingToErase) || errors.Is(err, errRekeyed)
 }
 
-// anonymise runs the store's Anonymise function on v, when it declares one;
-// false when the function panicked.
-func (s *StoreService[T]) anonymise(v *T) (ok bool) {
+// anonymise is v with the store's Anonymise function run on it, when it
+// declares one; false when the function panicked.
+func (s *storeCore) anonymise(v any) (anonymised any, ok bool) {
 	p := s.privacy
 	if p == nil || p.anonymise == nil {
-		return true
+		return v, true
 	}
 	defer func() {
 		if recover() != nil {
-			ok = false
+			anonymised, ok = v, false
 		}
 	}()
-	p.anonymise(v)
-	return true
+	return p.anonymise(v), true
 }
 
 // eraseRekeyed deletes a record whose erasure would change its key, and
 // says so once for the store.
-func (s *StoreService[T]) eraseRekeyed(ctx context.Context, a *App, key, reason string) (bool, error) {
+func (s *storeCore) eraseRekeyed(ctx context.Context, a *App, key, reason string) (bool, error) {
 	if p := s.privacy; p != nil {
 		p.mu.Lock()
 		first := !p.rekeyed
@@ -194,7 +196,7 @@ func (s *StoreService[T]) eraseRekeyed(ctx context.Context, a *App, key, reason 
 // deleteRecord removes the record under key, v as it was, and journals it.
 // It reports whether it removed the record, even when the journal then
 // failed. The caller holds the store's hold lock, and checked the holds.
-func (s *StoreService[T]) deleteRecord(ctx context.Context, a *App, key string, v T, reason string) (bool, error) {
+func (s *storeCore) deleteRecord(ctx context.Context, a *App, key string, v any, reason string) (bool, error) {
 	if err := s.remove(ctx, key); err != nil {
 		return false, err
 	}
@@ -205,7 +207,7 @@ func (s *StoreService[T]) deleteRecord(ctx context.Context, a *App, key string, 
 }
 
 // counted adds to what this run erased and deleted, for the graph.
-func (s *StoreService[T]) counted(erased, deleted int) {
+func (s *storeCore) counted(erased, deleted int) {
 	if p := s.privacy; p != nil {
 		p.mu.Lock()
 		p.erased += erased
@@ -219,7 +221,7 @@ func (s *StoreService[T]) counted(erased, deleted int) {
 // moved under a data key of its own before the person's is destroyed. The
 // outcome says what changed, even when the journal then failed, and refs
 // the data keys the record was sealed under: the erasure destroys them.
-func (s *StoreService[T]) eraseOnRequest(ctx context.Context, a *App, key, reason string) (erasureOutcome, []string, error) {
+func (s *storeCore) eraseOnRequest(ctx context.Context, a *App, key, reason string) (erasureOutcome, []string, error) {
 	ctx, release, err := s.turn(ctx)
 	defer release()
 	if err != nil {
@@ -251,7 +253,7 @@ func (s *StoreService[T]) eraseOnRequest(ctx context.Context, a *App, key, reaso
 // sealedRefs are the data keys the record under key is sealed under, as it
 // rests, and its own: none when the store seals nothing, or the record is
 // gone.
-func (s *StoreService[T]) sealedRefs(ctx context.Context, a *App, key string) ([]string, error) {
+func (s *storeCore) sealedRefs(ctx context.Context, a *App, key string) ([]string, error) {
 	se := s.sealing()
 	if se == nil {
 		return nil, nil
@@ -275,12 +277,16 @@ func (s *StoreService[T]) sealedRefs(ctx context.Context, a *App, key string) ([
 // refOf) —, and its former values sealed under its person's key, so that
 // the person's erasure leaves it readable: a held record is kept, whoever
 // asks. Former values sealed under another person's key stay theirs.
-func (s *StoreService[T]) moveOwn(ctx context.Context, a *App, key string) error {
+func (s *storeCore) moveOwn(ctx context.Context, a *App, key string) error {
 	eng, se := s.engine(), s.sealing()
 	if eng == nil || se == nil {
 		return nil
 	}
-	v, err := eng.Update(ctx, key, func(*T) error { return nil })
+	d, err := eng.Update(ctx, key, func(*plug.DocumentValue) error { return nil })
+	var v any
+	if err == nil {
+		v, err = s.valueOf(d)
+	}
 	switch {
 	case errors.Is(err, docstore.DocumentNotFound):
 		return nil
@@ -305,7 +311,7 @@ func (s *StoreService[T]) moveOwn(ctx context.Context, a *App, key string) error
 }
 
 // deleteOnRequest deletes one record of a person who asked.
-func (s *StoreService[T]) deleteOnRequest(ctx context.Context, a *App, key, reason string) (erasureOutcome, error) {
+func (s *storeCore) deleteOnRequest(ctx context.Context, a *App, key, reason string) (erasureOutcome, error) {
 	v, err := s.read(ctx, key)
 	switch {
 	case isNotFound(err):
@@ -324,12 +330,12 @@ func (s *StoreService[T]) deleteOnRequest(ctx context.Context, a *App, key, reas
 // what an erasure overwrote leaves the store's files: an engine that keeps
 // such files folds them (folder); a store in memory has nothing to
 // fold.
-func (s *StoreService[T]) fold(ctx context.Context) error {
+func (s *storeCore) fold(ctx context.Context) error {
 	eng := s.engine()
 	if eng == nil {
 		return notRunning(&s.nodeBase)
 	}
-	if f, ok := eng.(folder); ok {
+	if f, ok := eng.(plug.Folder); ok {
 		return s.said(f.Fold(ctx), "", "")
 	}
 	return nil

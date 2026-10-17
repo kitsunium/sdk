@@ -3,7 +3,6 @@ package kit
 import (
 	"context"
 	"net/http"
-	"reflect"
 	"strconv"
 
 	"github.com/kitsunium/sdk/framework/model"
@@ -56,14 +55,14 @@ func (a *App) trashOf(id string) (trashSource, error) {
 // records, in key order: each key — or Hidden —, deletion and purge instant.
 // It reads the store as the data browser does, in no span: the Studio is no
 // caller of the product's.
-func (s *StoreService[T]) trashShown(ctx context.Context, offset, limit int) (model.StoreTrash, error) {
+func (s *storeCore) trashShown(ctx context.Context, offset, limit int) (model.StoreTrash, error) {
 	out := model.StoreTrash{Store: s.id, Records: []model.TrashedRecord{}}
 	a := s.app()
 	tr, err := s.trashKeeper()
 	if err != nil {
 		return out, err
 	}
-	stones, err := tr.tombstones(s.outside(ctx))
+	stones, err := tr.Tombstones(s.outside(ctx))
 	if err != nil {
 		return out, s.trashFailure(s.trashSaid(err, ""))
 	}
@@ -91,7 +90,7 @@ func (s *StoreService[T]) trashShown(ctx context.Context, offset, limit int) (mo
 // under key: the store's type holds no personal, special or secret member,
 // or the record, those members cleared, still gives the key. A record that
 // no longer opens says nothing, so its key is hidden.
-func (s *StoreService[T]) keyShown(ctx context.Context, key string) bool {
+func (s *storeCore) keyShown(ctx context.Context, key string) bool {
 	p := s.plan()
 	if !p.sensitive() {
 		return true
@@ -100,8 +99,9 @@ func (s *StoreService[T]) keyShown(ctx context.Context, key string) bool {
 	if err != nil {
 		return false
 	}
-	p.clearSensitive(reflect.ValueOf(&v).Elem())
-	return s.keyOf(v) == key
+	rv := s.addressable(v)
+	p.clearSensitive(rv)
+	return s.keyOf(rv.Interface()) == key
 }
 
 // serveTrash answers GET /_kit/api/trash?store=[&offset=&limit=]: a page of

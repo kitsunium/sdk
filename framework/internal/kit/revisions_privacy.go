@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
@@ -31,11 +31,11 @@ import (
 
 // versionKeeper is the engine that keeps the store's versions, as they
 // rest; false when the store keeps none, or does not run.
-func (s *StoreService[T]) versionKeeper() (versionKeeper, bool) {
+func (s *storeCore) versionKeeper() (plug.VersionKeeper, bool) {
 	if s.revisions == 0 {
 		return nil, false
 	}
-	vk, ok := s.engine().(versionKeeper)
+	vk, ok := s.engine().(plug.VersionKeeper)
 	return vk, ok
 }
 
@@ -44,7 +44,7 @@ func (s *StoreService[T]) versionKeeper() (versionKeeper, bool) {
 // sealed again as the store seals, the members clear cleared left as they
 // are. A version kit cannot open or decode is dropped: what cannot be
 // cleared is not kept.
-func (s *StoreService[T]) eraseVersions(ctx context.Context, key string, clear func(v *T)) error {
+func (s *storeCore) eraseVersions(ctx context.Context, key string, clear func(v any) any) error {
 	vk, ok := s.versionKeeper()
 	if !ok {
 		return nil
@@ -56,7 +56,7 @@ func (s *StoreService[T]) eraseVersions(ctx context.Context, key string, clear f
 	}
 	defer release()
 	erasing := s.erasing(ctx, nil)
-	err = vk.rewriteVersions(ctx, key, func(former []docstore.Version) ([]docstore.Version, error) {
+	err = vk.RewriteVersions(ctx, key, func(former []plug.VersionValue) ([]plug.VersionValue, error) {
 		kept := former[:0]
 		for _, v := range former {
 			raw, ok := s.clearedVersion(erasing, se, key, ref, v.JSON, clear)
@@ -74,7 +74,7 @@ func (s *StoreService[T]) eraseVersions(ctx context.Context, key string, clear f
 // clearedVersion is one former version, raw as it rests, cleared by clear
 // and resting again — sealed under ref, what clear left of the members kit
 // seals —; false when kit cannot open or decode it.
-func (s *StoreService[T]) clearedVersion(ctx context.Context, se *sealedEngine[T], key, ref string, raw []byte, clear func(*T)) ([]byte, bool) {
+func (s *storeCore) clearedVersion(ctx context.Context, se *sealedEngine, key, ref string, raw []byte, clear func(v any) any) ([]byte, bool) {
 	plain := raw
 	if se != nil {
 		opened, err := se.openDoc(ctx, key, raw)
@@ -83,12 +83,11 @@ func (s *StoreService[T]) clearedVersion(ctx context.Context, se *sealedEngine[T
 		}
 		plain = opened
 	}
-	var v T
-	if json.Unmarshal(plain, &v) != nil {
+	v, err := s.decodeEntity(plain)
+	if err != nil {
 		return nil, false
 	}
-	clear(&v)
-	out, err := json.Marshal(v)
+	out, err := json.Marshal(clear(v))
 	if err != nil {
 		return nil, false
 	}
@@ -106,7 +105,7 @@ func (s *StoreService[T]) clearedVersion(ctx context.Context, se *sealedEngine[T
 // what a rewrite of its versions seals what it keeps under —, with its
 // stripe held until release: "" and nothing to release for a store that
 // seals nothing, or a record that is gone.
-func (s *StoreService[T]) versionRef(ctx context.Context, se *sealedEngine[T], key string) (string, func(), error) {
+func (s *storeCore) versionRef(ctx context.Context, se *sealedEngine, key string) (string, func(), error) {
 	if se == nil || !s.plan().sealsAny() {
 		return "", func() {}, nil
 	}
@@ -117,7 +116,7 @@ func (s *StoreService[T]) versionRef(ctx context.Context, se *sealedEngine[T], k
 	case err != nil:
 		return "", func() {}, s.said(err, key, "")
 	}
-	ref, err := se.refOf(ctx, key, cur)
+	ref, err := se.refOf(ctx, key, cur.Value)
 	if err != nil {
 		return "", func() {}, err
 	}
@@ -129,7 +128,7 @@ func (s *StoreService[T]) versionRef(ctx context.Context, se *sealedEngine[T], k
 // versionsRewritten is a rewrite's outcome as its caller reads it: a record
 // gone meanwhile has nothing to rewrite, and a write that stands but was not
 // confirmed stands.
-func (s *StoreService[T]) versionsRewritten(err error) error {
+func (s *storeCore) versionsRewritten(err error) error {
 	switch {
 	case err == nil, errors.Is(err, docstore.DocumentNotFound), errors.Is(err, docstore.WriteUnconfirmed):
 		return nil
@@ -144,13 +143,13 @@ func (s *StoreService[T]) versionsRewritten(err error) error {
 // person before their key is destroyed, as its former values are
 // (moveFormer). A box whose key is destroyed stays as it is: nothing opens
 // it.
-func (s *StoreService[T]) moveVersions(ctx context.Context, key, from, to string) error {
+func (s *storeCore) moveVersions(ctx context.Context, key, from, to string) error {
 	vk, ok := s.versionKeeper()
 	se := s.sealing()
 	if !ok || se == nil {
 		return nil
 	}
-	err := vk.rewriteVersions(ctx, key, func(former []docstore.Version) ([]docstore.Version, error) {
+	err := vk.RewriteVersions(ctx, key, func(former []plug.VersionValue) ([]plug.VersionValue, error) {
 		for i, v := range former {
 			moved, _, err := boxWalk(v.JSON, s.plan().rules, "", false, func(at memberAt, value []byte) ([]byte, bool, error) {
 				if ref, _ := boxRef(value); ref != from {
@@ -179,13 +178,13 @@ func (s *StoreService[T]) moveVersions(ctx context.Context, key, from, to string
 // versionsInClear reports whether a former version of the record under key
 // keeps in clear a member kit seals — made before its field was sealed —:
 // what `privacy seal` seals.
-func (s *StoreService[T]) versionsInClear(ctx context.Context, key string) bool {
+func (s *storeCore) versionsInClear(ctx context.Context, key string) bool {
 	vk, ok := s.versionKeeper()
 	se := s.sealing()
 	if !ok || se == nil {
 		return false
 	}
-	all, err := vk.storedVersions(ctx, key)
+	all, err := vk.StoredVersions(ctx, key)
 	if err != nil || len(all) < 2 {
 		return false
 	}
@@ -199,7 +198,7 @@ func (s *StoreService[T]) versionsInClear(ctx context.Context, key string) bool 
 
 // holdsInClear reports whether raw, a record as it rests, keeps in clear a
 // member kit seals, and holds something.
-func (s *StoreService[T]) holdsInClear(se *sealedEngine[T], raw []byte) bool {
+func (s *storeCore) holdsInClear(se *sealedEngine, raw []byte) bool {
 	found, plain := false, se.clearNow()
 	_, _, err := sealWalk(raw, s.plan().rules, "", false, func(at memberAt, value []byte) ([]byte, bool, error) {
 		kept := !at.inList && plain[at.pointer]
@@ -213,14 +212,14 @@ func (s *StoreService[T]) holdsInClear(se *sealedEngine[T], raw []byte) bool {
 // sealVersions seals, under ref, what the former versions of the record under
 // key keep in clear of the members kit seals; a member sealed already stays
 // under its key.
-func (s *StoreService[T]) sealVersions(ctx context.Context, key, ref string) error {
+func (s *storeCore) sealVersions(ctx context.Context, key, ref string) error {
 	vk, ok := s.versionKeeper()
 	se := s.sealing()
 	if !ok || se == nil {
 		return nil
 	}
 	clear := se.clearNow()
-	err := vk.rewriteVersions(ctx, key, func(former []docstore.Version) ([]docstore.Version, error) {
+	err := vk.RewriteVersions(ctx, key, func(former []plug.VersionValue) ([]plug.VersionValue, error) {
 		for i, v := range former {
 			sealed, _, err := sealWalk(v.JSON, s.plan().rules, "", false, func(at memberAt, value []byte) ([]byte, bool, error) {
 				if isBoxValue(value) || isNull(value) || (!at.inList && clear[at.pointer]) {
@@ -244,7 +243,7 @@ func (s *StoreService[T]) sealVersions(ctx context.Context, key, ref string) err
 // —, or as the Studio's preview shows them, every personal, special and
 // secret value redacted. A store that keeps no revisions, or a record gone
 // since the export read it, has none.
-func (s *StoreService[T]) exportVersions(ctx context.Context, key string, preview bool) ([]model.RecordVersion, error) {
+func (s *storeCore) exportVersions(ctx context.Context, key string, preview bool) ([]model.RecordVersion, error) {
 	if _, ok := s.versionKeeper(); !ok {
 		return nil, nil
 	}
@@ -268,7 +267,7 @@ func (s *StoreService[T]) exportVersions(ctx context.Context, key string, previe
 
 // exportedValue is a version's value in an export: without its secret
 // members, or redacted for the preview.
-func (s *StoreService[T]) exportedValue(raw []byte, preview bool) (json.RawMessage, error) {
+func (s *storeCore) exportedValue(raw []byte, preview bool) (json.RawMessage, error) {
 	if !preview {
 		out, err := s.plan().withoutSecrets(raw)
 		if err != nil {
@@ -276,8 +275,8 @@ func (s *StoreService[T]) exportedValue(raw []byte, preview bool) (json.RawMessa
 		}
 		return out, nil
 	}
-	var v T
-	if err := json.Unmarshal(raw, &v); err != nil {
+	v, err := s.decodeEntity(raw)
+	if err != nil {
 		return placeholder, nil
 	}
 	shown, _ := redactValue(v, 64<<10)
@@ -288,7 +287,7 @@ func (s *StoreService[T]) exportedValue(raw []byte, preview bool) (json.RawMessa
 // holds what an erasure clears: a record whose members are cleared already
 // may still keep them in its versions. Versions kit cannot read are: the
 // erasure tries, and drops what it cannot clear.
-func (s *StoreService[T]) versionsErasable(ctx context.Context, key string) bool {
+func (s *storeCore) versionsErasable(ctx context.Context, key string) bool {
 	if _, ok := s.versionKeeper(); !ok {
 		return false
 	}
@@ -298,8 +297,7 @@ func (s *StoreService[T]) versionsErasable(ctx context.Context, key string) bool
 	}
 	plan := s.plan()
 	for _, v := range all[min(1, len(all)):] {
-		var t T
-		if json.Unmarshal(v.JSON, &t) != nil || !plan.cleared(reflect.ValueOf(&t).Elem()) {
+		if t, err := s.decodeEntity(v.JSON); err != nil || !plan.cleared(s.addressable(t)) {
 			return true
 		}
 	}

@@ -36,8 +36,18 @@ const (
 // hash: how long a password is at least, and how many former passwords it
 // refuses. [StoreService.Passwords] declares it; Set, Change and Verify apply it.
 type PasswordPolicyService[T any] struct {
-	s    *StoreService[T]
-	decl pos
+	// passwordRule is the policy without its entity type, which the store's
+	// core checks every write against.
+	passwordRule
+	s *StoreService[T]
+}
+
+// passwordRule is a password policy as a store's core keeps it: its field
+// and its bounds, read on the entity by reflection.
+type passwordRule struct {
+	// store is the store whose field the policy is on.
+	store *storeCore
+	decl  pos
 	// member is the field, nil when the declaration is refused.
 	member               *member
 	minLength, notReused int
@@ -115,10 +125,10 @@ func (s *StoreService[T]) Passwords(field func(*T) *string, opts ...PasswordConf
 			opt.passwordConfigure(&o)
 		}
 	}
-	p := &PasswordPolicyService[T]{s: s, decl: callerPos(), minLength: o.minLength, notReused: o.notReused, notCommon: o.notCommon}
+	p := &PasswordPolicyService[T]{s: s, store: &s.storeCore, decl: callerPos(), minLength: o.minLength, notReused: o.notReused, notCommon: o.notCommon}
 	p.member = s.passwordField(field, p.decl)
-	p.judge(o)
-	s.passwords = append(s.passwords, p)
+	s.judgePolicy(&p.passwordRule, o)
+	s.passwords = append(s.passwords, &p.passwordRule)
 	return p
 }
 
@@ -182,23 +192,23 @@ func fieldNamed(v reflect.Value, target *string) (string, bool) {
 	return "", false
 }
 
-// judge says what the policy's options get wrong, and a second policy on
-// its field.
-func (p *PasswordPolicyService[T]) judge(o passwordOptions) {
-	svc, at, id, m := p.s.svc, p.decl, p.s.id, p.member
+// judgePolicy says what a policy's options get wrong, and a second policy
+// on its field.
+func (s *storeCore) judgePolicy(p *passwordRule, o passwordOptions) {
+	svc, at, id, m := s.svc, p.decl, s.id, p.member
 	if o.minLength < minimumLength {
 		svc.problem(at, id, "passwords.min-length", "min", o.minLength, "floor", minimumLength)
 	}
-	p.judgeReuse(o)
-	if m != nil && p.s.policyOn(m.pointer) != nil {
+	s.judgeReuse(p, o)
+	if m != nil && s.policyOn(m.pointer) != nil {
 		svc.problem(at, id, "passwords.twice", "field", m.field, "store", id)
 	}
 }
 
 // judgeReuse refuses a reuse bound out of range, or longer than the history
 // the field keeps.
-func (p *PasswordPolicyService[T]) judgeReuse(o passwordOptions) {
-	svc, at, id, m := p.s.svc, p.decl, p.s.id, p.member
+func (s *storeCore) judgeReuse(p *passwordRule, o passwordOptions) {
+	svc, at, id, m := s.svc, p.decl, s.id, p.member
 	switch {
 	case o.reuseSet && (o.notReused < 1 || o.notReused > historyLimit):
 		svc.problem(at, id, "passwords.not-reused", "n", o.notReused, "max", historyLimit)
@@ -210,7 +220,7 @@ func (p *PasswordPolicyService[T]) judgeReuse(o passwordOptions) {
 // policies are where the store's password policies are declared, in order:
 // a module's store takes those of its own Go module only (foreignPolicies,
 // module_check.go).
-func (s *StoreService[T]) policies() []pos {
+func (s *storeCore) policies() []pos {
 	out := make([]pos, len(s.passwords))
 	for i, p := range s.passwords {
 		out[i] = p.decl
@@ -220,7 +230,7 @@ func (s *StoreService[T]) policies() []pos {
 
 // policyOn is the store's policy on the field at pointer, nil when it has
 // none yet.
-func (s *StoreService[T]) policyOn(pointer string) *PasswordPolicyService[T] {
+func (s *storeCore) policyOn(pointer string) *passwordRule {
 	for _, p := range s.passwords {
 		if p.member != nil && p.member.pointer == pointer {
 			return p
@@ -230,7 +240,7 @@ func (s *StoreService[T]) policyOn(pointer string) *PasswordPolicyService[T] {
 }
 
 // info describes the policy for the model.
-func (p *PasswordPolicyService[T]) info(a *App) model.PasswordPolicy {
+func (p *passwordRule) info(a *App) model.PasswordPolicy {
 	out := model.PasswordPolicy{MinLength: p.minLength, NotReused: p.notReused, NotCommon: p.notCommon, Source: a.source(&p.decl)}
 	if p.member != nil {
 		out.Field = p.member.pointer
@@ -240,7 +250,7 @@ func (p *PasswordPolicyService[T]) info(a *App) model.PasswordPolicy {
 
 // passwordHashes are the hashes v holds in the store's policies' fields, in
 // the policies' order.
-func (s *StoreService[T]) passwordHashes(v *T) []string {
+func (s *storeCore) passwordHashes(v any) []string {
 	if len(s.passwords) == 0 {
 		return nil
 	}
@@ -255,31 +265,32 @@ func (s *StoreService[T]) passwordHashes(v *T) []string {
 // into one of the store's policies' fields. Nothing — no password yet, or
 // an erased one — passes, and so does a value the write leaves as it was:
 // before are the fields' hashes before the write, nil for a new record.
-func (h *historied[T]) checkPasswords(before []string, v T) error {
-	for i, p := range h.s.passwords {
-		hash, _ := p.hashOf(&v)
+func (s *storeCore) checkPasswords(before []string, v any) error {
+	for i, p := range s.passwords {
+		hash, _ := p.hashOf(v)
 		if hash == "" || (before != nil && before[i] == hash) || isPHC(hash) {
 			continue
 		}
 		return Invalid(fmt.Sprintf("%s: %s holds a password's hash, never a password: set it through its password policy",
-			h.s.name, p.member.pointer))
+			s.name, p.member.pointer))
 	}
 	return nil
 }
 
-// hashOf is the hash v holds in the policy's field.
-func (p *PasswordPolicyService[T]) hashOf(v *T) (string, bool) {
+// hashOf is the hash v — the entity, or a pointer to it — holds in the
+// policy's field.
+func (p *passwordRule) hashOf(v any) (string, bool) {
 	if p.member == nil {
 		return "", false
 	}
-	if f := fieldAt(reflect.ValueOf(v).Elem(), p.member.path); f.IsValid() && f.Kind() == reflect.String {
+	if f := fieldAt(reflect.Indirect(reflect.ValueOf(v)), p.member.path); f.IsValid() && f.Kind() == reflect.String {
 		return f.String(), true
 	}
 	return "", false
 }
 
-// setHash puts hash into v's field.
-func (p *PasswordPolicyService[T]) setHash(v *T, hash string) {
+// setHash puts hash into the field of the entity v points to.
+func (p *passwordRule) setHash(v any, hash string) {
 	if f := fieldAt(reflect.ValueOf(v).Elem(), p.member.path); f.IsValid() && f.CanSet() {
 		f.SetString(hash)
 	}

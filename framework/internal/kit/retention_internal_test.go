@@ -28,7 +28,7 @@ func (c *countedClock) NewTimer(d time.Duration) clock.Timer {
 func TestARetentionTakesWhatCameBeforeItArmsATimer(t *testing.T) {
 	clk := &countedClock{ManualClock: clock.NewManualClock(time.Date(2026, 9, 27, 9, 0, 0, 0, time.UTC))}
 	due := clk.Now().Add(time.Hour)
-	r := &retentionRun[struct{}]{
+	r := &retentionRun{
 		a: &App{clock: clk}, agenda: map[string]time.Time{"k": due},
 		wake: make(chan struct{}, 1),
 	}
