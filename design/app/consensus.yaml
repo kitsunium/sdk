@@ -2374,6 +2374,54 @@ packages:
           - type: coreconsensus.SnapshotMetaValue
           - type: error
       - doc: |-
+          OpenSnapshot reads a saved snapshot's encoded stream, as SaveSnapshot
+          wrote it, without a node: the reader returns the decoded stream, checks
+          each chunk as it decodes it, bounds the total by opt.MaxDecoded, and
+          answers SNAPSHOT_CORRUPT instead of io.EOF when the sizes or the SHA-256
+          differ from opt.Expected's. opt.Codec is flate when nil.
+        in:
+          - name: r
+            type: io.Reader
+          - name: opt
+            type: "*RestoreOptions"
+        name: OpenSnapshot
+        out:
+          - type: io.Reader
+          - type: error
+      - doc: |-
+          ImportObserved starts a new history on an empty, joining directory from
+          a saved snapshot and the committed tail an observer read after it: the
+          tail is checked against the snapshot (consecutive indexes from its
+          position, terms that never decrease, each payload's BodySum and the
+          ChainSum chained from the snapshot's ChainTip), replayed through m from
+          the snapshot, and the state it reaches is restored as RestoreSnapshot
+          does, its last entry the index the new history kept. An empty tail is
+          RestoreSnapshot itself. opt.Expected is the snapshot's metadata.
+
+          A tail that raises the cluster version, changes the timing contract or
+          the no-space alarm is refused: the restored metadata could not carry it;
+          import from a snapshot cut after it. Membership entries are checked and
+          passed over: the new history has its own members.
+        in:
+          - name: d
+            type: DataDir
+          - name: snap
+            type: io.Reader
+          - name: tail
+            type: "[]coreconsensus.EntryValue"
+          - name: m
+            type: coreconsensus.StateMachine
+          - name: newCluster
+            type: coreconsensus.ClusterID
+          - name: members
+            type: "[]coreconsensus.MemberValue"
+          - name: opt
+            type: "*RestoreOptions"
+        name: ImportObserved
+        out:
+          - type: coreconsensus.SnapshotMetaValue
+          - type: error
+      - doc: |-
           ProposeAs types the Apply result. A result of another dynamic type is
           RESULT_TYPE_MISMATCH carrying the committed token: the entry IS committed.
           A nil result is the zero R.
@@ -3211,6 +3259,25 @@ packages:
             name: SaveSnapshot
             out:
               - type: coreconsensus.SnapshotMetaValue
+              - type: error
+            recv: pointer
+          - doc: |-
+              ReadCommitted returns the committed entries [from, to], to clamped to
+              this node's commit index, at most maxBytes of them but always one when
+              any is due. from below the first entry the log keeps is COMPACTED: the
+              reader starts again from a snapshot. It reads the log store concurrently
+              with the writer, as every reader does, and never waits on the loop.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: from
+              - name: to
+                type: uint64
+              - name: maxBytes
+                type: int
+            name: ReadCommitted
+            out:
+              - type: "[]coreconsensus.EntryValue"
               - type: error
             recv: pointer
         name: Node
@@ -4653,6 +4720,40 @@ packages:
             - name: opt
               type: "*RestoreOptions"
           name: RestoreSnapshot
+          out:
+            - type: SnapshotMetaValue
+            - type: error
+      - func:
+          doc: OpenSnapshot reads a saved snapshot's stream without a node, checked to its digest.
+          forward: svcconsensus.OpenSnapshot
+          in:
+            - name: r
+              type: io.Reader
+            - name: opt
+              type: "*RestoreOptions"
+          name: OpenSnapshot
+          out:
+            - type: io.Reader
+            - type: error
+      - func:
+          doc: ImportObserved starts a new history from a saved snapshot and the verified tail an observer read after it, offline.
+          forward: svcconsensus.ImportObserved
+          in:
+            - name: d
+              type: DataDir
+            - name: snap
+              type: io.Reader
+            - name: tail
+              type: "[]EntryValue"
+            - name: m
+              type: StateMachine
+            - name: newCluster
+              type: ClusterID
+            - name: members
+              type: "[]MemberValue"
+            - name: opt
+              type: "*RestoreOptions"
+          name: ImportObserved
           out:
             - type: SnapshotMetaValue
             - type: error

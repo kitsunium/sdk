@@ -45242,6 +45242,18 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.ImportObserved",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "ImportObserved",
+      "spelled": "func(d DataDir, snap io.Reader, tail []coreconsensus.EntryValue, m coreconsensus.StateMachine, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) (coreconsensus.SnapshotMetaValue, error)",
+      "canonical": "func(d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir, snap io.Reader, tail []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue, m github.com/kitsunium/sdk/internal/core/app/consensus.StateMachine, newCluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID, members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue, opt *github.com/kitsunium/sdk/internal/service/app/consensus.RestoreOptions) (github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue, error)",
+      "doc": "ImportObserved starts a new history on an empty, joining directory from\na saved snapshot and the committed tail an observer read after it: the\ntail is checked against the snapshot (consecutive indexes from its\nposition, terms that never decrease, each payload's BodySum and the\nChainSum chained from the snapshot's ChainTip), replayed through m from\nthe snapshot, and the state it reaches is restored as RestoreSnapshot\ndoes, its last entry the index the new history kept. An empty tail is\nRestoreSnapshot itself. opt.Expected is the snapshot's metadata.\n\nA tail that raises the cluster version, changes the timing contract or\nthe no-space alarm is refused: the restored metadata could not carry it;\nimport from a snapshot cut after it. Membership entries are checked and\npassed over: the new history has its own members.\n",
+      "file": "service/app/consensus/observed.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.Init",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
@@ -46000,6 +46012,19 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*Node).ReadCommitted",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "ReadCommitted",
+      "recv": "Node",
+      "spelled": "func(ctx context.Context, from uint64, to uint64, maxBytes int) ([]coreconsensus.EntryValue, error)",
+      "canonical": "func(ctx context.Context, from uint64, to uint64, maxBytes int) ([]github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue, error)",
+      "doc": "ReadCommitted returns the committed entries [from, to], to clamped to\nthis node's commit index, at most maxBytes of them but always one when\nany is due. from below the first entry the log keeps is COMPACTED: the\nreader starts again from a snapshot. It reads the log store concurrently\nwith the writer, as every reader does, and never waits on the loop.\n",
+      "file": "service/app/consensus/observed.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.(*Node).Remove",
       "kind": "method",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
@@ -46100,6 +46125,18 @@
       "canonical": "func(ctx context.Context) <-chan github.com/kitsunium/sdk/internal/core/app/consensus.StatusValue",
       "doc": "Watch implements LeadershipWatcher. Each call launches one goroutine that\ncloses the returned channel and ends when ctx ends or the node's event\nloop stops.\n",
       "file": "service/app/consensus/node.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.OpenSnapshot",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "OpenSnapshot",
+      "spelled": "func(r io.Reader, opt *RestoreOptions) (io.Reader, error)",
+      "canonical": "func(r io.Reader, opt *github.com/kitsunium/sdk/internal/service/app/consensus.RestoreOptions) (io.Reader, error)",
+      "doc": "OpenSnapshot reads a saved snapshot's encoded stream, as SaveSnapshot\nwrote it, without a node: the reader returns the decoded stream, checks\neach chunk as it decodes it, bounds the total by opt.MaxDecoded, and\nanswers SNAPSHOT_CORRUPT instead of io.EOF when the sizes or the SHA-256\ndiffer from opt.Expected's. opt.Codec is flate when nil.\n",
+      "file": "service/app/consensus/observed.go",
       "layer": "service",
       "family": "app"
     },
