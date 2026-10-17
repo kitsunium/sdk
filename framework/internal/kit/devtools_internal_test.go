@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"runtime/pprof"
 	"slices"
 	"strings"
@@ -289,8 +288,8 @@ func TestMailboxReadsEveryMailer(t *testing.T) {
 }
 
 // Without a sampler — a product that imports no framework/kit/server — the
-// runtime graph carries no process and the dev route answers 404: kit
-// samples nothing by itself (ADR 0172).
+// runtime graph carries no process: kit samples nothing by itself (ADR
+// 0172). The dev route's 404 is the Studio's (studiokit).
 func TestNoSamplerNoProcess(t *testing.T) {
 	sample := plug.SampleProcess.Load()
 	plug.SampleProcess.Store(nil)
@@ -300,11 +299,6 @@ func TestNoSamplerNoProcess(t *testing.T) {
 	app.describeRuntime(&rt)
 	if rt.Process != nil {
 		t.Errorf("a process sampled without a sampler: %+v", rt.Process)
-	}
-	rec := httptest.NewRecorder()
-	app.serveProcess(rec, httptest.NewRequest(http.MethodGet, "/_kit/api/process", nil))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("GET /_kit/api/process without a sampler: %d", rec.Code)
 	}
 }
 

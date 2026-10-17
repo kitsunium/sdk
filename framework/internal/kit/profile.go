@@ -1,47 +1,11 @@
 package kit
 
 import (
-	"net/http"
 	"path/filepath"
 	"strings"
 
-	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 )
-
-// serveHeapProfile answers GET /_kit/api/profile/heap: the live heap, after
-// a collection, folded onto the graph.
-func (a *App) serveHeapProfile(w http.ResponseWriter, r *http.Request) {
-	prof := plug.StudioProfiler.Load()
-	if prof == nil {
-		a.replyError(r.Context(), w, NotFound("the Studio is not linked: import framework/kit/studio"))
-		return
-	}
-	out, err := prof.Heap(a.Graph(), a.sourceOf)
-	if err != nil {
-		a.replyError(r.Context(), w, failure(CodeProfileRead, "PROFILE_UNREADABLE", "the heap profile could not be read", err))
-		return
-	}
-	out.At = a.clock.Now().UTC()
-	writeJSON(w, http.StatusOK, out)
-}
-
-// serveGoroutines answers GET /_kit/api/goroutines: every goroutine, grouped
-// by the node it works for, the loop it belongs to, what it waits on, and
-// its innermost frame that is not the runtime's.
-func (a *App) serveGoroutines(w http.ResponseWriter, r *http.Request) {
-	prof := plug.StudioProfiler.Load()
-	if prof == nil {
-		a.replyError(r.Context(), w, NotFound("the Studio is not linked: import framework/kit/studio"))
-		return
-	}
-	out, err := prof.Goroutines(a.clock.Now().UTC())
-	if err != nil {
-		a.replyError(r.Context(), w, failure(CodeProfileRead, "PROFILE_UNREADABLE", "the goroutines could not be listed", err))
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
 
 // sourceOf is moduleSource for the profiler, which knows a function by its
 // file, its line and its name.

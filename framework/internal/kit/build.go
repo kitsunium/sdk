@@ -4,13 +4,12 @@ import (
 	"context"
 	"path/filepath"
 	"runtime/debug"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/kitsunium/sdk/framework/git"
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/proc/buildinfo"
 )
@@ -20,16 +19,6 @@ import (
 // the two always say the same version; the graph keeps both, as it always
 // had them.
 const sdkModule = "github.com/kitsunium/sdk"
-
-// Environment kit dev gives the process it launches, describing the build.
-const (
-	envDevBuiltAt     = "KIT_DEV_BUILT_AT"
-	envDevBuildMs     = "KIT_DEV_BUILD_MS"
-	envDevBuilds      = "KIT_DEV_REBUILDS"
-	envDevChanged     = "KIT_DEV_CHANGED"
-	envDevMore        = "KIT_DEV_CHANGED_MORE"
-	maxDevChanged int = 20
-)
 
 var (
 	// gitCache keeps git's answer per directory for the life of the process:
@@ -158,39 +147,17 @@ func headAt(dir string) (git.HeadState, bool) {
 	return h, err == nil
 }
 
-// devBuildOf reads what kit dev said about the build it launched, or nil
-// when the process was not started by kit dev.
+// devBuildOf is what kit dev said about the build it launched, as the
+// Studio subsystem reads it (plug.StudioDriverConfig.DevBuild), or nil: when
+// the process was not started by kit dev, and in a program that does not
+// import framework/kit/studio, whose core reads none of the tool's
+// variables (ADR 0180 step 1).
 func devBuildOf(getenv func(string) string) *model.DevBuild {
-	at, err := time.Parse(time.RFC3339Nano, getenv(envDevBuiltAt))
-	if err != nil {
+	d := plug.Studio.Load()
+	if d == nil {
 		return nil
 	}
-	d := &model.DevBuild{BuiltAt: new(at.UTC()), Changed: changedFiles(getenv(envDevChanged))}
-	if ms, err := strconv.ParseFloat(getenv(envDevBuildMs), 64); err == nil && ms >= 0 {
-		d.BuildMs = round2(ms)
-	}
-	d.Rebuilds, d.More = positiveInt(getenv(envDevBuilds)), positiveInt(getenv(envDevMore))
-	return d
-}
-
-// changedFiles are the files a dev build says changed, one a line: local
-// paths only, at most maxDevChanged.
-func changedFiles(raw string) []string {
-	var out []string
-	for f := range strings.SplitSeq(raw, "\n") {
-		if f = strings.TrimSpace(f); f != "" && filepath.IsLocal(filepath.FromSlash(f)) && len(out) < maxDevChanged {
-			out = append(out, f)
-		}
-	}
-	return out
-}
-
-// positiveInt is raw as a positive integer, 0 when it is not one.
-func positiveInt(raw string) int {
-	if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-		return n
-	}
-	return 0
+	return d.DevBuild(getenv)
 }
 
 // cachedHeadAt is headAt(dir), asked of git once per directory for the

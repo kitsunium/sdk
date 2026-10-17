@@ -29,12 +29,6 @@ var (
 	// nil until framework/kit/server is imported, and the graph then carries
 	// no process (ADR 0172).
 	SampleProcess atomic.Pointer[func() *model.Process]
-	// OpenEventStream opens a Server-Sent Events stream on w; nil until
-	// framework/kit/studio is imported.
-	OpenEventStream atomic.Pointer[func(w http.ResponseWriter, r *http.Request) (EventStream, error)]
-	// StudioProfiler is the Studio's profiler; nil until framework/kit/studio
-	// is imported.
-	StudioProfiler atomic.Pointer[ProfilerConfig]
 )
 
 // HTTPConfig is what kit asks of the HTTP engine: where to listen, its one
@@ -65,20 +59,6 @@ type HTTPState struct {
 	Total, Rejected uint64
 }
 
-// ProfilerConfig is the Studio's profiler: the live heap folded onto the graph's
-// nodes, and every goroutine grouped.
-type ProfilerConfig struct {
-	// Heap folds the live heap onto g's nodes; source says where a function
-	// of a module lies, nil when it knows none.
-	Heap func(g *model.Graph, source SourceFunc) (*model.Profile, error)
-	// Goroutines groups every goroutine of the process, read at at.
-	Goroutines func(at time.Time) (*model.Goroutines, error)
-}
-
-// SourceFunc says where the function fn, at file:line, lies in the product,
-// nil when it knows none.
-type SourceFunc func(file string, line int, fn string) *model.Source
-
 // HTTPServer is the HTTP engine kit starts, reads and stops.
 type HTTPServer interface {
 	// Start binds the address and serves, returning once bound.
@@ -87,14 +67,4 @@ type HTTPServer interface {
 	State() HTTPState
 	// Shutdown drains the engine within ctx.
 	Shutdown(ctx context.Context) error
-}
-
-// EventStream is one Server-Sent Events stream: the Studio's live events.
-type EventStream interface {
-	// Send writes one event's data.
-	Send(data string) error
-	// Done is closed when the client left.
-	Done() <-chan struct{}
-	// Close ends the stream.
-	Close() error
 }

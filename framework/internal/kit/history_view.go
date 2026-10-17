@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
-	"net/http"
 	"reflect"
 	"slices"
 	"strconv"
@@ -132,19 +131,12 @@ func (s *storeCore) formerShown(ctx context.Context, key string) (model.RecordHi
 	return out, nil
 }
 
-// serveFormer answers GET /_kit/api/former?store=&key=: a record's former
-// values, as the Studio's data view shows them.
-func (a *App) serveFormer(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	st, ok := a.findNode(q.Get("store")).(formerSource)
+// studioFormer is a record's former values, as the Studio's data view shows
+// them (GET /_kit/api/former?store=&key=).
+func (a *App) studioFormer(ctx context.Context, store, key string) (model.RecordHistory, error) {
+	st, ok := a.findNode(store).(formerSource)
 	if !ok {
-		a.replyError(r.Context(), w, NotFound("no such store"))
-		return
+		return model.RecordHistory{}, NotFound("no such store")
 	}
-	out, err := st.formerShown(r.Context(), q.Get("key"))
-	if err != nil {
-		a.replyError(r.Context(), w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
+	return st.formerShown(ctx, key)
 }

@@ -51,26 +51,6 @@ func TestBuildOfATodoOnALocalKit(t *testing.T) {
 	}
 }
 
-func TestDevBuildOfTheEnvironment(t *testing.T) {
-	env := map[string]string{
-		envDevBuiltAt: "2026-09-24T10:00:00.5Z",
-		envDevBuildMs: "1850",
-		envDevBuilds:  "7",
-		envDevChanged: "identity/api.go\n../../etc/passwd\n/abs/path.go\nnotify/locales/fr.json",
-		envDevMore:    "5",
-	}
-	d := devBuildOf(func(k string) string { return env[k] })
-	if d == nil || d.BuildMs != 1850 || d.Rebuilds != 7 || d.More != 5 || d.BuiltAt == nil {
-		t.Fatalf("dev build %+v", d)
-	}
-	if len(d.Changed) != 2 || d.Changed[0] != "identity/api.go" || d.Changed[1] != "notify/locales/fr.json" {
-		t.Errorf("only module-relative paths are kept: %v", d.Changed)
-	}
-	if devBuildOf(func(string) string { return "" }) != nil {
-		t.Error("a process kit dev did not start has no dev build")
-	}
-}
-
 func TestAServiceDocSpeaksItsLanguages(t *testing.T) {
 	svc := NewService("bilingual", "Accounts and sessions.\n\nfr: Comptes et sessions.")
 	app := NewApp("bilingual", svc).With(InMemory())

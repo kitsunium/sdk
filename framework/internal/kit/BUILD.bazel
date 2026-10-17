@@ -152,6 +152,7 @@ go_library(
         "store_engine.go",
         "store_sql.go",
         "store_sql_migrate.go",
+        "studio_host.go",
         "subsystem.go",
         "telemetry.go",
         "topic.go",

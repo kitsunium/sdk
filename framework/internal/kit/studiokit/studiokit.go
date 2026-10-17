@@ -2,11 +2,20 @@ package studiokit
 
 import "github.com/kitsunium/sdk/framework/internal/kit/plug"
 
-// Enable plugs the Studio's event stream, its profiler and kit's
-// catalogues after English into kit.
+// driver is what Enable plugs into kit: the tool's variables and the
+// Studio's routes.
+var driver = plug.StudioDriverConfig{
+	Env:      studioEnv,
+	Settings: studioSettings,
+	Forced:   devForced,
+	DevBuild: devBuildOf,
+	Mount:    mount,
+}
+
+// Enable plugs the Studio into kit: the tool's variables, the Studio's
+// routes — with its event stream and its profiler — and kit's catalogues
+// after English.
 func Enable() {
-	open := openEventStream
-	plug.OpenEventStream.Store(&open)
-	plug.StudioProfiler.Store(&profiler)
+	plug.Studio.Store(&driver)
 	plug.Words.Store(&words)
 }

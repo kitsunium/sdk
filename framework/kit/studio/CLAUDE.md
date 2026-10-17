@@ -5,7 +5,10 @@ A subsystem of `framework/kit`, enabled by a blank import:
 `import _ "github.com/kitsunium/sdk/framework/kit/studio"`. It lets a serving
 app in dev mount the read-only API the kit tool's Studio reads — the graph
 and its event stream, traces, instances, items, source, dev tools, the
-profiler (`ikit.EnableStudio`). Since ADR 0179 step 8 it also plugs in kit's
+profiler — whose routes, guard and handlers are `studiokit`'s since ADR 0180
+step 1, read over the app's host (`ikit.EnableStudio`) —, and it reads the
+kit tool's variables (`KIT_DEV_*`, `KIT_STUDIO`, `KIT_STUDIO_REMOTE`,
+`KIT_ANALYZE`), which the core reads no more. Since ADR 0179 step 8 it also plugs in kit's
 sentences in the languages after English — French today, the catalogues and
 the SDK's `i18n` in `studiokit` (`plug.Words`) —, which only the Studio shows,
 in its reader's language (Q6). Without it none of those routes is linked, a
@@ -21,12 +24,12 @@ dev build tag, for the product it serves.
 
 | File | Holds |
 |---|---|
-| `studio.go` | the package documentation and `enable`, which plugs the event stream, the profiler and kit's catalogues after English in (`studiokit.Enable`) and calls `ikit.EnableStudio` |
+| `studio.go` | the package documentation and `enable`, which plugs the Studio in — the tool's variables, its routes with the event stream and the profiler, and kit's catalogues after English (`studiokit.Enable`: `plug.Studio`, `plug.Words`) — and calls `ikit.EnableStudio` |
 | `README.md` | written by `tools/genindex` from `docs/api` (`make docs-readme`, ADR 0167) |
 
 ## Rules
 
-- It holds no behaviour: the one call it makes is into `framework/internal/kit`, where the behaviour, its tests (`subsystems_test.go`, `subsystems_internal_test.go`) and the refusal naming the import live.
+- It holds no behaviour: its two calls are into `framework/internal/kit/studiokit`, where the routes, their handlers and the tool's variables live with their tests (`studio_internal_test.go`, `env_internal_test.go`), and into `framework/internal/kit`, where the host they read, the start's warning naming the import and the suites that serve the Studio (`studio_test.go`, `devtools_test.go`) live.
 - The call runs from a blank package-level value (`var _ = …()`), never an `init`: the SDK's convention (`KTN-FUNC-NOINIT`).
 
 ## Verify

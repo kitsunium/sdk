@@ -300,6 +300,64 @@ var kitStoreCode = []string{
 	"(*App).watchCommand",
 }
 
+// studioCode is the Studio's code ADR 0180's step 1 took out of kit's core
+// into framework/internal/kit/studiokit — its routes, their guard and their
+// handlers, the event stream, the source endpoint, the mailbox, and the
+// reading of the tool's variables — and the core's reads that only its
+// routes reach, through the host EnableStudio alone builds: one function of
+// each part, by its symbol under sdk — a handler that is a closure by its
+// closure, which the compiler never inlines away. A product that does not import
+// framework/kit/studio links none of them; one that does links every one, so
+// that the list cannot go stale by naming what nothing links.
+var studioCode = []string{
+	studioKit + "mount",
+	studioKit + "studio.guard.func1",
+	studioKit + "serveEvents.func1",
+	studioKit + "studio.serveSource",
+	studioKit + "studio.serveMails",
+	studioKit + "studio.serveHeapProfile",
+	studioKit + "studioEnv",
+	studioKit + "studioSettings",
+	studioKit + "devForced",
+	studioKit + "devBuildOf",
+	kitCore + "mountStudio",
+	kitCore + "studioHost.Source",
+	kitCore + "studioHost.Reply",
+	kitCore + "(*App).studioLogs",
+	kitCore + "(*App).studioDatabases",
+	kitCore + "(*App).studioTrash",
+	kitCore + "readSource",
+}
+
+// kitCore is kit's core, the prefix of its symbols.
+const kitCore = "framework/internal/kit."
+
+// toolVariables are the names of the tool's variables (ADR 0180 §3): what
+// kit dev sets for a launch and what turns the Studio on, off or remote and
+// the static analysis off. Only the Studio subsystem reads them, so only a
+// product that imports framework/kit/studio holds them.
+var toolVariables = []string{
+	"KIT_DEV_BUILT_AT", "KIT_DEV_BUILD_MS", "KIT_DEV_REBUILDS", "KIT_DEV_CHANGED", "KIT_DEV_FORCED",
+	"KIT_STUDIO", "KIT_ANALYZE",
+}
+
+// linksNoStudio fails the test when a product that imports by, and not
+// framework/kit/studio, links any of studioCode or holds the name of one of
+// the tool's variables (ADR 0180 step 1).
+func linksNoStudio(t *testing.T, by string, syms map[string]bool, image []byte) {
+	t.Helper()
+	for _, fn := range studioCode {
+		if syms[sdk+fn] {
+			t.Errorf("a product that imports %s and not framework/kit/studio links the Studio's code: %s", by, fn)
+		}
+	}
+	for _, name := range toolVariables {
+		if bytes.Contains(image, []byte(name)) {
+			t.Errorf("a product that imports %s and not framework/kit/studio holds the tool's variable %s", by, name)
+		}
+	}
+}
+
 // kitStoreSymbol is the text symbol of one entry of kitStoreCode.
 func kitStoreSymbol(fn string) string { return sdk + "framework/internal/kit." + fn }
 
@@ -351,6 +409,7 @@ func linksNoSubsystem(t *testing.T, goTool, dir string) {
 			t.Errorf("a product that does not import framework/kit/store links kit's own store code: %s", fn)
 		}
 	}
+	linksNoStudio(t, "framework/kit", syms, image)
 	// The core names the SDK's mail types — Mailer.Send takes a mail.Message
 	// —, so the mail package and its SMTP transport stay in its graph; their
 	// code is the mail subsystem's (ADR 0179 step 6).
@@ -435,6 +494,7 @@ func TestAProductThatImportsTheStoresLinksThem(t *testing.T) {
 	linksNoMail(t, "framework/kit/store", syms, linked)
 	linksNoJobs(t, "framework/kit/store", linked)
 	linksNoWords(t, "framework/kit/store", image, linked)
+	linksNoStudio(t, "framework/kit/store", syms, image)
 }
 
 // linksNoWords fails the test when a product that imports by, and not
@@ -508,6 +568,7 @@ func TestAProductThatImportsTheQueuesLinksThem(t *testing.T) {
 	linksNoMail(t, "framework/kit/queue", syms, linked)
 	linksNoJobs(t, "framework/kit/queue", linked)
 	linksNoWords(t, "framework/kit/queue", image, linked)
+	linksNoStudio(t, "framework/kit/queue", syms, image)
 }
 
 // The same half of §7 for step 5: testdata/workflowprobe, coreprobe with
@@ -543,6 +604,7 @@ func TestAProductThatImportsTheWorkflowsLinksThem(t *testing.T) {
 	linksNoMail(t, "framework/kit/workflow", syms, linked)
 	linksNoJobs(t, "framework/kit/workflow", linked)
 	linksNoWords(t, "framework/kit/workflow", image, linked)
+	linksNoStudio(t, "framework/kit/workflow", syms, image)
 	// The probe's two workflows are compiled — the facade at each of their
 	// types —, and the SDK's machine at kit's entity and the state's
 	// spelling alone: its methods' wrappers name no other type, its shaped
@@ -611,6 +673,7 @@ func TestAProductThatImportsTheMailLinksIt(t *testing.T) {
 	}
 	linksNoJobs(t, "framework/kit/mail", linked)
 	linksNoWords(t, "framework/kit/mail", image, linked)
+	linksNoStudio(t, "framework/kit/mail", syms, image)
 }
 
 // The same half of §7 for step 7: testdata/jobsprobe, coreprobe with
@@ -655,6 +718,7 @@ func TestAProductThatImportsTheJobsLinksThem(t *testing.T) {
 		}
 	}
 	linksNoWords(t, "framework/kit/jobs", image, linked)
+	linksNoStudio(t, "framework/kit/jobs", syms, image)
 }
 
 // The same half of §7 for step 8: testdata/studioprobe, coreprobe with
@@ -706,6 +770,18 @@ func TestAProductThatImportsTheStudioLinksItsLanguages(t *testing.T) {
 	}
 	if !bytes.Contains(image, []byte(englishSentence)) {
 		t.Errorf("a product that imports framework/kit/studio does not hold kit's English table (%q)", englishSentence)
+	}
+	// It links the Studio's routes and the reading of the tool's variables
+	// (ADR 0180 step 1), which no other probe links.
+	for _, fn := range studioCode {
+		if !syms[sdk+fn] {
+			t.Errorf("a product that imports framework/kit/studio does not link the Studio's code: %s", fn)
+		}
+	}
+	for _, name := range toolVariables {
+		if !bytes.Contains(image, []byte(name)) {
+			t.Errorf("a product that imports framework/kit/studio does not hold the tool's variable %s", name)
+		}
 	}
 }
 

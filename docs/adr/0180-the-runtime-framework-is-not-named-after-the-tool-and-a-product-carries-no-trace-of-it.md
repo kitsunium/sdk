@@ -301,7 +301,7 @@ nothing.
 | Step | Where | What |
 |---|---|---|
 | 0 | — | Done on 2026-10-17: the owner answered the twelve questions, and this record is accepted with its answers |
-| 1 | SDK | The Studio's routes, handlers, capture view and tool variables move from the core into the Studio subsystem; the core keeps the probes (non-breaking: a product that imports `framework/kit/studio` keeps its Studio) |
+| 1 | SDK | The Studio's routes, handlers, capture view and tool variables move from the core into the Studio subsystem; the core keeps the probes (non-breaking: a product that imports `framework/kit/studio` keeps its Studio) — done (2026-10-17, §Step 1, done) |
 | 2 | platform | `kit dev` injects the hook by overlay; the generator stops writing `dev_gen.go`; `kit check` refuses a product's import of the Studio subsystem; the todo deletes `kitdev.go`, moderation its import |
 | 3 | SDK | The rename of §1, a design edit first (ADR 0163, 0167, 0168): `design/framework/app.yaml`, `kit gen`, `make api`, `make docs-readme`; the facade's and implementation's paths; `model` `Version` 6; the scripts, `BUILD.bazel`, `//:audit_sources`, `tools/alloc-lane-targets.txt` and `codes.ranges` owners re-pointed; the three database connectors follow; the texts of §2 reworded |
 | 4 | SDK | The runtime names of §3: the prefix, the routes, the tag key, the graph values, the telemetry name; the refusals of an old name at the start (§3, Q12) |
@@ -309,6 +309,118 @@ nothing.
 | 6 | SDK | `TestAProductCarriesNoTraceOfTheTool`, with an empty allow-list; it can land earlier with an allow-list shrinking step by step, as ADR 0179's `stillInCore` did |
 | 7 | platform | Its ADR for §5: the header, the digest line, the skeletons, the seed variable, the design's `apiVersion`, the lock, the version pin; the analyzer and `subsystem.Table` on the new paths; `internal/modelts` regenerated for `Version` 6; the Studio's client on the new prefix; the reference regenerated, and its guard |
 | 8 | products | todo, moderation, statusline: the import path and `kit.` → `app.` (a rewrite of the import path and the package qualifier, then the 14 shadowing files by hand), the struct tags (moderation's 174), the variables in Dockerfiles, compose files and CI, `.gitignore` |
+
+### Step 1, done (2026-10-17)
+
+The Studio's routes, their guard and their handlers, and the reading of the
+tool's variables, are `framework/internal/kit/studiokit`'s, which
+`framework/kit/studio` plugs in as it is imported (`plug.Studio`, a
+`StudioDriverConfig`), on the model of ADR 0179's steps:
+
+- **The routes.** `studiokit`'s `mount` registers every route the core's
+  `mountIntrospection` registered, in its order and with its patterns — the
+  graph, the event stream, traces, one trace, source, instances, items, the
+  process, goroutines, the heap profile, logs, the mailbox and one mail,
+  and, on the store subsystem, the databases, former values, versions, the
+  trash and the Privacy page —, the not-found answers under `/_kit/api/` and
+  `/_kit/`, and the guard (loopback unless `KIT_STUDIO_REMOTE=on`, the Host
+  allowed, the Studio's CSP, `nosniff`, `no-referrer`). The event stream
+  (the SDK's `net/sse`) and the profiler (the SDK's `profiling`) are now
+  `studiokit`'s own, under its routes: `plug.OpenEventStream`,
+  `plug.StudioProfiler`, `plug.EventStream`, `plug.ProfilerConfig` and
+  `plug.SourceFunc` are gone.
+- **What the routes read.** A route reads the running app through a
+  `plug.StudioHost`, which the core implements (`studio_host.go`,
+  `studioHost`): the graph, the phase, the clock, the hub's events, traces
+  and logs, a workflow's instances, a store's items redacted, a source file
+  the graph names — still read through `os.Root`, never a link
+  (`readSource`) —, where a function lies, the mailboxes, the store tools'
+  reads (`studioDatabases`, `studioFormer`, `studioRevisions`, `studioTrash`,
+  `privacyView`), the guard's facts, and kit's answers (`Reply`, `Forbid`,
+  `Fail`, `NotFound`, `Invalid`, `ProfileUnreadable` — `CodeProfileRead`
+  stays kit's —, `Debug`). What the app keeps stays beside its state, as
+  ADR 0179 §3 lets code that names no SDK type of the subsystem stay; it is
+  reached only through the host, which only `mountStudio` makes, which only
+  `EnableStudio` stores — so a program that does not import
+  `framework/kit/studio` links none of it. A query parameter judged against
+  what the app keeps — a log level, a page of the trash, two version
+  numbers — is handed to the host as received, so that a request with two
+  faults is answered with the fault kit answered first.
+- **The tool's variables.** `KIT_DEV_BUILT_AT`, `KIT_DEV_BUILD_MS`,
+  `KIT_DEV_REBUILDS`, `KIT_DEV_CHANGED`, `KIT_DEV_CHANGED_MORE`,
+  `KIT_DEV_FORCED`, `KIT_STUDIO`, `KIT_STUDIO_REMOTE` and `KIT_ANALYZE` are
+  read by `studiokit` alone (`studioEnv`, `studioSettings`, `devForced`,
+  `devBuildOf`), behind `Env`, `Settings`, `Forced` and `DevBuild`. The core
+  resolves the Studio from what they ask (`plug.StudioEnvValue`), its zero
+  value without the Studio — a run in which none is set —, and keeps the
+  code's options (`kit.Studio`, `kit.Analyze`), the production warning and
+  the start's warning that names the import.
+- **What stays in the core.** The three probes and the reserved `/_kit/`
+  outside dev (`mountHealth`, renamed by step 4). The mailbox's record of a
+  captured mail — its headers, `X-Kit-Attachments` among them — stays the
+  mailer's: it is also what `Mailer.Captured` hands a product's tests, which
+  are not the Studio, so the header is renamed with the runtime names
+  (step 4) rather than moved here; the mailbox's routes, the capture view
+  the Studio reads, moved. The announcement in dev of the Studio's API
+  (`/_kit/api/`) and its sentence are §2's text and step 4's prefix.
+
+**Non-breaking.** A product that imports `framework/kit/studio` keeps its
+Studio: the same routes, answers and guards — the core's suites that serve
+the Studio (`studio_test.go`, `devtools_test.go`, `trash_view_test.go`,
+`revisions_view_test.go`, the mailbox and source suites), whose binary
+imports the package, pass unchanged, and `studiokit`'s own suite holds the
+guard, the mailbox, the source endpoint's refusals and the tool's variables
+over a fake host. A product that does not import it reads none of the
+tool's variables: its settings carry no row of them, its graph no dev
+build, and `KIT_STUDIO=off` no longer silences the start's warning that the
+Studio is not linked.
+
+**Held by the initgraph test.** `studioCode` lists one function of each part
+of the Studio's code, by its symbol — `studiokit`'s `mount`, the guard's
+handler, the event stream, the source endpoint, the mailbox, the heap
+profile, `studioEnv`, `studioSettings`, `devForced`, `devBuildOf`, and the
+core's `mountStudio`, `studioHost.Source`, `studioHost.Reply`, `studioLogs`,
+`studioDatabases`, `studioTrash`, `readSource` —, and `toolVariables` the
+names of the tool's variables. `linksNoStudio` refuses every one of them,
+symbol or name, in `cliprobe`, `coreprobe`, `storeprobe`, `queueprobe`,
+`workflowprobe`, `mailprobe` and `jobsprobe`;
+`TestAProductThatImportsTheStudioLinksItsLanguages` requires every one in
+`studioprobe`. Run against the tree before this step, the test fails where
+it should: in `cliprobe` and in `coreprobe` each of the seven entries of
+`toolVariables` matches — read as substrings, `KIT_DEV_CHANGED` and
+`KIT_STUDIO` also cover `KIT_DEV_CHANGED_MORE` and `KIT_STUDIO_REMOTE`, so
+the seven entries are the nine names the table below counts —, which the
+core read.
+
+Measured as ADR 0179's steps (Go 1.27.2, `GOTOOLCHAIN=local`, `-trimpath`,
+`GOWORK=off`, MB = 10⁶ bytes, text symbols `T`/`t` by `go tool nm -size`),
+before on `origin/main` at ff3fd191:
+
+| | cliprobe before | cliprobe after | coreprobe before | coreprobe after | studioprobe before | studioprobe after |
+|---|---|---|---|---|---|---|
+| packages (`go list -deps`) | 341 | 341 | 340 | 340 | 355 | 355 |
+| file | 14.451 | **14.447 (−0.004)** | 14.440 | 14.433 | 16.874 | 16.931 (+0.057) |
+| `.text` | 4.545 | 4.542 | 4.542 | 4.540 | 5.359 | 5.376 |
+| text symbols | 4.394 | **4.392 (−0.002)** | 4.391 | 4.389 | 5.183 | 5.199 (+0.016) |
+| kit's core | 0.4276 | 0.4256 | 0.4275 | 0.4255 | 0.7388 | 0.7281 |
+| `studiokit` | 0 | 0 | 0 | 0 | 0.0133 | 0.0404 |
+| names of the tool's variables in the binary | 9 | **0** | 9 | **0** | 9 | 9 |
+
+**Reading.** The measure corrects §Context: before this step a product that
+did not import `framework/kit/studio` already linked none of the Studio's
+handlers — `mountIntrospection` was reached only through `EnableStudio`
+since ADR 0179 —, so "compiled into every production binary" held of the
+core's package, not of the linked program. What such a product did link of
+the Studio was the reading of the tool's variables (`devBuildOf`,
+`changedFiles`, `resolveStudio`, `devForced`: 2.5 kB of code, 2.1 kB net) and their nine
+names, which it no longer holds; its code is 2.1 kB smaller and its file
+4.0 kB. The step's gain is where the source lies: the Studio's routes,
+handlers and literals are out of the core's package, as §6's literal check
+(step 6) needs. A product shown in the Studio links 0.016 MB more code —
+the host's methods, each route encoding its own answer, and the event
+stream and profiler without their former hooks. Not measured: the latency
+of a fresh process, which nothing here moves.
+
 
 ### Impact
 
@@ -461,6 +573,7 @@ clear, and accepting both keeps the old names longer.
 |---|---|---|
 | Proposed | 2026-10-17 | The design, the measured inventory, twelve questions for the owner |
 | Accepted | the owner's decision, 2026-10-17 | Q1 answered `framework/app`, the recommendation of Q2 to Q12 retained as written; each question replaced by its *Decision* line; the status, the header (*Accepted*, *Amends*), the placeholder name replaced by `app`, and the passages that depended on an open question (§1's table, §4's hook, §5, migration step 0 and 5, the cost, §Breaking changes, §Deferred) updated. No other text changed |
+| Accepted, step 1 done | 2026-10-17 | The migration table marks step 1 done; §Step 1, done records the Studio's routes, guard and handlers in `studiokit` behind `plug.Studio` (`StudioDriverConfig`: `Env`, `Settings`, `Forced`, `DevBuild`, `Mount`), reading the app through `plug.StudioHost`, which the core implements and only `EnableStudio` reaches; the event stream and the profiler `studiokit`'s own, their hooks gone; the tool's nine variables read by `studiokit` alone; the probes, the reserved `/_kit/`, the captured mail's header (shared with `Mailer.Captured`) and the dev announcement kept in the core for step 4; the initgraph test's `studioCode` and `toolVariables`; and the measure — the smallest product 2.1 kB of code and 4.0 kB of file less, none of the tool's names, and §Context's "compiled into every production binary" corrected: the handlers were already unlinked without the Studio. No decision changed |
 
 ## Deferred
 

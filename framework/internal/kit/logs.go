@@ -3,7 +3,6 @@ package kit
 import (
 	"context"
 	"encoding/hex"
-	"net/http"
 	"strconv"
 	"strings"
 
@@ -247,28 +246,27 @@ func (h *hub) recentLogs(f logFilter, limit int) []model.LogRecord {
 	return out
 }
 
-// serveLogs answers GET /_kit/api/logs?trace=&node=&level=&limit=.
-func (a *App) serveLogs(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	f := logFilter{trace: q.Get("trace"), node: q.Get("node")}
-	if lv := strings.ToLower(q.Get("level")); lv != "" {
+// studioLogs are the latest records the hub keeps, as the Studio's
+// GET /_kit/api/logs?trace=&node=&level=&limit= asks them: of a trace, of a
+// node, from a level, at most limit — defaultLogs when it is empty.
+func (a *App) studioLogs(trace, node, level, limitText string) ([]model.LogRecord, error) {
+	f := logFilter{trace: trace, node: node}
+	if lv := strings.ToLower(level); lv != "" {
 		rank, ok := logLevels[lv]
 		if !ok {
-			a.replyError(r.Context(), w, Invalid("level must be debug, info, warn or error"))
-			return
+			return nil, Invalid("level must be debug, info, warn or error")
 		}
 		f.level = rank
 	}
 	limit := defaultLogs
-	if raw := q.Get("limit"); raw != "" {
-		n, err := strconv.Atoi(raw)
+	if limitText != "" {
+		n, err := strconv.Atoi(limitText)
 		if err != nil || n < 1 || n > maxLogs {
-			a.replyError(r.Context(), w, Invalid("limit must be a number from 1 to "+strconv.Itoa(maxLogs)))
-			return
+			return nil, Invalid("limit must be a number from 1 to " + strconv.Itoa(maxLogs))
 		}
 		limit = n
 	}
-	writeJSON(w, http.StatusOK, a.hub.recentLogs(f, limit))
+	return a.hub.recentLogs(f, limit), nil
 }
 
 // rankOf ranks words by their place in order, from 0.

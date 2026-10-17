@@ -6,9 +6,9 @@
 import "github.com/kitsunium/sdk/framework/internal/kit/plug"
 ```
 
-Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/kit/server), the Studio's event stream, its profiler and kit's sentences in the languages after English (framework/kit/studio), the stores and the databases (framework/kit/store), the queues (framework/kit/queue), the workflows (framework/kit/workflow), the mailers (framework/kit/mail), the jobs (framework/kit/jobs). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
+Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/kit/server), the Studio — the tool's variables, its routes and kit's sentences in the languages after English (framework/kit/studio) —, the stores and the databases (framework/kit/store), the queues (framework/kit/queue), the workflows (framework/kit/workflow), the mailers (framework/kit/mail), the jobs (framework/kit/jobs). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
 
-It is also the contract between kit's core and the subsystems ADR 0179 takes out of it, as database/sql/driver is between database/sql and a driver: the store subsystem's engine over documents, its siblings, kit's scope on a database and its migrations ([Stores](#Stores)), which framework/kit/store sets; the refusals an engine says in kit's terms ([Refusal](#Refusal)); what kit's transactions offer an engine that takes part in them ([Transaction](#Transaction)); the queue subsystem's brokers and their consumer ([Queues](#Queues)), which framework/kit/queue sets; the workflow subsystem's engine and the ports it runs on ([Workflows](#Workflows)), which framework/kit/workflow sets; the mail subsystem's outbox and transports ([Mail](#Mail)), which framework/kit/mail sets; the jobs subsystem's schedules and scheduler ([Jobs](#Jobs)), which framework/kit/jobs sets; and kit's catalogues in the languages after English ([Words](#Words)), which framework/kit/studio sets.
+It is also the contract between kit's core and the subsystems ADR 0179 takes out of it, as database/sql/driver is between database/sql and a driver: the store subsystem's engine over documents, its siblings, kit's scope on a database and its migrations ([Stores](#Stores)), which framework/kit/store sets; the refusals an engine says in kit's terms ([Refusal](#Refusal)); what kit's transactions offer an engine that takes part in them ([Transaction](#Transaction)); the queue subsystem's brokers and their consumer ([Queues](#Queues)), which framework/kit/queue sets; the workflow subsystem's engine and the ports it runs on ([Workflows](#Workflows)), which framework/kit/workflow sets; the mail subsystem's outbox and transports ([Mail](#Mail)), which framework/kit/mail sets; the jobs subsystem's schedules and scheduler ([Jobs](#Jobs)), which framework/kit/jobs sets; kit's catalogues in the languages after English ([Words](#Words)), and the Studio's routes and the tool's variables ([Studio](#Studio), ADR 0180 step 1), which framework/kit/studio sets, the routes reading the running app through a [StudioHost](#StudioHost) kit gives.
 
 The package imports the standard library and the framework's model only, so that kit and every subsystem can import it.
 
@@ -56,10 +56,6 @@ The package imports the standard library and the framework's model only, so that
 - [type EntrySource](<#EntrySource>)
   - [func \(EntrySource\) KeyedEntries\(ctx context.Context, limit int\) \(\[\]EntryValue, error\)](<#EntrySource.KeyedEntries>)
 - [type EntryValue](<#EntryValue>)
-- [type EventStream](<#EventStream>)
-  - [func \(EventStream\) Close\(\) error](<#EventStream.Close>)
-  - [func \(EventStream\) Done\(\) \<-chan struct{}](<#EventStream.Done>)
-  - [func \(EventStream\) Send\(data string\) error](<#EventStream.Send>)
 - [type Executor](<#Executor>)
   - [func \(Executor\) ExecContext\(ctx context.Context, query string, args ...any\) \(sql.Result, error\)](<#Executor.ExecContext>)
   - [func \(Executor\) QueryContext\(ctx context.Context, query string, args ...any\) \(\*sql.Rows, error\)](<#Executor.QueryContext>)
@@ -114,7 +110,6 @@ The package imports the standard library and the framework's model only, so that
   - [func \(Migrator\) Up\(ctx context.Context\) error](<#Migrator.Up>)
 - [type MigratorProvider](<#MigratorProvider>)
   - [func \(MigratorProvider\) Migrator\(table string, ms \[\]MigrationValue\) \(Migrator, error\)](<#MigratorProvider.Migrator>)
-- [type ProfilerConfig](<#ProfilerConfig>)
 - [type QueueConfig](<#QueueConfig>)
 - [type QueueDriverConfig](<#QueueDriverConfig>)
 - [type QueuePolicyValue](<#QueuePolicyValue>)
@@ -124,7 +119,6 @@ The package imports the standard library and the framework's model only, so that
   - [func \(\*RefusalError\) Unwrap\(\) error](<#RefusalError.Unwrap>)
 - [type Reindexer](<#Reindexer>)
   - [func \(Reindexer\) Reindex\(ctx context.Context\) error](<#Reindexer.Reindex>)
-- [type SourceFunc](<#SourceFunc>)
 - [type StampValue](<#StampValue>)
 - [type Step](<#Step>)
 - [type StoreConfig](<#StoreConfig>)
@@ -142,6 +136,39 @@ The package imports the standard library and the framework's model only, so that
   - [func \(StoreEngine\) Update\(ctx context.Context, key string, fn func\(d \*DocumentValue\) error\) \(DocumentValue, error\)](<#StoreEngine.Update>)
   - [func \(StoreEngine\) Watch\(onWrite func\(key string\), onDelete func\(key string\)\)](<#StoreEngine.Watch>)
   - [func \(StoreEngine\) Write\(ctx context.Context, d DocumentValue, mode WriteMode\) error](<#StoreEngine.Write>)
+- [type StudioDriverConfig](<#StudioDriverConfig>)
+- [type StudioEnvValue](<#StudioEnvValue>)
+- [type StudioHost](<#StudioHost>)
+  - [func \(StudioHost\) AllowedHost\(host string\) bool](<#StudioHost.AllowedHost>)
+  - [func \(StudioHost\) Databases\(ctx context.Context\) \[\]model.Database](<#StudioHost.Databases>)
+  - [func \(StudioHost\) Debug\(ctx context.Context, message string, err error\)](<#StudioHost.Debug>)
+  - [func \(StudioHost\) Fail\(w http.ResponseWriter, message string\)](<#StudioHost.Fail>)
+  - [func \(StudioHost\) Forbid\(w http.ResponseWriter, message string\)](<#StudioHost.Forbid>)
+  - [func \(StudioHost\) Former\(ctx context.Context, store string, key string\) \(model.RecordHistory, error\)](<#StudioHost.Former>)
+  - [func \(StudioHost\) Graph\(\) \*model.Graph](<#StudioHost.Graph>)
+  - [func \(StudioHost\) Instances\(workflow string\) \(\[\]model.Instance, bool\)](<#StudioHost.Instances>)
+  - [func \(StudioHost\) Invalid\(message string\) error](<#StudioHost.Invalid>)
+  - [func \(StudioHost\) Items\(store string\) \(\[\]json.RawMessage, bool\)](<#StudioHost.Items>)
+  - [func \(StudioHost\) Locate\(file string, line int, fn string\) \*model.Source](<#StudioHost.Locate>)
+  - [func \(StudioHost\) Logs\(trace string, node string, level string, limit string\) \(\[\]model.LogRecord, error\)](<#StudioHost.Logs>)
+  - [func \(StudioHost\) Mail\(id string\) \(model.MailMessage, bool\)](<#StudioHost.Mail>)
+  - [func \(StudioHost\) Mails\(limit int\) \[\]model.MailSummary](<#StudioHost.Mails>)
+  - [func \(StudioHost\) NotFound\(message string\) error](<#StudioHost.NotFound>)
+  - [func \(StudioHost\) Now\(\) time.Time](<#StudioHost.Now>)
+  - [func \(StudioHost\) Phase\(\) string](<#StudioHost.Phase>)
+  - [func \(StudioHost\) Privacy\(ctx context.Context\) \(model.Privacy, error\)](<#StudioHost.Privacy>)
+  - [func \(StudioHost\) ProfileUnreadable\(public string, cause error\) error](<#StudioHost.ProfileUnreadable>)
+  - [func \(StudioHost\) Remote\(\) bool](<#StudioHost.Remote>)
+  - [func \(StudioHost\) Reply\(w http.ResponseWriter, r \*http.Request, body json.RawMessage, err error\)](<#StudioHost.Reply>)
+  - [func \(StudioHost\) Revisions\(ctx context.Context, store string, key string, from string, to string\) \(model.RecordVersions, error\)](<#StudioHost.Revisions>)
+  - [func \(StudioHost\) Source\(ctx context.Context, module string, file string\) \(\[\]byte, bool\)](<#StudioHost.Source>)
+  - [func \(StudioHost\) Stopping\(\) \<-chan struct{}](<#StudioHost.Stopping>)
+  - [func \(StudioHost\) Stores\(\) bool](<#StudioHost.Stores>)
+  - [func \(StudioHost\) Subscribe\(\) \(events \<-chan model.Event, cancel func\(\)\)](<#StudioHost.Subscribe>)
+  - [func \(StudioHost\) Trace\(id string\) \(model.Trace, bool\)](<#StudioHost.Trace>)
+  - [func \(StudioHost\) Traces\(limit int, root string, node string\) \[\]model.Trace](<#StudioHost.Traces>)
+  - [func \(StudioHost\) Trash\(ctx context.Context, store string, offset string, limit string\) \(model.StoreTrash, error\)](<#StudioHost.Trash>)
+- [type StudioStateValue](<#StudioStateValue>)
 - [type TableSpec](<#TableSpec>)
 - [type Ticker](<#Ticker>)
   - [func \(Ticker\) C\(\) \<-chan time.Time](<#Ticker.C>)
@@ -701,13 +728,6 @@ var NewStaticFiles atomic.Pointer[func(fsys fs.FS, csp string) (http.Handler, er
 
 NewStaticFiles builds the file server of a frontend's tree; nil until framework/kit/server is imported.
 
-<a name="OpenEventStream"></a>
-```go
-var OpenEventStream atomic.Pointer[func(w http.ResponseWriter, r *http.Request) (EventStream, error)]
-```
-
-OpenEventStream opens a Server-Sent Events stream on w; nil until framework/kit/studio is imported.
-
 <a name="Queues"></a>
 ```go
 var Queues atomic.Pointer[QueueDriverConfig]
@@ -729,12 +749,12 @@ var Stores atomic.Pointer[StoreDriverConfig]
 
 Stores is the store subsystem: the engines kit's stores run on, kit's scope on a database and the migrations of kit's tables; nil until framework/kit/store is imported. A product that declares a store or a database without it is refused at the start (ADR 0179 §6).
 
-<a name="StudioProfiler"></a>
+<a name="Studio"></a>
 ```go
-var StudioProfiler atomic.Pointer[ProfilerConfig]
+var Studio atomic.Pointer[StudioDriverConfig]
 ```
 
-StudioProfiler is the Studio's profiler; nil until framework/kit/studio is imported.
+Studio is the Studio subsystem: the tool's variables and the Studio's routes; nil until framework/kit/studio is imported, and kit then reads none of the tool's variables and serves no route of the Studio.
 
 <a name="Words"></a>
 ```go
@@ -1243,49 +1263,6 @@ type EntryValue struct {
 	JSON json.RawMessage
 }
 ```
-
-<a name="EventStream"></a>
-## type [EventStream](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
-
-EventStream is one Server-Sent Events stream: the Studio's live events.
-
-```go
-type EventStream interface {
-	// Close ends the stream.
-	Close() error
-	// Done is closed when the client left.
-	Done() <-chan struct{}
-	// Send writes one event's data.
-	Send(data string) error
-}
-```
-
-<a name="EventStream.Close"></a>
-### func \(EventStream\) [Close](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
-
-```go
-func (EventStream) Close() error
-```
-
-Close ends the stream.
-
-<a name="EventStream.Done"></a>
-### func \(EventStream\) [Done](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
-
-```go
-func (EventStream) Done() <-chan struct{}
-```
-
-Done is closed when the client left.
-
-<a name="EventStream.Send"></a>
-### func \(EventStream\) [Send](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
-
-```go
-func (EventStream) Send(data string) error
-```
-
-Send writes one event's data.
 
 <a name="Executor"></a>
 ## type [Executor](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
@@ -2034,21 +2011,6 @@ func (MigratorProvider) Migrator(table string, ms []MigrationValue) (Migrator, e
 
 Migrator is the set ms, under the version table table.
 
-<a name="ProfilerConfig"></a>
-## type [ProfilerConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
-
-ProfilerConfig is the Studio's profiler: the live heap folded onto the graph's nodes, and every goroutine grouped.
-
-```go
-type ProfilerConfig struct {
-	// Heap folds the live heap onto g's nodes; source says where a function
-	// of a module lies, nil when it knows none.
-	Heap       func(g *model.Graph, source SourceFunc) (*model.Profile, error)
-	// Goroutines groups every goroutine of the process, read at at.
-	Goroutines func(at time.Time) (*model.Goroutines, error)
-}
-```
-
 <a name="QueueConfig"></a>
 ## type [QueueConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/queue.go>)
 
@@ -2193,15 +2155,6 @@ func (Reindexer) Reindex(ctx context.Context) error
 ```
 
 Reindex files every record's index rows again.
-
-<a name="SourceFunc"></a>
-## type [SourceFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/plug.go>)
-
-SourceFunc says where the function fn, at file:line, lies in the product, nil when it knows none.
-
-```go
-type SourceFunc func(file string, line int, fn string) *model.Source
-```
 
 <a name="StampValue"></a>
 ## type [StampValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)
@@ -2444,6 +2397,426 @@ func (StoreEngine) Write(ctx context.Context, d DocumentValue, mode WriteMode) e
 ```
 
 Write stores d as mode says. The document and its index keys are kept together, or neither.
+
+<a name="StudioDriverConfig"></a>
+## type [StudioDriverConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio.go>)
+
+StudioDriverConfig is what framework/kit/studio plugs into kit: how the tool's variables are read, and how the Studio's routes mount.
+
+```go
+type StudioDriverConfig struct {
+	// Env reads what the tool's variables ask of the Studio in this run.
+	Env      func(getenv func(string) string) StudioEnvValue
+	// Settings are the tool's variables as the settings of a run show them,
+	// in order, each with its value as the run resolved it and where it
+	// came from: the product's code, the environment, or kit's default.
+	Settings func(getenv func(string) string, state StudioStateValue) []model.Setting
+	// Forced are the variables kit dev says it set itself for this launch,
+	// as it names them; kit labels only those it lets kit dev set.
+	Forced   func(getenv func(string) string) []string
+	// DevBuild is what kit dev said about the build it launched, nil when
+	// the process was not started by kit dev.
+	DevBuild func(getenv func(string) string) *model.DevBuild
+	// Mount registers the Studio's routes on mux, each behind the Studio's
+	// guard, reading the running app through host.
+	Mount    func(mux *http.ServeMux, host StudioHost)
+}
+```
+
+<a name="StudioEnvValue"></a>
+## type [StudioEnvValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio.go>)
+
+StudioEnvValue is what the tool's variables ask of the Studio: their zero value is a run in which none is set.
+
+```go
+type StudioEnvValue struct {
+	// Studio is what the environment says of the Studio: on — which
+	// production refuses —, off, or empty when it says neither.
+	Studio     string
+	// Remote: the Studio answers a client that is not on this machine.
+	Remote     bool
+	// NoAnalysis: the environment turns the static analysis off.
+	NoAnalysis bool
+}
+```
+
+<a name="StudioHost"></a>
+## type [StudioHost](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+StudioHost is the running app, as the Studio's routes read it and answer through it.
+
+```go
+type StudioHost interface {
+	// AllowedHost reports whether a request's Host, its port, brackets and
+	// case removed, may reach the Studio.
+	AllowedHost(host string) bool
+	// Databases are the app's databases, each checked and its migrations
+	// read again now.
+	Databases(ctx context.Context) []model.Database
+	// Debug logs, at the debug level, a failure nobody is told of.
+	Debug(ctx context.Context, message string, err error)
+	// Fail answers an internal error, saying message and nothing of the
+	// error.
+	Fail(w http.ResponseWriter, message string)
+	// Forbid answers that the caller may not reach the Studio, saying
+	// message.
+	Forbid(w http.ResponseWriter, message string)
+	// Former are the former values of the record under key in store, as
+	// the Studio's data view shows them.
+	Former(ctx context.Context, store string, key string) (model.RecordHistory, error)
+	// Graph is the app's graph, as it is now.
+	Graph() *model.Graph
+	// Instances are a workflow's entities and where each is; false for no
+	// such workflow.
+	Instances(workflow string) ([]model.Instance, bool)
+	// Invalid is kit's answer to a request the caller must change, saying
+	// message.
+	Invalid(message string) error
+	// Items are a store's latest entities, redacted as payloads are; false
+	// for no such store.
+	Items(store string) ([]json.RawMessage, bool)
+	// Locate says where the function fn, at file:line, lies in the
+	// product's own module; nil anywhere else.
+	Locate(file string, line int, fn string) *model.Source
+	// Logs are the latest records the product logged, those of a trace or
+	// a node and from a level when given, at most limit — a default when
+	// it is empty; a level or a limit the app does not take is refused.
+	Logs(trace string, node string, level string, limit string) ([]model.LogRecord, error)
+	// Mail is one mail, whole when its mailer keeps bodies; false when no
+	// mailer remembers it.
+	Mail(id string) (model.MailMessage, bool)
+	// Mails are every mailer's latest mails, at most limit of each.
+	Mails(limit int) []model.MailSummary
+	// NotFound is kit's answer to a request for what does not exist,
+	// saying message.
+	NotFound(message string) error
+	// Now is the time on the app's clock.
+	Now() time.Time
+	// Phase is where the app is in its life, as the graph says it.
+	Phase() string
+	// Privacy is what the Studio's Privacy page shows.
+	Privacy(ctx context.Context) (model.Privacy, error)
+	// ProfileUnreadable is kit's refusal of a profile the process could
+	// not read: public says which, cause why, for the logs.
+	ProfileUnreadable(public string, cause error) error
+	// Remote reports whether the Studio answers a client that is not on
+	// this machine.
+	Remote() bool
+	// Reply answers r with body, a JSON document, or with err as kit
+	// answers an error.
+	Reply(w http.ResponseWriter, r *http.Request, body json.RawMessage, err error)
+	// Revisions are the versions of the record under key in store, and
+	// what changed from version from to version to when both are given.
+	Revisions(ctx context.Context, store string, key string, from string, to string) (model.RecordVersions, error)
+	// Source is a file the graph names, of the product's Go module or of
+	// the one module names: a regular file within the bound, never a link;
+	// false for any other name.
+	Source(ctx context.Context, module string, file string) ([]byte, bool)
+	// Stopping is closed when the app ends its live streams.
+	Stopping() <-chan struct{}
+	// Stores reports whether the app runs on the store subsystem: the
+	// Studio's routes on the stores and the databases are mounted only then.
+	Stores() bool
+	// Subscribe streams the app's live events until cancel is called.
+	Subscribe() (events <-chan model.Event, cancel func())
+	// Trace is one trace, while the app keeps it.
+	Trace(id string) (model.Trace, bool)
+	// Traces are the latest traces the app keeps, at most limit, those of
+	// root's trace or through node when either is given.
+	Traces(limit int, root string, node string) []model.Trace
+	// Trash is a page of store's trash, from offset and at most limit
+	// records — defaults when they are empty.
+	Trash(ctx context.Context, store string, offset string, limit string) (model.StoreTrash, error)
+}
+```
+
+<a name="StudioHost.AllowedHost"></a>
+### func \(StudioHost\) [AllowedHost](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) AllowedHost(host string) bool
+```
+
+AllowedHost reports whether a request's Host, its port, brackets and case removed, may reach the Studio.
+
+<a name="StudioHost.Databases"></a>
+### func \(StudioHost\) [Databases](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Databases(ctx context.Context) []model.Database
+```
+
+Databases are the app's databases, each checked and its migrations read again now.
+
+<a name="StudioHost.Debug"></a>
+### func \(StudioHost\) [Debug](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Debug(ctx context.Context, message string, err error)
+```
+
+Debug logs, at the debug level, a failure nobody is told of.
+
+<a name="StudioHost.Fail"></a>
+### func \(StudioHost\) [Fail](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Fail(w http.ResponseWriter, message string)
+```
+
+Fail answers an internal error, saying message and nothing of the error.
+
+<a name="StudioHost.Forbid"></a>
+### func \(StudioHost\) [Forbid](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Forbid(w http.ResponseWriter, message string)
+```
+
+Forbid answers that the caller may not reach the Studio, saying message.
+
+<a name="StudioHost.Former"></a>
+### func \(StudioHost\) [Former](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Former(ctx context.Context, store string, key string) (model.RecordHistory, error)
+```
+
+Former are the former values of the record under key in store, as the Studio's data view shows them.
+
+<a name="StudioHost.Graph"></a>
+### func \(StudioHost\) [Graph](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Graph() *model.Graph
+```
+
+Graph is the app's graph, as it is now.
+
+<a name="StudioHost.Instances"></a>
+### func \(StudioHost\) [Instances](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Instances(workflow string) ([]model.Instance, bool)
+```
+
+Instances are a workflow's entities and where each is; false for no such workflow.
+
+<a name="StudioHost.Invalid"></a>
+### func \(StudioHost\) [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Invalid(message string) error
+```
+
+Invalid is kit's answer to a request the caller must change, saying message.
+
+<a name="StudioHost.Items"></a>
+### func \(StudioHost\) [Items](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Items(store string) ([]json.RawMessage, bool)
+```
+
+Items are a store's latest entities, redacted as payloads are; false for no such store.
+
+<a name="StudioHost.Locate"></a>
+### func \(StudioHost\) [Locate](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Locate(file string, line int, fn string) *model.Source
+```
+
+Locate says where the function fn, at file:line, lies in the product's own module; nil anywhere else.
+
+<a name="StudioHost.Logs"></a>
+### func \(StudioHost\) [Logs](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Logs(trace string, node string, level string, limit string) ([]model.LogRecord, error)
+```
+
+Logs are the latest records the product logged, those of a trace or a node and from a level when given, at most limit — a default when it is empty; a level or a limit the app does not take is refused.
+
+<a name="StudioHost.Mail"></a>
+### func \(StudioHost\) [Mail](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Mail(id string) (model.MailMessage, bool)
+```
+
+Mail is one mail, whole when its mailer keeps bodies; false when no mailer remembers it.
+
+<a name="StudioHost.Mails"></a>
+### func \(StudioHost\) [Mails](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Mails(limit int) []model.MailSummary
+```
+
+Mails are every mailer's latest mails, at most limit of each.
+
+<a name="StudioHost.NotFound"></a>
+### func \(StudioHost\) [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) NotFound(message string) error
+```
+
+NotFound is kit's answer to a request for what does not exist, saying message.
+
+<a name="StudioHost.Now"></a>
+### func \(StudioHost\) [Now](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Now() time.Time
+```
+
+Now is the time on the app's clock.
+
+<a name="StudioHost.Phase"></a>
+### func \(StudioHost\) [Phase](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Phase() string
+```
+
+Phase is where the app is in its life, as the graph says it.
+
+<a name="StudioHost.Privacy"></a>
+### func \(StudioHost\) [Privacy](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Privacy(ctx context.Context) (model.Privacy, error)
+```
+
+Privacy is what the Studio's Privacy page shows.
+
+<a name="StudioHost.ProfileUnreadable"></a>
+### func \(StudioHost\) [ProfileUnreadable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) ProfileUnreadable(public string, cause error) error
+```
+
+ProfileUnreadable is kit's refusal of a profile the process could not read: public says which, cause why, for the logs.
+
+<a name="StudioHost.Remote"></a>
+### func \(StudioHost\) [Remote](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Remote() bool
+```
+
+Remote reports whether the Studio answers a client that is not on this machine.
+
+<a name="StudioHost.Reply"></a>
+### func \(StudioHost\) [Reply](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Reply(w http.ResponseWriter, r *http.Request, body json.RawMessage, err error)
+```
+
+Reply answers r with body, a JSON document, or with err as kit answers an error.
+
+<a name="StudioHost.Revisions"></a>
+### func \(StudioHost\) [Revisions](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Revisions(ctx context.Context, store string, key string, from string, to string) (model.RecordVersions, error)
+```
+
+Revisions are the versions of the record under key in store, and what changed from version from to version to when both are given.
+
+<a name="StudioHost.Source"></a>
+### func \(StudioHost\) [Source](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Source(ctx context.Context, module string, file string) ([]byte, bool)
+```
+
+Source is a file the graph names, of the product's Go module or of the one module names: a regular file within the bound, never a link; false for any other name.
+
+<a name="StudioHost.Stopping"></a>
+### func \(StudioHost\) [Stopping](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Stopping() <-chan struct{}
+```
+
+Stopping is closed when the app ends its live streams.
+
+<a name="StudioHost.Stores"></a>
+### func \(StudioHost\) [Stores](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Stores() bool
+```
+
+Stores reports whether the app runs on the store subsystem: the Studio's routes on the stores and the databases are mounted only then.
+
+<a name="StudioHost.Subscribe"></a>
+### func \(StudioHost\) [Subscribe](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Subscribe() (events <-chan model.Event, cancel func())
+```
+
+Subscribe streams the app's live events until cancel is called.
+
+<a name="StudioHost.Trace"></a>
+### func \(StudioHost\) [Trace](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Trace(id string) (model.Trace, bool)
+```
+
+Trace is one trace, while the app keeps it.
+
+<a name="StudioHost.Traces"></a>
+### func \(StudioHost\) [Traces](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Traces(limit int, root string, node string) []model.Trace
+```
+
+Traces are the latest traces the app keeps, at most limit, those of root's trace or through node when either is given.
+
+<a name="StudioHost.Trash"></a>
+### func \(StudioHost\) [Trash](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio_interface.go>)
+
+```go
+func (StudioHost) Trash(ctx context.Context, store string, offset string, limit string) (model.StoreTrash, error)
+```
+
+Trash is a page of store's trash, from offset and at most limit records — defaults when they are empty.
+
+<a name="StudioStateValue"></a>
+## type [StudioStateValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/studio.go>)
+
+StudioStateValue is what a run resolved of the Studio, and what the product's code chose of it: what the settings show of the tool's variables.
+
+```go
+type StudioStateValue struct {
+	// StudioOption and AnalyzeOption are the product's code's choice of the
+	// Studio and of the static analysis, which wins over the environment;
+	// nil when the code chose nothing.
+	StudioOption  *bool
+	// StudioOption and AnalyzeOption are the product's code's choice of the
+	// Studio and of the static analysis, which wins over the environment;
+	// nil when the code chose nothing.
+	AnalyzeOption *bool
+	// Studio, Remote and Analyze are the Studio's switches, as resolved and
+	// as the settings spell them: on or off.
+	Studio        string
+	// Studio, Remote and Analyze are the Studio's switches, as resolved and
+	// as the settings spell them: on or off.
+	Remote        string
+	// Studio, Remote and Analyze are the Studio's switches, as resolved and
+	// as the settings spell them: on or off.
+	Analyze       string
+}
+```
 
 <a name="TableSpec"></a>
 ## type [TableSpec](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)

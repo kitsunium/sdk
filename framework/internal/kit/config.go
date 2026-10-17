@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
@@ -197,8 +198,9 @@ func resolveConfig(o *appOptions, getenv func(string) string) config {
 	dev := cfg.env == EnvDev
 	cfg.addr = resolveAddr(o, getenv, dev)
 	cfg.dataDir, cfg.memoryData = resolveDataDir(o, getenv, dev)
-	cfg.studio = resolveStudio(o, getenv, dev)
-	if !dev && studioAsked(o, getenv) {
+	studio := studioEnv(getenv)
+	cfg.studio = resolveStudio(o, studio, dev)
+	if !dev && studioAsked(o, studio) {
 		cfg.warnings = append(cfg.warnings, say("config.studio-production"))
 	}
 	cfg.trustProxy = getenv("KIT_TRUST_PROXY") == "on"
@@ -274,39 +276,69 @@ func (c *config) defaultOutputs() {
 	}
 }
 
+// studioEnv is what the tool's variables ask of the Studio, which the
+// Studio subsystem reads (plug.Studio, ADR 0180 step 1): the zero value — as
+// if none were set — in a program that does not import framework/kit/studio,
+// whose core reads none of them.
+func studioEnv(getenv func(string) string) plug.StudioEnvValue {
+	d := plug.Studio.Load()
+	if d == nil {
+		return plug.StudioEnvValue{}
+	}
+	return d.Env(getenv)
+}
+
 // studioAsked reports whether the code or the environment asks for the
 // Studio, which production refuses.
-func studioAsked(o *appOptions, getenv func(string) string) bool {
-	return getenv("KIT_STUDIO") == "on" || (o.studio != nil && *o.studio)
+func studioAsked(o *appOptions, env plug.StudioEnvValue) bool {
+	return env.Studio == "on" || (o.studio != nil && *o.studio)
 }
 
 // resolveStudio is what the Studio may do: served in dev unless turned off,
 // to remote clients when they opt in — a dev container reached through a
 // forwarded port is not loopback for the process —, and with the static
 // analysis unless turned off.
-func resolveStudio(o *appOptions, getenv func(string) string, dev bool) studioConfig {
-	on := dev && getenv("KIT_STUDIO") != "off"
+func resolveStudio(o *appOptions, env plug.StudioEnvValue, dev bool) studioConfig {
+	on := dev && env.Studio != "off"
 	if o.studio != nil {
 		on = dev && *o.studio
 	}
-	analyze := on && getenv("KIT_ANALYZE") != "off"
+	analyze := on && !env.NoAnalysis
 	if o.analyze != nil {
 		analyze = on && *o.analyze
 	}
-	return studioConfig{on: on, remote: on && getenv("KIT_STUDIO_REMOTE") == "on", analyze: analyze}
+	return studioConfig{on: on, remote: on && env.Remote, analyze: analyze}
 }
 
-// devForced reads which variables kit dev set for this launch
-// (model.VarDevForced). It is a label and nothing else: an unknown name is
-// dropped, and it never changes a value.
+// devForced reads which variables kit dev set for this launch, as the
+// Studio subsystem reads them (plug.StudioDriverConfig.Forced): a label and
+// nothing else — a name kit does not let kit dev set is dropped, and it
+// never changes a value. None without framework/kit/studio.
 func devForced(getenv func(string) string) map[string]bool {
 	out := map[string]bool{}
-	for name := range strings.SplitSeq(getenv(model.VarDevForced), ",") {
-		if name = strings.TrimSpace(name); slices.Contains(devForcible, name) {
+	d := plug.Studio.Load()
+	if d == nil {
+		return out
+	}
+	for _, name := range d.Forced(getenv) {
+		if slices.Contains(devForcible, name) {
 			out[name] = true
 		}
 	}
 	return out
+}
+
+// studioSettings are the tool's variables among the settings, as the Studio
+// subsystem shows them; none without framework/kit/studio.
+func studioSettings(o *appOptions, getenv func(string) string, c *config) []model.Setting {
+	d := plug.Studio.Load()
+	if d == nil {
+		return nil
+	}
+	return d.Settings(getenv, plug.StudioStateValue{
+		StudioOption: o.studio, AnalyzeOption: o.analyze,
+		Studio: onOff(c.studio.on), Remote: onOff(c.studio.remote), Analyze: onOff(c.studio.analyze),
+	})
 }
 
 // settings is what the start read, in the order kit resolves it: each
@@ -320,17 +352,15 @@ func settings(o *appOptions, getenv func(string) string, c *config) []model.Sett
 	if o.memory {
 		dataOption = "kit.InMemory"
 	}
-	return []model.Setting{
+	return slices.Concat([]model.Setting{
 		{Name: model.VarEnv, Value: c.env, From: src.from(o.env != nil, model.VarEnv), Option: "kit.Env"},
 		{Name: model.VarAddr, Value: c.addr, From: src.from(o.addr != nil, model.VarAddr, "PORT"), Option: "kit.Listen", Flag: "-addr"},
 		{Name: model.VarDataDir, Value: cmp.Or(c.dataDir, "memory"), From: src.from(o.memory || o.dataDir != nil, model.VarDataDir), Option: dataOption, Flag: "-data"},
-		{Name: model.VarStudio, Value: onOff(c.studio.on), From: src.from(o.studio != nil, model.VarStudio), Option: "kit.Studio"},
-		{Name: model.VarStudioRemote, Value: onOff(c.studio.remote), From: src.from(false, model.VarStudioRemote)},
-		{Name: model.VarAnalyze, Value: onOff(c.studio.analyze), From: src.from(o.analyze != nil, model.VarAnalyze), Option: "kit.Analyze"},
+	}, studioSettings(o, getenv, c), []model.Setting{
 		{Name: model.VarTrustProxy, Value: onOff(c.trustProxy), From: src.from(false, model.VarTrustProxy)},
 		{Name: model.VarAllowedHosts, Value: strings.Join(c.allowedHosts, ","), From: src.from(false, model.VarAllowedHosts)},
 		{Name: model.VarLogLevel, Value: cmp.Or(c.logLevel, "info"), From: src.from(false, model.VarLogLevel)},
-	}
+	})
 }
 
 // from is where the setting read from names comes from: its option when the

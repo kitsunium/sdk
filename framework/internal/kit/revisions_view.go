@@ -2,7 +2,6 @@ package kit
 
 import (
 	"context"
-	"net/http"
 	"slices"
 	"strconv"
 
@@ -109,27 +108,19 @@ func matchSegs(pattern, segs []string) bool {
 	return true
 }
 
-// serveRevisions answers GET /_kit/api/revisions?store=&key=[&from=&to=]: a
-// record's versions, and what changed between two of them, as the Studio's
-// data view shows them.
-func (a *App) serveRevisions(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	st, ok := a.findNode(q.Get("store")).(revisionsSource)
+// studioRevisions are a record's versions, and what changed between two of
+// them, as the Studio's data view shows them
+// (GET /_kit/api/revisions?store=&key=[&from=&to=]).
+func (a *App) studioRevisions(ctx context.Context, store, key, fromText, toText string) (model.RecordVersions, error) {
+	st, ok := a.findNode(store).(revisionsSource)
 	if !ok {
-		a.replyError(r.Context(), w, NotFound("no such store"))
-		return
+		return model.RecordVersions{}, NotFound("no such store")
 	}
-	from, to, err := versionPair(q.Get("from"), q.Get("to"))
+	from, to, err := versionPair(fromText, toText)
 	if err != nil {
-		a.replyError(r.Context(), w, err)
-		return
+		return model.RecordVersions{}, err
 	}
-	out, err := st.revisionsShown(r.Context(), q.Get("key"), from, to)
-	if err != nil {
-		a.replyError(r.Context(), w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
+	return st.revisionsShown(ctx, key, from, to)
 }
 
 // versionPair reads the two versions a diff compares: both, or neither.

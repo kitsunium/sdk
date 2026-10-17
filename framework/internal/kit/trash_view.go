@@ -2,7 +2,6 @@ package kit
 
 import (
 	"context"
-	"net/http"
 	"strconv"
 
 	"github.com/kitsunium/sdk/framework/model"
@@ -104,26 +103,18 @@ func (s *storeCore) keyShown(ctx context.Context, key string) bool {
 	return s.keyOf(rv.Interface()) == key
 }
 
-// serveTrash answers GET /_kit/api/trash?store=[&offset=&limit=]: a page of
-// a store's trash, as the Studio's data view lists it.
-func (a *App) serveTrash(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	src, err := a.trashOf(q.Get("store"))
+// studioTrash is a page of a store's trash, as the Studio's data view lists
+// it (GET /_kit/api/trash?store=[&offset=&limit=]).
+func (a *App) studioTrash(ctx context.Context, store, offsetText, limitText string) (model.StoreTrash, error) {
+	src, err := a.trashOf(store)
 	if err != nil {
-		a.replyError(r.Context(), w, err)
-		return
+		return model.StoreTrash{}, err
 	}
-	offset, limit, err := trashPage(q.Get("offset"), q.Get("limit"))
+	offset, limit, err := trashPage(offsetText, limitText)
 	if err != nil {
-		a.replyError(r.Context(), w, err)
-		return
+		return model.StoreTrash{}, err
 	}
-	out, err := src.trashShown(r.Context(), offset, limit)
-	if err != nil {
-		a.replyError(r.Context(), w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
+	return src.trashShown(ctx, offset, limit)
 }
 
 // trashPage reads a page of the trash list: an offset from 0, 0 unless

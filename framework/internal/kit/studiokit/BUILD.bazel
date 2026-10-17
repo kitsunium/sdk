@@ -5,9 +5,13 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "studiokit",
     srcs = [
+        "devtools.go",
         "doc.go",
+        "env.go",
         "events.go",
         "profile.go",
+        "routes.go",
+        "source.go",
         "studiokit.go",
         "studiokit_compliance.go",
         "words.go",
@@ -41,7 +45,9 @@ go_test(
     name = "studiokit_test",
     srcs = [
         "api_gen_test.go",
+        "env_internal_test.go",
         "profile_internal_test.go",
+        "studio_internal_test.go",
         "words_internal_test.go",
     ],
     embed = [":studiokit"],
