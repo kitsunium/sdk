@@ -335,8 +335,8 @@ created, until step 10 removes those imports.
 | Step | What | Breaking |
 |---|---|---|
 | 0 | **Measure the ceiling** (Q1): the probe and the status line built from a throwaway branch where kit's references to every subsystem of §1 are cut; machine code, file size, inits, `latency-ab.sh` with its control, recorded on #276 — done on 2026-10-16 (§Step 0, measured) | — (not merged) |
-| 1 | the hook types of §3 for the store, the start's check of §6 with its code in the design, the extended `initgraph` test with its allow-list | no |
-| 2 | the store engine non-generic **inside** kit's core (no package moves yet): `StoreService[T]` over documents; `docEngine`, `sqlEngine`, `historied`, `sealedEngine`, revisions, trash, retention, records, data copy on documents; the per-type instantiations gone. `storetest` passes unchanged | no |
+| 1 | the hook types of §3 for the store, the start's check of §6 with its code in the design, the extended `initgraph` test with its allow-list — done (#359, 2026-10-17) | no |
+| 2 | the store engine non-generic **inside** kit's core (no package moves yet): `StoreService[T]` over documents; `docEngine`, `sqlEngine`, `historied`, `sealedEngine`, revisions, trash, retention, records, data copy on documents; the per-type instantiations gone. `storetest` passes unchanged — done (2026-10-17, §Step 2, done) | no |
 | 3 | `storekit` + `framework/kit/store`: the stores' implementation — the code naming `docstore` and the SDK's `sql` — moves there; `kit.Engine` stays in the core and still returns `*sql.DB`, its dialect now kit's own type (Q5); the connectors import `framework/kit/store` | no (the facade imports it) |
 | 4 | `queuekit` + `framework/kit/queue` | no |
 | 5 | `workflowkit` + `framework/kit/workflow` (Q3) | no |
@@ -482,6 +482,46 @@ commit before the kit migration with the cut (§Measurement's run (b)), and a
 build where the imports are removed rather than unreached (the leaving
 packages' inits are subtracted, not removed).
 
+### Step 2, done (2026-10-17)
+
+The store's engine is one, over documents, inside kit's core. `StoreService[T]`
+embeds `storeCore`, the store without its entity type, and keeps the typed
+facade — its exported methods, its declarations, `Revisions`/`Revision`, a few
+lines each; `docEngine`, `sqlEngine`, `sealedEngine` and `historied` implement
+`plug.StoreEngine` and its siblings over `plug.DocumentValue`, the SDK's
+`docstore` instantiated once at kit's record type (`docRecord`); the retention,
+the trash's agenda, the holds, an erasure, an export, the revisions, `Records`
+and `data copy` run on the core; what the product declares on its type is
+wrapped once at the declaration (`entityOf`, `privacyFuncsOf`, an index's key
+function). The bytes at rest are `json.Marshal`'s, as before, and `storetest`
+passes unchanged, in kit's suite and the SQLite connector's. Two parts of
+§3's contract are left to step 3, which moves the engines to `storekit`: the
+core opens an engine with its own configuration, not `plug.StoreConfig` (a
+version's hold is asked with the write's context on a database, and a write's
+stamp is read from its context), and an engine's refusals are still the SDK's
+`docstore` sentinels, which the core words.
+
+Measured as step 0 was (Go 1.27.2, `-trimpath`, text symbols `T`/`t` by
+`go tool nm -size`), before on `origin/main` at bfa13054:
+
+| | cliprobe before | cliprobe after | delta |
+|---|---|---|---|
+| file | 22.08 MB | 18.21 MB | **−3.87 MB (−18 %)** |
+| text symbols | 6.80 MB | 5.65 MB | **−1.15 MB** |
+| `.text` / `.gopclntab` / debug | 7.02 / 5.51 / 5.03 MB | 5.84 / 4.40 / 4.43 MB | −1.18 / −1.10 / −0.60 MB |
+| kit's generic code (instantiations) | 0.915 MB (`StoreService` 0.418, `sealedEngine` 0.132, `historied` 0.107, `sqlEngine` 0.071, `docEngine` 0.059, `retentionRun` 0.033, `trashRun` 0.022) | 0.035 MB (`StoreService` 0.018, the rest under 0.01) | −0.88 MB |
+| SDK `docstore` | 0.696 MB | 0.197 MB | −0.50 MB |
+| packages | 363 | 363 | 0 (step 3's) |
+
+The cost of an entity type, measured on a product declaring 1 and 21 stores of
+distinct shapes, each called through `Put`, `Get`, `List`, `Update` and
+`Delete`: before, **0.41 MB of code and 1.36 MB of file per type** (§Context's
+≈ 0.3 MB was the estimate); after, 0.011 MB of code and 0.061 MB of file. A
+benchmark of the facade over 100 records (a temporary one, the numbers in the
+pull request) found `Get`, `List` and `Update` no slower in memory and in the
+data directory — fewer allocations each —, `Update` in files bound by its
+`fsync` either way.
+
 ### Risks
 
 - **A read decodes.** The generic engine hands back a `T`; the document engine
@@ -613,6 +653,7 @@ release note.
 | Accepted | the owner's decision, 2026-10-16 | The recommendation of each of the eight questions retained as written; each question replaced by its *Decision* line; the status, the header and the passages that depended on an open question (Q2, Q3, Q5, Q6) updated — `database/sql` stays in the core and leaves §7's refused list. No other text changed |
 | Accepted, review | 2026-10-16 | Step 3 says what moves to `storekit` and that `kit.Engine` stays in the core (Q5); §7 keeps the two invariants and leaves the test's package list, allow-list and gate to `framework/kit/CLAUDE.md`; steps 1–9 non-breaking, as Q8 decided |
 | Accepted, step 0 measured | 2026-10-16 | §Step 0, measured: the ceiling built in a throwaway copy — the probe's file −7.52 MB, its code −2.39 MB, its init ≈ −0.08 ms, its warm p50 about −0.3 ms; the status line's file −7.41 MB, its latency gain within the noise of its control; §Measurement's probe target set from the ceiling (at least 2.15 MB of code, 6.8 MB of file); §Context's estimate marked measured; §Context's file size written in MB like every other figure (22.06 MB, the 21.0 it gave being MiB) and the package counts reconciled. No decision changed |
+| Accepted, steps 1 and 2 done | 2026-10-17 | The migration table marks step 1 done (#359) and step 2 done; §Step 2, done records the engine over documents — the probe's file −3.87 MB, its code −1.15 MB, kit's generic code 0.915 → 0.035 MB, an entity type's cost 0.41 → 0.011 MB of code —, §Context's per-type estimate measured, and the two parts of §3's contract left to step 3 (`plug.StoreConfig`, the refusals). No decision changed |
 
 ## Deferred
 
