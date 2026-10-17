@@ -16,14 +16,16 @@ store or a database without the import is refused at the start, every
 declaration at once, the refusal naming this import and carrying
 `CodeSubsystemMissing` (0.4.2.83).
 
-Until ADR 0179's step 10, `framework/kit` imports this package itself
-(`subsystems.go`, Q8), and the three connectors (`framework/connectors/
-{postgres,mysql,sqlite}`) do too (§4), and so does `framework/kit/queue` (step
-4, Q4: a queue on a database joins the stores' transactions), and
-`framework/kit/workflow` (step 5, Q4: a workflow runs over a store), and
-`framework/kit/mail` (step 6, Q4: a mailer's outbox on a database is on a
-database of the stores', sealed under data keys kept in a store): no product
-needs the line yet, and `kit gen` will write it (§5).
+`framework/kit` does not import this package (ADR 0179 step 10; it did
+until then, Q8): a product that declares a store or a database imports it
+— `kit gen` writes the line for a designed product (§5, the platform's
+step 9) —, and so do the three connectors (`framework/connectors/
+{postgres,mysql,sqlite}`, §4), `framework/kit/queue` (step 4, Q4: a queue on
+a database joins the stores' transactions), `framework/kit/workflow` (step
+5, Q4: a workflow runs over a store) and `framework/kit/mail` (step 6, Q4: a
+mailer's outbox on a database is on a database of the stores', sealed under
+data keys kept in a store). It runs a product's migrations, `kit.Migration`s
+— kit's own type since step 10 —, on the SDK's migrator.
 
 ## Contents
 

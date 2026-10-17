@@ -7,8 +7,9 @@
 //
 // A product that declares none does not, and links none of that scheduler; a
 // program that declares one without it is refused at the start, the refusal
-// naming this import (CodeSubsystemMissing). framework/kit imports it too
-// until ADR 0179's last step: no product needs the line yet.
+// naming this import (CodeSubsystemMissing). framework/kit does not import
+// it (ADR 0179 step 10): kit gen writes the line for a designed product, and
+// a hand-written one writes it.
 package jobs
 
 import "github.com/kitsunium/sdk/framework/internal/kit/jobkit"

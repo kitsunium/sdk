@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/kit"
+	_ "github.com/kitsunium/sdk/framework/kit/mail"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/mail"
 )

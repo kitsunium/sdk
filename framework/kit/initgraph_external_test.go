@@ -3,6 +3,7 @@ package kit_test
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,21 +12,42 @@ import (
 	"testing"
 )
 
-// A product that imports framework/kit alone initialises no subsystem it did
-// not import (ADR 0172): neither the HTTP engine and the frontends' file server
-// (framework/kit/server), nor the Studio's event stream and profiler
-// (framework/kit/studio), nor the process sampler — runtime/metrics, whose
-// initialisation every process importing it pays, and the spawn engine behind
-// pkg/v1/proc/process. Go runs the initialisation of every package a binary
-// imports, used or not, so the import graph is what decides.
+// sdk is the repository's module path, which every package below is under.
+const sdk = "github.com/kitsunium/sdk/"
+
+// registration are the registration packages of kit's subsystems: a program
+// has a subsystem if and only if it imports its package (ADR 0179 §1, ADR
+// 0172) — the stores, the queues, the workflows, the mailers and the jobs,
+// the HTTP engine, and the Studio. Since ADR 0179's step 10 the facade
+// imports none of them: a product imports those it declares, as kit gen
+// writes them.
+var registration = []string{
+	"framework/kit/store",
+	"framework/kit/queue",
+	"framework/kit/workflow",
+	"framework/kit/mail",
+	"framework/kit/jobs",
+	"framework/kit/server",
+	"framework/kit/studio",
+}
+
+// A product that imports framework/kit alone initialises no subsystem (ADR
+// 0172, ADR 0179 §7): neither the HTTP engine and the frontends' file server
+// (framework/kit/server), nor the Studio's event stream, profiler and
+// catalogues after English (framework/kit/studio), nor the process sampler —
+// runtime/metrics, whose initialisation every process importing it pays, and
+// the spawn engine behind pkg/v1/proc/process —, nor any registration
+// package, any subsystem's implementation or any SDK package of leaving. Go
+// runs the initialisation of every package a binary imports, used or not,
+// so the import graph is what decides.
 //
 // It lists the graph with the go command, and skips without one or under
 // Bazel, whose sandbox holds no module. Its gate is CI's test-386 job, which
 // runs go test over every module with the toolchain on PATH (rule 12).
 func TestTheFacadeImportsNoOptInSubsystem(t *testing.T) {
 	goTool := goToList(t)
-	deps := listDeps(t, goTool, "github.com/kitsunium/sdk/framework/kit")
-	if !deps["github.com/kitsunium/sdk/framework/internal/kit"] {
+	deps := listDeps(t, goTool, sdk+"framework/kit")
+	if !deps[sdk+"framework/internal/kit"] {
 		t.Fatalf("the listing does not hold framework/internal/kit: %v", deps)
 	}
 	for _, opt := range []struct{ pkg, by string }{
@@ -36,22 +58,38 @@ func TestTheFacadeImportsNoOptInSubsystem(t *testing.T) {
 		{"runtime/metrics", "framework/kit/server"},
 		{"github.com/kitsunium/sdk/pkg/v1/net/sse", "framework/kit/studio"},
 		{"github.com/kitsunium/sdk/pkg/v1/observe/profiling", "framework/kit/studio"},
-		{"github.com/kitsunium/sdk/pkg/v1/app/i18n", "framework/kit/studio"},
 	} {
 		if deps[opt.pkg] {
 			t.Errorf("framework/kit imports %s, which only %s may bring", opt.pkg, opt.by)
 		}
 	}
+	for _, by := range registration {
+		if deps[sdk+by] {
+			t.Errorf("framework/kit imports the registration package %s: a product imports it, the facade never (ADR 0179 step 10)", by)
+		}
+	}
+	for by, engine := range kitEngines {
+		if pkg := sdk + strings.TrimSuffix(engine, "."); deps[pkg] {
+			t.Errorf("framework/kit imports %s, which only %s may bring", pkg, by)
+		}
+	}
+	if deps[sdk+strings.TrimSuffix(studioKit, ".")] {
+		t.Errorf("framework/kit imports %s, which only framework/kit/studio may bring", strings.TrimSuffix(studioKit, "."))
+	}
+	for _, l := range leaving {
+		for _, pkg := range l.packages() {
+			if deps[sdk+pkg] {
+				t.Errorf("framework/kit imports %s, which only %s may bring (ADR 0179 step %d)", pkg, l.by, l.step)
+			}
+		}
+	}
 }
 
-// sdk is the repository's module path, which every package below is under.
-const sdk = "github.com/kitsunium/sdk/"
-
-// leaving are the subsystems ADR 0179 §1 takes out of framework/internal/kit,
+// leaving are the subsystems ADR 0179 §1 took out of framework/internal/kit,
 // each by the SDK package its engine lives in: the registration package that
-// brings it once it has left, the migration step that moves it, and the
-// packages whose machine code is the subsystem's in a binary — the SDK
-// package's core and service halves, whose names its symbols carry.
+// brings it, the migration step that moved it, and the packages whose
+// machine code is the subsystem's in a binary — the SDK package's core and
+// service halves, whose names its symbols carry.
 var leaving = []leavingCase{
 	{"pkg/v1/data/docstore", "framework/kit/store", 3, []string{"internal/core/data/docstore.", "internal/service/data/docstore."}},
 	{"pkg/v1/data/sql", "framework/kit/store", 3, []string{"internal/core/data/sql.", "internal/service/data/sql."}},
@@ -70,8 +108,17 @@ type leavingCase struct {
 	code    []string
 }
 
-// kitEngines are the implementation packages of the subsystems that have
-// left the core, by the registration package that alone imports each: their
+// packages are the SDK package of l and its core and service halves.
+func (l leavingCase) packages() []string {
+	out := []string{l.pkg}
+	for _, c := range l.code {
+		out = append(out, strings.TrimSuffix(c, "."))
+	}
+	return out
+}
+
+// kitEngines are the implementation packages of the subsystems that left
+// the core, by the registration package that alone imports each: their
 // symbols in a binary are the subsystem's (ADR 0179 §1, step 3 on).
 var kitEngines = map[string]string{
 	"framework/kit/store":    "framework/internal/kit/storekit.",
@@ -81,22 +128,9 @@ var kitEngines = map[string]string{
 	"framework/kit/jobs":     "framework/internal/kit/jobkit.",
 }
 
-// stillInCore is the allow-list while ADR 0179's migration runs: the SDK
-// packages of leaving that framework/internal/kit still imports. Each step
-// took its own entries out in the same change that moved them — step 3
-// docstore and sql, step 4 queue, step 5 statemachine, step 6 mail/spool,
-// step 7 scheduler, step 8 i18n —, so it is empty, and step 10, which drops
-// the facade's blank imports, deletes it with this test's allowances. It is
-// held tight both ways: a package still listed that the core no longer
-// imports fails the test as surely as one the core imports and the list does
-// not name.
-var stillInCore = map[string]bool{}
-
 // studioKit is the implementation package framework/kit/studio alone
 // imports: the Studio's event stream, its profiler and, since ADR 0179's
-// step 8, kit's catalogues after English over the SDK's i18n. Unlike
-// kitEngines, the facade never imports its registration package: the Studio
-// stays opt-in (Q6), and a product of the facade speaks English alone.
+// step 8, kit's catalogues after English over the SDK's i18n.
 const studioKit = "framework/internal/kit/studiokit."
 
 // frenchSentence and englishSentence are a sentence of kit's French
@@ -107,33 +141,6 @@ const (
 	frenchSentence  = "doit être une durée positive"
 	englishSentence = "must be a positive duration"
 )
-
-// throughStill are the packages of stillInCore whose own graph holds pkg, or
-// the core or service half of the SDK package pkg names (leaving's code):
-// what the core reaches pkg through, once it imports pkg no more itself —
-// the SDK's sql and the queue's two halves were under the mail spool until
-// step 6 took it out, and none is now. A package the core reaches through
-// none of them is the core's own import.
-func throughStill(t *testing.T, goTool, pkg string) []string {
-	t.Helper()
-	halves := []string{sdk + pkg}
-	for _, l := range leaving {
-		if l.pkg == pkg {
-			for _, c := range l.code {
-				halves = append(halves, sdk+strings.TrimSuffix(c, "."))
-			}
-		}
-	}
-	var via []string
-	for p := range stillInCore {
-		deps := listDeps(t, goTool, sdk+p)
-		if slices.ContainsFunc(halves, func(h string) bool { return deps[h] }) {
-			via = append(via, p)
-		}
-	}
-	slices.Sort(via)
-	return via
-}
 
 // beyondInits are the text symbols of syms under prefixes that are not a
 // package's initialisation: what of a package a binary links beyond the init
@@ -162,53 +169,33 @@ func beyondInitsAt(syms map[string]bool, prefixes []string) []string {
 	return code
 }
 
-// The core imports none of the subsystems ADR 0179 §1 takes out of it, but
-// those the allow-list still names — a package it reaches only through one
-// of those is theirs, until their step —; the facade brings one only through
-// its registration package, which it blank-imports until step 10; and plug,
-// the contract between the core and every subsystem, imports the standard
-// library and the framework's model only (ADR 0179 §3, §7).
-func TestTheCoreImportsOnlyTheSubsystemsStillInIt(t *testing.T) {
+// The core imports none of the subsystems ADR 0179 §1 took out of it, nor
+// their implementations nor their registration packages; and plug, the
+// contract between the core and every subsystem, imports the standard
+// library and the framework's model only (ADR 0179 §3, §7). The allow-list
+// the migration ran under is gone with its step 10: there is no exception.
+func TestTheCoreImportsNoSubsystem(t *testing.T) {
 	goTool := goToList(t)
 	core := listDeps(t, goTool, sdk+"framework/internal/kit")
-	direct := goList(t, goTool, sdk+"framework/internal/kit", "-f", "{{join .Imports \" \"}}")
-	facade := listDeps(t, goTool, sdk+"framework/kit")
-	runCase := func(t *testing.T, l leavingCase) {
-		t.Helper()
-		inCore := core[sdk+l.pkg]
-		switch {
-		case direct[sdk+l.pkg] && !stillInCore[l.pkg]:
-			t.Errorf("framework/internal/kit imports %s, which only %s may bring once step %d of ADR 0179 moved it", l.pkg, l.by, l.step)
-		case inCore && !stillInCore[l.pkg]:
-			via := throughStill(t, goTool, l.pkg)
-			if len(via) == 0 {
-				t.Errorf("framework/internal/kit reaches %s through none of the subsystems still in it: only %s may bring it once step %d of ADR 0179 moved it", l.pkg, l.by, l.step)
-				return
-			}
-			t.Logf("framework/internal/kit no longer imports %s, and reaches it through %s, still in it (ADR 0179 allow-list)", l.pkg, strings.Join(via, ", "))
-		case !inCore && stillInCore[l.pkg]:
-			t.Errorf("framework/internal/kit no longer imports %s: take it off stillInCore", l.pkg)
-		case facade[sdk+l.pkg] && !inCore && !facade[sdk+l.by]:
-			t.Errorf("framework/kit brings %s without %s", l.pkg, l.by)
-		}
-	}
 	for _, l := range leaving {
-		t.Run(l.pkg, func(t *testing.T) { runCase(t, l) })
+		for _, pkg := range l.packages() {
+			if core[sdk+pkg] {
+				t.Errorf("framework/internal/kit imports %s, which only %s may bring once step %d of ADR 0179 moved it", pkg, l.by, l.step)
+			}
+		}
 	}
 	for by, engine := range kitEngines {
-		pkg := sdk + strings.TrimSuffix(engine, ".")
-		if core[pkg] {
+		if pkg := sdk + strings.TrimSuffix(engine, "."); core[pkg] {
 			t.Errorf("framework/internal/kit imports %s, which only %s may bring", pkg, by)
-		}
-		if !facade[sdk+by] {
-			t.Errorf("framework/kit does not import %s, which it blank-imports until ADR 0179's step 10", by)
 		}
 	}
 	if core[sdk+strings.TrimSuffix(studioKit, ".")] {
 		t.Errorf("framework/internal/kit imports %s, which only framework/kit/studio may bring", strings.TrimSuffix(studioKit, "."))
 	}
-	if facade[sdk+"framework/kit/studio"] {
-		t.Error("framework/kit imports framework/kit/studio: the Studio stays opt-in (ADR 0179 Q6)")
+	for _, by := range registration {
+		if core[sdk+by] {
+			t.Errorf("framework/internal/kit imports the registration package %s", by)
+		}
 	}
 	for p := range goList(t, goTool, sdk+"framework/internal/kit/plug", "-f", "{{join .Imports \" \"}}") {
 		if strings.Contains(strings.Split(p, "/")[0], ".") && p != sdk+"framework/model" {
@@ -217,21 +204,17 @@ func TestTheCoreImportsOnlyTheSubsystemsStillInIt(t *testing.T) {
 	}
 }
 
-// registrationOf is the registration package that brings the SDK package
-// pkg of leaving.
-func registrationOf(pkg string) string {
-	for _, l := range leaving {
-		if l.pkg == pkg {
-			return l.by
-		}
-	}
-	return pkg
-}
-
 // textSymbols builds the program at dir and lists its text symbols: an
 // import graph says what is initialised, the symbol table what is linked. It
 // returns the binary's bytes too, for the data it holds.
 func textSymbols(t *testing.T, goTool, dir string) (map[string]bool, []byte) {
+	t.Helper()
+	syms, image, _ := buildProbe(t, goTool, dir)
+	return syms, image
+}
+
+// buildProbe is textSymbols with the binary's path.
+func buildProbe(t *testing.T, goTool, dir string) (map[string]bool, []byte, string) {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), filepath.Base(dir))
 	build := exec.Command(goTool, "build", "-o", bin, dir)
@@ -261,7 +244,7 @@ func textSymbols(t *testing.T, goTool, dir string) (map[string]bool, []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return syms, image
+	return syms, image, bin
 }
 
 // linkedSymbols counts syms by owner: the text symbols under each owner's
@@ -330,19 +313,25 @@ func owners() map[string][]string {
 }
 
 // A product that imports no registration package links none of the code of
-// the subsystems ADR 0179 §1 takes out of the core, nor the engines of those
-// that left it, but what the allow-list still names — and what a subsystem
-// still in the core imports, its packages' inits alone (beyondInits); since
-// step 6 took the mail spool out, the SDK's sql and queue are no longer in
-// its graph, not even by their inits, since step 7 neither is the SDK's
-// scheduler, nor the jobs subsystem's, and since step 8 neither is the SDK's
-// i18n, nor the French catalogue: kit speaks English from its own table, and
-// the allow-list is empty. It builds testdata/coreprobe, the
-// smallest product on the core alone: the facade imports every registration
-// package until step 10, which a product built on it links.
-func TestTheSmallestProductLinksOnlyTheSubsystemsStillInTheCore(t *testing.T) {
+// the subsystems ADR 0179 §1 took out of the core, nor the engines of those
+// that left it, nor kit's own store code, nor the French catalogue: it
+// speaks English from kit's own table. Since step 10 that product is one of
+// the facade — testdata/cliprobe, the smallest product, which imports
+// framework/kit alone — as surely as one of the core alone,
+// testdata/coreprobe: the facade completes nothing, and no subsystem is
+// allowed in either.
+func TestTheSmallestProductLinksNoSubsystem(t *testing.T) {
 	goTool := goToList(t)
-	syms, image := textSymbols(t, goTool, "./testdata/coreprobe")
+	for _, probe := range []string{"cliprobe", "coreprobe"} {
+		t.Run(probe, func(t *testing.T) { linksNoSubsystem(t, goTool, "./testdata/"+probe) })
+	}
+}
+
+// linksNoSubsystem fails the test when the program at dir links anything of
+// a subsystem.
+func linksNoSubsystem(t *testing.T, goTool, dir string) {
+	t.Helper()
+	syms, image := textSymbols(t, goTool, dir)
 	linked := linkedSymbols(syms, owners())
 	// kit speaks English from its own table, and no other language: the
 	// catalogues after English are the Studio's (ADR 0179 step 8, Q6).
@@ -363,34 +352,44 @@ func TestTheSmallestProductLinksOnlyTheSubsystemsStillInTheCore(t *testing.T) {
 	if code := beyondInitsAt(syms, mailTransport); len(code) > 0 {
 		t.Errorf("a product that does not import framework/kit/mail links the SDK's mail transports beyond their inits: %v", code)
 	}
-	runCase := func(t *testing.T, owner string) {
-		t.Helper()
-		n := linked[owner]
-		switch {
-		case n == 0:
-			return
-		case stillInCore[owner]:
-			t.Logf("still in the core (ADR 0179 allow-list): %s, %d text symbols linked", owner, n)
-		case kitEngines[owner] != "":
-			t.Errorf("a product that does not import %s links %d text symbols of its engines", owner, n)
-		default:
-			via := throughStill(t, goTool, owner)
-			if len(via) == 0 {
-				t.Errorf("the smallest product links %d text symbols of %s, which only its registration package may bring", n, owner)
-				return
-			}
-			// What a subsystem still in the core imports is initialised, and
-			// nothing more of it is linked: its code is its registration
-			// package's.
-			if code := beyondInits(syms, owners()[owner]); len(code) > 0 {
-				t.Errorf("the smallest product links code of %s beyond its packages' inits, which only %s may bring: %v", owner, registrationOf(owner), code)
-				return
-			}
-			t.Logf("%s: %d text symbols linked through %s, still in the core, its packages' inits alone (ADR 0179 allow-list)", owner, n, strings.Join(via, ", "))
+	for owner := range owners() {
+		if n := linked[owner]; n > 0 {
+			t.Errorf("the smallest product links %d text symbols of %s, which only its registration package may bring", n, owner)
 		}
 	}
-	for owner := range owners() {
-		t.Run(owner, func(t *testing.T) { runCase(t, owner) })
+}
+
+// missingStore is the line a program that declares a store and does not
+// import its subsystem is refused with: the import it needs.
+const missingStore = `add import _ "github.com/kitsunium/sdk/framework/kit/store"`
+
+// A real product that declares a store and imports framework/kit alone is
+// refused at its start (ADR 0179 §6, step 10): testdata/missingprobe, built
+// and run as a status line runs it, exits 78 and names the store and the
+// import to add — the facade completes nothing, so the refusal the start
+// always had is now one a product meets. It links nothing of the stores
+// either: the check reads the hook, never the subsystem's code.
+func TestAProductThatDeclaresAStoreWithoutItsImportIsRefused(t *testing.T) {
+	goTool := goToList(t)
+	syms, _, bin := buildProbe(t, goTool, "./testdata/missingprobe")
+	for _, owner := range []string{"framework/kit/store", "pkg/v1/data/docstore", "pkg/v1/data/sql"} {
+		if n := linkedSymbols(syms, owners())[owner]; n > 0 {
+			t.Errorf("a product that does not import framework/kit/store links %d text symbols of %s", n, owner)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	run := exec.Command(bin)
+	run.Stdout, run.Stderr = &stdout, &stderr
+	err := run.Run()
+	exit, ok := errors.AsType[*exec.ExitError](err)
+	if !ok || exit.ExitCode() != 78 {
+		t.Fatalf("a product that declares a store without its import ran: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	}
+	if stdout.Len() > 0 {
+		t.Errorf("the refused command wrote on its standard output: %q", stdout.String())
+	}
+	if out := stderr.String(); !strings.Contains(out, "line/store/entries") || !strings.Contains(out, missingStore) {
+		t.Errorf("the refusal does not name the store and the import to add:\n%s", out)
 	}
 }
 

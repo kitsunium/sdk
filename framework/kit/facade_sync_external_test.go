@@ -18,6 +18,7 @@ var facadeNames = [][2]string{
 	{"AuthenticatorHandler", "Authenticator"},
 	{"StdioValue", "Stdio"},
 	{"DatabaseURLValue", "DatabaseURL"},
+	{"MigrationValue", "Migration"},
 	{"EmptyValue", "Empty"},
 	{"EndpointService", "Endpoint"},
 	{"ViolationMessage", "Violation"},

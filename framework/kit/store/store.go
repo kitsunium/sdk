@@ -10,9 +10,9 @@
 // A product that declares none does not, and links none of those engines; a
 // program that declares one without it is refused at the start, the refusal
 // naming this import (CodeSubsystemMissing). A connector —
-// framework/connectors/postgres, …/mysql, …/sqlite — imports it itself, and
-// framework/kit does too until ADR 0179's last step: no product needs the
-// line yet.
+// framework/connectors/postgres, …/mysql, …/sqlite — imports it itself;
+// framework/kit does not (ADR 0179 step 10): kit gen writes the line for a
+// designed product, and a hand-written one writes it.
 package store
 
 import (

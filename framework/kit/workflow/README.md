@@ -12,6 +12,6 @@ Package workflow plugs kit's workflows in: the state machines a service declares
 import _ "github.com/kitsunium/sdk/framework/kit/workflow"
 ```
 
-A product that declares none does not, and links none of that engine; a program that declares one without it is refused at the start, the refusal naming this import (CodeSubsystemMissing). It imports framework/kit/store: a workflow runs over a store. framework/kit imports it too until ADR 0179's last step: no product needs the line yet.
+A product that declares none does not, and links none of that engine; a program that declares one without it is refused at the start, the refusal naming this import (CodeSubsystemMissing). It imports framework/kit/store: a workflow runs over a store. framework/kit does not import it (ADR 0179 step 10): kit gen writes the line for a designed product, and a hand-written one writes it.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

@@ -46,3 +46,14 @@ type DatabaseConfigurer interface {
 type Keeper interface {
 	keep() kept
 }
+
+// MigrationExecutor is what a migration's step runs its statements on: a
+// transaction, which a step cannot end.
+type MigrationExecutor interface {
+	// ExecContext runs a statement that returns no rows.
+	ExecContext(ctx context.Context, query string, args ...any) (stdsql.Result, error)
+	// QueryContext runs a query that returns rows; the caller closes them.
+	QueryContext(ctx context.Context, query string, args ...any) (*stdsql.Rows, error)
+	// QueryRowContext runs a query that returns at most one row.
+	QueryRowContext(ctx context.Context, query string, args ...any) *stdsql.Row
+}

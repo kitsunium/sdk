@@ -22,7 +22,7 @@ func manualLedger(t *testing.T, db *kit.FakeDB) func() *kit.App {
 	t.Setenv("LEDGER_DATABASE_MIGRATE", "manual")
 	var logs syncBuffer
 	return func() *kit.App {
-		return ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), sqlMigrations(migrations...)))
+		return ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), kit.Migrations(migrations...)))
 	}
 }
 
@@ -124,12 +124,44 @@ func TestAFailedMigrationStopsTheStart(t *testing.T) {
 	db := kit.NewFakeDB(sql.DialectPostgres)
 	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
 	var logs syncBuffer
-	broken := append(slices.Clone(migrations), sql.Migration{Version: 20260903120000, Name: "broken", Up: sql.Statements("FAIL here"), Down: sql.Irreversible})
-	err := ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), sqlMigrations(broken...))).Start(t.Context())
+	broken := append(slices.Clone(migrations), kit.MigrationValue{Version: 20260903120000, Name: "broken", Up: kit.Statements("FAIL here"), Down: kit.Irreversible})
+	err := ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), kit.Migrations(broken...))).Start(t.Context())
 	if !errs.HasCode(err, kit.CodeDatabaseMigrate) || !strings.Contains(err.Error(), "20260903120000") || strings.Contains(err.Error(), "syntax") {
 		t.Fatalf("start: %v", err)
 	}
 	if got := db.Versions("schema_migrations"); !slices.Equal(got, []int64{20260901120000, 20260902120000}) {
 		t.Errorf("schema_migrations holds %v", got)
+	}
+}
+
+// A migration whose Down is kit.Irreversible is not reversed: `migrate
+// down` below its version refuses, naming it, and the set keeps every
+// version it had; the step itself refuses with CodeMigrationIrreversible
+// (ADR 0179 step 10, kit's own migration).
+func TestAnIrreversibleMigrationIsNotReversed(t *testing.T) {
+	needsFileStore(t)
+	db := kit.NewFakeDB(sql.DialectPostgres)
+	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
+	t.Setenv("LEDGER_DATABASE_MIGRATE", "manual")
+	sealed := append(slices.Clone(migrations), kit.MigrationValue{Version: 20260903120000, Name: "seal", Up: kit.Statements("CREATE TABLE seal (id TEXT)"), Down: kit.Irreversible})
+	var logs syncBuffer
+	newApp := func() *kit.App {
+		return ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), kit.Migrations(sealed...)))
+	}
+	if code, _, errOut := migrateCommand(t, newApp, "up"); code != 0 {
+		t.Fatalf("up: %d %s", code, errOut)
+	}
+	code, out, errOut := migrateCommand(t, newApp, "down", "product", "20260901120000")
+	if code == 0 || strings.Contains(out, "reversed") {
+		t.Fatalf("down past an irreversible migration: %d\n%s%s", code, out, errOut)
+	}
+	if !strings.Contains(errOut, "20260903120000") {
+		t.Errorf("the refusal does not name the irreversible migration: %s", errOut)
+	}
+	if got := db.Versions("schema_migrations"); !slices.Equal(got, []int64{20260901120000, 20260902120000, 20260903120000}) {
+		t.Errorf("after a refused down: %v", got)
+	}
+	if err := kit.Irreversible(t.Context(), nil); !errs.HasCode(err, kit.CodeMigrationIrreversible) {
+		t.Errorf("kit.Irreversible: %v", err)
 	}
 }

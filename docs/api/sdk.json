@@ -183,7 +183,7 @@
       "name": "jobs",
       "dir": "framework/kit/jobs",
       "layer": "framework",
-      "doc": "Package jobs plugs kit's jobs in: the work a service declares on a\nschedule — every period (Service.Every) or on a five-field cron expression\n(Service.Cron) —, which the SDK's scheduler fires on the app's clock. A\nproduct that declares one imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/jobs\"\n\nA product that declares none does not, and links none of that scheduler; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). framework/kit imports it too\nuntil ADR 0179's last step: no product needs the line yet.\n"
+      "doc": "Package jobs plugs kit's jobs in: the work a service declares on a\nschedule — every period (Service.Every) or on a five-field cron expression\n(Service.Cron) —, which the SDK's scheduler fires on the app's clock. A\nproduct that declares one imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/jobs\"\n\nA product that declares none does not, and links none of that scheduler; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). framework/kit does not import\nit (ADR 0179 step 10): kit gen writes the line for a designed product, and\na hand-written one writes it.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/kit/kittest",
@@ -197,14 +197,14 @@
       "name": "mail",
       "dir": "framework/kit/mail",
       "layer": "framework",
-      "doc": "Package mail plugs kit's mailers in: the outbox a mailer keeps — the SDK's\nmail spool, sealed on the database that keeps the mailer's service, else in\nthe data directory or in memory — and the transports that empty it, the\nSDK's SMTP transport and its capture transport. A product that declares a\nmailer imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/mail\"\n\nA product that declares none does not, and links none of that outbox; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). It imports framework/kit/store\nand framework/kit/queue: a mailer's outbox on a database is the queue\nsubsystem's, joined to the transaction of the database the store subsystem\nopened, and sealed under kit's data keys, kept in a store of kit's own.\nframework/kit imports it too until ADR 0179's last step: no product needs\nthe line yet.\n"
+      "doc": "Package mail plugs kit's mailers in: the outbox a mailer keeps — the SDK's\nmail spool, sealed on the database that keeps the mailer's service, else in\nthe data directory or in memory — and the transports that empty it, the\nSDK's SMTP transport and its capture transport. A product that declares a\nmailer imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/mail\"\n\nA product that declares none does not, and links none of that outbox; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). It imports framework/kit/store\nand framework/kit/queue: a mailer's outbox on a database is the queue\nsubsystem's, joined to the transaction of the database the store subsystem\nopened, and sealed under kit's data keys, kept in a store of kit's own.\nframework/kit does not import it (ADR 0179 step 10): kit gen writes the\nline for a designed product, and a hand-written one writes it.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/kit/queue",
       "name": "queue",
       "dir": "framework/kit/queue",
       "layer": "framework",
-      "doc": "Package queue plugs kit's queues in: the queues of the topics a service\ndeclares and of their subscriptions, of its watches and of its queued\ncommands, and the outbox of a mailer on a database — the brokers the SDK's\nqueue runs them on, in memory, in the data directory or on a database, and\ntheir consumers. A product that declares one imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/queue\"\n\nA product that declares none does not, and links none of those brokers; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). It imports framework/kit/store:\na queue on a database joins the store subsystem's transactions, and a\nsealed message is sealed under data keys kit keeps in a store of its own.\nframework/kit imports it too until ADR 0179's last step: no product needs\nthe line yet.\n"
+      "doc": "Package queue plugs kit's queues in: the queues of the topics a service\ndeclares and of their subscriptions, of its watches and of its queued\ncommands, and the outbox of a mailer on a database — the brokers the SDK's\nqueue runs them on, in memory, in the data directory or on a database, and\ntheir consumers. A product that declares one imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/queue\"\n\nA product that declares none does not, and links none of those brokers; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). It imports framework/kit/store:\na queue on a database joins the store subsystem's transactions, and a\nsealed message is sealed under data keys kit keeps in a store of its own.\nframework/kit does not import it (ADR 0179 step 10): kit gen writes the\nline for a designed product, and a hand-written one writes it.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/kit/server",
@@ -218,7 +218,7 @@
       "name": "store",
       "dir": "framework/kit/store",
       "layer": "framework",
-      "doc": "Package store plugs kit's stores in: the stores a service declares, the\ndatabases a product keeps them in and their migrations, kit.Transact on a\ndatabase, sealing at rest, history, revisions, trash, retention, holds,\nthe privacy journal, Records and `data copy` — the engines the SDK's\ndocument store and sql run them on. A product that declares a store or a\ndatabase imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/store\"\n\nA product that declares none does not, and links none of those engines; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). A connector —\nframework/connectors/postgres, …/mysql, …/sqlite — imports it itself, and\nframework/kit does too until ADR 0179's last step: no product needs the\nline yet.\n"
+      "doc": "Package store plugs kit's stores in: the stores a service declares, the\ndatabases a product keeps them in and their migrations, kit.Transact on a\ndatabase, sealing at rest, history, revisions, trash, retention, holds,\nthe privacy journal, Records and `data copy` — the engines the SDK's\ndocument store and sql run them on. A product that declares a store or a\ndatabase imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/store\"\n\nA product that declares none does not, and links none of those engines; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). A connector —\nframework/connectors/postgres, …/mysql, …/sqlite — imports it itself;\nframework/kit does not (ADR 0179 step 10): kit gen writes the line for a\ndesigned product, and a hand-written one writes it.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/kit/storetest",
@@ -239,7 +239,7 @@
       "name": "workflow",
       "dir": "framework/kit/workflow",
       "layer": "framework",
-      "doc": "Package workflow plugs kit's workflows in: the state machines a service\ndeclares over the entities of its stores — their event, timer and guard\ntransitions, their hooks and their loop —, which the SDK's statemachine\nruns. A product that declares one imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/workflow\"\n\nA product that declares none does not, and links none of that engine; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). It imports framework/kit/store:\na workflow runs over a store. framework/kit imports it too until ADR\n0179's last step: no product needs the line yet.\n"
+      "doc": "Package workflow plugs kit's workflows in: the state machines a service\ndeclares over the entities of its stores — their event, timer and guard\ntransitions, their hooks and their loop —, which the SDK's statemachine\nruns. A product that declares one imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/workflow\"\n\nA product that declares none does not, and links none of that engine; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). It imports framework/kit/store:\na workflow runs over a store. framework/kit does not import it (ADR 0179\nstep 10): kit gen writes the line for a designed product, and a\nhand-written one writes it.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/model",
@@ -4249,6 +4249,21 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeMigrationIrreversible",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "CodeMigrationIrreversible",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262740",
+      "code": {
+        "value": "0.4.2.84"
+      },
+      "doc": "CodeMigrationIrreversible refuses the Down of a migration declared\nirreversible with [Irreversible] (ADR 0179 step 10): what it changed\nis undone by a new forward migration, never by migrate down.\n",
+      "file": "framework/internal/kit/codes_gen.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeNotMounted",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/internal/kit",
@@ -5876,6 +5891,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.Irreversible",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "Irreversible",
+      "spelled": "func(ctx context.Context, ex MigrationExecutor) error",
+      "canonical": "func(ctx context.Context, ex github.com/kitsunium/sdk/framework/internal/kit.MigrationExecutor) error",
+      "doc": "Irreversible is the Down of a migration that cannot be reversed, said out\nloud rather than left nil: it refuses, with [CodeMigrationIrreversible],\nand `<product> migrate down` below its version stops there.\n",
+      "file": "framework/internal/kit/migration.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit.Job",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit",
@@ -6181,13 +6207,104 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.MigrationExecutor",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "MigrationExecutor",
+      "spelled": "interface{ExecContext(ctx context.Context, query string, args ...any) (stdsql.Result, error); QueryContext(ctx context.Context, query string, args ...any) (*stdsql.Rows, error); QueryRowContext(ctx context.Context, query string, args ...any) *stdsql.Row}",
+      "canonical": "interface{ExecContext(ctx context.Context, query string, args ...any) (database/sql.Result, error); QueryContext(ctx context.Context, query string, args ...any) (*database/sql.Rows, error); QueryRowContext(ctx context.Context, query string, args ...any) *database/sql.Row}",
+      "doc": "MigrationExecutor is what a migration's step runs its statements on: a\ntransaction, which a step cannot end.\n",
+      "file": "framework/internal/kit/database_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.MigrationExecutor.ExecContext",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "ExecContext",
+      "recv": "MigrationExecutor",
+      "spelled": "func(ctx context.Context, query string, args ...any) (stdsql.Result, error)",
+      "canonical": "func(ctx context.Context, query string, args ...any) (database/sql.Result, error)",
+      "doc": "ExecContext runs a statement that returns no rows.\n",
+      "file": "framework/internal/kit/database_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.MigrationExecutor.QueryContext",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "QueryContext",
+      "recv": "MigrationExecutor",
+      "spelled": "func(ctx context.Context, query string, args ...any) (*stdsql.Rows, error)",
+      "canonical": "func(ctx context.Context, query string, args ...any) (*database/sql.Rows, error)",
+      "doc": "QueryContext runs a query that returns rows; the caller closes them.\n",
+      "file": "framework/internal/kit/database_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.MigrationExecutor.QueryRowContext",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "QueryRowContext",
+      "recv": "MigrationExecutor",
+      "spelled": "func(ctx context.Context, query string, args ...any) *stdsql.Row",
+      "canonical": "func(ctx context.Context, query string, args ...any) *database/sql.Row",
+      "doc": "QueryRowContext runs a query that returns at most one row.\n",
+      "file": "framework/internal/kit/database_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.MigrationStep",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "MigrationStep",
+      "spelled": "func(ctx context.Context, ex MigrationExecutor) error",
+      "canonical": "func(ctx context.Context, ex github.com/kitsunium/sdk/framework/internal/kit.MigrationExecutor) error",
+      "doc": "MigrationStep is one direction of a migration, run on ex — the\ntransaction its version row is written in, so that both commit\ntogether.\n",
+      "file": "framework/internal/kit/migration.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.MigrationValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "MigrationValue",
+      "spelled": "struct{Version uint64; Name string; Up MigrationStep; Down MigrationStep}",
+      "canonical": "struct{Version uint64; Name string; Up github.com/kitsunium/sdk/framework/internal/kit.MigrationStep; Down github.com/kitsunium/sdk/framework/internal/kit.MigrationStep}",
+      "fields": [
+        {
+          "name": "Version",
+          "type": "uint64",
+          "doc": "Version orders the migration in its set: non-zero and unique; a UTC\ntimestamp is the convention, so that two branches do not collide.\n"
+        },
+        {
+          "name": "Name",
+          "type": "string",
+          "doc": "Name labels it in the version table; required.\n"
+        },
+        {
+          "name": "Up",
+          "type": "MigrationStep",
+          "doc": "Up applies the change; required.\n"
+        },
+        {
+          "name": "Down",
+          "type": "MigrationStep",
+          "doc": "Down reverses it; required — [Irreversible] says out loud that it\ncannot be reversed.\n"
+        }
+      ],
+      "doc": "MigrationValue is one versioned change of a database's schema and its\nreversal, kit's own (ADR 0179 step 10): the shape the SDK's sql runs,\nwhich the store subsystem hands it.\n\n\tkit.Migration{\n\t\tVersion: 20261017120000,\n\t\tName:    \"notes\",\n\t\tUp:      kit.Statements(\"CREATE TABLE notes (id TEXT PRIMARY KEY, body TEXT)\"),\n\t\tDown:    kit.Statements(\"DROP TABLE notes\"),\n\t}\n",
+      "file": "framework/internal/kit/migration.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit.Migrations",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/kit",
       "name": "Migrations",
-      "spelled": "func(m ...plug.MigrationValue) interface{DatabaseConfigurer; ModuleConfigurer}",
-      "canonical": "func(m ...github.com/kitsunium/sdk/framework/internal/kit/plug.MigrationValue) interface{github.com/kitsunium/sdk/framework/internal/kit.DatabaseConfigurer; github.com/kitsunium/sdk/framework/internal/kit.ModuleConfigurer}",
-      "doc": "Migrations are migrations — the SDK's sql.Migration, as the facade takes\nthem —, run when\nthe database starts (<name>-migrate: start) or by `<product> migrate up`,\nkit's own first, each set under its own version table — and so its own\nlock. On MySQL a DDL statement commits by itself: write one per migration.\n\nGiven to [Database], they are the product's, under schema_migrations.\nGiven to [NewModule], they are the module's (ADR 0008), for the data it\nkeeps outside kit's stores: run on the database that keeps the module,\nunder <module>_migrations.\n",
+      "spelled": "func(m ...MigrationValue) interface{DatabaseConfigurer; ModuleConfigurer}",
+      "canonical": "func(m ...github.com/kitsunium/sdk/framework/internal/kit.MigrationValue) interface{github.com/kitsunium/sdk/framework/internal/kit.DatabaseConfigurer; github.com/kitsunium/sdk/framework/internal/kit.ModuleConfigurer}",
+      "doc": "Migrations are migrations, kit's own [MigrationValue]s (ADR 0179 step\n10), run when the database starts (<name>-migrate: start) or by\n`<product> migrate up`, kit's own first, each set under its own version\ntable — and so its own lock. On MySQL a DDL statement commits by itself:\nwrite one per migration. The store subsystem runs them: a program that\ndeclares a database imports framework/kit/store, as its engine module\ndoes.\n\nGiven to [Database], they are the product's, under schema_migrations.\nGiven to [NewModule], they are the module's (ADR 0008), for the data it\nkeeps outside kit's stores: run on the database that keeps the module,\nunder <module>_migrations.\n",
       "file": "framework/internal/kit/database.go",
       "layer": "framework"
     },
@@ -7712,6 +7829,17 @@
       "value": "\"special\"",
       "doc": "Special marks a field of GDPR art. 9(1) or art. 10.\n",
       "file": "framework/internal/kit/records.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit.Statements",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit",
+      "name": "Statements",
+      "spelled": "func(stmts ...string) MigrationStep",
+      "canonical": "func(stmts ...string) github.com/kitsunium/sdk/framework/internal/kit.MigrationStep",
+      "doc": "Statements is the [MigrationStep] that runs stmts in order on its\nexecutor, stopping at the first that fails — whose error it returns as\nthe driver said it.\n",
+      "file": "framework/internal/kit/migration.go",
       "layer": "framework"
     },
     {
@@ -10465,7 +10593,7 @@
           "doc": "Down reverses it.\n"
         }
       ],
-      "doc": "MigrationValue is one versioned change of a database's schema and its\nreversal, as kit's migrations are written: the SDK's own, on the standard\nlibrary's types.\n",
+      "doc": "MigrationValue is one versioned change of a database's schema and its\nreversal, as the core hands it to the store subsystem: a product's\nkit.Migration, or one of kit's own, its steps on the standard library's\ntypes.\n",
       "file": "framework/internal/kit/plug/store.go",
       "layer": "framework"
     },
@@ -15343,6 +15471,22 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.CodeMigrationIrreversible",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "CodeMigrationIrreversible",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262740",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/kit.CodeMigrationIrreversible",
+      "code": {
+        "value": "0.4.2.84"
+      },
+      "doc": "CodeMigrationIrreversible refuses the Down of a migration declared\nirreversible with [Irreversible]: what it changed is undone by a new\nforward migration, never by migrate down.\n",
+      "file": "framework/kit/errors.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/kit.CodeNotMounted",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/kit",
@@ -16740,6 +16884,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.Irreversible",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "Irreversible",
+      "spelled": "func(ctx context.Context, ex MigrationExecutor) error",
+      "canonical": "func(ctx context.Context, ex github.com/kitsunium/sdk/framework/kit.MigrationExecutor) error",
+      "doc": "Irreversible is the Down of a migration that cannot be reversed, said out\nloud rather than left nil: it refuses, with [CodeMigrationIrreversible],\nand `<product> migrate down` below its version stops there.\n",
+      "file": "framework/kit/database.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/kit.Job",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/framework/kit",
@@ -16960,13 +17115,49 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.Migration",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "Migration",
+      "spelled": "ikit.MigrationValue",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit.MigrationValue",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/kit.MigrationValue",
+      "doc": "Migration is one versioned change of a database's schema and its\nreversal, kit's own (ADR 0179 step 10): the shape the SDK's sql runs,\nwhich the store subsystem hands it.\n\n\tkit.Migration{\n\t\tVersion: 20261017120000,\n\t\tName:    \"notes\",\n\t\tUp:      kit.Statements(\"CREATE TABLE notes (id TEXT PRIMARY KEY, body TEXT)\"),\n\t\tDown:    kit.Statements(\"DROP TABLE notes\"),\n\t}\n",
+      "file": "framework/kit/database.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.MigrationExecutor",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "MigrationExecutor",
+      "spelled": "ikit.MigrationExecutor",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit.MigrationExecutor",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/kit.MigrationExecutor",
+      "doc": "MigrationExecutor is what a migration's step runs its statements on: a\ntransaction, which a step cannot end.\n",
+      "file": "framework/kit/database.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.MigrationStep",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "MigrationStep",
+      "spelled": "ikit.MigrationStep",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit.MigrationStep",
+      "owner": "go:github.com/kitsunium/sdk/framework/internal/kit.MigrationStep",
+      "doc": "MigrationStep is one direction of a [Migration], run on ex — the\ntransaction its version row is written in, so that both commit\ntogether.\n",
+      "file": "framework/kit/database.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/kit.Migrations",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/kit",
       "name": "Migrations",
-      "spelled": "func(m ...sql.Migration) interface{DatabaseOption; ModulePart}",
-      "canonical": "func(m ...github.com/kitsunium/sdk/pkg/v1/data/sql.Migration) interface{github.com/kitsunium/sdk/framework/kit.DatabaseOption; github.com/kitsunium/sdk/framework/kit.ModulePart}",
-      "doc": "Migrations are migrations, values of the SDK's sql.Migration, run when\nthe database starts (<name>-migrate: start) or by `<product> migrate up`,\nkit's own first, each set under its own version table — and so its own\nlock. On MySQL a DDL statement commits by itself: write one per migration.\n\nGiven to [Database], they are the product's, under schema_migrations.\nGiven to [NewModule], they are the module's (ADR 0008), for the data it\nkeeps outside kit's stores: run on the database that keeps the module,\nunder <module>_migrations.\n",
+      "spelled": "func(m ...Migration) interface{DatabaseOption; ModulePart}",
+      "canonical": "func(m ...github.com/kitsunium/sdk/framework/kit.Migration) interface{github.com/kitsunium/sdk/framework/kit.DatabaseOption; github.com/kitsunium/sdk/framework/kit.ModulePart}",
+      "doc": "Migrations are migrations, kit's own [Migration]s (ADR 0179 step 10),\nrun when the database starts (<name>-migrate: start) or by\n`<product> migrate up`, kit's own first, each set under its own version\ntable — and so its own lock. On MySQL a DDL statement commits by itself:\nwrite one per migration. The store subsystem runs them: a program that\ndeclares a database imports framework/kit/store, as its engine module\ndoes.\n\nGiven to [Database], they are the product's, under schema_migrations.\nGiven to [NewModule], they are the module's (ADR 0008), for the data it\nkeeps outside kit's stores: run on the database that keeps the module,\nunder <module>_migrations.\n",
       "file": "framework/kit/database.go",
       "layer": "framework"
     },
@@ -17804,6 +17995,17 @@
       "init": "go:github.com/kitsunium/sdk/framework/internal/kit.Special",
       "doc": "Special marks a field of GDPR art. 9(1) or art. 10.\n",
       "file": "framework/kit/records.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/kit.Statements",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/kit",
+      "name": "Statements",
+      "spelled": "func(stmts ...string) MigrationStep",
+      "canonical": "func(stmts ...string) github.com/kitsunium/sdk/framework/kit.MigrationStep",
+      "doc": "Statements is the [MigrationStep] that runs stmts in order on its\nexecutor, stopping at the first that fails — whose error it returns as\nthe driver said it.\n",
+      "file": "framework/kit/database.go",
       "layer": "framework"
     },
     {

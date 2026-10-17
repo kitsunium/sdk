@@ -281,6 +281,11 @@ const (
 	// each declaration and the package to import, and carries this code.
 	CodeSubsystemMissing errs.Code = ikit.CodeSubsystemMissing
 
+	// CodeMigrationIrreversible refuses the Down of a migration declared
+	// irreversible with [Irreversible]: what it changed is undone by a new
+	// forward migration, never by migrate down.
+	CodeMigrationIrreversible errs.Code = ikit.CodeMigrationIrreversible
+
 	// The signals kit ends one of its own steps with and catches itself — a
 	// caller never receives one —, typed when the SDK made rule 2 a gate.
 	CodeSealErased errs.Code = ikit.CodeSealErased

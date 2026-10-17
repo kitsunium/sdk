@@ -12,6 +12,6 @@ Package store plugs kit's stores in: the stores a service declares, the database
 import _ "github.com/kitsunium/sdk/framework/kit/store"
 ```
 
-A product that declares none does not, and links none of those engines; a program that declares one without it is refused at the start, the refusal naming this import (CodeSubsystemMissing). A connector — framework/connectors/postgres, …/mysql, …/sqlite — imports it itself, and framework/kit does too until ADR 0179's last step: no product needs the line yet.
+A product that declares none does not, and links none of those engines; a program that declares one without it is refused at the start, the refusal naming this import (CodeSubsystemMissing). A connector — framework/connectors/postgres, …/mysql, …/sqlite — imports it itself; framework/kit does not (ADR 0179 step 10): kit gen writes the line for a designed product, and a hand-written one writes it.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

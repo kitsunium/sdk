@@ -313,7 +313,8 @@ framework/         the layer above pkg/v1, packages of the root module — ADR 0
                    ADR 0162
                    model (the graph types + the ID grammar, Version 5),
                    kit (the runtime a product imports; beneath it the
-                     opt-in subsystems config/{toml,yaml}, server,
+                     opt-in subsystems, which a product imports and kit
+                     never — ADR 0179 step 10 —: config/{toml,yaml}, server,
                      studio — with kit's languages after English,
                      ADR 0179 step 8 —, store — the stores and databases, ADR
                      0179 —, queue — the queues, step 4 —, workflow
@@ -612,6 +613,6 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0176 — An error sentinel is static data, and its options are the design's fields, proposed on 2026-10-14: the 679 `errs.Define` calls of the 93 generated `codes_gen.go` run at init because `Define` validates, can panic and applies closures; a sentinel gains `exit:` (0..255 or a sysexits name) and `http:` (100..599) in the design, `options:` stays for the dynamic only, and a sentinel without options is written with a new `errs.Static`, a sibling of `Define` (constants only, one composite literal, initialised at link time) whose validation moves to `kit gen` and whose registry audits learn it; five PRs, the first gated on proof that the toolchain initialises it statically; the gain is capped at 0.1 to 0.2 ms of init (ADR 0172) — `docs/adr/0176-an-error-sentinel-is-static-data-and-its-options-are-the-designs-fields.md`
 - ADR 0177 — the Linux init runtime bar runs on public runners, and the lab is gone — `docs/adr/0177-the-linux-init-runtime-bar-runs-on-public-runners.md`
 - ADR 0178 — kit's effects join the transaction on the database that keeps their queue, accepted on 2026-10-14 for #274 by the owner's decision on each of its seven choices; the subject in a list (C5) implemented; three more points decided on 2026-10-15 (no index of the oldest `data-key` version, the age limit on versions still deferred, `kit.Only`, `kit.As` deferred) — `docs/adr/0178-kits-effects-join-the-transaction-on-the-database-that-keeps-their-queue.md`
-- ADR 0179 — a store is a non-generic engine under a typed facade, and a subsystem is imported, accepted on 2026-10-16 for #273 and #276 by the owner, who retained the recommendation of each of its eight questions: one registration package per subsystem, a non-generic store engine under `Store[T]`, `kit gen` writing the imports, a typed refusal at the start — `docs/adr/0179-a-store-is-a-non-generic-engine-under-a-typed-facade-and-a-subsystem-is-imported.md`
+- ADR 0179 — a store is a non-generic engine under a typed facade, and a subsystem is imported, accepted on 2026-10-16 for #273 and #276 by the owner, who retained the recommendation of each of its eight questions: one registration package per subsystem, a non-generic store engine under `Store[T]`, `kit gen` writing the imports, a typed refusal at the start; implemented on 2026-10-17 — step 10 the break: the facade imports no subsystem, a product imports those it declares, and `kit.Migration` is kit's own — `docs/adr/0179-a-store-is-a-non-generic-engine-under-a-typed-facade-and-a-subsystem-is-imported.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

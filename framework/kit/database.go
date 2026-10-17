@@ -4,8 +4,6 @@ import (
 	"context"
 
 	ikit "github.com/kitsunium/sdk/framework/internal/kit"
-	"github.com/kitsunium/sdk/framework/internal/kit/plug"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // The SQL dialects an [Engine] speaks: kit's own names (ADR 0179 Q5), which
@@ -29,6 +27,27 @@ type Dialect = ikit.Dialect
 // password, never a parameter.
 type DatabaseURL = ikit.DatabaseURLValue
 
+// Migration is one versioned change of a database's schema and its
+// reversal, kit's own (ADR 0179 step 10): the shape the SDK's sql runs,
+// which the store subsystem hands it.
+//
+//	kit.Migration{
+//		Version: 20261017120000,
+//		Name:    "notes",
+//		Up:      kit.Statements("CREATE TABLE notes (id TEXT PRIMARY KEY, body TEXT)"),
+//		Down:    kit.Statements("DROP TABLE notes"),
+//	}
+type Migration = ikit.MigrationValue
+
+// MigrationStep is one direction of a [Migration], run on ex — the
+// transaction its version row is written in, so that both commit
+// together.
+type MigrationStep = ikit.MigrationStep
+
+// MigrationExecutor is what a migration's step runs its statements on: a
+// transaction, which a step cannot end.
+type MigrationExecutor = ikit.MigrationExecutor
+
 // Keeps says what the database keeps: a service's stores, a store, a
 // module's stores. The most precise wins: a store kept by name, then its
 // service, then its module, then the default database — the one declared
@@ -39,42 +58,40 @@ func Keeps(things ...Keepable) DatabaseOption {
 	return ikit.Keeps(things...)
 }
 
-// Migrations are migrations, values of the SDK's sql.Migration, run when
-// the database starts (<name>-migrate: start) or by `<product> migrate up`,
-// kit's own first, each set under its own version table — and so its own
-// lock. On MySQL a DDL statement commits by itself: write one per migration.
+// Migrations are migrations, kit's own [Migration]s (ADR 0179 step 10),
+// run when the database starts (<name>-migrate: start) or by
+// `<product> migrate up`, kit's own first, each set under its own version
+// table — and so its own lock. On MySQL a DDL statement commits by itself:
+// write one per migration. The store subsystem runs them: a program that
+// declares a database imports framework/kit/store, as its engine module
+// does.
 //
 // Given to [Database], they are the product's, under schema_migrations.
 // Given to [NewModule], they are the module's (ADR 0008), for the data it
 // keeps outside kit's stores: run on the database that keeps the module,
 // under <module>_migrations.
-func Migrations(m ...sql.Migration) interface {
+func Migrations(m ...Migration) interface {
 	DatabaseOption
 	ModulePart
 } {
-	//: the implementation is framework/internal/kit's; this facade hands it the
-	//: SDK's migrations on the standard library's types, which its core runs
-	//: through the store subsystem without naming the SDK's sql (ADR 0179 Q5).
-	return ikit.Migrations(pluggedMigrations(m)...)
+	//: the implementation is framework/internal/kit's; this facade only forwards.
+	return ikit.Migrations(m...)
 }
 
-// pluggedMigrations are ms as kit's core takes them: the same versions,
-// names and steps, each step run on the executor the store subsystem hands
-// it — the SDK's, the standard library's types.
-func pluggedMigrations(ms []sql.Migration) []plug.MigrationValue {
-	out := make([]plug.MigrationValue, len(ms))
-	for i, m := range ms {
-		out[i] = plug.MigrationValue{Version: m.Version, Name: m.Name, Up: pluggedStep(m.Up), Down: pluggedStep(m.Down)}
-	}
-	return out
+// Statements is the [MigrationStep] that runs stmts in order on its
+// executor, stopping at the first that fails — whose error it returns as
+// the driver said it.
+func Statements(stmts ...string) MigrationStep {
+	//: the implementation is framework/internal/kit's; this facade only forwards.
+	return ikit.Statements(stmts...)
 }
 
-// pluggedStep is s on the standard library's executor, nil for none.
-func pluggedStep(s sql.Step) plug.Step {
-	if s == nil {
-		return nil
-	}
-	return func(ctx context.Context, ex plug.Executor) error { return s(ctx, ex) }
+// Irreversible is the Down of a migration that cannot be reversed, said out
+// loud rather than left nil: it refuses, with [CodeMigrationIrreversible],
+// and `<product> migrate down` below its version stops there.
+func Irreversible(ctx context.Context, ex MigrationExecutor) error {
+	//: the implementation is framework/internal/kit's; this facade only forwards.
+	return ikit.Irreversible(ctx, ex)
 }
 
 // Database declares a database the product keeps its stores in, named name,

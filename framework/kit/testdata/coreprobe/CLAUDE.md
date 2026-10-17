@@ -1,27 +1,28 @@
-<!-- updated: 2026-10-17T22:00:00Z -->
+<!-- updated: 2026-10-17T23:00:00Z -->
 # framework/kit/testdata/coreprobe — the smallest product, on kit's core alone
 
 A test fixture, not a package a product imports: `cliprobe`'s service and
 command — one service, one default fail-safe CLI command that writes a line —
-on `framework/internal/kit` directly. The facade (`framework/kit`) imports
-every registration package of ADR 0179 until its step 10, so a product built
-on it links every subsystem; this probe imports none, and is what
-`initgraph_external_test.go`'s
-`TestTheSmallestProductLinksOnlyTheSubsystemsStillInTheCore` builds and reads
-the symbols of: none of the store subsystem's engines, none of kit's own
-store code (`kitStoreCode`, step 3b), none of the queue subsystem's brokers
-(step 4) nor of the SDK's queue and sql, out of its graph since step 6, not
-even their inits; nothing of the workflow subsystem's engine nor of the SDK's
-statemachine, out of its graph since step 5; and nothing of the mail
-subsystem's outbox nor of the SDK's spool, out of its graph since step 6, nor
-of the SDK's mail transports beyond their inits; and nothing of the jobs
-subsystem's scheduler nor of the SDK's scheduler, out of its graph since step
-7, not even its inits. Once step 10 drops the facade's imports, `cliprobe` is that
-program again and this probe can go.
+on `framework/internal/kit` directly. Until ADR 0179's step 10 the facade
+(`framework/kit`) imported every registration package, so a product built on
+it linked every subsystem, and this probe was the program that imported
+none. Since step 10 the facade imports none either: `cliprobe` is that
+program again, and this probe stays as its control on the core alone —
+`initgraph_external_test.go`'s `TestTheSmallestProductLinksNoSubsystem`
+builds both and reads their symbols: none of the store subsystem's engines,
+none of kit's own store code (`kitStoreCode`, step 3b), none of the queue
+subsystem's brokers (step 4) nor of the SDK's queue and sql, not even their
+inits; nothing of the workflow subsystem's engine nor of the SDK's
+statemachine (step 5); nothing of the mail subsystem's outbox nor of the
+SDK's spool (step 6), nor of the SDK's mail transports beyond their inits;
+nothing of the jobs subsystem's scheduler nor of the SDK's scheduler (step
+7). The other probes (`storeprobe`, `queueprobe`, `workflowprobe`,
+`mailprobe`, `jobsprobe`, `studioprobe`) are this one with one registration
+package imported.
 
 It holds kit's English table and nothing of its languages after English —
 neither the SDK's i18n, not even its inits, nor the French catalogue: those
-are `framework/kit/studio`'s (step 8): the allow-list is empty.
+are `framework/kit/studio`'s (step 8). There is no allow-list.
 
 ## Contents
 

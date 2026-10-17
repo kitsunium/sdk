@@ -18,7 +18,6 @@ import (
 	"github.com/kitsunium/sdk/framework/kit"
 	"github.com/kitsunium/sdk/framework/kit/storetest"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
@@ -224,7 +223,7 @@ func status(t *testing.T, base, path string) int {
 // 0140), and its stores live in it.
 func TestMigrationsAndStoresRunOnTheFile(t *testing.T) {
 	needsFileStore(t)
-	m := sql.Migration{Version: 1, Name: "create", Up: sql.Statements("CREATE TABLE x (id TEXT)"), Down: sql.Statements("DROP TABLE x")}
+	m := kit.Migration{Version: 1, Name: "create", Up: kit.Statements("CREATE TABLE x (id TEXT)"), Down: kit.Statements("DROP TABLE x")}
 	dir := t.TempDir()
 	app := ledger(t, dir, kit.Migrations(m))
 	run(t, app)

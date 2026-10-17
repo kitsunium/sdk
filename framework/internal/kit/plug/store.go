@@ -180,8 +180,9 @@ type TableSpec struct {
 }
 
 // MigrationValue is one versioned change of a database's schema and its
-// reversal, as kit's migrations are written: the SDK's own, on the standard
-// library's types.
+// reversal, as the core hands it to the store subsystem: a product's
+// kit.Migration, or one of kit's own, its steps on the standard library's
+// types.
 type MigrationValue struct {
 	// Version orders the migration in its set: non-zero and unique.
 	Version uint64
