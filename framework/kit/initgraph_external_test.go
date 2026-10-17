@@ -51,11 +51,7 @@ const sdk = "github.com/kitsunium/sdk/"
 // packages whose machine code is the subsystem's in a binary — the SDK
 // package's core and service halves, whose names its symbols carry; kit's
 // own store engines for the stores.
-var leaving = []struct {
-	pkg, by string
-	step    int
-	code    []string
-}{
+var leaving = []leavingCase{
 	{"pkg/v1/data/docstore", "framework/kit/store", 3, []string{"internal/core/data/docstore.", "internal/service/data/docstore."}},
 	{"pkg/v1/data/sql", "framework/kit/store", 3, []string{"internal/core/data/sql.", "internal/service/data/sql."}},
 	{"pkg/v1/data/queue", "framework/kit/queue", 4, []string{"internal/core/data/queue.", "internal/service/data/queue."}},
@@ -63,6 +59,14 @@ var leaving = []struct {
 	{"pkg/v1/app/mail/spool", "framework/kit/mail", 6, []string{"internal/core/app/mail/spool.", "internal/service/app/mail/spool."}},
 	{"pkg/v1/app/scheduler", "framework/kit/jobs", 7, []string{"internal/core/app/scheduler.", "internal/service/app/scheduler."}},
 	{"pkg/v1/app/i18n", "framework/kit/studio", 8, []string{"internal/core/app/i18n.", "internal/service/app/i18n."}},
+}
+
+// leavingCase is one subsystem of leaving: the SDK package its engine lives
+// in, its registration package, its step, and the prefixes of its symbols.
+type leavingCase struct {
+	pkg, by string
+	step    int
+	code    []string
 }
 
 // storeEngines are kit's generic store engines, which ADR 0179's step 2 makes
@@ -103,7 +107,8 @@ func TestTheCoreImportsOnlyTheSubsystemsStillInIt(t *testing.T) {
 	goTool := goToList(t)
 	core := listDeps(t, goTool, sdk+"framework/internal/kit")
 	facade := listDeps(t, goTool, sdk+"framework/kit")
-	for _, l := range leaving {
+	runCase := func(t *testing.T, l leavingCase) {
+		t.Helper()
 		inCore := core[sdk+l.pkg]
 		switch {
 		case inCore && !stillInCore[l.pkg]:
@@ -113,6 +118,9 @@ func TestTheCoreImportsOnlyTheSubsystemsStillInIt(t *testing.T) {
 		case facade[sdk+l.pkg] && !inCore && !facade[sdk+l.by]:
 			t.Errorf("framework/kit brings %s without %s", l.pkg, l.by)
 		}
+	}
+	for _, l := range leaving {
+		t.Run(l.pkg, func(t *testing.T) { runCase(t, l) })
 	}
 	for p := range goList(t, goTool, sdk+"framework/internal/kit/plug", "-f", "{{join .Imports \" \"}}") {
 		if strings.Contains(strings.Split(p, "/")[0], ".") && p != sdk+"framework/model" {
@@ -166,12 +174,20 @@ func TestTheSmallestProductLinksOnlyTheSubsystemsStillInTheCore(t *testing.T) {
 	if err := lines.Err(); err != nil {
 		t.Fatal(err)
 	}
-	for owner, n := range linked {
+	runCase := func(t *testing.T, owner string) {
+		t.Helper()
+		n := linked[owner]
+		if n == 0 {
+			return
+		}
 		if !stillInCore[owner] {
 			t.Errorf("the smallest product links %d text symbols of %s, which only its registration package may bring", n, owner)
-			continue
+			return
 		}
 		t.Logf("still in the core (ADR 0179 allow-list): %s, %d text symbols linked", owner, n)
+	}
+	for owner := range owners {
+		t.Run(owner, func(t *testing.T) { runCase(t, owner) })
 	}
 }
 
