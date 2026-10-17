@@ -9,7 +9,8 @@ document store and sql under them, and every function of kit's own store
 code the test lists (`kitStoreCode`, step 3b) — the half of ADR 0179 §7 that keeps the
 other from passing by testing nothing —, and none of the queue subsystem's
 brokers nor of the SDK's queue beyond its init: the stores do not bring the
-queues (step 4, Q4).
+queues (step 4, Q4), nor the workflow subsystem's engine nor the SDK's
+statemachine: nor the workflows (step 5).
 
 ## Contents
 

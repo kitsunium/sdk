@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/app/statemachine"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
@@ -39,7 +39,8 @@ const autoSchedule = "at the next transition due · on every write"
 //   - guard transitions ([WorkflowService.When]), fired by the same loop as soon as
 //     a condition on the entity holds.
 //
-// The SDK's state-machine engine runs it (statemachine). Its loop never
+// The SDK's state-machine engine runs it (statemachine), which the workflow
+// subsystem plugs in (framework/kit/workflow, ADR 0179 step 5). Its loop never
 // polls: it keeps an agenda of the transitions due, sleeps until the
 // earliest, and a write of the store — which may bring one forward — wakes
 // it. A workflow with nothing due does not run at all. Transitions of one
@@ -61,10 +62,16 @@ type WorkflowService[E any, S comparable] struct {
 	enter   map[S][]hook[E]
 	after   []changeHook[E, S]
 
+	// spelled maps each state the workflow met to its spelling — the name
+	// the engine, the workflow's file and the Studio know it by
+	// (fmt.Sprint): the engine is instantiated once, over the spelling
+	// (ADR 0179 Q3), and the facade reads a state back from it.
+	spelled sync.Map
+
 	// mu guards what the running app built: the engine, its loop, and the
 	// function that takes the workflow's hooks off its store.
 	mu      sync.Mutex
-	machine *statemachine.Machine[E, S]
+	machine plug.WorkflowEngine
 	running *autoRun
 	unwatch func()
 }
@@ -305,7 +312,7 @@ func (w *WorkflowService[E, S]) OnTransition(fn func(context.Context, ChangeEven
 }
 
 // engine is the running engine, or nil.
-func (w *WorkflowService[E, S]) engine() *statemachine.Machine[E, S] {
+func (w *WorkflowService[E, S]) engine() plug.WorkflowEngine {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.machine
@@ -324,12 +331,12 @@ func (w *WorkflowService[E, S]) Start(ctx context.Context, e E) (E, error) {
 	if m := w.engine(); m != nil {
 		key := w.store.keyOf(e)
 		err = w.inTransaction(ctx, a, func(ctx context.Context) error {
-			var err error
-			out, err = m.Start(context.WithValue(ctx, transitionOf{}, firing{caller: caller, key: key}), e)
+			d, err := m.Start(context.WithValue(ctx, transitionOf{}, firing{caller: caller, key: key}), w.entityValue(e))
+			out = w.entityOf(d)
 			return err
 		})
 		if err != nil {
-			out, err = e, w.refusal(ctx, a, err, key, statemachine.CreateEvent, e)
+			out, err = e, w.refusal(ctx, a, err, key, plug.WorkflowCreateEvent, e)
 		}
 	}
 	sp.end(err)
@@ -379,8 +386,8 @@ func (w *WorkflowService[E, S]) fire(ctx context.Context, a *App, key, event, ca
 	}
 	var e E
 	err := w.inTransaction(ctx, a, func(ctx context.Context) error {
-		var err error
-		e, err = m.Fire(context.WithValue(ctx, transitionOf{}, firing{caller: caller, key: key}), key, event)
+		d, err := m.Fire(context.WithValue(ctx, transitionOf{}, firing{caller: caller, key: key}), key, event)
+		e = w.entityOf(d)
 		return err
 	})
 	if err != nil {
@@ -394,9 +401,9 @@ func (w *WorkflowService[E, S]) fire(ctx context.Context, a *App, key, event, ca
 // hook's panic is logged with its stack; the rest is said as the loop says it.
 func (w *WorkflowService[E, S]) refusal(ctx context.Context, a *App, err error, key, event string, e E) error {
 	switch {
-	case errors.Is(err, statemachine.TransitionRefused):
+	case workflowFailed(err, plug.WorkflowTransitionRefused):
 		return Conflict(fmt.Sprintf("%s: %q is not possible from state %q", w.name, clip(event), fmt.Sprint(*w.state(&e))))
-	case errors.Is(err, statemachine.HookPanicked):
+	case workflowFailed(err, plug.WorkflowHookPanicked):
 		w.logPanic(ctx, a, err)
 	}
 	return w.said(err, key, event)
@@ -415,13 +422,13 @@ func (w *WorkflowService[E, S]) said(err error, key, event string) error {
 		return hookErr
 	}
 	switch {
-	case errors.Is(err, statemachine.EntityMissing):
+	case workflowFailed(err, plug.WorkflowEntityMissing):
 		return w.store.missing(key)
-	case errors.Is(err, statemachine.EntityExists):
+	case workflowFailed(err, plug.WorkflowEntityExists):
 		return Conflict(fmt.Sprintf("%s: an entity with key %q already exists", w.store.name, clip(key)))
-	case errors.Is(err, statemachine.KeyEmpty):
+	case workflowFailed(err, plug.WorkflowKeyEmpty):
 		return Invalid(fmt.Sprintf("%s: an entity's key cannot be empty", w.store.name))
-	case errors.Is(err, statemachine.WaitAbandoned):
+	case workflowFailed(err, plug.WorkflowWaitAbandoned):
 		// The caller stopped waiting for the entity: its context's own error.
 		if errors.Is(err, context.DeadlineExceeded) {
 			return context.DeadlineExceeded
@@ -438,16 +445,16 @@ func (w *WorkflowService[E, S]) said(err error, key, event string) error {
 // workflow's loop; isHook is false for any other error.
 func (w *WorkflowService[E, S]) hookSaid(err error, event string) (isHook bool, said error) {
 	switch {
-	case errors.Is(err, statemachine.HookPanicked):
+	case workflowFailed(err, plug.WorkflowHookPanicked):
 		return true, hookPanicked(w.id, hookName(fieldOf(err, "hook")))
-	case errors.Is(err, statemachine.HookFailed):
+	case workflowFailed(err, plug.WorkflowHookFailed):
 		return true, hookOwn(err)
-	case errors.Is(err, statemachine.FunctionPanicked), errors.Is(err, statemachine.LoopPanicked):
+	case workflowFailed(err, plug.WorkflowFunctionPanicked), workflowFailed(err, plug.WorkflowLoopPanicked):
 		return true, failure(CodeLoopPanic, "LOOP_PANICKED", "the workflow's loop panicked", nil, errs.String("workflow", w.id))
-	case errors.Is(err, statemachine.HookChangedState), errors.Is(err, statemachine.HookChangedKey):
+	case workflowFailed(err, plug.WorkflowHookChangedState), workflowFailed(err, plug.WorkflowHookChangedKey):
 		return true, failure(CodeWorkflowHookChange, "HOOK_CHANGED", "an OnEnter hook changed the state it entered, or its entity's key", nil,
 			errs.String("workflow", w.id), errs.String("event", event))
-	case errors.Is(err, statemachine.Reentrant):
+	case workflowFailed(err, plug.WorkflowReentrant):
 		return true, failure(CodeWorkflowReentrant, "WORKFLOW_REENTRANT", "an OnEnter hook fired its own workflow", nil, errs.String("workflow", w.id))
 	default:
 		return false, nil
@@ -459,7 +466,7 @@ func (w *WorkflowService[E, S]) hookSaid(err error, event string) (isHook bool, 
 func hookOwn(err error) error {
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		for _, e := range joined.Unwrap() {
-			if !errors.Is(e, statemachine.HookFailed) {
+			if !workflowFailed(e, plug.WorkflowHookFailed) {
 				return e
 			}
 		}
@@ -488,12 +495,18 @@ func hookName(engine string) string {
 // logPanic logs what panicked — a hook, a guard, an instant function — with
 // the value and the stack the engine kept.
 func (w *WorkflowService[E, S]) logPanic(ctx context.Context, a *App, err error) {
+	w.logPanicked(ctx, a, workflowFailed(err, plug.WorkflowHookPanicked), fieldOf(err, "hook"), fieldOf(err, "panic"), fieldOf(err, "stack"))
+}
+
+// logPanicked logs a panic of a hook — hook says which, as the engine names
+// it — or of the loop, with its value and its stack.
+func (w *WorkflowService[E, S]) logPanicked(ctx context.Context, a *App, ofHook bool, hook, value, stack string) {
 	msg := "a workflow's loop panicked"
-	if errors.Is(err, statemachine.HookPanicked) {
+	if ofHook {
 		msg = "a workflow hook panicked"
 	}
-	logger.Error(ctx, a.log, msg, logger.String("node", w.id), logger.String("hook", hookName(fieldOf(err, "hook"))),
-		logger.String("panic", fieldOf(err, "panic")), logger.String("stack", fieldOf(err, "stack")))
+	logger.Error(ctx, a.log, msg, logger.String("node", w.id), logger.String("hook", hookName(hook)),
+		logger.String("panic", value), logger.String("stack", stack))
 }
 
 // report receives what the engine reports and no caller's return value
@@ -502,13 +515,13 @@ func (w *WorkflowService[E, S]) logPanic(ctx context.Context, a *App, err error)
 // its stack —, a write of the workflow's file that failed — logged. What the
 // loop could not fire also reaches the end of its run (onLoop).
 func (w *WorkflowService[E, S]) report(ctx context.Context, a *App, err error) {
-	if errors.Is(err, statemachine.JournalFailed) {
+	if workflowFailed(err, plug.WorkflowJournalFailed) {
 		logger.Warn(ctx, a.log, "a workflow's file could not be written; its timers count from the next start after a restart",
 			logger.String("node", w.id), logger.String("error", err.Error()))
 		return
 	}
 	panicked := isPanic(err)
-	if !panicked && !errors.Is(err, statemachine.HookFailed) {
+	if !panicked && !workflowFailed(err, plug.WorkflowHookFailed) {
 		return
 	}
 	if panicked {
@@ -522,14 +535,20 @@ func (w *WorkflowService[E, S]) report(ctx context.Context, a *App, err error) {
 	if f, ok := ctx.Value(transitionOf{}).(firing); ok && key == "" {
 		key = f.key
 	}
-	_, body := describe(w.said(err, key, event))
+	w.transitionHookFailed(a, event, key, w.said(err, key, event))
+}
+
+// transitionHookFailed is the problem the Studio shows for an OnTransition
+// hook of the transition event of the entity key that failed as said says.
+func (w *WorkflowService[E, S]) transitionHookFailed(a *App, event, key string, said error) {
+	_, body := describe(said)
 	a.problem(w.id, say("workflow.hook-failed", "workflow", w.id, "event", event, "key", key, "detail", body.Message))
 }
 
 // isPanic reports whether err is a panic of a workflow's hook, function or
 // loop.
 func isPanic(err error) bool {
-	return errors.Is(err, statemachine.HookPanicked) || errors.Is(err, statemachine.FunctionPanicked) || errors.Is(err, statemachine.LoopPanicked)
+	return workflowFailed(err, plug.WorkflowHookPanicked) || workflowFailed(err, plug.WorkflowFunctionPanicked) || workflowFailed(err, plug.WorkflowLoopPanicked)
 }
 
 // hookFields are the hook kind and the event the engine's account of a
@@ -537,7 +556,7 @@ func isPanic(err error) bool {
 func hookFields(err error) (hook, event string) {
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		for _, e := range joined.Unwrap() {
-			if errors.Is(e, statemachine.HookFailed) {
+			if workflowFailed(e, plug.WorkflowHookFailed) {
 				return fieldOf(e, "hook"), fieldOf(e, "event")
 			}
 		}
@@ -565,16 +584,54 @@ func (w *WorkflowService[E, S]) Census(ctx context.Context) (map[S]int, error) {
 	return counts, nil
 }
 
-// count is census with every declared state present.
-func (w *WorkflowService[E, S]) count(census map[S]int) map[S]int {
+// count is the engine's census, by spelling, as the facade's states, with
+// every declared state present.
+func (w *WorkflowService[E, S]) count(census map[string]int) map[S]int {
 	counts := make(map[S]int, len(w.order))
 	for _, st := range w.order {
 		counts[st] = 0
 	}
-	for st, n := range census {
-		counts[st] += n
+	for name, n := range census {
+		counts[w.stateNamed(name)] += n
 	}
 	return counts
+}
+
+// spell is the spelling of st, the name the engine knows it by — and the
+// workflow's file and the Studio —, which the facade reads st back from.
+func (w *WorkflowService[E, S]) spell(st S) string {
+	name := fmt.Sprint(st)
+	if _, met := w.spelled.Load(name); !met {
+		w.spelled.LoadOrStore(name, st)
+	}
+	return name
+}
+
+// stateNamed is the state spelled name, the zero S for a spelling the
+// workflow never met — the state a creation leaves.
+func (w *WorkflowService[E, S]) stateNamed(name string) S {
+	st, _ := w.spelled.Load(name)
+	return as[S](st)
+}
+
+// entityValue is e as the engine holds it: e, and its state spelled.
+func (w *WorkflowService[E, S]) entityValue(e E) plug.WorkflowEntityValue {
+	return plug.WorkflowEntityValue{Value: e, State: w.spell(*w.state(&e))}
+}
+
+// entityOf is the entity the engine holds, d, with the state the engine set:
+// a transition sets the spelling, which the entity's state field follows.
+func (w *WorkflowService[E, S]) entityOf(d plug.WorkflowEntityValue) E {
+	e := as[E](d.Value)
+	if d.Value == nil || w.state == nil {
+		return e
+	}
+	if st := w.state(&e); fmt.Sprint(*st) != d.State {
+		if named, met := w.spelled.Load(d.State); met {
+			*st = as[S](named)
+		}
+	}
+	return e
 }
 
 // stateField finds which field of the entity the state function points at,
@@ -669,76 +726,94 @@ func (w *WorkflowService[E, S]) publishCensus(a *App) {
 
 // transitioned streams a stored transition to the Studio — the transition,
 // then the census — before the product's OnTransition hooks run.
-func (w *WorkflowService[E, S]) transitioned(a *App, c statemachine.Change[E, S]) {
-	from := fmt.Sprint(c.From)
-	if c.Trigger == statemachine.TriggerStart {
+func (w *WorkflowService[E, S]) transitioned(a *App, c *plug.WorkflowChangeValue) {
+	from := c.From
+	if c.Trigger == plug.WorkflowTriggerStart {
 		from = ""
 	}
 	a.hub.publish(model.Event{Type: model.EventTransition, Time: c.At.UTC(), Transition: &model.TransitionEvent{
-		Workflow: w.id, Instance: c.Key, Event: c.Event, From: from, To: fmt.Sprint(c.To), Trigger: kitTrigger(c.Trigger), Caller: c.Actor,
+		Workflow: w.id, Instance: c.Key, Event: c.Event, From: from, To: c.To, Trigger: kitTrigger(c.Trigger), Caller: c.Actor,
 	}})
 	w.publishCensus(a)
 }
 
-// changeOf is the engine's stored transition as an OnTransition hook reads it.
-func changeOf[E any, S comparable](c statemachine.Change[E, S]) ChangeEvent[E, S] {
+// changeOf is the engine's stored transition as an OnTransition hook reads
+// it: the entity and the states the facade's.
+func (w *WorkflowService[E, S]) changeOf(c *plug.WorkflowChangeValue) ChangeEvent[E, S] {
 	return ChangeEvent[E, S]{
-		Key: c.Key, Entity: c.Entity, Event: c.Event, From: c.From, To: c.To,
+		Key: c.Key, Entity: w.entityOf(c.Entity), Event: c.Event, From: w.stateNamed(c.From), To: w.stateNamed(c.To),
 		Trigger: kitTrigger(c.Trigger), Caller: c.Actor, At: c.At.UTC(),
 	}
 }
 
-// declare declares the transition to the SDK's engine: a guard's, an
+// spec is the transition x as the engine declares it: a guard's, an
 // instant's, a timer's — its delay as its setting holds it in this run — or
-// an event's.
-func (x *arrow[E, S]) declare(def *statemachine.Definition[E, S]) {
-	switch {
-	case x.guard != nil:
-		def.When(x.event, x.from, x.to, x.guard)
-	case x.instant != nil:
-		def.At(x.event, x.from, x.to, x.instant)
+// an event's; a guard and an instant function read the facade's entity.
+func (w *WorkflowService[E, S]) spec(x *arrow[E, S]) plug.TransitionSpec {
+	t := plug.TransitionSpec{Event: x.event, From: w.spell(x.from), To: w.spell(x.to), Trigger: plug.WorkflowTriggerEvent}
+	switch guard, instant := x.guard, x.instant; {
+	case guard != nil:
+		t.Trigger = plug.WorkflowTriggerGuard
+		t.Guard = func(d plug.WorkflowEntityValue) bool { return guard(w.entityOf(d)) }
+	case instant != nil:
+		t.Trigger = plug.WorkflowTriggerDeadline
+		t.Instant = func(d plug.WorkflowEntityValue) (time.Time, bool) { return instant(w.entityOf(d)) }
 	case x.trigger == model.TriggerTimer:
-		def.After(x.event, x.wait(), x.from, x.to)
-	default:
-		def.On(x.event, x.from, x.to)
+		t.Trigger, t.Delay = plug.WorkflowTriggerDelay, x.wait()
+	}
+	return t
+}
+
+// enterHook is the OnEnter hook fn as the engine runs it: on the facade's
+// entity, whose state field holds the state entered, the entity and its
+// state — whatever fn did to them — handed back to the engine.
+func (w *WorkflowService[E, S]) enterHook(fn func(context.Context, *E) error) func(context.Context, *plug.WorkflowEntityValue) error {
+	return func(ctx context.Context, d *plug.WorkflowEntityValue) error {
+		e := w.entityOf(*d)
+		err := fn(ctx, &e)
+		*d = w.entityValue(e)
+		return err
 	}
 }
 
-// definition declares the workflow to the SDK's engine: its states, its
-// transitions — a timer's delay as its setting holds it in this run — and
-// its hooks, kit's own OnTransition hook first.
-func (w *WorkflowService[E, S]) definition(a *App) *statemachine.Definition[E, S] {
-	def := statemachine.Define(w.state).Initial(w.initial)
-	for _, x := range w.arrows {
-		x.declare(def)
+// config declares the workflow to the engine: its states, its transitions —
+// a timer's delay as its setting holds it in this run — and its hooks, kit's
+// own OnTransition hook first; the ports and the brackets are start's.
+func (w *WorkflowService[E, S]) config(a *App) *plug.WorkflowConfig {
+	for _, st := range w.order {
+		w.spell(st)
+	}
+	cfg := &plug.WorkflowConfig{Initial: w.spell(w.initial)}
+	for i := range w.arrows {
+		cfg.Transitions = append(cfg.Transitions, w.spec(&w.arrows[i]))
 	}
 	for _, st := range w.order {
 		for _, h := range w.enter[st] {
-			def.OnEnter(st, h.fn)
+			cfg.OnEnter = append(cfg.OnEnter, plug.EnterHookSpec{State: w.spell(st), Fn: w.enterHook(h.fn)})
 		}
 	}
 	// A transition runs in a transaction: its hooks wait for the commit,
 	// kit's own — the Studio's events — as the product's.
-	def.OnTransition(func(ctx context.Context, c statemachine.Change[E, S]) error {
-		if !hold(ctx, heldEffect{node: w.id, release: func(context.Context) error { w.transitioned(a, c); return nil }, inside: true}) {
-			w.transitioned(a, c)
+	cfg.OnTransition = append(cfg.OnTransition, func(ctx context.Context, c plug.WorkflowChangeValue) error {
+		if !hold(ctx, heldEffect{node: w.id, release: func(context.Context) error { w.transitioned(a, &c); return nil }, inside: true}) {
+			w.transitioned(a, &c)
 		}
 		return nil
 	})
 	for _, h := range w.after {
-		def.OnTransition(w.heldHook(a, h.fn))
+		cfg.OnTransition = append(cfg.OnTransition, w.heldHook(a, h.fn))
 	}
-	return def
+	return cfg
 }
 
 // heldHook is a product's OnTransition hook fn as the engine runs it: held
 // until the transition's transaction commits.
-func (w *WorkflowService[E, S]) heldHook(a *App, fn func(context.Context, ChangeEvent[E, S]) error) func(context.Context, statemachine.Change[E, S]) error {
-	return func(ctx context.Context, c statemachine.Change[E, S]) error {
-		if hold(ctx, heldEffect{node: w.id, release: func(rctx context.Context) error { w.afterCommit(rctx, a, fn, c); return nil }}) {
+func (w *WorkflowService[E, S]) heldHook(a *App, fn func(context.Context, ChangeEvent[E, S]) error) func(context.Context, plug.WorkflowChangeValue) error {
+	return func(ctx context.Context, c plug.WorkflowChangeValue) error {
+		if hold(ctx, heldEffect{node: w.id, release: func(rctx context.Context) error { w.afterCommit(rctx, a, fn, &c); return nil }}) {
 			return nil
 		}
-		return fn(ctx, changeOf(c))
+		return fn(ctx, w.changeOf(&c))
 	}
 }
 
@@ -747,16 +822,15 @@ func (w *WorkflowService[E, S]) heldHook(a *App, fn func(context.Context, Change
 // transition's values, the committing transaction's life: its error, or its
 // panic, is reported as the engine reports a hook's, and the transition
 // stands.
-func (w *WorkflowService[E, S]) afterCommit(ctx context.Context, a *App, fn func(context.Context, ChangeEvent[E, S]) error, c statemachine.Change[E, S]) {
-	fields := []errs.Field{errs.String("hook", "on-transition"), errs.String("event", c.Event), errs.String("key", c.Key)}
+func (w *WorkflowService[E, S]) afterCommit(ctx context.Context, a *App, fn func(context.Context, ChangeEvent[E, S]) error, c *plug.WorkflowChangeValue) {
 	defer func() {
 		if p := recover(); p != nil {
-			w.report(ctx, a, errs.Wrap(statemachine.HookPanicked, errs.WrapParams{}, append(fields,
-				errs.String("panic", fmt.Sprint(p)), errs.String("stack", string(debug.Stack())))...))
+			w.logPanicked(ctx, a, true, "on-transition", fmt.Sprint(p), string(debug.Stack()))
+			w.transitionHookFailed(a, c.Event, c.Key, hookPanicked(w.id, hookName("on-transition")))
 		}
 	}()
-	if err := fn(ctx, changeOf(c)); err != nil {
-		w.report(ctx, a, errors.Join(errs.Wrap(statemachine.HookFailed, errs.WrapParams{}, fields...), err))
+	if err := fn(ctx, w.changeOf(c)); err != nil {
+		w.transitionHookFailed(a, c.Event, c.Key, err)
 	}
 }
 
@@ -766,8 +840,8 @@ func (w *WorkflowService[E, S]) afterCommit(ctx context.Context, a *App, fn func
 // the engine says the transition stood, and its OnTransition hooks run once
 // they did. A transition that lost a race — its entity deleted meanwhile —
 // is not a failure.
-func (w *WorkflowService[E, S]) observe(a *App) func(context.Context, statemachine.Firing[S]) (context.Context, func(error)) {
-	return func(ctx context.Context, f statemachine.Firing[S]) (context.Context, func(error)) {
+func (w *WorkflowService[E, S]) observe(a *App) func(context.Context, plug.WorkflowFiringValue) (context.Context, func(error)) {
+	return func(ctx context.Context, f plug.WorkflowFiringValue) (context.Context, func(error)) {
 		tctx, sp := a.begin(ctx, &spanStart{node: w.id, label: f.Event, op: model.OpTransition, name: f.Event})
 		sp.attr("instance", f.Key)
 		sp.attr("trigger", kitTrigger(f.Trigger))
@@ -777,7 +851,7 @@ func (w *WorkflowService[E, S]) observe(a *App) func(context.Context, statemachi
 			if cerr := tx.finish(tctx, err); err == nil {
 				err = cerr
 			}
-			if errors.Is(err, statemachine.EntityMissing) {
+			if workflowFailed(err, plug.WorkflowEntityMissing) {
 				err = nil
 			}
 			sp.end(w.said(err, f.Key, f.Event))
@@ -834,18 +908,18 @@ func (w *WorkflowService[E, S]) loop() *autoRun {
 
 // onLoop draws the engine's loop as the workflow's loop in the Runtime view:
 // each run, why it started, what failed in it, when the loop wakes next.
-func (w *WorkflowService[E, S]) onLoop(a *App) func(statemachine.LoopEvent) {
-	return func(e statemachine.LoopEvent) {
+func (w *WorkflowService[E, S]) onLoop(a *App) func(plug.WorkflowLoopEventValue) {
+	return func(e plug.WorkflowLoopEventValue) {
 		r := w.loop()
 		if r == nil {
 			return
 		}
 		switch e.Kind {
-		case statemachine.LoopRunStarted:
+		case plug.WorkflowLoopRunStarted:
 			r.state.begin(a, wakeReason(e.Wake))
-		case statemachine.LoopWaiting:
+		case plug.WorkflowLoopWaiting:
 			r.state.idle(a, e.Next)
-		case statemachine.LoopRunEnded:
+		case plug.WorkflowLoopRunEnded:
 			err := w.loopFailure(e.Err)
 			if r.ctx.Err() != nil && errors.Is(err, context.Canceled) {
 				err = nil // the app is stopping: the run honoured its context
@@ -876,14 +950,15 @@ func (w *WorkflowService[E, S]) loopFailure(err error) error {
 }
 
 // wakeReason is why the engine's loop ran, as the model says it.
-func wakeReason(wake statemachine.Wake) string {
+func wakeReason(wake plug.WorkflowWake) string {
 	switch wake {
-	case statemachine.WakeDue:
+	case plug.WorkflowWakeDue:
 		return model.WakeDeadline
-	case statemachine.WakeChange:
+	case plug.WorkflowWakeChange:
 		return model.WakeChange
+	default:
+		return model.WakeStart
 	}
-	return model.WakeStart
 }
 
 // start opens the SDK's engine over the store: it reads the workflow's file
@@ -893,20 +968,22 @@ func wakeReason(wake statemachine.Wake) string {
 // hold, a state changed by a plain write is recorded, a deleted entity is
 // forgotten.
 func (w *WorkflowService[E, S]) start(ctx context.Context, a *App) error {
-	cfg := &statemachine.Config[E, S]{
-		Store: storePort[E]{s: w.store, state: w.stateField()},
-		Clock: a.clock,
-		Actor: func(ctx context.Context) string {
-			f, _ := ctx.Value(transitionOf{}).(firing)
-			return f.caller
-		},
-		Observe:    w.observe(a),
-		Report:     func(ctx context.Context, err error) { w.report(ctx, a, err) },
-		OnLoop:     w.onLoop(a),
-		MinGap:     minDeadlineGap,
-		Backoff:    loopBackoff,
-		MaxHistory: maxHistory,
+	d := plug.Workflows.Load()
+	if d == nil || d.Open == nil {
+		return workflowsMissing()
 	}
+	cfg := w.config(a)
+	cfg.Store = workflowPort[E, S]{w: w, state: w.stateField()}
+	cfg.Clock = pluggedClock{Timed: a.clock}
+	cfg.Actor = func(ctx context.Context) string {
+		f, _ := ctx.Value(transitionOf{}).(firing)
+		return f.caller
+	}
+	cfg.Observe = w.observe(a)
+	cfg.Report = func(ctx context.Context, err error) { w.report(ctx, a, err) }
+	cfg.OnLoop = w.onLoop(a)
+	cfg.MinGap, cfg.MaxHistory = minDeadlineGap, maxHistory
+	cfg.BackoffBase, cfg.BackoffMax = loopBackoff.BaseDelay, loopBackoff.MaxDelay
 	switch r := a.databaseOf(w.store); {
 	case r != nil:
 		j, err := w.openSQLJournal(a, r)
@@ -915,7 +992,7 @@ func (w *WorkflowService[E, S]) start(ctx context.Context, a *App) error {
 		}
 		cfg.Journal = j
 	case a.data != nil && !w.store.inMemory:
-		cfg.Journal = &workflowJournal[E, S]{w: w, data: a.data, file: path.Join(w.svc.name, w.name+".workflow.json")}
+		cfg.Journal = &workflowJournal{id: w.id, declared: w.declaredStates(), data: a.data, file: path.Join(w.svc.name, w.name+".workflow.json")}
 	}
 	// The engine is set before a write can reach it: a write between its
 	// read of the store and now waits here, then tells it. A start that fails
@@ -923,7 +1000,7 @@ func (w *WorkflowService[E, S]) start(ctx context.Context, a *App) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	unwatch := w.store.watch(w.changed, w.forget)
-	m, err := statemachine.New(ctx, w.definition(a), cfg)
+	m, err := d.Open(ctx, cfg)
 	if err != nil {
 		unwatch()
 		return w.openFailure(err)
@@ -935,7 +1012,7 @@ func (w *WorkflowService[E, S]) start(ctx context.Context, a *App) error {
 // openFailure is why the engine did not open: the workflow's file or the
 // store, as they said it, or the engine's own refusal.
 func (w *WorkflowService[E, S]) openFailure(err error) error {
-	if errs.HasCode(err, CodeWorkflowLoad) || errors.Is(err, statemachine.StoreFailed) || errors.Is(err, statemachine.JournalFailed) {
+	if errs.HasCode(err, CodeWorkflowLoad) || workflowFailed(err, plug.WorkflowStoreFailed) || workflowFailed(err, plug.WorkflowJournalFailed) {
 		return err
 	}
 	return failure(CodeWorkflowLoad, "WORKFLOW_OPEN", "the workflow cannot start", err, errs.String("workflow", w.id))
@@ -979,10 +1056,21 @@ func (w *WorkflowService[E, S]) stop(_ context.Context, _ *App) error {
 
 // check reports what can only be judged once the declaration is complete.
 func (w *WorkflowService[E, S]) check() []phrase {
+	var out []phrase
 	if !w.hasInit {
-		return []phrase{say("workflow.initial", "name", w.name)}
+		out = append(out, say("workflow.initial", "name", w.name))
 	}
-	return nil
+	// The engine knows a state by its spelling (ADR 0179 Q3): two declared
+	// states spelled alike would be one state to it.
+	spelled := make(map[string]bool, len(w.order))
+	for _, st := range w.order {
+		name := fmt.Sprint(st)
+		if spelled[name] {
+			out = append(out, say("workflow.state-spelled-twice", "name", w.name, "state", name))
+		}
+		spelled[name] = true
+	}
+	return out
 }
 
 // instanceList returns the instances, most recently changed first.
@@ -993,8 +1081,8 @@ func (w *WorkflowService[E, S]) instanceList() []model.Instance {
 	}
 	records := m.Records()
 	out := make([]model.Instance, len(records))
-	for i, rec := range records {
-		out[i] = instanceOf(rec)
+	for i := range records {
+		out[i] = instanceOf(&records[i])
 	}
 	slices.SortStableFunc(out, func(a, b model.Instance) int { return b.EnteredAt.Compare(a.EnteredAt) })
 	return out

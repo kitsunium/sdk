@@ -315,11 +315,12 @@ framework/         the layer above pkg/v1, packages of the root module — ADR 0
                    kit (the runtime a product imports; beneath it the
                      opt-in subsystems config/{toml,yaml}, server,
                      studio, store — the stores and databases, ADR
-                     0179 — and queue — the queues, step 4 —, storetest,
-                     the stores' conformance suite, and kittest, a
-                     product's tests on disk — ADR 0175; its engine
-                     internal/kit, + plug, serverkit, studiokit, storekit,
-                     queuekit), telemetry (the telemetry port + exporter
+                     0179 —, queue — the queues, step 4 — and workflow
+                     — the workflows, step 5 —, storetest, the stores'
+                     conformance suite, and kittest, a product's tests
+                     on disk — ADR 0175; its engine internal/kit, +
+                     plug, serverkit, studiokit, storekit, queuekit,
+                     workflowkit), telemetry (the telemetry port + exporter
                      — ADR 0149),
                    entitlement, selfupdate, gate, git (the distribution
                      mechanisms the SDK library shipped until ADR 0158:

@@ -19,7 +19,8 @@ declaration at once, the refusal naming this import and carrying
 Until ADR 0179's step 10, `framework/kit` imports this package itself
 (`subsystems.go`, Q8), and the three connectors (`framework/connectors/
 {postgres,mysql,sqlite}`) do too (§4), and so does `framework/kit/queue` (step
-4, Q4: a queue on a database joins the stores' transactions): no product
+4, Q4: a queue on a database joins the stores' transactions), and
+`framework/kit/workflow` (step 5, Q4: a workflow runs over a store): no product
 needs the line yet, and `kit gen` will write it (§5).
 
 ## Contents

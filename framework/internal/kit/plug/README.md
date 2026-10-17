@@ -6,9 +6,9 @@
 import "github.com/kitsunium/sdk/framework/internal/kit/plug"
 ```
 
-Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/kit/server), the Studio's event stream and its profiler (framework/kit/studio), the stores and the databases (framework/kit/store), the queues (framework/kit/queue). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
+Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the frontends' file server and the process sampler of the runtime graph (framework/kit/server), the Studio's event stream and its profiler (framework/kit/studio), the stores and the databases (framework/kit/store), the queues (framework/kit/queue), the workflows (framework/kit/workflow). kit reads what they registered through the hooks declared here, and imports none of the SDK packages behind them: a product that does not import a subsystem neither links nor initialises its packages.
 
-It is also the contract between kit's core and the subsystems ADR 0179 takes out of it, as database/sql/driver is between database/sql and a driver: the store subsystem's engine over documents, its siblings, kit's scope on a database and its migrations ([Stores](#Stores)), which framework/kit/store sets; the refusals an engine says in kit's terms ([Refusal](#Refusal)); what kit's transactions offer an engine that takes part in them ([Transaction](#Transaction)); and the queue subsystem's brokers and their consumer ([Queues](#Queues)), which framework/kit/queue sets.
+It is also the contract between kit's core and the subsystems ADR 0179 takes out of it, as database/sql/driver is between database/sql and a driver: the store subsystem's engine over documents, its siblings, kit's scope on a database and its migrations ([Stores](#Stores)), which framework/kit/store sets; the refusals an engine says in kit's terms ([Refusal](#Refusal)); what kit's transactions offer an engine that takes part in them ([Transaction](#Transaction)); the queue subsystem's brokers and their consumer ([Queues](#Queues)), which framework/kit/queue sets; and the workflow subsystem's engine and the ports it runs on ([Workflows](#Workflows)), which framework/kit/workflow sets.
 
 The package imports the standard library and the framework's model only, so that kit and every subsystem can import it.
 
@@ -52,6 +52,7 @@ The package imports the standard library and the framework's model only, so that
   - [func \(Documents\) KeyList\(ctx context.Context\) iter.Seq2\[string, error\]](<#Documents.KeyList>)
   - [func \(Documents\) TombstoneList\(ctx context.Context\) \(\[\]TombstoneValue, error\)](<#Documents.TombstoneList>)
   - [func \(Documents\) VersionList\(ctx context.Context, key string\) \(\[\]VersionValue, error\)](<#Documents.VersionList>)
+- [type EnterHookSpec](<#EnterHookSpec>)
 - [type EntrySource](<#EntrySource>)
   - [func \(EntrySource\) KeyedEntries\(ctx context.Context, limit int\) \(\[\]EntryValue, error\)](<#EntrySource.KeyedEntries>)
 - [type EntryValue](<#EntryValue>)
@@ -132,6 +133,7 @@ The package imports the standard library and the framework's model only, so that
   - [func \(Transaction\) Local\(ctx context.Context\) bool](<#Transaction.Local>)
   - [func \(Transaction\) Retell\(ctx context.Context, fn func\(\)\)](<#Transaction.Retell>)
   - [func \(Transaction\) Undo\(ctx context.Context, store string, restore func\(ctx context.Context\) error\)](<#Transaction.Undo>)
+- [type TransitionSpec](<#TransitionSpec>)
 - [type Trasher](<#Trasher>)
   - [func \(Trasher\) Purge\(ctx context.Context, key string\) error](<#Trasher.Purge>)
   - [func \(Trasher\) Tombstones\(ctx context.Context\) \(\[\]TombstoneValue, error\)](<#Trasher.Tombstones>)
@@ -144,6 +146,36 @@ The package imports the standard library and the framework's model only, so that
 - [type VersionWeightValue](<#VersionWeightValue>)
 - [type VersionWeighter](<#VersionWeighter>)
   - [func \(VersionWeighter\) VersionWeight\(ctx context.Context\) \(VersionWeightValue, error\)](<#VersionWeighter.VersionWeight>)
+- [type WorkflowChangeValue](<#WorkflowChangeValue>)
+- [type WorkflowConfig](<#WorkflowConfig>)
+- [type WorkflowDriverConfig](<#WorkflowDriverConfig>)
+- [type WorkflowEngine](<#WorkflowEngine>)
+  - [func \(WorkflowEngine\) Census\(\) map\[string\]int](<#WorkflowEngine.Census>)
+  - [func \(WorkflowEngine\) Changed\(ctx context.Context, key string\) error](<#WorkflowEngine.Changed>)
+  - [func \(WorkflowEngine\) Deleted\(ctx context.Context, key string\) error](<#WorkflowEngine.Deleted>)
+  - [func \(WorkflowEngine\) Fire\(ctx context.Context, key string, event string\) \(WorkflowEntityValue, error\)](<#WorkflowEngine.Fire>)
+  - [func \(WorkflowEngine\) Records\(\) \[\]WorkflowRecordValue](<#WorkflowEngine.Records>)
+  - [func \(WorkflowEngine\) Run\(ctx context.Context\) error](<#WorkflowEngine.Run>)
+  - [func \(WorkflowEngine\) Start\(ctx context.Context, e WorkflowEntityValue\) \(WorkflowEntityValue, error\)](<#WorkflowEngine.Start>)
+- [type WorkflowEntityValue](<#WorkflowEntityValue>)
+- [type WorkflowFailure](<#WorkflowFailure>)
+- [type WorkflowFiringValue](<#WorkflowFiringValue>)
+- [type WorkflowJournal](<#WorkflowJournal>)
+  - [func \(WorkflowJournal\) Delete\(ctx context.Context, keys ...string\) error](<#WorkflowJournal.Delete>)
+  - [func \(WorkflowJournal\) Load\(ctx context.Context\) \(\[\]WorkflowRecordValue, error\)](<#WorkflowJournal.Load>)
+  - [func \(WorkflowJournal\) Save\(ctx context.Context, records ...WorkflowRecordValue\) error](<#WorkflowJournal.Save>)
+- [type WorkflowLoopEvent](<#WorkflowLoopEvent>)
+- [type WorkflowLoopEventValue](<#WorkflowLoopEventValue>)
+- [type WorkflowRecordValue](<#WorkflowRecordValue>)
+- [type WorkflowStepValue](<#WorkflowStepValue>)
+- [type WorkflowStore](<#WorkflowStore>)
+  - [func \(WorkflowStore\) All\(ctx context.Context\) iter.Seq2\[WorkflowEntityValue, error\]](<#WorkflowStore.All>)
+  - [func \(WorkflowStore\) Get\(ctx context.Context, key string\) \(WorkflowEntityValue, bool, error\)](<#WorkflowStore.Get>)
+  - [func \(WorkflowStore\) Insert\(ctx context.Context, e WorkflowEntityValue\) \(bool, error\)](<#WorkflowStore.Insert>)
+  - [func \(WorkflowStore\) Key\(e WorkflowEntityValue\) string](<#WorkflowStore.Key>)
+  - [func \(WorkflowStore\) Replace\(ctx context.Context, e WorkflowEntityValue\) \(bool, error\)](<#WorkflowStore.Replace>)
+- [type WorkflowTrigger](<#WorkflowTrigger>)
+- [type WorkflowWake](<#WorkflowWake>)
 - [type WriteMode](<#WriteMode>)
 
 ## Constants
@@ -323,6 +355,202 @@ const RefusalVersionsRewrite Refusal = 16
 
 RefusalVersionsRewrite is a rewrite of versions that adds or renumbers one.
 
+<a name="WorkflowCreateEvent"></a>
+```go
+const WorkflowCreateEvent string = "create"
+```
+
+WorkflowCreateEvent is the event of a transition Start fires: an entity entering its workflow.
+
+<a name="WorkflowEntityExists"></a>
+```go
+const WorkflowEntityExists WorkflowFailure = 3
+```
+
+WorkflowEntityExists is an entity already under the key Start names.
+
+<a name="WorkflowEntityMissing"></a>
+```go
+const WorkflowEntityMissing WorkflowFailure = 2
+```
+
+WorkflowEntityMissing is no entity under the key.
+
+<a name="WorkflowFailureNone"></a>
+```go
+const WorkflowFailureNone WorkflowFailure = 0
+```
+
+WorkflowFailureNone is no failure kit words.
+
+<a name="WorkflowFunctionPanicked"></a>
+```go
+const WorkflowFunctionPanicked WorkflowFailure = 12
+```
+
+WorkflowFunctionPanicked is a guard or an instant function that panicked.
+
+<a name="WorkflowHookChangedKey"></a>
+```go
+const WorkflowHookChangedKey WorkflowFailure = 8
+```
+
+WorkflowHookChangedKey is an OnEnter hook that changed its entity's key.
+
+<a name="WorkflowHookChangedState"></a>
+```go
+const WorkflowHookChangedState WorkflowFailure = 7
+```
+
+WorkflowHookChangedState is an OnEnter hook that changed the state it entered.
+
+<a name="WorkflowHookFailed"></a>
+```go
+const WorkflowHookFailed WorkflowFailure = 5
+```
+
+WorkflowHookFailed is a hook that returned an error, joined to it; its "hook" and "event" fields name the hook's kind and the event.
+
+<a name="WorkflowHookPanicked"></a>
+```go
+const WorkflowHookPanicked WorkflowFailure = 6
+```
+
+WorkflowHookPanicked is a hook that panicked; its "hook", "panic" and "stack" fields say which and how.
+
+<a name="WorkflowJournalFailed"></a>
+```go
+const WorkflowJournalFailed WorkflowFailure = 11
+```
+
+WorkflowJournalFailed is the workflow's journal that failed.
+
+<a name="WorkflowKeyEmpty"></a>
+```go
+const WorkflowKeyEmpty WorkflowFailure = 4
+```
+
+WorkflowKeyEmpty is an entity whose key is empty.
+
+<a name="WorkflowLoopOther"></a>
+```go
+const WorkflowLoopOther WorkflowLoopEvent = 0
+```
+
+WorkflowLoopOther is an event of the loop kit shows nothing of.
+
+<a name="WorkflowLoopPanicked"></a>
+```go
+const WorkflowLoopPanicked WorkflowFailure = 13
+```
+
+WorkflowLoopPanicked is the loop that panicked.
+
+<a name="WorkflowLoopRunEnded"></a>
+```go
+const WorkflowLoopRunEnded WorkflowLoopEvent = 2
+```
+
+WorkflowLoopRunEnded is a run ending: Started, Ended, Next and what it could not fire, Err, are set.
+
+<a name="WorkflowLoopRunStarted"></a>
+```go
+const WorkflowLoopRunStarted WorkflowLoopEvent = 1
+```
+
+WorkflowLoopRunStarted is a run starting: Wake and Started are set.
+
+<a name="WorkflowLoopWaiting"></a>
+```go
+const WorkflowLoopWaiting WorkflowLoopEvent = 3
+```
+
+WorkflowLoopWaiting is the loop asleep until Next, zero for no transition due.
+
+<a name="WorkflowReentrant"></a>
+```go
+const WorkflowReentrant WorkflowFailure = 9
+```
+
+WorkflowReentrant is an OnEnter hook that fired its own workflow.
+
+<a name="WorkflowStoreFailed"></a>
+```go
+const WorkflowStoreFailed WorkflowFailure = 10
+```
+
+WorkflowStoreFailed is the workflow's store that failed.
+
+<a name="WorkflowTransitionRefused"></a>
+```go
+const WorkflowTransitionRefused WorkflowFailure = 1
+```
+
+WorkflowTransitionRefused is an event that leaves no transition from the entity's state.
+
+<a name="WorkflowTriggerDeadline"></a>
+```go
+const WorkflowTriggerDeadline WorkflowTrigger = 3
+```
+
+WorkflowTriggerDeadline is a timer at an instant the entity carries.
+
+<a name="WorkflowTriggerDelay"></a>
+```go
+const WorkflowTriggerDelay WorkflowTrigger = 2
+```
+
+WorkflowTriggerDelay is a timer: a duration spent in a state.
+
+<a name="WorkflowTriggerEvent"></a>
+```go
+const WorkflowTriggerEvent WorkflowTrigger = 1
+```
+
+WorkflowTriggerEvent is an event code fires.
+
+<a name="WorkflowTriggerGuard"></a>
+```go
+const WorkflowTriggerGuard WorkflowTrigger = 4
+```
+
+WorkflowTriggerGuard is a condition on the entity that holds.
+
+<a name="WorkflowTriggerStart"></a>
+```go
+const WorkflowTriggerStart WorkflowTrigger = 0
+```
+
+WorkflowTriggerStart is a creation, which Start fires.
+
+<a name="WorkflowWaitAbandoned"></a>
+```go
+const WorkflowWaitAbandoned WorkflowFailure = 14
+```
+
+WorkflowWaitAbandoned is a caller that stopped waiting for its entity: its context ended.
+
+<a name="WorkflowWakeChange"></a>
+```go
+const WorkflowWakeChange WorkflowWake = 2
+```
+
+WorkflowWakeChange is a write that may have brought one forward.
+
+<a name="WorkflowWakeDue"></a>
+```go
+const WorkflowWakeDue WorkflowWake = 1
+```
+
+WorkflowWakeDue is a transition coming due.
+
+<a name="WorkflowWakeStart"></a>
+```go
+const WorkflowWakeStart WorkflowWake = 0
+```
+
+WorkflowWakeStart is the loop's first run.
+
 <a name="WriteInsert"></a>
 ```go
 const WriteInsert WriteMode = 1
@@ -394,6 +622,13 @@ var StudioProfiler atomic.Pointer[ProfilerConfig]
 ```
 
 StudioProfiler is the Studio's profiler; nil until framework/kit/studio is imported.
+
+<a name="Workflows"></a>
+```go
+var Workflows atomic.Pointer[WorkflowDriverConfig]
+```
+
+Workflows is the workflow subsystem: the engine kit's workflows run on; nil until framework/kit/workflow is imported. A product that declares a workflow without it is refused at the start (ADR 0179 §6).
 
 <a name="Refuse"></a>
 ## func [Refuse](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_refusal.go>)
@@ -838,6 +1073,21 @@ func (Documents) VersionList(ctx context.Context, key string) ([]VersionValue, e
 ```
 
 VersionList is the versions of the document key, newest first.
+
+<a name="EnterHookSpec"></a>
+## type [EnterHookSpec](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)
+
+EnterHookSpec is one hook run as an entity enters a state, before it is stored: an error cancels the transition.
+
+```go
+type EnterHookSpec struct {
+	// Fn runs the hook; it may change the entity, not its state nor its
+	// key.
+	Fn    func(ctx context.Context, e *WorkflowEntityValue) error
+	// State is the state whose entering runs it.
+	State string
+}
+```
 
 <a name="EntrySource"></a>
 ## type [EntrySource](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
@@ -1876,6 +2126,32 @@ func (Transaction) Undo(ctx context.Context, store string, restore func(ctx cont
 
 Undo keeps restore, which a rollback of the transaction ctx carries runs; nothing outside one. store names the store in a log line.
 
+<a name="TransitionSpec"></a>
+## type [TransitionSpec](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)
+
+TransitionSpec declares one transition: an event's, a timer's after a delay or at an instant the entity carries, or a guard's.
+
+```go
+type TransitionSpec struct {
+	// Instant is when a deadline's transition comes due, false for no
+	// instant for now; set for WorkflowTriggerDeadline.
+	Instant func(e WorkflowEntityValue) (time.Time, bool)
+	// Guard is the condition a guard's transition waits for; set for
+	// WorkflowTriggerGuard.
+	Guard   func(e WorkflowEntityValue) bool
+	// Event names the transition.
+	Event   string
+	// From is the state it leaves.
+	From    string
+	// To is the state it enters.
+	To      string
+	// Delay is how long a delay's transition waits in From.
+	Delay   time.Duration
+	// Trigger is what fires it: an event, a delay, a deadline or a guard.
+	Trigger WorkflowTrigger
+}
+```
+
 <a name="Trasher"></a>
 ## type [Trasher](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store_interface.go>)
 
@@ -2021,6 +2297,428 @@ func (VersionWeighter) VersionWeight(ctx context.Context) (VersionWeightValue, e
 ```
 
 VersionWeight is what the store's versions and trash weigh.
+
+<a name="WorkflowChangeValue"></a>
+## type [WorkflowChangeValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)
+
+WorkflowChangeValue is one stored transition: the entity as stored after it, the states it left and entered, what fired it, who and when.
+
+```go
+type WorkflowChangeValue struct {
+	// At is when it happened.
+	At      time.Time
+	// Entity is the entity, as stored after the transition.
+	Entity  WorkflowEntityValue
+	// Key is the entity's key.
+	Key     string
+	// Event is the transition's name; WorkflowCreateEvent for Start.
+	Event   string
+	// From is the state left, "" on creation.
+	From    string
+	// To is the state entered.
+	To      string
+	// Actor is who fired it, "" for the loop.
+	Actor   string
+	// Trigger is what fired it.
+	Trigger WorkflowTrigger
+}
+```
+
+<a name="WorkflowConfig"></a>
+## type [WorkflowConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)
+
+WorkflowConfig is one workflow as its engine runs it: its states and transitions, its hooks, the store and the journal it runs over, and how the app's loop, clock and spans see it.
+
+```go
+type WorkflowConfig struct {
+	// Store is the workflow's entities, as the engine reads and writes them.
+	Store        WorkflowStore
+	// Journal keeps what the engine knows of each entity — its state, since
+	// when, its latest transitions —; nil keeps it in memory alone.
+	Journal      WorkflowJournal
+	// Clock is the app's clock, which the engine stamps and waits on.
+	Clock        Clock
+	// Actor names, from the context of a transition someone fired, who
+	// fired it.
+	Actor        func(ctx context.Context) string
+	// Observe brackets each transition the loop fires: the context it runs
+	// with, and the function told how it ended.
+	Observe      func(ctx context.Context, f WorkflowFiringValue) (context.Context, func(err error))
+	// Report receives what the engine reports and no caller's return value
+	// carries: an OnTransition hook that failed, a panic, a journal's write
+	// that failed.
+	Report       func(ctx context.Context, err error)
+	// OnLoop is told each run of the loop, and each wait.
+	OnLoop       func(e WorkflowLoopEventValue)
+	// Initial is the state Start enters an entity in.
+	Initial      string
+	// Transitions are the declared transitions, in declaration order.
+	Transitions  []TransitionSpec
+	// OnEnter are the hooks run as an entity enters a state, in
+	// declaration order.
+	OnEnter      []EnterHookSpec
+	// OnTransition are the hooks run after every stored transition, in
+	// declaration order.
+	OnTransition []func(ctx context.Context, c WorkflowChangeValue) error
+	// MinGap is the least a wake for a due transition waits after a run.
+	MinGap       time.Duration
+	// BackoffBase is the wait after a run that failed, doubled after each,
+	// up to BackoffMax.
+	BackoffBase  time.Duration
+	// BackoffMax bounds the wait after a run that failed.
+	BackoffMax   time.Duration
+	// MaxHistory caps the transitions remembered per entity.
+	MaxHistory   int
+}
+```
+
+<a name="WorkflowDriverConfig"></a>
+## type [WorkflowDriverConfig](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)
+
+WorkflowDriverConfig is what framework/kit/workflow plugs into kit: how a workflow's engine opens, and how kit tells the engine's failures apart.
+
+```go
+type WorkflowDriverConfig struct {
+	// Open opens the engine of one workflow, as cfg declares it: it reads
+	// the journal and every entity of the store once.
+	Open   func(ctx context.Context, cfg *WorkflowConfig) (WorkflowEngine, error)
+	// Failed reports whether err, or an error it wraps, is the engine's
+	// failure of kind: the SDK's sentinels stay in the subsystem, and the
+	// error keeps the fields the engine gave it.
+	Failed func(err error, kind WorkflowFailure) bool
+}
+```
+
+<a name="WorkflowEngine"></a>
+## type [WorkflowEngine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+WorkflowEngine is one workflow's engine as kit's core uses it: the transitions code fires, what a write of the store tells it, what it counts and records, and its loop.
+
+```go
+type WorkflowEngine interface {
+	// Census counts the entities per state.
+	Census() map[string]int
+	// Changed tells the engine the entity under key was written.
+	Changed(ctx context.Context, key string) error
+	// Deleted tells the engine the entity under key was deleted.
+	Deleted(ctx context.Context, key string) error
+	// Fire moves the entity under key along the event's transition leaving
+	// its state.
+	Fire(ctx context.Context, key string, event string) (WorkflowEntityValue, error)
+	// Records are what the engine knows of each entity.
+	Records() []WorkflowRecordValue
+	// Run runs the loop that fires the timers and the guards, until ctx
+	// ends.
+	Run(ctx context.Context) error
+	// Start enters e in the workflow, in the initial state: its OnEnter
+	// hooks run, then it is inserted in the store.
+	Start(ctx context.Context, e WorkflowEntityValue) (WorkflowEntityValue, error)
+}
+```
+
+<a name="WorkflowEngine.Census"></a>
+### func \(WorkflowEngine\) [Census](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowEngine) Census() map[string]int
+```
+
+Census counts the entities per state.
+
+<a name="WorkflowEngine.Changed"></a>
+### func \(WorkflowEngine\) [Changed](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowEngine) Changed(ctx context.Context, key string) error
+```
+
+Changed tells the engine the entity under key was written.
+
+<a name="WorkflowEngine.Deleted"></a>
+### func \(WorkflowEngine\) [Deleted](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowEngine) Deleted(ctx context.Context, key string) error
+```
+
+Deleted tells the engine the entity under key was deleted.
+
+<a name="WorkflowEngine.Fire"></a>
+### func \(WorkflowEngine\) [Fire](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowEngine) Fire(ctx context.Context, key string, event string) (WorkflowEntityValue, error)
+```
+
+Fire moves the entity under key along the event's transition leaving its state.
+
+<a name="WorkflowEngine.Records"></a>
+### func \(WorkflowEngine\) [Records](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowEngine) Records() []WorkflowRecordValue
+```
+
+Records are what the engine knows of each entity.
+
+<a name="WorkflowEngine.Run"></a>
+### func \(WorkflowEngine\) [Run](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowEngine) Run(ctx context.Context) error
+```
+
+Run runs the loop that fires the timers and the guards, until ctx ends.
+
+<a name="WorkflowEngine.Start"></a>
+### func \(WorkflowEngine\) [Start](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowEngine) Start(ctx context.Context, e WorkflowEntityValue) (WorkflowEntityValue, error)
+```
+
+Start enters e in the workflow, in the initial state: its OnEnter hooks run, then it is inserted in the store.
+
+<a name="WorkflowEntityValue"></a>
+## type [WorkflowEntityValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)
+
+WorkflowEntityValue is one entity as a workflow's engine holds it: the product's, kept as any — the workflow's typed facade asserts it to its type —, and its state as the facade spells it, which the engine reads and sets.
+
+```go
+type WorkflowEntityValue struct {
+	// Value is the product's entity.
+	Value any
+	// State is the entity's state, spelled.
+	State string
+}
+```
+
+<a name="WorkflowFailure"></a>
+## type [WorkflowFailure](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)
+
+WorkflowFailure is a failure of a workflow's engine, as kit words it.
+
+```go
+type WorkflowFailure uint8
+```
+
+<a name="WorkflowFiringValue"></a>
+## type [WorkflowFiringValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)
+
+WorkflowFiringValue is one transition the loop is about to fire: the entity's key, the event, the states it leaves and enters, and its trigger.
+
+```go
+type WorkflowFiringValue struct {
+	// Key is the entity's key.
+	Key     string
+	// Event is the transition's name.
+	Event   string
+	// From is the state it leaves.
+	From    string
+	// To is the state it enters.
+	To      string
+	// Trigger is what fires it.
+	Trigger WorkflowTrigger
+}
+```
+
+<a name="WorkflowJournal"></a>
+## type [WorkflowJournal](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+WorkflowJournal is the port a workflow's engine keeps what it knows of each entity in: the workflow's file under the data directory, or its table on the database that keeps its store.
+
+```go
+type WorkflowJournal interface {
+	// Delete forgets the records of keys; one already gone is no error.
+	Delete(ctx context.Context, keys ...string) error
+	// Load reads every record the journal kept.
+	Load(ctx context.Context) ([]WorkflowRecordValue, error)
+	// Save keeps records, in the transaction ctx carries for a database.
+	Save(ctx context.Context, records ...WorkflowRecordValue) error
+}
+```
+
+<a name="WorkflowJournal.Delete"></a>
+### func \(WorkflowJournal\) [Delete](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowJournal) Delete(ctx context.Context, keys ...string) error
+```
+
+Delete forgets the records of keys; one already gone is no error.
+
+<a name="WorkflowJournal.Load"></a>
+### func \(WorkflowJournal\) [Load](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowJournal) Load(ctx context.Context) ([]WorkflowRecordValue, error)
+```
+
+Load reads every record the journal kept.
+
+<a name="WorkflowJournal.Save"></a>
+### func \(WorkflowJournal\) [Save](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowJournal) Save(ctx context.Context, records ...WorkflowRecordValue) error
+```
+
+Save keeps records, in the transaction ctx carries for a database.
+
+<a name="WorkflowLoopEvent"></a>
+## type [WorkflowLoopEvent](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)
+
+WorkflowLoopEvent is what a workflow's loop reports.
+
+```go
+type WorkflowLoopEvent uint8
+```
+
+<a name="WorkflowLoopEventValue"></a>
+## type [WorkflowLoopEventValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)
+
+WorkflowLoopEventValue is what a workflow's loop reports: a run started, a run ended, a wait.
+
+```go
+type WorkflowLoopEventValue struct {
+	// Err is what a run could not fire, nil for nothing.
+	Err     error
+	// Started is when the run started.
+	Started time.Time
+	// Ended is when the run ended.
+	Ended   time.Time
+	// Next is when the loop wakes next, zero for no transition due.
+	Next    time.Time
+	// Kind is what the event reports.
+	Kind    WorkflowLoopEvent
+	// Wake is why the run started.
+	Wake    WorkflowWake
+}
+```
+
+<a name="WorkflowRecordValue"></a>
+## type [WorkflowRecordValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)
+
+WorkflowRecordValue is what a workflow's engine knows of one entity: its state, since when, and its latest transitions, oldest first.
+
+```go
+type WorkflowRecordValue struct {
+	// Entered is when the entity entered its state.
+	Entered time.Time
+	// Key is the entity's key.
+	Key     string
+	// State is the entity's state.
+	State   string
+	// History are its latest transitions, oldest first.
+	History []WorkflowStepValue
+}
+```
+
+<a name="WorkflowStepValue"></a>
+## type [WorkflowStepValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)
+
+WorkflowStepValue is one transition of an entity's history: the event, the states it left and entered, what fired it, who and when.
+
+```go
+type WorkflowStepValue struct {
+	// At is when it happened.
+	At      time.Time
+	// Event is the transition's name.
+	Event   string
+	// From is the state left, "" on creation.
+	From    string
+	// To is the state entered.
+	To      string
+	// Actor is who fired it, "" for the loop.
+	Actor   string
+	// Trigger is what fired it.
+	Trigger WorkflowTrigger
+}
+```
+
+<a name="WorkflowStore"></a>
+## type [WorkflowStore](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+WorkflowStore is the port a workflow's engine reads and writes its entities through: the workflow's store.
+
+```go
+type WorkflowStore interface {
+	// All yields every entity of the store.
+	All(ctx context.Context) iter.Seq2[WorkflowEntityValue, error]
+	// Get reads the entity under key; false when there is none.
+	Get(ctx context.Context, key string) (WorkflowEntityValue, bool, error)
+	// Insert writes e unless its key is taken; false when it was.
+	Insert(ctx context.Context, e WorkflowEntityValue) (bool, error)
+	// Key is e's key.
+	Key(e WorkflowEntityValue) string
+	// Replace writes e over the entity of its key; false when there was
+	// none.
+	Replace(ctx context.Context, e WorkflowEntityValue) (bool, error)
+}
+```
+
+<a name="WorkflowStore.All"></a>
+### func \(WorkflowStore\) [All](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowStore) All(ctx context.Context) iter.Seq2[WorkflowEntityValue, error]
+```
+
+All yields every entity of the store.
+
+<a name="WorkflowStore.Get"></a>
+### func \(WorkflowStore\) [Get](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowStore) Get(ctx context.Context, key string) (WorkflowEntityValue, bool, error)
+```
+
+Get reads the entity under key; false when there is none.
+
+<a name="WorkflowStore.Insert"></a>
+### func \(WorkflowStore\) [Insert](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowStore) Insert(ctx context.Context, e WorkflowEntityValue) (bool, error)
+```
+
+Insert writes e unless its key is taken; false when it was.
+
+<a name="WorkflowStore.Key"></a>
+### func \(WorkflowStore\) [Key](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowStore) Key(e WorkflowEntityValue) string
+```
+
+Key is e's key.
+
+<a name="WorkflowStore.Replace"></a>
+### func \(WorkflowStore\) [Replace](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow_interface.go>)
+
+```go
+func (WorkflowStore) Replace(ctx context.Context, e WorkflowEntityValue) (bool, error)
+```
+
+Replace writes e over the entity of its key; false when there was none.
+
+<a name="WorkflowTrigger"></a>
+## type [WorkflowTrigger](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)
+
+WorkflowTrigger is what fires a transition.
+
+```go
+type WorkflowTrigger uint8
+```
+
+<a name="WorkflowWake"></a>
+## type [WorkflowWake](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/workflow.go>)
+
+WorkflowWake is why a run of a workflow's loop started.
+
+```go
+type WorkflowWake uint8
+```
 
 <a name="WriteMode"></a>
 ## type [WriteMode](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)

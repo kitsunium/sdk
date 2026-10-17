@@ -11,7 +11,7 @@ on it links every subsystem; this probe imports none, and is what
 the symbols of: none of the store subsystem's engines, none of kit's own
 store code (`kitStoreCode`, step 3b), none of the queue subsystem's brokers
 and nothing of the SDK's queue but the `init` of the package the mail spool
-imports (step 4). Once step 10 drops the facade's imports, `cliprobe` is that
+imports (step 4), and nothing of the workflow subsystem's engine nor of the SDK's statemachine, out of its graph since step 5. Once step 10 drops the facade's imports, `cliprobe` is that
 program again and this probe can go.
 
 ## Contents

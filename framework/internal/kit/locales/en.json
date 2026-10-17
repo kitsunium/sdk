@@ -276,6 +276,7 @@
   "workflow.initial": "workflow \"{name}\" has no initial state: call Initial",
   "workflow.instant-nil": "workflow \"{name}\": timer transition \"{event}\" has a nil instant function",
   "workflow.needs": "workflow \"{name}\" needs a store and a state function",
+  "workflow.state-spelled-twice": "workflow \"{name}\": two states are spelled {state}, which the engine would take for one: give each state its own spelling",
   "workflow.timer-nil-setting": "workflow \"{name}\": timer transition \"{event}\" waits a nil setting",
   "workflow.timer-positive": "workflow \"{name}\": timer transition \"{event}\" needs a positive duration"
 }

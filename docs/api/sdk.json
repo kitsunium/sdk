@@ -78,7 +78,7 @@
       "name": "plug",
       "dir": "framework/internal/kit/plug",
       "layer": "framework",
-      "doc": "Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the\nfrontends' file server and the process sampler of the runtime graph\n(framework/kit/server), the Studio's event stream and its profiler\n(framework/kit/studio), the stores and the databases (framework/kit/store),\nthe queues (framework/kit/queue). kit reads what they registered through the\nhooks declared here, and imports none of the SDK packages behind them: a\nproduct that does not import a subsystem neither links nor initialises its\npackages.\n\nIt is also the contract between kit's core and the subsystems ADR 0179\ntakes out of it, as database/sql/driver is between database/sql and a\ndriver: the store subsystem's engine over documents, its siblings, kit's\nscope on a database and its migrations ([Stores]), which framework/kit/store\nsets; the refusals an engine says in kit's terms ([Refusal]); what kit's\ntransactions offer an engine that takes part in them ([Transaction]); and\nthe queue subsystem's brokers and their consumer ([Queues]), which\nframework/kit/queue sets.\n\nThe package imports the standard library and the framework's model only,\nso that kit and every subsystem can import it.\n"
+      "doc": "Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the\nfrontends' file server and the process sampler of the runtime graph\n(framework/kit/server), the Studio's event stream and its profiler\n(framework/kit/studio), the stores and the databases (framework/kit/store),\nthe queues (framework/kit/queue), the workflows (framework/kit/workflow).\nkit reads what they registered through the\nhooks declared here, and imports none of the SDK packages behind them: a\nproduct that does not import a subsystem neither links nor initialises its\npackages.\n\nIt is also the contract between kit's core and the subsystems ADR 0179\ntakes out of it, as database/sql/driver is between database/sql and a\ndriver: the store subsystem's engine over documents, its siblings, kit's\nscope on a database and its migrations ([Stores]), which framework/kit/store\nsets; the refusals an engine says in kit's terms ([Refusal]); what kit's\ntransactions offer an engine that takes part in them ([Transaction]); the\nqueue subsystem's brokers and their consumer ([Queues]), which\nframework/kit/queue sets; and the workflow subsystem's engine and the\nports it runs on ([Workflows]), which framework/kit/workflow sets.\n\nThe package imports the standard library and the framework's model only,\nso that kit and every subsystem can import it.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/internal/kit/queuekit",
@@ -107,6 +107,13 @@
       "dir": "framework/internal/kit/studiokit",
       "layer": "framework",
       "doc": "Package studiokit — the Studio's live events, as a Server-Sent Events\nstream.\n\nPackage studiokit — the Studio's profiler: the live heap folded onto the\ngraph's nodes, and every goroutine grouped.\n\nPackage studiokit is what framework/kit/studio plugs into kit: the\nStudio's event stream (the SDK's net/sse) and its profiler (the SDK's\nprofiling). kit imports neither: a product that does not import the\nStudio neither links nor initialises them.\n\nPackage studiokit — the compile-time proof that the stream is kit's.\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/framework/internal/kit/workflowkit",
+      "name": "workflowkit",
+      "dir": "framework/internal/kit/workflowkit",
+      "layer": "framework",
+      "doc": "Package workflowkit is what framework/kit/workflow plugs into kit: the\nengine kit's workflows run on — the SDK's statemachine, instantiated once,\nover kit's entity and the state's spelling (ADR 0179 §1, step 5, Q3) —,\nits loop of timers and guards, and the conversions between the engine's\nvalues and plug's. kit's core imports none of the SDK's statemachine: it\nreaches it through plug, and a product that declares no workflow links\nnone of it.\n\nPackage workflowkit — the compile-time proof that the engine is kit's.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/internal/service/entitlement",
@@ -198,6 +205,13 @@
       "dir": "framework/kit/studio",
       "layer": "framework",
       "doc": "Package studio serves, in dev, the read-only API the kit tool's Studio\nreads: the graph and its event stream, traces, instances and items, the\nsource, the dev tools — the process, the databases, goroutines, the heap\nprofile, logs, the mailbox, former values. A server imports it to be seen\nby the Studio:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/studio\"\n\nWithout it a product links none of those routes, the event stream or the\nprofiler; in dev the start warns that the Studio was asked for.\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/framework/kit/workflow",
+      "name": "workflow",
+      "dir": "framework/kit/workflow",
+      "layer": "framework",
+      "doc": "Package workflow plugs kit's workflows in: the state machines a service\ndeclares over the entities of its stores — their event, timer and guard\ntransitions, their hooks and their loop —, which the SDK's statemachine\nruns. A product that declares one imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/workflow\"\n\nA product that declares none does not, and links none of that engine; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). It imports framework/kit/store:\na workflow runs over a store. framework/kit imports it too until ADR\n0179's last step: no product needs the line yet.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/model",
@@ -8456,7 +8470,7 @@
       "name": "WorkflowService",
       "spelled": "[E any, S comparable] struct{}",
       "canonical": "[E any, S comparable] struct{}",
-      "doc": "WorkflowService is a state machine over the entities of one store: the states an\nentity goes through, and the arrows between them. It is declared as data —\nwhich is why the diagram can draw it exactly — and it runs four kinds of\ntransitions:\n\n  - event transitions ([WorkflowService.On]), fired by code with [WorkflowService.Fire];\n  - timer transitions ([WorkflowService.After]), fired by the workflow's own loop\n    once an entity has spent a duration in a state;\n  - timer transitions at an instant the entity carries ([WorkflowService.At]) — a\n    due date, a deadline — fired by the same loop when it comes;\n  - guard transitions ([WorkflowService.When]), fired by the same loop as soon as\n    a condition on the entity holds.\n\nThe SDK's state-machine engine runs it (statemachine). Its loop never\npolls: it keeps an agenda of the transitions due, sleeps until the\nearliest, and a write of the store — which may bring one forward — wakes\nit. A workflow with nothing due does not run at all. Transitions of one\nentity run one at a time, of different entities at once.\n\nThe entity's state lives in the entity itself (the state function returns\na pointer to it), so the store stays the single source of truth; the\nengine keeps, beside it, when each entity entered its state and the\nhistory of its transitions — in the workflow's file under the data\ndirectory, so a timer keeps counting across a restart.\n",
+      "doc": "WorkflowService is a state machine over the entities of one store: the states an\nentity goes through, and the arrows between them. It is declared as data —\nwhich is why the diagram can draw it exactly — and it runs four kinds of\ntransitions:\n\n  - event transitions ([WorkflowService.On]), fired by code with [WorkflowService.Fire];\n  - timer transitions ([WorkflowService.After]), fired by the workflow's own loop\n    once an entity has spent a duration in a state;\n  - timer transitions at an instant the entity carries ([WorkflowService.At]) — a\n    due date, a deadline — fired by the same loop when it comes;\n  - guard transitions ([WorkflowService.When]), fired by the same loop as soon as\n    a condition on the entity holds.\n\nThe SDK's state-machine engine runs it (statemachine), which the workflow\nsubsystem plugs in (framework/kit/workflow, ADR 0179 step 5). Its loop never\npolls: it keeps an agenda of the transitions due, sleeps until the\nearliest, and a write of the store — which may bring one forward — wakes\nit. A workflow with nothing due does not run at all. Transitions of one\nentity run one at a time, of different entities at once.\n\nThe entity's state lives in the entity itself (the state function returns\na pointer to it), so the store stays the single source of truth; the\nengine keeps, beside it, when each entity entered its state and the\nhistory of its transitions — in the workflow's file under the data\ndirectory, so a timer keeps counting across a restart.\n",
       "file": "framework/internal/kit/workflow.go",
       "layer": "framework"
     },
@@ -9148,6 +9162,29 @@
       "canonical": "func(ctx context.Context, key string) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.VersionValue, error)",
       "doc": "VersionList is the versions of the document key, newest first.\n",
       "file": "framework/internal/kit/plug/store_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.EnterHookSpec",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "EnterHookSpec",
+      "spelled": "struct{Fn func(ctx context.Context, e *WorkflowEntityValue) error; State string}",
+      "canonical": "struct{Fn func(ctx context.Context, e *github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue) error; State string}",
+      "fields": [
+        {
+          "name": "Fn",
+          "type": "func(ctx context.Context, e *WorkflowEntityValue) error",
+          "doc": "Fn runs the hook; it may change the entity, not its state nor its\nkey.\n"
+        },
+        {
+          "name": "State",
+          "type": "string",
+          "doc": "State is the state whose entering runs it.\n"
+        }
+      ],
+      "doc": "EnterHookSpec is one hook run as an entity enters a state, before it is\nstored: an error cancels the transition.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
       "layer": "framework"
     },
     {
@@ -10892,6 +10929,54 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.TransitionSpec",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "TransitionSpec",
+      "spelled": "struct{Instant func(e WorkflowEntityValue) (time.Time, bool); Guard func(e WorkflowEntityValue) bool; Event string; From string; To string; Delay time.Duration; Trigger WorkflowTrigger}",
+      "canonical": "struct{Instant func(e github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue) (time.Time, bool); Guard func(e github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue) bool; Event string; From string; To string; Delay time.Duration; Trigger github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTrigger}",
+      "fields": [
+        {
+          "name": "Instant",
+          "type": "func(e WorkflowEntityValue) (time.Time, bool)",
+          "doc": "Instant is when a deadline's transition comes due, false for no\ninstant for now; set for WorkflowTriggerDeadline.\n"
+        },
+        {
+          "name": "Guard",
+          "type": "func(e WorkflowEntityValue) bool",
+          "doc": "Guard is the condition a guard's transition waits for; set for\nWorkflowTriggerGuard.\n"
+        },
+        {
+          "name": "Event",
+          "type": "string",
+          "doc": "Event names the transition.\n"
+        },
+        {
+          "name": "From",
+          "type": "string",
+          "doc": "From is the state it leaves.\n"
+        },
+        {
+          "name": "To",
+          "type": "string",
+          "doc": "To is the state it enters.\n"
+        },
+        {
+          "name": "Delay",
+          "type": "time.Duration",
+          "doc": "Delay is how long a delay's transition waits in From.\n"
+        },
+        {
+          "name": "Trigger",
+          "type": "WorkflowTrigger",
+          "doc": "Trigger is what fires it: an event, a delay, a deadline or a guard.\n"
+        }
+      ],
+      "doc": "TransitionSpec declares one transition: an event's, a timer's after a\ndelay or at an instant the entity carries, or a guard's.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Trasher",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
@@ -11070,6 +11155,954 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowChangeValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowChangeValue",
+      "spelled": "struct{At time.Time; Entity WorkflowEntityValue; Key string; Event string; From string; To string; Actor string; Trigger WorkflowTrigger}",
+      "canonical": "struct{At time.Time; Entity github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue; Key string; Event string; From string; To string; Actor string; Trigger github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTrigger}",
+      "fields": [
+        {
+          "name": "At",
+          "type": "time.Time",
+          "doc": "At is when it happened.\n"
+        },
+        {
+          "name": "Entity",
+          "type": "WorkflowEntityValue",
+          "doc": "Entity is the entity, as stored after the transition.\n"
+        },
+        {
+          "name": "Key",
+          "type": "string",
+          "doc": "Key is the entity's key.\n"
+        },
+        {
+          "name": "Event",
+          "type": "string",
+          "doc": "Event is the transition's name; WorkflowCreateEvent for Start.\n"
+        },
+        {
+          "name": "From",
+          "type": "string",
+          "doc": "From is the state left, \"\" on creation.\n"
+        },
+        {
+          "name": "To",
+          "type": "string",
+          "doc": "To is the state entered.\n"
+        },
+        {
+          "name": "Actor",
+          "type": "string",
+          "doc": "Actor is who fired it, \"\" for the loop.\n"
+        },
+        {
+          "name": "Trigger",
+          "type": "WorkflowTrigger",
+          "doc": "Trigger is what fired it.\n"
+        }
+      ],
+      "doc": "WorkflowChangeValue is one stored transition: the entity as stored after\nit, the states it left and entered, what fired it, who and when.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowConfig",
+      "spelled": "struct{Store WorkflowStore; Journal WorkflowJournal; Clock Clock; Actor func(ctx context.Context) string; Observe func(ctx context.Context, f WorkflowFiringValue) (context.Context, func(err error)); Report func(ctx context.Context, err error); OnLoop func(e WorkflowLoopEventValue); Initial string; Transitions []TransitionSpec; OnEnter []EnterHookSpec; OnTransition []func(ctx context.Context, c WorkflowChangeValue) error; MinGap time.Duration; BackoffBase time.Duration; BackoffMax time.Duration; MaxHistory int}",
+      "canonical": "struct{Store github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowStore; Journal github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowJournal; Clock github.com/kitsunium/sdk/framework/internal/kit/plug.Clock; Actor func(ctx context.Context) string; Observe func(ctx context.Context, f github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFiringValue) (context.Context, func(err error)); Report func(ctx context.Context, err error); OnLoop func(e github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowLoopEventValue); Initial string; Transitions []github.com/kitsunium/sdk/framework/internal/kit/plug.TransitionSpec; OnEnter []github.com/kitsunium/sdk/framework/internal/kit/plug.EnterHookSpec; OnTransition []func(ctx context.Context, c github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowChangeValue) error; MinGap time.Duration; BackoffBase time.Duration; BackoffMax time.Duration; MaxHistory int}",
+      "fields": [
+        {
+          "name": "Store",
+          "type": "WorkflowStore",
+          "doc": "Store is the workflow's entities, as the engine reads and writes them.\n"
+        },
+        {
+          "name": "Journal",
+          "type": "WorkflowJournal",
+          "doc": "Journal keeps what the engine knows of each entity — its state, since\nwhen, its latest transitions —; nil keeps it in memory alone.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "Clock",
+          "doc": "Clock is the app's clock, which the engine stamps and waits on.\n"
+        },
+        {
+          "name": "Actor",
+          "type": "func(ctx context.Context) string",
+          "doc": "Actor names, from the context of a transition someone fired, who\nfired it.\n"
+        },
+        {
+          "name": "Observe",
+          "type": "func(ctx context.Context, f WorkflowFiringValue) (context.Context, func(err error))",
+          "doc": "Observe brackets each transition the loop fires: the context it runs\nwith, and the function told how it ended.\n"
+        },
+        {
+          "name": "Report",
+          "type": "func(ctx context.Context, err error)",
+          "doc": "Report receives what the engine reports and no caller's return value\ncarries: an OnTransition hook that failed, a panic, a journal's write\nthat failed.\n"
+        },
+        {
+          "name": "OnLoop",
+          "type": "func(e WorkflowLoopEventValue)",
+          "doc": "OnLoop is told each run of the loop, and each wait.\n"
+        },
+        {
+          "name": "Initial",
+          "type": "string",
+          "doc": "Initial is the state Start enters an entity in.\n"
+        },
+        {
+          "name": "Transitions",
+          "type": "[]TransitionSpec",
+          "doc": "Transitions are the declared transitions, in declaration order.\n"
+        },
+        {
+          "name": "OnEnter",
+          "type": "[]EnterHookSpec",
+          "doc": "OnEnter are the hooks run as an entity enters a state, in\ndeclaration order.\n"
+        },
+        {
+          "name": "OnTransition",
+          "type": "[]func(ctx context.Context, c WorkflowChangeValue) error",
+          "doc": "OnTransition are the hooks run after every stored transition, in\ndeclaration order.\n"
+        },
+        {
+          "name": "MinGap",
+          "type": "time.Duration",
+          "doc": "MinGap is the least a wake for a due transition waits after a run.\n"
+        },
+        {
+          "name": "BackoffBase",
+          "type": "time.Duration",
+          "doc": "BackoffBase is the wait after a run that failed, doubled after each,\nup to BackoffMax.\n"
+        },
+        {
+          "name": "BackoffMax",
+          "type": "time.Duration",
+          "doc": "BackoffMax bounds the wait after a run that failed.\n"
+        },
+        {
+          "name": "MaxHistory",
+          "type": "int",
+          "doc": "MaxHistory caps the transitions remembered per entity.\n"
+        }
+      ],
+      "doc": "WorkflowConfig is one workflow as its engine runs it: its states and\ntransitions, its hooks, the store and the journal it runs over, and how\nthe app's loop, clock and spans see it.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowCreateEvent",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowCreateEvent",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"create\"",
+      "doc": "WorkflowCreateEvent is the event of a transition Start fires: an entity\nentering its workflow.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowDriverConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowDriverConfig",
+      "spelled": "struct{Open func(ctx context.Context, cfg *WorkflowConfig) (WorkflowEngine, error); Failed func(err error, kind WorkflowFailure) bool}",
+      "canonical": "struct{Open func(ctx context.Context, cfg *github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowConfig) (github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEngine, error); Failed func(err error, kind github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure) bool}",
+      "fields": [
+        {
+          "name": "Open",
+          "type": "func(ctx context.Context, cfg *WorkflowConfig) (WorkflowEngine, error)",
+          "doc": "Open opens the engine of one workflow, as cfg declares it: it reads\nthe journal and every entity of the store once.\n"
+        },
+        {
+          "name": "Failed",
+          "type": "func(err error, kind WorkflowFailure) bool",
+          "doc": "Failed reports whether err, or an error it wraps, is the engine's\nfailure of kind: the SDK's sentinels stay in the subsystem, and the\nerror keeps the fields the engine gave it.\n"
+        }
+      ],
+      "doc": "WorkflowDriverConfig is what framework/kit/workflow plugs into kit: how a\nworkflow's engine opens, and how kit tells the engine's failures apart.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEngine",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowEngine",
+      "spelled": "interface{Census() map[string]int; Changed(ctx context.Context, key string) error; Deleted(ctx context.Context, key string) error; Fire(ctx context.Context, key string, event string) (WorkflowEntityValue, error); Records() []WorkflowRecordValue; Run(ctx context.Context) error; Start(ctx context.Context, e WorkflowEntityValue) (WorkflowEntityValue, error)}",
+      "canonical": "interface{Census() map[string]int; Changed(ctx context.Context, key string) error; Deleted(ctx context.Context, key string) error; Fire(ctx context.Context, key string, event string) (github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue, error); Records() []github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowRecordValue; Run(ctx context.Context) error; Start(ctx context.Context, e github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue) (github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue, error)}",
+      "doc": "WorkflowEngine is one workflow's engine as kit's core uses it: the\ntransitions code fires, what a write of the store tells it, what it\ncounts and records, and its loop.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEngine.Census",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Census",
+      "recv": "WorkflowEngine",
+      "spelled": "func() map[string]int",
+      "canonical": "func() map[string]int",
+      "doc": "Census counts the entities per state.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEngine.Changed",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Changed",
+      "recv": "WorkflowEngine",
+      "spelled": "func(ctx context.Context, key string) error",
+      "canonical": "func(ctx context.Context, key string) error",
+      "doc": "Changed tells the engine the entity under key was written.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEngine.Deleted",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Deleted",
+      "recv": "WorkflowEngine",
+      "spelled": "func(ctx context.Context, key string) error",
+      "canonical": "func(ctx context.Context, key string) error",
+      "doc": "Deleted tells the engine the entity under key was deleted.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEngine.Fire",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Fire",
+      "recv": "WorkflowEngine",
+      "spelled": "func(ctx context.Context, key string, event string) (WorkflowEntityValue, error)",
+      "canonical": "func(ctx context.Context, key string, event string) (github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue, error)",
+      "doc": "Fire moves the entity under key along the event's transition leaving\nits state.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEngine.Records",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Records",
+      "recv": "WorkflowEngine",
+      "spelled": "func() []WorkflowRecordValue",
+      "canonical": "func() []github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowRecordValue",
+      "doc": "Records are what the engine knows of each entity.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEngine.Run",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Run",
+      "recv": "WorkflowEngine",
+      "spelled": "func(ctx context.Context) error",
+      "canonical": "func(ctx context.Context) error",
+      "doc": "Run runs the loop that fires the timers and the guards, until ctx\nends.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEngine.Start",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Start",
+      "recv": "WorkflowEngine",
+      "spelled": "func(ctx context.Context, e WorkflowEntityValue) (WorkflowEntityValue, error)",
+      "canonical": "func(ctx context.Context, e github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue) (github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue, error)",
+      "doc": "Start enters e in the workflow, in the initial state: its OnEnter\nhooks run, then it is inserted in the store.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityExists",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowEntityExists",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "3",
+      "doc": "WorkflowEntityExists is an entity already under the key Start names.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityMissing",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowEntityMissing",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "2",
+      "doc": "WorkflowEntityMissing is no entity under the key.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowEntityValue",
+      "spelled": "struct{Value any; State string}",
+      "canonical": "struct{Value any; State string}",
+      "fields": [
+        {
+          "name": "Value",
+          "type": "any",
+          "doc": "Value is the product's entity.\n"
+        },
+        {
+          "name": "State",
+          "type": "string",
+          "doc": "State is the entity's state, spelled.\n"
+        }
+      ],
+      "doc": "WorkflowEntityValue is one entity as a workflow's engine holds it: the\nproduct's, kept as any — the workflow's typed facade asserts it to its\ntype —, and its state as the facade spells it, which the engine reads and\nsets.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowFailure",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "WorkflowFailure is a failure of a workflow's engine, as kit words it.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailureNone",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowFailureNone",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "0",
+      "doc": "WorkflowFailureNone is no failure kit words.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFiringValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowFiringValue",
+      "spelled": "struct{Key string; Event string; From string; To string; Trigger WorkflowTrigger}",
+      "canonical": "struct{Key string; Event string; From string; To string; Trigger github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTrigger}",
+      "fields": [
+        {
+          "name": "Key",
+          "type": "string",
+          "doc": "Key is the entity's key.\n"
+        },
+        {
+          "name": "Event",
+          "type": "string",
+          "doc": "Event is the transition's name.\n"
+        },
+        {
+          "name": "From",
+          "type": "string",
+          "doc": "From is the state it leaves.\n"
+        },
+        {
+          "name": "To",
+          "type": "string",
+          "doc": "To is the state it enters.\n"
+        },
+        {
+          "name": "Trigger",
+          "type": "WorkflowTrigger",
+          "doc": "Trigger is what fires it.\n"
+        }
+      ],
+      "doc": "WorkflowFiringValue is one transition the loop is about to fire: the\nentity's key, the event, the states it leaves and enters, and its trigger.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFunctionPanicked",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowFunctionPanicked",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "12",
+      "doc": "WorkflowFunctionPanicked is a guard or an instant function that\npanicked.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowHookChangedKey",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowHookChangedKey",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "8",
+      "doc": "WorkflowHookChangedKey is an OnEnter hook that changed its entity's\nkey.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowHookChangedState",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowHookChangedState",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "7",
+      "doc": "WorkflowHookChangedState is an OnEnter hook that changed the state\nit entered.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowHookFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowHookFailed",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "5",
+      "doc": "WorkflowHookFailed is a hook that returned an error, joined to it;\nits \"hook\" and \"event\" fields name the hook's kind and the event.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowHookPanicked",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowHookPanicked",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "6",
+      "doc": "WorkflowHookPanicked is a hook that panicked; its \"hook\", \"panic\" and\n\"stack\" fields say which and how.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowJournal",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowJournal",
+      "spelled": "interface{Delete(ctx context.Context, keys ...string) error; Load(ctx context.Context) ([]WorkflowRecordValue, error); Save(ctx context.Context, records ...WorkflowRecordValue) error}",
+      "canonical": "interface{Delete(ctx context.Context, keys ...string) error; Load(ctx context.Context) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowRecordValue, error); Save(ctx context.Context, records ...github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowRecordValue) error}",
+      "doc": "WorkflowJournal is the port a workflow's engine keeps what it knows of\neach entity in: the workflow's file under the data directory, or its\ntable on the database that keeps its store.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowJournal.Delete",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Delete",
+      "recv": "WorkflowJournal",
+      "spelled": "func(ctx context.Context, keys ...string) error",
+      "canonical": "func(ctx context.Context, keys ...string) error",
+      "doc": "Delete forgets the records of keys; one already gone is no error.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowJournal.Load",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Load",
+      "recv": "WorkflowJournal",
+      "spelled": "func(ctx context.Context) ([]WorkflowRecordValue, error)",
+      "canonical": "func(ctx context.Context) ([]github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowRecordValue, error)",
+      "doc": "Load reads every record the journal kept.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowJournal.Save",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Save",
+      "recv": "WorkflowJournal",
+      "spelled": "func(ctx context.Context, records ...WorkflowRecordValue) error",
+      "canonical": "func(ctx context.Context, records ...github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowRecordValue) error",
+      "doc": "Save keeps records, in the transaction ctx carries for a database.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowJournalFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowJournalFailed",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "11",
+      "doc": "WorkflowJournalFailed is the workflow's journal that failed.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowKeyEmpty",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowKeyEmpty",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "4",
+      "doc": "WorkflowKeyEmpty is an entity whose key is empty.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowLoopEvent",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowLoopEvent",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "WorkflowLoopEvent is what a workflow's loop reports.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowLoopEventValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowLoopEventValue",
+      "spelled": "struct{Err error; Started time.Time; Ended time.Time; Next time.Time; Kind WorkflowLoopEvent; Wake WorkflowWake}",
+      "canonical": "struct{Err error; Started time.Time; Ended time.Time; Next time.Time; Kind github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowLoopEvent; Wake github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowWake}",
+      "fields": [
+        {
+          "name": "Err",
+          "type": "error",
+          "doc": "Err is what a run could not fire, nil for nothing.\n"
+        },
+        {
+          "name": "Started",
+          "type": "time.Time",
+          "doc": "Started is when the run started.\n"
+        },
+        {
+          "name": "Ended",
+          "type": "time.Time",
+          "doc": "Ended is when the run ended.\n"
+        },
+        {
+          "name": "Next",
+          "type": "time.Time",
+          "doc": "Next is when the loop wakes next, zero for no transition due.\n"
+        },
+        {
+          "name": "Kind",
+          "type": "WorkflowLoopEvent",
+          "doc": "Kind is what the event reports.\n"
+        },
+        {
+          "name": "Wake",
+          "type": "WorkflowWake",
+          "doc": "Wake is why the run started.\n"
+        }
+      ],
+      "doc": "WorkflowLoopEventValue is what a workflow's loop reports: a run started,\na run ended, a wait.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowLoopOther",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowLoopOther",
+      "spelled": "WorkflowLoopEvent",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowLoopEvent",
+      "value": "0",
+      "doc": "WorkflowLoopOther is an event of the loop kit shows nothing of.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowLoopPanicked",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowLoopPanicked",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "13",
+      "doc": "WorkflowLoopPanicked is the loop that panicked.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowLoopRunEnded",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowLoopRunEnded",
+      "spelled": "WorkflowLoopEvent",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowLoopEvent",
+      "value": "2",
+      "doc": "WorkflowLoopRunEnded is a run ending: Started, Ended, Next and what\nit could not fire, Err, are set.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowLoopRunStarted",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowLoopRunStarted",
+      "spelled": "WorkflowLoopEvent",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowLoopEvent",
+      "value": "1",
+      "doc": "WorkflowLoopRunStarted is a run starting: Wake and Started are set.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowLoopWaiting",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowLoopWaiting",
+      "spelled": "WorkflowLoopEvent",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowLoopEvent",
+      "value": "3",
+      "doc": "WorkflowLoopWaiting is the loop asleep until Next, zero for no\ntransition due.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowRecordValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowRecordValue",
+      "spelled": "struct{Entered time.Time; Key string; State string; History []WorkflowStepValue}",
+      "canonical": "struct{Entered time.Time; Key string; State string; History []github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowStepValue}",
+      "fields": [
+        {
+          "name": "Entered",
+          "type": "time.Time",
+          "doc": "Entered is when the entity entered its state.\n"
+        },
+        {
+          "name": "Key",
+          "type": "string",
+          "doc": "Key is the entity's key.\n"
+        },
+        {
+          "name": "State",
+          "type": "string",
+          "doc": "State is the entity's state.\n"
+        },
+        {
+          "name": "History",
+          "type": "[]WorkflowStepValue",
+          "doc": "History are its latest transitions, oldest first.\n"
+        }
+      ],
+      "doc": "WorkflowRecordValue is what a workflow's engine knows of one entity: its\nstate, since when, and its latest transitions, oldest first.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowReentrant",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowReentrant",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "9",
+      "doc": "WorkflowReentrant is an OnEnter hook that fired its own workflow.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowStepValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowStepValue",
+      "spelled": "struct{At time.Time; Event string; From string; To string; Actor string; Trigger WorkflowTrigger}",
+      "canonical": "struct{At time.Time; Event string; From string; To string; Actor string; Trigger github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTrigger}",
+      "fields": [
+        {
+          "name": "At",
+          "type": "time.Time",
+          "doc": "At is when it happened.\n"
+        },
+        {
+          "name": "Event",
+          "type": "string",
+          "doc": "Event is the transition's name.\n"
+        },
+        {
+          "name": "From",
+          "type": "string",
+          "doc": "From is the state left, \"\" on creation.\n"
+        },
+        {
+          "name": "To",
+          "type": "string",
+          "doc": "To is the state entered.\n"
+        },
+        {
+          "name": "Actor",
+          "type": "string",
+          "doc": "Actor is who fired it, \"\" for the loop.\n"
+        },
+        {
+          "name": "Trigger",
+          "type": "WorkflowTrigger",
+          "doc": "Trigger is what fired it.\n"
+        }
+      ],
+      "doc": "WorkflowStepValue is one transition of an entity's history: the event,\nthe states it left and entered, what fired it, who and when.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowStore",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowStore",
+      "spelled": "interface{All(ctx context.Context) iter.Seq2[WorkflowEntityValue, error]; Get(ctx context.Context, key string) (WorkflowEntityValue, bool, error); Insert(ctx context.Context, e WorkflowEntityValue) (bool, error); Key(e WorkflowEntityValue) string; Replace(ctx context.Context, e WorkflowEntityValue) (bool, error)}",
+      "canonical": "interface{All(ctx context.Context) iter.Seq2[github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue, error]; Get(ctx context.Context, key string) (github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue, bool, error); Insert(ctx context.Context, e github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue) (bool, error); Key(e github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue) string; Replace(ctx context.Context, e github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue) (bool, error)}",
+      "doc": "WorkflowStore is the port a workflow's engine reads and writes its\nentities through: the workflow's store.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowStore.All",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "All",
+      "recv": "WorkflowStore",
+      "spelled": "func(ctx context.Context) iter.Seq2[WorkflowEntityValue, error]",
+      "canonical": "func(ctx context.Context) iter.Seq2[github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue, error]",
+      "doc": "All yields every entity of the store.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowStore.Get",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Get",
+      "recv": "WorkflowStore",
+      "spelled": "func(ctx context.Context, key string) (WorkflowEntityValue, bool, error)",
+      "canonical": "func(ctx context.Context, key string) (github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue, bool, error)",
+      "doc": "Get reads the entity under key; false when there is none.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowStore.Insert",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Insert",
+      "recv": "WorkflowStore",
+      "spelled": "func(ctx context.Context, e WorkflowEntityValue) (bool, error)",
+      "canonical": "func(ctx context.Context, e github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue) (bool, error)",
+      "doc": "Insert writes e unless its key is taken; false when it was.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowStore.Key",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Key",
+      "recv": "WorkflowStore",
+      "spelled": "func(e WorkflowEntityValue) string",
+      "canonical": "func(e github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue) string",
+      "doc": "Key is e's key.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowStore.Replace",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Replace",
+      "recv": "WorkflowStore",
+      "spelled": "func(ctx context.Context, e WorkflowEntityValue) (bool, error)",
+      "canonical": "func(ctx context.Context, e github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowEntityValue) (bool, error)",
+      "doc": "Replace writes e over the entity of its key; false when there was\nnone.\n",
+      "file": "framework/internal/kit/plug/workflow_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowStoreFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowStoreFailed",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "10",
+      "doc": "WorkflowStoreFailed is the workflow's store that failed.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTransitionRefused",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowTransitionRefused",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "1",
+      "doc": "WorkflowTransitionRefused is an event that leaves no transition from\nthe entity's state.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTrigger",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowTrigger",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "WorkflowTrigger is what fires a transition.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTriggerDeadline",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowTriggerDeadline",
+      "spelled": "WorkflowTrigger",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTrigger",
+      "value": "3",
+      "doc": "WorkflowTriggerDeadline is a timer at an instant the entity carries.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTriggerDelay",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowTriggerDelay",
+      "spelled": "WorkflowTrigger",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTrigger",
+      "value": "2",
+      "doc": "WorkflowTriggerDelay is a timer: a duration spent in a state.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTriggerEvent",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowTriggerEvent",
+      "spelled": "WorkflowTrigger",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTrigger",
+      "value": "1",
+      "doc": "WorkflowTriggerEvent is an event code fires.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTriggerGuard",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowTriggerGuard",
+      "spelled": "WorkflowTrigger",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTrigger",
+      "value": "4",
+      "doc": "WorkflowTriggerGuard is a condition on the entity that holds.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTriggerStart",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowTriggerStart",
+      "spelled": "WorkflowTrigger",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowTrigger",
+      "value": "0",
+      "doc": "WorkflowTriggerStart is a creation, which Start fires.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowWaitAbandoned",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowWaitAbandoned",
+      "spelled": "WorkflowFailure",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowFailure",
+      "value": "14",
+      "doc": "WorkflowWaitAbandoned is a caller that stopped waiting for its\nentity: its context ended.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowWake",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowWake",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "WorkflowWake is why a run of a workflow's loop started.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowWakeChange",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowWakeChange",
+      "spelled": "WorkflowWake",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowWake",
+      "value": "2",
+      "doc": "WorkflowWakeChange is a write that may have brought one forward.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowWakeDue",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowWakeDue",
+      "spelled": "WorkflowWake",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowWake",
+      "value": "1",
+      "doc": "WorkflowWakeDue is a transition coming due.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowWakeStart",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "WorkflowWakeStart",
+      "spelled": "WorkflowWake",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowWake",
+      "value": "0",
+      "doc": "WorkflowWakeStart is the loop's first run.\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Workflows",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Workflows",
+      "spelled": "atomic.Pointer[WorkflowDriverConfig]",
+      "canonical": "sync/atomic.Pointer[github.com/kitsunium/sdk/framework/internal/kit/plug.WorkflowDriverConfig]",
+      "doc": "Workflows is the workflow subsystem: the engine kit's workflows run on;\nnil until framework/kit/workflow is imported. A product that declares a\nworkflow without it is refused at the start (ADR 0179 §6).\n",
+      "file": "framework/internal/kit/plug/workflow.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.WriteInsert",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
@@ -11169,6 +12202,17 @@
       "canonical": "func()",
       "doc": "Enable plugs the Studio's event stream and profiler into kit.\n",
       "file": "framework/internal/kit/studiokit/studiokit.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/workflowkit.Enable",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/workflowkit",
+      "name": "Enable",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "Enable plugs the workflows' engine into kit.\n",
+      "file": "framework/internal/kit/workflowkit/workflowkit.go",
       "layer": "framework"
     },
     {

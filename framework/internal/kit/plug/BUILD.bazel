@@ -12,6 +12,8 @@ go_library(
         "store.go",
         "store_interface.go",
         "store_refusal.go",
+        "workflow.go",
+        "workflow_interface.go",
     ],
     importpath = "github.com/kitsunium/sdk/framework/internal/kit/plug",
     visibility = [

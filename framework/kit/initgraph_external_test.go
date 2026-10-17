@@ -73,24 +73,24 @@ type leavingCase struct {
 // left the core, by the registration package that alone imports each: their
 // symbols in a binary are the subsystem's (ADR 0179 §1, step 3 on).
 var kitEngines = map[string]string{
-	"framework/kit/store": "framework/internal/kit/storekit.",
-	"framework/kit/queue": "framework/internal/kit/queuekit.",
+	"framework/kit/store":    "framework/internal/kit/storekit.",
+	"framework/kit/queue":    "framework/internal/kit/queuekit.",
+	"framework/kit/workflow": "framework/internal/kit/workflowkit.",
 }
 
 // stillInCore is the allow-list while ADR 0179's migration runs: the SDK
 // packages of leaving that framework/internal/kit still imports. Each step
 // takes its own entries out in the same change that moves them — step 3 took
-// docstore and sql, step 4 queue, step 5 takes statemachine, step 6
+// docstore and sql, step 4 queue, step 5 statemachine, step 6 takes
 // mail/spool, step 7 scheduler, step 8 i18n —, and step 10, which drops the
 // facade's blank imports, deletes it with this test's allowances. It is held
 // tight both ways: a package still listed that the core no longer imports
 // fails the test as surely as one the core imports and the list does not
 // name.
 var stillInCore = map[string]bool{
-	"pkg/v1/app/statemachine": true,
-	"pkg/v1/app/mail/spool":   true,
-	"pkg/v1/app/scheduler":    true,
-	"pkg/v1/app/i18n":         true,
+	"pkg/v1/app/mail/spool": true,
+	"pkg/v1/app/scheduler":  true,
+	"pkg/v1/app/i18n":       true,
 }
 
 // throughStill are the packages of stillInCore whose own graph holds pkg, or
@@ -367,6 +367,13 @@ func TestAProductThatImportsTheStoresLinksThem(t *testing.T) {
 	if code := beyondInits(syms, owners()["pkg/v1/data/queue"]); len(code) > 0 {
 		t.Errorf("a product that imports framework/kit/store alone links the SDK's queue beyond its inits: %v", code)
 	}
+	// Nor the workflows (Q4: the workflow package imports the store
+	// package, never the other way).
+	for _, owner := range []string{"framework/kit/workflow", "pkg/v1/app/statemachine"} {
+		if n := linked[owner]; n > 0 {
+			t.Errorf("a product that imports framework/kit/store alone links %d text symbols of %s", n, owner)
+		}
+	}
 }
 
 // The same half of §7 for step 4: testdata/queueprobe, coreprobe with
@@ -384,6 +391,65 @@ func TestAProductThatImportsTheQueuesLinksThem(t *testing.T) {
 	}
 	if code := beyondInits(syms, owners()["pkg/v1/data/queue"]); len(code) == 0 {
 		t.Error("a product that imports framework/kit/queue links nothing of the SDK's queue beyond its inits")
+	}
+	for _, owner := range []string{"framework/kit/workflow", "pkg/v1/app/statemachine"} {
+		if n := linked[owner]; n > 0 {
+			t.Errorf("a product that imports framework/kit/queue links %d text symbols of %s", n, owner)
+		}
+	}
+}
+
+// The same half of §7 for step 5: testdata/workflowprobe, coreprobe with
+// framework/kit/workflow and two workflows over entities and states of
+// distinct types, links the workflow subsystem's engine — the SDK's
+// statemachine, instantiated once (ADR 0179 Q3) whatever the types — and the
+// store subsystem's engines, since the workflow package imports the store
+// package (Q4), and nothing of the queues.
+func TestAProductThatImportsTheWorkflowsLinksThem(t *testing.T) {
+	goTool := goToList(t)
+	syms := textSymbols(t, goTool, "./testdata/workflowprobe")
+	linked := linkedSymbols(syms, owners())
+	type tc struct {
+		owner  string
+		linked bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if n := linked[c.owner]; (n > 0) != c.linked {
+			t.Errorf("a product that imports framework/kit/workflow links %d text symbols of %s, want linked %v", n, c.owner, c.linked)
+		}
+	}
+	for _, c := range []tc{
+		{"framework/kit/workflow", true},
+		{"pkg/v1/app/statemachine", true},
+		{"framework/kit/store", true},
+		{"pkg/v1/data/docstore", true},
+		{"framework/kit/queue", false},
+	} {
+		t.Run(c.owner, func(t *testing.T) { runCase(t, c) })
+	}
+	// The probe's two workflows are compiled — the facade at each of their
+	// types —, and the SDK's machine at kit's entity and the state's
+	// spelling alone: its methods' wrappers name no other type, its shaped
+	// bodies (go.shape.…) are compiled once for them.
+	instantiated := func(prefix string) []string {
+		var types []string
+		for s := range syms {
+			if rest, ok := strings.CutPrefix(s, sdk+prefix); ok && !strings.HasPrefix(rest, "go.shape.") {
+				args, _, _ := strings.Cut(rest, "]")
+				if !slices.Contains(types, args) {
+					types = append(types, args)
+				}
+			}
+		}
+		slices.Sort(types)
+		return types
+	}
+	if got := instantiated("framework/internal/kit.(*WorkflowService["); len(got) < 2 {
+		t.Errorf("the probe's two workflows are not both compiled: the facade is instantiated at %q", got)
+	}
+	if got, want := instantiated("internal/service/app/statemachine.(*StateMachine["), sdk+"framework/internal/kit/plug.WorkflowEntityValue,string"; !slices.Equal(got, []string{want}) {
+		t.Errorf("the workflow engine is instantiated at %q, want once, at %s", got, want)
 	}
 }
 
