@@ -750,7 +750,7 @@ func (s *storeCore) open(ctx context.Context, a *App, where storeFS, specs []plu
 // it is a product store of an app that keeps data keys, which opens what an
 // earlier classification sealed.
 func (s *storeCore) opensSealed(a *App) bool {
-	return s.plan().sealsAny() || (a.privacyKeyStore() != nil && !kitOwn(s.svc))
+	return s.plan().sealsAny() || (a.keepsDataKeys() && !kitOwn(s.svc))
 }
 
 // sealsAtRest reports whether the store seals what it keeps: its entity has

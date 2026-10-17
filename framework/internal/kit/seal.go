@@ -391,8 +391,9 @@ func (k keyStore) All(ctx context.Context) iter.Seq2[secret.WrappedKey, error] {
 // seals or opens: kit's own store of data keys open, data-key found — made
 // when kit keeps it and it is not there yet.
 func (a *App) sealing(ctx context.Context) (*sealer, error) {
+	keys := a.privacyKeyStore()
 	a.privacy.mu.Lock()
-	z, keys, dataKey := a.privacy.sealer, a.privacy.keyStore, a.privacy.dataKey
+	z, dataKey := a.privacy.sealer, a.privacy.dataKey
 	a.privacy.mu.Unlock()
 	if z != nil {
 		return z, nil
@@ -492,9 +493,10 @@ func (a *App) rewrapDataKeys(ctx context.Context) {
 // privacyKeyStore is kit's own store of data keys, nil when the app keeps
 // none.
 func (a *App) privacyKeyStore() *StoreService[wrappedKey] {
-	a.privacy.mu.Lock()
-	defer a.privacy.mu.Unlock()
-	return a.privacy.keyStore
+	if own := a.ownStoresOf(); own != nil {
+		return own.keys
+	}
+	return nil
 }
 
 // sealingSource is a building block that keeps values at rest — a store, a

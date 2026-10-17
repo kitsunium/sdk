@@ -130,14 +130,19 @@ func (a *App) mainCommands() map[string]func(ctx context.Context, args []string)
 		"secrets": func(ctx context.Context, args []string) int {
 			return a.secretsCommand(ctx, args, os.Stdin, os.Stdout, os.Stderr)
 		},
-		"migrate": func(ctx context.Context, args []string) int { return a.migrateCommand(ctx, args, os.Stdout, os.Stderr) },
-		"privacy": func(ctx context.Context, args []string) int { return a.privacyCommand(ctx, args, os.Stdout, os.Stderr) },
-		"revisions": func(ctx context.Context, args []string) int {
-			return a.revisionsCommand(ctx, args, os.Stdout, os.Stderr)
-		},
-		"watch": func(ctx context.Context, args []string) int { return a.watchCommand(ctx, args, os.Stdout, os.Stderr) },
-		"data":  func(ctx context.Context, args []string) int { return a.dataCommand(ctx, args, os.Stdout, os.Stderr) },
-		"help":  help, "-h": help, "-help": help, "--help": help,
+		// The commands on the stores are kit's own store code, which the
+		// store subsystem plugs in (store_enable.go).
+		"migrate": a.onStores("migrate"), "privacy": a.onStores("privacy"), "revisions": a.onStores("revisions"),
+		"watch": a.onStores("watch"), "data": a.onStores("data"),
+		"help": help, "-h": help, "-help": help, "--help": help,
+	}
+}
+
+// onStores is Main's command name on the stores, on the process's standard
+// streams.
+func (a *App) onStores(name string) func(ctx context.Context, args []string) int {
+	return func(ctx context.Context, args []string) int {
+		return a.storeCommand(ctx, name, args, os.Stdout, os.Stderr)
 	}
 }
 

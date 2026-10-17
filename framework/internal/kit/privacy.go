@@ -68,13 +68,12 @@ type actorKey struct{}
 type privacyRun struct {
 	mu sync.Mutex
 	// svc is kit's own service, mounted while the app keeps personal data
-	// or seals what it keeps; keyStore, holds and journal are its stores,
-	// dataKey its secret.
-	svc      *Service
-	keyStore *StoreService[wrappedKey]
-	holds    *StoreService[holdRecord]
-	journal  *StoreService[journalRecord]
-	dataKey  *Secret
+	// or seals what it keeps; own are its stores — an *ownStores, held as
+	// any so that the app's type names no store's (store_enable.go) —, and
+	// dataKey its secret, set with its store of data keys.
+	svc     *Service
+	own     any
+	dataKey *Secret
 	// keys are the reference keys, derived from index-key the first time a
 	// run needs them.
 	keys *referenceKeys
@@ -146,10 +145,10 @@ func (a *App) beginPrivacy(ctx context.Context, store string, edge model.EdgeKin
 	return a.begin(ctx, &spanStart{node: store, from: currentNode(ctx), edge: edge, label: label, op: op, name: name})
 }
 
-// mountPrivacy puts kit's own service first among the app's services when
+// mountPrivacyService puts kit's own service first among the app's services when
 // the app keeps personal data or seals what it keeps, and forgets what the
 // last run derived.
-func (a *App) mountPrivacy() {
+func (a *App) mountPrivacyService() {
 	a.privacy.mu.Lock()
 	a.privacy.keys, a.privacy.sealer = nil, nil
 	a.privacy.explain = a.privacy.explain || a.cfg.env == EnvDev
@@ -180,7 +179,8 @@ func (a *App) mountPrivacy() {
 	// kit's own declarations point at the app that brought them.
 	holds.decl, journal.decl = a.decl, a.decl
 	a.privacy.mu.Lock()
-	a.privacy.svc, a.privacy.keyStore, a.privacy.holds, a.privacy.journal, a.privacy.dataKey = svc, keys, holds, journal, dataKey
+	a.privacy.svc, a.privacy.dataKey = svc, dataKey
+	a.privacy.own = &ownStores{keys: keys, holds: holds, journal: journal}
 	a.privacy.mu.Unlock()
 	// A copy of an app (With) carries the services its original mounted,
 	// kit's own copy among them: this app mounts its own instead. kit.Privacy
@@ -218,12 +218,39 @@ func asKept(svc *Service) *Service {
 	return svc
 }
 
+// ownStores are kit's own stores: the data keys, nil where nothing rests
+// on disk, the holds and the journal.
+type ownStores struct {
+	keys    *StoreService[wrappedKey]
+	holds   *StoreService[holdRecord]
+	journal *StoreService[journalRecord]
+}
+
+// ownStoresOf are kit's own stores, nil when the app mounted none.
+func (a *App) ownStoresOf() *ownStores {
+	a.privacy.mu.Lock()
+	defer a.privacy.mu.Unlock()
+	own, _ := a.privacy.own.(*ownStores)
+	return own
+}
+
 // privacyStores returns kit's own stores, nil when the app keeps no
 // personal data.
 func (a *App) privacyStores() (*StoreService[holdRecord], *StoreService[journalRecord]) {
+	if own := a.ownStoresOf(); own != nil {
+		return own.holds, own.journal
+	}
+	return nil, nil
+}
+
+// keepsDataKeys reports whether kit keeps a store of data keys: the app
+// seals what it keeps on disk, and data-key is declared with the store. It
+// names no store, so the rest of the core asks it without linking kit's own
+// store code.
+func (a *App) keepsDataKeys() bool {
 	a.privacy.mu.Lock()
 	defer a.privacy.mu.Unlock()
-	return a.privacy.holds, a.privacy.journal
+	return a.privacy.dataKey != nil
 }
 
 // keepsPersonalData reports whether a store of the product keeps personal
@@ -285,7 +312,7 @@ func (a *App) explainPrivacy() {
 // seals what it keeps: what its retention does, and whether its index key
 // and its data-key are set, and where — never their values.
 func (a *App) privacySettings(ctx context.Context) []model.Setting {
-	personal, seals := a.keepsPersonalData(), a.privacyKeyStore() != nil
+	personal, seals := a.keepsPersonalData(), a.keepsDataKeys()
 	var out []model.Setting
 	if personal {
 		out = append(out, a.retentionSetting())

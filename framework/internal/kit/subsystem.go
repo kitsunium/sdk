@@ -34,9 +34,12 @@ type subsystem struct {
 	// pkg is its registration package.
 	pkg string
 	// kinds are the nodes that need it; databases says whether a database
-	// does.
+	// does, and sealing whether a node that seals what it keeps at rest
+	// does — a topic, a queued command or a mailer whose values are sealed
+	// on disk, under data keys kit keeps in a store of its own.
 	kinds     []model.NodeKind
 	databases bool
+	sealing   bool
 	// linked reports whether the program links the subsystem.
 	linked func() bool
 }
@@ -44,17 +47,17 @@ type subsystem struct {
 // subsystems are the subsystems the start checks, one per registration
 // package of ADR 0179 §1, each added by the step that takes its subsystem out
 // of the core: the stores' since step 3, linked when framework/kit/store set
-// plug.Stores. A test sets the hook as a program that does not import the
-// package would see it.
+// plug.Stores and kit's own store code (EnableStores, step 3b). A test sets
+// the hooks as a program that does not import the package would see them.
 var subsystems = []subsystem{{
 	name: "store", pkg: storePackage,
-	kinds: []model.NodeKind{model.KindStore}, databases: true,
+	kinds: []model.NodeKind{model.KindStore}, databases: true, sealing: true,
 	linked: storesLinked,
 }}
 
 // storesLinked reports whether the program imports framework/kit/store: the
-// store subsystem is plugged in.
-func storesLinked() bool { return plug.Stores.Load() != nil }
+// store subsystem is plugged in, its engines and kit's own store code.
+func storesLinked() bool { return plug.Stores.Load() != nil && stores() != nil }
 
 // unlinkedDecl is one declaration whose subsystem the program does not link.
 type unlinkedDecl struct {
@@ -111,12 +114,18 @@ func (a *App) unlinkedNodes(svc *Service, missing []subsystem) []unlinkedDecl {
 	for _, n := range nodes {
 		b := n.base()
 		for _, s := range missing {
-			if slices.Contains(s.kinds, b.kind) {
+			if slices.Contains(s.kinds, b.kind) || s.sealing && sealsAtRest(a, n) {
 				out = append(out, unlinkedDecl{node: b.id, at: a.source(&b.decl), sub: s})
 			}
 		}
 	}
 	return out
+}
+
+// sealsAtRest reports whether n seals what it keeps at rest.
+func sealsAtRest(a *App, n node) bool {
+	s, ok := n.(sealingSource)
+	return ok && s.sealsAtRest(a)
 }
 
 // subsystemProblems are the start's diagnostics for the declarations whose

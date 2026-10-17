@@ -159,10 +159,9 @@ func TestTheCoreImportsOnlyTheSubsystemsStillInIt(t *testing.T) {
 	}
 }
 
-// linkedSymbols builds the program at dir and counts its text symbols by
-// owner: an import graph says what is initialised, the symbol table what is
-// linked.
-func linkedSymbols(t *testing.T, goTool, dir string, owners map[string][]string) map[string]int {
+// textSymbols builds the program at dir and lists its text symbols: an
+// import graph says what is initialised, the symbol table what is linked.
+func textSymbols(t *testing.T, goTool, dir string) map[string]bool {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), filepath.Base(dir))
 	build := exec.Command(goTool, "build", "-o", bin, dir)
@@ -175,28 +174,72 @@ func linkedSymbols(t *testing.T, goTool, dir string, owners map[string][]string)
 	if err != nil {
 		t.Fatalf("go tool nm: %v", err)
 	}
-	linked := map[string]int{}
+	syms := map[string]bool{}
 	lines := bufio.NewScanner(bytes.NewReader(out))
 	lines.Buffer(make([]byte, 0, 64*1024), 4<<20)
 	for lines.Scan() {
 		f := strings.Fields(lines.Text())
 		// address, symbol type, name, Go type: a text symbol is T or t.
-		if len(f) < 3 || (f[1] != "T" && f[1] != "t") {
-			continue
-		}
-		for owner, prefixes := range owners {
-			for _, p := range prefixes {
-				if strings.HasPrefix(f[2], sdk+p) {
-					linked[owner]++
-				}
-			}
+		if len(f) >= 3 && (f[1] == "T" || f[1] == "t") {
+			syms[f[2]] = true
 		}
 	}
 	if err := lines.Err(); err != nil {
 		t.Fatal(err)
 	}
+	return syms
+}
+
+// linkedSymbols counts syms by owner: the text symbols under each owner's
+// prefixes.
+func linkedSymbols(syms map[string]bool, owners map[string][]string) map[string]int {
+	linked := map[string]int{}
+	for s := range syms {
+		for owner, prefixes := range owners {
+			for _, p := range prefixes {
+				if strings.HasPrefix(s, sdk+p) {
+					linked[owner]++
+				}
+			}
+		}
+	}
 	return linked
 }
+
+// kitStoreCode is kit's own store code, which stays in the core because it
+// names no SDK type (ADR 0179 §3) and which a program reaches only through
+// framework/kit/store (EnableStores, step 3b): one function of each part, by
+// its symbol — the privacy service kit mounts and its journal, sealing,
+// the stores' engines over documents and their history, the databases, their
+// migrations and checks, the retention, the trash, and the commands on the
+// stores. A product that does not import the package links
+// none of them; one that does links every one, so that the list cannot go
+// stale by naming what nothing links.
+var kitStoreCode = []string{
+	"(*App).mountPrivacyService",
+	"(*App).appendToJournal",
+	"(*App).sealing",
+	"(*App).sealingProblems",
+	"(*App).indexKeyProblems",
+	"(*App).privacyProblems",
+	"(*storeCore).start",
+	"(*sealedEngine).Write",
+	"(*historied).Write",
+	"(*App).addDatabaseComponents",
+	"(*App).startDatabase",
+	"(*App).databaseProblems",
+	"(*App).migrateAtStart",
+	"(*App).addRetentionComponent",
+	"(*App).addTrashComponent",
+	"(*App).migrateCommand",
+	"(*App).privacyCommand",
+	"(*App).revisionsCommand",
+	"(*App).dataCommand",
+	"(*App).watchCommand",
+}
+
+// kitStoreSymbol is the text symbol of one entry of kitStoreCode.
+func kitStoreSymbol(fn string) string { return sdk + "framework/internal/kit." + fn }
 
 // owners are the symbol prefixes of each subsystem of leaving, and of each
 // implementation package that left the core, by its registration package.
@@ -220,7 +263,13 @@ func owners() map[string][]string {
 // built on it links.
 func TestTheSmallestProductLinksOnlyTheSubsystemsStillInTheCore(t *testing.T) {
 	goTool := goToList(t)
-	linked := linkedSymbols(t, goTool, "./testdata/coreprobe", owners())
+	syms := textSymbols(t, goTool, "./testdata/coreprobe")
+	linked := linkedSymbols(syms, owners())
+	for _, fn := range kitStoreCode {
+		if syms[kitStoreSymbol(fn)] {
+			t.Errorf("a product that does not import framework/kit/store links kit's own store code: %s", fn)
+		}
+	}
 	runCase := func(t *testing.T, owner string) {
 		t.Helper()
 		n := linked[owner]
@@ -248,13 +297,20 @@ func TestTheSmallestProductLinksOnlyTheSubsystemsStillInTheCore(t *testing.T) {
 // A product that imports a registration package links the code it brings —
 // the other half of §7, so that the half above cannot pass by testing
 // nothing: testdata/storeprobe, coreprobe with framework/kit/store, links the
-// store subsystem's engines and the SDK's document store and sql under them.
+// store subsystem's engines, the SDK's document store and sql under them,
+// and kit's own store code.
 func TestAProductThatImportsTheStoresLinksThem(t *testing.T) {
 	goTool := goToList(t)
-	linked := linkedSymbols(t, goTool, "./testdata/storeprobe", owners())
+	syms := textSymbols(t, goTool, "./testdata/storeprobe")
+	linked := linkedSymbols(syms, owners())
 	for _, owner := range []string{"framework/kit/store", "pkg/v1/data/docstore", "pkg/v1/data/sql"} {
 		if linked[owner] == 0 {
 			t.Errorf("a product that imports framework/kit/store links no text symbol of %s", owner)
+		}
+	}
+	for _, fn := range kitStoreCode {
+		if !syms[kitStoreSymbol(fn)] {
+			t.Errorf("a product that imports framework/kit/store does not link kit's own store code: %s", fn)
 		}
 	}
 }

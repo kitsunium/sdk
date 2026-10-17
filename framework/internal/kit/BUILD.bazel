@@ -144,6 +144,7 @@ go_library(
         "store.go",
         "store_core.go",
         "store_document.go",
+        "store_enable.go",
         "store_engine.go",
         "store_sql.go",
         "store_sql_migrate.go",

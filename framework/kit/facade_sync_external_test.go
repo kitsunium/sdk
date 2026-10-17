@@ -62,13 +62,13 @@ var facadeNames = [][2]string{
 
 // internalOnly are the exported internal names a product never reaches: the
 // constructors a declaring method calls, and the hooks a subsystem package
-// calls as it is imported (framework/kit/server, studio, config/*), which the
-// facade does not export.
+// calls as it is imported (framework/kit/server, studio, store, config/*),
+// which the facade does not export.
 var internalOnly = []string{
 	"NewCommand", "NewEndpointService", "NewError", "NewListener", "NewLoop",
 	"NewMailer", "NewPortService", "NewQuery", "NewRecordsService", "NewSecret",
 	"NewSettingService", "NewStoreService", "NewTopicService", "NewWorkflowService",
-	"RegisterConfigFormat", "EnableStudio", "EnableServer",
+	"RegisterConfigFormat", "EnableStudio", "EnableServer", "EnableStores",
 }
 
 // topLevelNames are the exported top-level names the Go files of dir declare,

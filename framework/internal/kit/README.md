@@ -308,6 +308,7 @@ Package kit — the ports the workflow engine reaches a store through.
 - [func DeleteOnErasure\(\) StoreConfigurer](<#DeleteOnErasure>)
 - [func DesignDigest\(digest string\) AppConfigurer](<#DesignDigest>)
 - [func EnableServer\(\)](<#EnableServer>)
+- [func EnableStores\(\)](<#EnableStores>)
 - [func EnableStudio\(\)](<#EnableStudio>)
 - [func Env\(env string\) AppConfigurer](<#Env>)
 - [func Erase\(ctx context.Context, reason string, ids ...string\) \(Erasure, error\)](<#Erase>)
@@ -1813,6 +1814,15 @@ func EnableServer()
 ```
 
 EnableServer makes an app in the server profile serve HTTP. framework/kit/server calls it as it is imported; a product never does.
+
+<a name="EnableStores"></a>
+## func [EnableStores](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store_enable.go>)
+
+```go
+func EnableStores()
+```
+
+EnableStores makes kit's own store code reachable: what kit mounts, starts and answers for the stores and databases a product declares. framework/kit/store calls it as it is imported; a product never does.
 
 <a name="EnableStudio"></a>
 ## func [EnableStudio](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/introspect.go>)

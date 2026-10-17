@@ -365,7 +365,7 @@ func (s *storeCore) trashedSubject(ctx context.Context, a *App, key string) (str
 	case err == nil:
 		return s.subjectOf(v), nil
 	case isNotFound(err), errs.HasCode(err, CodeSealOpen), errs.HasCode(err, CodeSealKey),
-		errs.HasCode(err, CodeStoreDecode), a.privacyKeyStore() == nil:
+		errs.HasCode(err, CodeStoreDecode), !a.keepsDataKeys():
 		return "", nil
 	}
 	return "", err

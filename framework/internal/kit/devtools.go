@@ -28,12 +28,25 @@ const defaultMails int = 200
 // behind the Studio's guard.
 func (a *App) mountDevTools(api func(pattern string, h http.HandlerFunc)) {
 	api("GET /_kit/api/process", a.serveProcess)
-	api("GET /_kit/api/databases", a.serveDatabases)
 	api("GET /_kit/api/goroutines", a.serveGoroutines)
 	api("GET /_kit/api/profile/heap", a.serveHeapProfile)
 	api("GET /_kit/api/logs", a.serveLogs)
 	api("GET /_kit/api/mail", a.serveMails)
 	api("GET /_kit/api/mail/{id}", a.serveMail)
+	a.mountStoreTools(api)
+}
+
+// mountStoreTools registers the dev tools that read the stores and the
+// databases: the databases, a field's former values, a record's versions, a
+// store's trash, and the privacy tools. They are kit's own store code; the
+// Studio alone reaches them (framework/kit/studio), so a program links them
+// only when it mounts the Studio, as before ADR 0179 step 3b, and serves
+// them only with the store subsystem — without it there is no store to read.
+func (a *App) mountStoreTools(api func(pattern string, h http.HandlerFunc)) {
+	if stores() == nil {
+		return
+	}
+	api("GET /_kit/api/databases", a.serveDatabases)
 	api("GET /_kit/api/former", a.serveFormer)
 	api("GET /_kit/api/revisions", a.serveRevisions)
 	api("GET /_kit/api/trash", a.serveTrash)
