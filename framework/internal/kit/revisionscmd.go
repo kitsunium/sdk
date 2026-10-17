@@ -86,7 +86,7 @@ func parseRestore(args []string, stderr io.Writer) (restoreRequest, bool) {
 // restoreVia restores a version for kit itself — the command line —: no
 // node caused it, so no edge is drawn; the restore is one root span on the
 // store, which says who asked (via).
-func (s *StoreService[T]) restoreVia(ctx context.Context, a *App, via, key string, number uint64, fields []string) error {
+func (s *storeCore) restoreVia(ctx context.Context, a *App, via, key string, number uint64, fields []string) error {
 	ctx, sp := a.begin(ctx, &spanStart{node: s.id, label: restoreLabel, op: model.OpWrite, name: "Restore"})
 	sp.attr("via", via)
 	_, err := s.restore(ctx, key, number, fields)

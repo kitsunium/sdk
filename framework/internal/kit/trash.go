@@ -2,7 +2,6 @@ package kit
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -102,7 +101,7 @@ func (s *storeCore) trashLength() time.Duration {
 
 // trashes reports whether a deletion by the product moves the record to the
 // store's trash.
-func (s *StoreService[T]) trashes() bool {
+func (s *storeCore) trashes() bool {
 	if s.trashLength() == 0 {
 		return false
 	}
@@ -139,7 +138,7 @@ func (s *StoreService[T]) Untrash(ctx context.Context, key string) (T, error) {
 	ctx, sp := a.begin(ctx, &spanStart{node: s.id, from: currentNode(ctx), edge: model.EdgeWrites, label: untrashLabel, op: model.OpWrite, name: "Untrash"})
 	v, err := s.untrash(ctx, key)
 	sp.end(err)
-	return v, err
+	return as[T](v), err
 }
 
 // Trashed returns the records in the store's trash, in key order: each
@@ -158,20 +157,19 @@ func (s *StoreService[T]) Trashed(ctx context.Context) ([]TombstoneEvent, error)
 
 // untrash brings the record under key back from the trash: a funnel, which
 // tells the store's watches of the write once kit confirms it.
-func (s *StoreService[T]) untrash(ctx context.Context, key string) (T, error) {
-	var zero T
+func (s *storeCore) untrash(ctx context.Context, key string) (any, error) {
 	tr, err := s.trashKeeper()
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	ctx, release, err := s.turn(ctx)
 	defer release()
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
 	ctx = s.outside(ctx)
 	if err := s.trashSaid(tr.Untrash(ctx, key), key); err != nil {
-		return zero, err
+		return nil, err
 	}
 	// The agenda keeps its entry: a rollback puts the record back in the
 	// trash, and a record no longer there passes its instant doing nothing.
@@ -180,7 +178,7 @@ func (s *StoreService[T]) untrash(ctx context.Context, key string) (T, error) {
 }
 
 // trashed lists the trash, each record with the instant kit purges it.
-func (s *StoreService[T]) trashed(ctx context.Context, a *App) ([]TombstoneEvent, error) {
+func (s *storeCore) trashed(ctx context.Context, a *App) ([]TombstoneEvent, error) {
 	tr, err := s.trashKeeper()
 	if err != nil {
 		return nil, err
@@ -199,7 +197,7 @@ func (s *StoreService[T]) trashed(ctx context.Context, a *App) ([]TombstoneEvent
 // trashRecord moves the record under key to the trash: Store.Delete's,
 // on a store that keeps one. A funnel: the store's watches hear of a
 // deletion, and the trash's agenda of the record.
-func (s *StoreService[T]) trashRecord(ctx context.Context, tr plug.Trasher, key string) error {
+func (s *storeCore) trashRecord(ctx context.Context, tr plug.Trasher, key string) error {
 	ctx, release, err := s.turn(ctx)
 	defer release()
 	if err != nil {
@@ -218,7 +216,7 @@ func (s *StoreService[T]) trashRecord(ctx context.Context, tr plug.Trasher, key 
 
 // discard is how Store.Delete removes the record under key: to the trash on
 // a store that keeps one, at once otherwise.
-func (s *StoreService[T]) discard(ctx context.Context, key string) error {
+func (s *storeCore) discard(ctx context.Context, key string) error {
 	if s.trashes() {
 		if tr, ok := s.engine().(plug.Trasher); ok {
 			return s.trashRecord(ctx, tr, key)
@@ -232,7 +230,7 @@ func (s *StoreService[T]) discard(ctx context.Context, key string) error {
 // than scheduled, the one the agenda named —: it reports false, with no
 // error, when no such record is trashed there any more. The record's
 // person's data key goes once nothing kit keeps needs it (shredIfLast).
-func (s *StoreService[T]) purgeTrashed(ctx context.Context, a *App, key string, scheduled time.Time) (bool, error) {
+func (s *storeCore) purgeTrashed(ctx context.Context, a *App, key string, scheduled time.Time) (bool, error) {
 	tr, err := s.trashKeeper()
 	if err != nil {
 		return false, err
@@ -271,7 +269,7 @@ func (s *StoreService[T]) purgeTrashed(ctx context.Context, a *App, key string, 
 // purged in one transaction on a database, under the writer turn elsewhere:
 // a restoration and a new deletion since make a tombstone the agenda did not
 // name, which waits for its own instant. DocumentNotTrashed when none is.
-func (s *StoreService[T]) purgeScheduled(ctx context.Context, a *App, tr plug.Trasher, key string, scheduled time.Time) error {
+func (s *storeCore) purgeScheduled(ctx context.Context, a *App, tr plug.Trasher, key string, scheduled time.Time) error {
 	purge := func(ctx context.Context) error {
 		if !scheduled.IsZero() {
 			stones, err := tr.Tombstones(ctx)
@@ -296,7 +294,7 @@ func (s *StoreService[T]) purgeScheduled(ctx context.Context, a *App, tr plug.Tr
 // erasure leaves nothing of them in the trash. It returns the keys purged.
 // A record no data key opens any more is not theirs to judge: its subject
 // cannot be read, and it is left for its purge — what sealed it is gone.
-func (s *StoreService[T]) eraseTrashed(ctx context.Context, a *App, ids []string, reason string) ([]string, error) {
+func (s *storeCore) eraseTrashed(ctx context.Context, a *App, ids []string, reason string) ([]string, error) {
 	tr, ok := s.engine().(plug.Trasher)
 	if s.revisions == 0 || !ok || s.plan().subject == nil {
 		return nil, nil
@@ -320,7 +318,7 @@ func (s *StoreService[T]) eraseTrashed(ctx context.Context, a *App, ids []string
 // eraseOneTrashed purges the record trashed under key when its subject is
 // one of ids, and journals it: it reports whether it purged, even when the
 // journal then failed.
-func (s *StoreService[T]) eraseOneTrashed(ctx context.Context, a *App, key string, ids []string, reason string) (bool, error) {
+func (s *storeCore) eraseOneTrashed(ctx context.Context, a *App, key string, ids []string, reason string) (bool, error) {
 	subject, err := s.trashedSubject(ctx, a, key)
 	if err != nil || subject == "" || !slices.Contains(ids, subject) {
 		return false, err
@@ -335,23 +333,23 @@ func (s *StoreService[T]) eraseOneTrashed(ctx context.Context, a *App, key strin
 
 // trashedValue is the record trashed under key, as it was deleted: opened,
 // for a store that seals.
-func (s *StoreService[T]) trashedValue(ctx context.Context, key string) (T, error) {
-	var v T
+func (s *storeCore) trashedValue(ctx context.Context, key string) (any, error) {
 	all, err := s.restingVersions(ctx, key)
 	if err != nil {
-		return v, err
+		return nil, err
 	}
 	if len(all) == 0 {
-		return v, s.missing(key)
+		return nil, s.missing(key)
 	}
 	raw := all[0].JSON
 	if se := s.sealing(); se != nil {
 		if raw, err = se.openDoc(ctx, key, raw); err != nil {
-			return v, err
+			return nil, err
 		}
 	}
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return v, s.decodeFailure(key, err)
+	v, err := s.decodeEntity(raw)
+	if err != nil {
+		return nil, s.decodeFailure(key, err)
 	}
 	return v, nil
 }
@@ -359,7 +357,7 @@ func (s *StoreService[T]) trashedValue(ctx context.Context, key string) (T, erro
 // trashedSubject is the subject of the record trashed under key; "" when
 // the store has none, kit keeps no data keys, or the record no longer opens:
 // sealed under a key destroyed since, it says nothing of anyone.
-func (s *StoreService[T]) trashedSubject(ctx context.Context, a *App, key string) (string, error) {
+func (s *storeCore) trashedSubject(ctx context.Context, a *App, key string) (string, error) {
 	if s.plan().subject == nil {
 		return "", nil
 	}
@@ -376,7 +374,7 @@ func (s *StoreService[T]) trashedSubject(ctx context.Context, a *App, key string
 
 // purgeAt is when kit purges a record of the trash: its trash's length
 // after its deletion, or its retention's instant when that comes first.
-func (s *StoreService[T]) purgeAt(ctx context.Context, a *App, st plug.TombstoneValue) time.Time {
+func (s *storeCore) purgeAt(ctx context.Context, a *App, st plug.TombstoneValue) time.Time {
 	at := st.At.Add(s.trashLength())
 	if !s.retains() {
 		return at

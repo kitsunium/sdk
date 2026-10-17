@@ -37,8 +37,8 @@ func passing(types ...reflect.Type) []dataType {
 
 // dataTypes are the Go types the Store carries, for the classification of
 // personal data: its entity rests.
-func (s *StoreService[T]) dataTypes() []dataType {
-	return []dataType{{typ: reflect.TypeFor[T](), rests: true}}
+func (s *storeCore) dataTypes() []dataType {
+	return []dataType{{typ: s.ent.typ, rests: true}}
 }
 
 // dataTypes are the Go types the Topic carries, for the classification of

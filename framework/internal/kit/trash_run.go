@@ -34,8 +34,8 @@ import (
 const armSlack time.Duration = time.Millisecond
 
 // trashRun is one store's trash in a running app: its agenda and its loop.
-type trashRun[T any] struct {
-	s     *StoreService[T]
+type trashRun struct {
+	s     *storeCore
 	a     *App
 	state *loopState
 
@@ -100,12 +100,12 @@ func (a *App) addTrash() error {
 //
 // Goroutine lifecycle: one goroutine runs the trash's loop until stopTrash
 // cancels its context and waits for it.
-func (s *StoreService[T]) startTrash(ctx context.Context, a *App) error {
+func (s *storeCore) startTrash(ctx context.Context, a *App) error {
 	tr, err := s.trashKeeper()
 	if err != nil {
 		return err
 	}
-	r := &trashRun[T]{s: s, a: a, agenda: map[string]trashEntry{}, wake: make(chan struct{}, 1), done: make(chan struct{})}
+	r := &trashRun{s: s, a: a, agenda: map[string]trashEntry{}, wake: make(chan struct{}, 1), done: make(chan struct{})}
 	stones, err := tr.Tombstones(s.outside(ctx))
 	if err != nil {
 		return s.trashFailure(err)
@@ -132,7 +132,7 @@ func (s *StoreService[T]) startTrash(ctx context.Context, a *App) error {
 }
 
 // stopTrash stops the store's trash loop.
-func (s *StoreService[T]) stopTrash(ctx context.Context) error {
+func (s *storeCore) stopTrash(ctx context.Context) error {
 	r := s.bin.Swap(nil)
 	if r == nil {
 		return nil
@@ -148,7 +148,7 @@ func (s *StoreService[T]) stopTrash(ctx context.Context) error {
 }
 
 // trashPlanned puts a record the product trashed on the agenda.
-func (s *StoreService[T]) trashPlanned(ctx context.Context, a *App, st plug.TombstoneValue) {
+func (s *storeCore) trashPlanned(ctx context.Context, a *App, st plug.TombstoneValue) {
 	r := s.bin.Load()
 	if r == nil {
 		return
@@ -162,7 +162,7 @@ func (s *StoreService[T]) trashPlanned(ctx context.Context, a *App, st plug.Tomb
 
 // forget takes key off the agenda, unless a deletion since put another
 // tombstone of it there.
-func (r *trashRun[T]) forget(key string, e trashEntry) {
+func (r *trashRun) forget(key string, e trashEntry) {
 	r.mu.Lock()
 	if r.agenda[key] == e {
 		delete(r.agenda, key)
@@ -171,7 +171,7 @@ func (r *trashRun[T]) forget(key string, e trashEntry) {
 }
 
 // signal wakes the loop: a burst of deletions is one wake.
-func (r *trashRun[T]) signal() {
+func (r *trashRun) signal() {
 	select {
 	case r.wake <- struct{}{}:
 	default:
@@ -179,7 +179,7 @@ func (r *trashRun[T]) signal() {
 }
 
 // earliest is the agenda's first instant, zero when it is empty.
-func (r *trashRun[T]) earliest() time.Time {
+func (r *trashRun) earliest() time.Time {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var first time.Time
@@ -192,7 +192,7 @@ func (r *trashRun[T]) earliest() time.Time {
 }
 
 // dueKeys are the keys due at now, in key order, with their entries.
-func (r *trashRun[T]) dueKeys(now time.Time) ([]string, map[string]trashEntry) {
+func (r *trashRun) dueKeys(now time.Time) ([]string, map[string]trashEntry) {
 	entries := map[string]trashEntry{}
 	r.mu.Lock()
 	for k, e := range r.agenda {
@@ -207,7 +207,7 @@ func (r *trashRun[T]) dueKeys(now time.Time) ([]string, map[string]trashEntry) {
 
 // purgeDue purges every record due at now: a record no longer in the trash
 // leaves the agenda, one whose purge failed stays on it.
-func (r *trashRun[T]) purgeDue(ctx context.Context, now time.Time) error {
+func (r *trashRun) purgeDue(ctx context.Context, now time.Time) error {
 	keys, entries := r.dueKeys(now)
 	if len(keys) == 0 {
 		return nil
@@ -232,7 +232,7 @@ func (r *trashRun[T]) purgeDue(ctx context.Context, now time.Time) error {
 // loop is the trash's goroutine: it sleeps until the next record is due,
 // or a deletion moves the agenda, purges what is due, and sleeps again. A
 // failed purge waits a backoff, one second doubling up to a minute.
-func (r *trashRun[T]) loop(ctx context.Context) {
+func (r *trashRun) loop(ctx context.Context) {
 	done := r.done
 	defer close(done)
 	ctx = withActor(r.a.asLoop(ctx, r.state.Name), actorRetention)
@@ -255,7 +255,7 @@ func (r *trashRun[T]) loop(ctx context.Context) {
 
 // nextWake is the agenda's first instant, no earlier than floor, and says so
 // on the loop: idle until then, or until a deletion when nothing is due.
-func (r *trashRun[T]) nextWake(floor time.Time) time.Time {
+func (r *trashRun) nextWake(floor time.Time) time.Time {
 	next := r.earliest()
 	if !next.IsZero() && next.Before(floor) {
 		next = floor
@@ -266,7 +266,7 @@ func (r *trashRun[T]) nextWake(floor time.Time) time.Time {
 
 // runOnce purges what is due at now. A run that fails waits a backoff
 // before the next; one that succeeds clears it.
-func (r *trashRun[T]) runOnce(ctx context.Context, reason string, now time.Time, b *retentionBackoff) {
+func (r *trashRun) runOnce(ctx context.Context, reason string, now time.Time, b *retentionBackoff) {
 	r.state.begin(r.a, reason)
 	err := r.purgeDue(ctx, now)
 	ended := r.a.clock.Now()
@@ -283,7 +283,7 @@ func (r *trashRun[T]) runOnce(ctx context.Context, reason string, now time.Time,
 
 // arm arms a timer for next on the app's clock, and reports instead that
 // next is due when the clock reached it meanwhile.
-func (r *trashRun[T]) arm(next time.Time) (clock.Timer, bool) {
+func (r *trashRun) arm(next time.Time) (clock.Timer, bool) {
 	for {
 		now := r.a.clock.Now()
 		if !now.Before(next) {
@@ -301,7 +301,7 @@ func (r *trashRun[T]) arm(next time.Time) (clock.Timer, bool) {
 // agenda; with nothing on the agenda, it waits for a deletion alone. It
 // says why the loop woke, and false when it stops. A wake already pending is
 // taken before a timer is armed.
-func (r *trashRun[T]) wait(ctx context.Context, next time.Time) (string, bool) {
+func (r *trashRun) wait(ctx context.Context, next time.Time) (string, bool) {
 	select {
 	case <-r.wake:
 		return model.WakeChange, true

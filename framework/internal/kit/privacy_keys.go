@@ -216,12 +216,13 @@ func (k *referenceKeys) ref(key mac.Key, text string) string {
 // A store's part --------------------------------------------------------------
 
 // privacyDeclared reports whether the store declares a privacy option.
-func (s *StoreService[T]) privacyDeclared() bool { return s.privacy != nil }
+func (s *storeCore) privacyDeclared() bool { return s.privacy != nil }
 
 // heldUntil is the instant the store's HeldUntil holds v until, when it
 // declares one and v gives one.
 func (s *storeCore) heldUntil(v any) (until time.Time, held bool) {
-	if s.heldFor == nil {
+	p := s.privacy
+	if p == nil || p.heldUntil == nil {
 		return time.Time{}, false
 	}
 	defer func() {
@@ -230,7 +231,7 @@ func (s *storeCore) heldUntil(v any) (until time.Time, held bool) {
 			until, held = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC), true
 		}
 	}()
-	return s.heldFor(v)
+	return p.heldUntil(v)
 }
 
 // heldAt says whether a hold, or the store's HeldUntil, keeps v at now.

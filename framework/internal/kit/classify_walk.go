@@ -257,7 +257,7 @@ func jsonElems(v any) []any {
 // members, and the subject — as well as the names the redactor knows. A
 // member sealed at rest is shown sealed: the Studio never opens it (ADR
 // 0006 §9).
-func (s *StoreService[T]) redacted(raw json.RawMessage) json.RawMessage {
+func (s *storeCore) redacted(raw json.RawMessage) json.RawMessage {
 	var sealed []string
 	if hasBoxes(raw) {
 		walked, _, err := boxWalk(raw, nil, "", false, func(at memberAt, _ []byte) ([]byte, bool, error) {
@@ -269,9 +269,8 @@ func (s *StoreService[T]) redacted(raw json.RawMessage) json.RawMessage {
 		}
 		raw = walked
 	}
-	var v T
 	var shown json.RawMessage
-	if err := json.Unmarshal(raw, &v); err != nil {
+	if v, err := s.decodeEntity(raw); err != nil {
 		shown, _ = redactJSON(raw, 64<<10)
 	} else {
 		shown, _ = redactValue(v, 64<<10)

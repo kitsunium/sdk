@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"reflect"
 	"slices"
 	"strings"
 
@@ -133,7 +132,7 @@ func (h *historied) opened(ctx context.Context, key, pointer string, list []form
 // receives them — a secret field's left out —, or for the Studio's preview
 // with every personal, special or secret value redacted. A record deleted
 // since the export read it has none.
-func (s *StoreService[T]) exportFormer(ctx context.Context, key string, preview bool) (map[string][]Former, error) {
+func (s *storeCore) exportFormer(ctx context.Context, key string, preview bool) (map[string][]Former, error) {
 	h := s.historied()
 	if h == nil || h.hist == nil {
 		return nil, nil
@@ -212,15 +211,15 @@ func within(pointer, parent string) bool {
 // erasable reports whether an erasure of v would clear anything: a member
 // it clears, or a former value or a version of one — a record whose members
 // are already cleared may still remember what they held.
-func (s *StoreService[T]) erasable(ctx context.Context, v T) bool {
-	return !s.plan().cleared(reflect.ValueOf(&v).Elem()) || s.keepsErasable(ctx, s.keyOf(v)) ||
+func (s *storeCore) erasable(ctx context.Context, v any) bool {
+	return !s.plan().cleared(s.addressable(v)) || s.keepsErasable(ctx, s.keyOf(v)) ||
 		s.versionsErasable(ctx, s.keyOf(v))
 }
 
 // keepsErasable reports whether the record under key keeps former values an
 // erasure clears. A history kit cannot read is: the erasure tries, and says
 // why it cannot.
-func (s *StoreService[T]) keepsErasable(ctx context.Context, key string) bool {
+func (s *storeCore) keepsErasable(ctx context.Context, key string) bool {
 	h := s.historied()
 	if h == nil || h.hist == nil {
 		return false

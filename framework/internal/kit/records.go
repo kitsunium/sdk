@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"reflect"
 	"slices"
 
 	"github.com/kitsunium/sdk/framework/model"
@@ -146,7 +145,7 @@ func (r RecordsService) Delete(ctx context.Context, key, reason string) error {
 func (s *StoreService[T]) records() recordsPort { return s }
 
 // recordGet reads the record key for a module, inside its span.
-func (s *StoreService[T]) recordGet(ctx context.Context, key string) (json.RawMessage, error) {
+func (s *storeCore) recordGet(ctx context.Context, key string) (json.RawMessage, error) {
 	a := s.app()
 	if a == nil {
 		return nil, notRunning(&s.nodeBase)
@@ -159,7 +158,7 @@ func (s *StoreService[T]) recordGet(ctx context.Context, key string) (json.RawMe
 
 // readForModule is the record under key without its secret members,
 // journaled as read.
-func (s *StoreService[T]) readForModule(ctx context.Context, a *App, key string) (json.RawMessage, error) {
+func (s *storeCore) readForModule(ctx context.Context, a *App, key string) (json.RawMessage, error) {
 	v, err := s.read(ctx, key)
 	if err != nil {
 		return nil, err
@@ -173,7 +172,7 @@ func (s *StoreService[T]) readForModule(ctx context.Context, a *App, key string)
 
 // recordEraseFields erases the fields at paths of the record key for a module,
 // for reason.
-func (s *StoreService[T]) recordEraseFields(ctx context.Context, key, reason string, paths []string) error {
+func (s *storeCore) recordEraseFields(ctx context.Context, key, reason string, paths []string) error {
 	a := s.app()
 	if a == nil {
 		return notRunning(&s.nodeBase)
@@ -186,7 +185,7 @@ func (s *StoreService[T]) recordEraseFields(ctx context.Context, key, reason str
 
 // eraseFields clears the named fields of one record, unless a hold keeps
 // it, journals it, and folds the store — even when the journal failed.
-func (s *StoreService[T]) eraseFields(ctx context.Context, a *App, key, reason string, paths []string) error {
+func (s *storeCore) eraseFields(ctx context.Context, a *App, key, reason string, paths []string) error {
 	members, err := s.membersAt(paths)
 	if err != nil {
 		return err
@@ -225,18 +224,19 @@ func (s *storeCore) membersAt(paths []string) ([]*member, error) {
 // clearMembers clears the members of the record under key, in one update,
 // and returns the record's subject. Their former values go with them (ADR
 // 0007).
-func (s *StoreService[T]) clearMembers(ctx context.Context, key string, members []*member) (subject string, err error) {
+func (s *storeCore) clearMembers(ctx context.Context, key string, members []*member) (subject string, err error) {
 	plan := s.plan()
-	_, err = s.modify(s.erasing(ctx, members), key, func(v *T) error {
-		rv := reflect.ValueOf(v).Elem()
+	_, err = s.modify(s.erasing(ctx, members), key, func(v any) (any, error) {
+		rv := s.addressable(v)
 		subject, _ = plan.subjectOf(rv)
 		for _, m := range members {
 			clearPath(rv, m.path)
 		}
-		if s.keyOf(*v) != key {
-			return errRekeyed
+		next := rv.Interface()
+		if s.keyOf(next) != key {
+			return nil, errRekeyed
 		}
-		return nil
+		return next, nil
 	})
 	switch {
 	case errors.Is(err, errRekeyed):
@@ -245,16 +245,17 @@ func (s *StoreService[T]) clearMembers(ctx context.Context, key string, members 
 		return "", err
 	}
 	// The record's versions are cleared of what it clears (ADR 0007 §4).
-	return subject, s.eraseVersions(ctx, key, func(v *T) {
-		rv := reflect.ValueOf(v).Elem()
+	return subject, s.eraseVersions(ctx, key, func(v any) any {
+		rv := s.addressable(v)
 		for _, m := range members {
 			clearPath(rv, m.path)
 		}
+		return rv.Interface()
 	})
 }
 
 // recordDelete deletes the record key for a module, for reason.
-func (s *StoreService[T]) recordDelete(ctx context.Context, key, reason string) error {
+func (s *storeCore) recordDelete(ctx context.Context, key, reason string) error {
 	a := s.app()
 	if a == nil {
 		return notRunning(&s.nodeBase)
@@ -267,7 +268,7 @@ func (s *StoreService[T]) recordDelete(ctx context.Context, key, reason string) 
 
 // deleteForModule deletes the record under key, unless a hold keeps it,
 // journals it, and folds the store: a module's final removal.
-func (s *StoreService[T]) deleteForModule(ctx context.Context, a *App, key, reason string) error {
+func (s *storeCore) deleteForModule(ctx context.Context, a *App, key, reason string) error {
 	unlock := a.lockHolds(s.id)
 	defer unlock()
 	if err := s.holdRefusal(ctx, a, key); err != nil {

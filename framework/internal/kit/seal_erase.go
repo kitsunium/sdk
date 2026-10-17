@@ -146,7 +146,7 @@ func (a *App) destroyKey(ctx context.Context, z *sealer, ref string) (bool, erro
 // key, which they still need. A store that seals nothing keeps none. A box
 // whose key cannot be read is an error, never "not under ref": when kit
 // cannot tell, the key stays.
-func (s *StoreService[T]) sealsUnder(ctx context.Context, ref string) (bool, error) {
+func (s *storeCore) sealsUnder(ctx context.Context, ref string) (bool, error) {
 	se := s.sealing()
 	if se == nil {
 		return false, nil
@@ -162,7 +162,7 @@ func (s *StoreService[T]) sealsUnder(ctx context.Context, ref string) (bool, err
 
 // formerSealUnder reports whether a former value the store's history keeps
 // is sealed under the data key ref.
-func (s *StoreService[T]) formerSealUnder(ctx context.Context, ref string) (bool, error) {
+func (s *storeCore) formerSealUnder(ctx context.Context, ref string) (bool, error) {
 	h := s.historied()
 	if h == nil || h.hist == nil {
 		return false, nil

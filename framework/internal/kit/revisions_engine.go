@@ -53,7 +53,7 @@ func (s *storeCore) versionsHeld(ctx context.Context, key string) bool {
 	if _, held, err := a.holdOf(ctx, s.id, key); held || err != nil {
 		return true
 	}
-	if s.heldFor == nil {
+	if s.privacy == nil || s.privacy.heldUntil == nil {
 		return false
 	}
 	v, err := s.read(ctx, key)

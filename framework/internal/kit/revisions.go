@@ -176,7 +176,7 @@ func (s *StoreService[T]) Restore(ctx context.Context, key string, number uint64
 	ctx, sp := a.begin(ctx, &spanStart{node: s.id, from: currentNode(ctx), edge: model.EdgeWrites, label: restoreLabel, op: model.OpWrite, name: "Restore"})
 	v, err := s.restore(ctx, key, number, fields)
 	sp.end(err)
-	return v, err
+	return as[T](v), err
 }
 
 // revisionList reads every version of the record under key, newest first,
@@ -241,7 +241,7 @@ func (p *classPlan) zeroSecrets(v reflect.Value) {
 // openedVersions reads every version the store keeps of the record under
 // key, newest first, as JSON — opened, for a store that seals: a member
 // whose data key is destroyed is left out.
-func (s *StoreService[T]) openedVersions(ctx context.Context, key string) ([]plug.VersionValue, error) {
+func (s *storeCore) openedVersions(ctx context.Context, key string) ([]plug.VersionValue, error) {
 	all, err := s.restingVersions(ctx, key)
 	if err != nil {
 		return nil, err
@@ -261,7 +261,7 @@ func (s *StoreService[T]) openedVersions(ctx context.Context, key string) ([]plu
 }
 
 // openedVersion reads the version numbered number of the record under key.
-func (s *StoreService[T]) openedVersion(ctx context.Context, key string, number uint64) (plug.VersionValue, error) {
+func (s *storeCore) openedVersion(ctx context.Context, key string, number uint64) (plug.VersionValue, error) {
 	all, err := s.openedVersions(ctx, key)
 	if err != nil {
 		return plug.VersionValue{}, err
@@ -276,7 +276,7 @@ func (s *StoreService[T]) openedVersion(ctx context.Context, key string, number 
 
 // restingVersions reads every version of the record under key as the store
 // keeps it — a sealing store's members as boxes.
-func (s *StoreService[T]) restingVersions(ctx context.Context, key string) ([]plug.VersionValue, error) {
+func (s *storeCore) restingVersions(ctx context.Context, key string) ([]plug.VersionValue, error) {
 	vk, err := s.keeper()
 	if err != nil {
 		return nil, err
@@ -290,7 +290,7 @@ func (s *StoreService[T]) restingVersions(ctx context.Context, key string) ([]pl
 
 // keeper is the engine that keeps the store's versions, as they rest: an
 // [Invalid] for a store that keeps none.
-func (s *StoreService[T]) keeper() (plug.VersionKeeper, error) {
+func (s *storeCore) keeper() (plug.VersionKeeper, error) {
 	eng := s.engine()
 	if eng == nil {
 		return nil, notRunning(&s.nodeBase)

@@ -34,7 +34,7 @@ type retained int
 // sweep erases and deletes what is due at now, then folds the store: one
 // span on the store's node per run. Under dry-run it journals what it would
 // do and changes nothing.
-func (r *retentionRun[T]) sweep(ctx context.Context, now time.Time) error {
+func (r *retentionRun) sweep(ctx context.Context, now time.Time) error {
 	keys := r.dueKeys(now)
 	if len(keys) == 0 {
 		return nil
@@ -54,7 +54,7 @@ func (r *retentionRun[T]) sweep(ctx context.Context, now time.Time) error {
 
 // retainAll handles the records due at now, and says whether the store
 // changed: then its files are folded, even when a journal entry failed.
-func (r *retentionRun[T]) retainAll(ctx context.Context, keys []string, now time.Time) (failed []error, wrote bool) {
+func (r *retentionRun) retainAll(ctx context.Context, keys []string, now time.Time) (failed []error, wrote bool) {
 	dry := r.mode == model.RetentionDryRun
 	for _, key := range keys {
 		out, err := r.s.retainOne(ctx, r.a, key, now, r.mode)
@@ -72,7 +72,7 @@ func (r *retentionRun[T]) retainAll(ctx context.Context, keys []string, now time
 // again at now — a hold, a write since —, then deleted, erased, or left.
 // Under dry-run it says what it would do, and journals it. The outcome says
 // what changed, even when the journal then failed.
-func (s *StoreService[T]) retainOne(ctx context.Context, a *App, key string, now time.Time, mode string) (retained, error) {
+func (s *storeCore) retainOne(ctx context.Context, a *App, key string, now time.Time, mode string) (retained, error) {
 	// The writer turn before the hold lock: a write's outermost lock
 	// (transact_turn.go).
 	ctx, release, err := s.turn(ctx)
@@ -104,7 +104,7 @@ func (s *StoreService[T]) retainOne(ctx context.Context, a *App, key string, now
 
 // wouldRetain journals what the retention would do with a due record, and
 // changes nothing: a dry run.
-func (s *StoreService[T]) wouldRetain(ctx context.Context, a *App, key string, v T, deleteDue bool) (retained, error) {
+func (s *storeCore) wouldRetain(ctx context.Context, a *App, key string, v any, deleteDue bool) (retained, error) {
 	op, would := model.JournalErase, retainErased
 	if deleteDue {
 		op, would = model.JournalDelete, retainDeleted
@@ -114,7 +114,7 @@ func (s *StoreService[T]) wouldRetain(ctx context.Context, a *App, key string, v
 
 // retainDelete deletes a due record, in a span of its own on the store's
 // node, inside the run's.
-func (s *StoreService[T]) retainDelete(ctx context.Context, a *App, key string, v T) (retained, error) {
+func (s *storeCore) retainDelete(ctx context.Context, a *App, key string, v any) (retained, error) {
 	ctx, sp := a.begin(ctx, &spanStart{node: s.id, op: model.OpWrite, name: "Delete"})
 	removed, err := s.deleteRecord(ctx, a, key, v, actorRetention)
 	sp.end(err)
@@ -126,7 +126,7 @@ func (s *StoreService[T]) retainDelete(ctx context.Context, a *App, key string, 
 
 // retainErase erases a due record, in a span of its own on the store's node,
 // inside the run's.
-func (s *StoreService[T]) retainErase(ctx context.Context, a *App, key string) (retained, error) {
+func (s *storeCore) retainErase(ctx context.Context, a *App, key string) (retained, error) {
 	ctx, sp := a.begin(ctx, &spanStart{node: s.id, op: model.OpWrite, name: "Erase"})
 	wrote, err := s.eraseRecord(ctx, a, key, actorRetention)
 	sp.end(err)
@@ -141,7 +141,7 @@ func (s *StoreService[T]) retainErase(ctx context.Context, a *App, key string) (
 // postpones it to the instant it gives, and a record with nothing left to
 // erase is due only for its deletion. When kit cannot tell whether a hold
 // keeps it, it is scheduled: the run asks again, and fails.
-func (s *StoreService[T]) nextDue(a *App, key string, v T) (time.Time, bool) {
+func (s *storeCore) nextDue(a *App, key string, v any) (time.Time, bool) {
 	if _, held, err := a.holdOf(context.Background(), s.id, key); held && err == nil {
 		return time.Time{}, false
 	}
@@ -158,7 +158,7 @@ func (s *StoreService[T]) nextDue(a *App, key string, v T) (time.Time, bool) {
 // firstDue is the first instant a rule makes v due at, zero when none does.
 // A retention function that panics makes the record due now: the run that
 // finds the panic again fails, says so, and backs off.
-func (s *StoreService[T]) firstDue(a *App, v T) time.Time {
+func (s *storeCore) firstDue(a *App, v any) time.Time {
 	p := s.privacy
 	var next time.Time
 	add := func(at time.Time, ok bool, err error) {
@@ -180,7 +180,7 @@ func (s *StoreService[T]) firstDue(a *App, v T) time.Time {
 
 // dueNow says whether v is due, at now, for its deletion or its erasure. A
 // held record is due for neither; when kit cannot tell, it is the error.
-func (s *StoreService[T]) dueNow(ctx context.Context, a *App, key string, v T, now time.Time) (deleteDue, eraseDue bool, err error) {
+func (s *storeCore) dueNow(ctx context.Context, a *App, key string, v any, now time.Time) (deleteDue, eraseDue bool, err error) {
 	if held, err := s.heldAt(ctx, a, key, v, now); held || err != nil {
 		return false, false, err
 	}
@@ -197,14 +197,14 @@ func (s *StoreService[T]) dueNow(ctx context.Context, a *App, key string, v T, n
 }
 
 // dueBy says whether rule makes v due at now.
-func dueBy[T any](rule *retentionRule[T], v T, now time.Time) (bool, error) {
+func dueBy(rule *retentionRule, v any, now time.Time) (bool, error) {
 	at, ok, err := rule.due(v)
 	return ok && !at.After(now), err
 }
 
 // retentionText says a rule in words, for the register and an export:
 // "90 days after Closed", "at Report.EraseAt".
-func retentionText[T any](a *App, r *retentionRule[T]) (string, bool) {
+func retentionText(a *App, r *retentionRule) (string, bool) {
 	if r == nil {
 		return "", false
 	}
@@ -249,7 +249,7 @@ func humanDuration(d time.Duration) string {
 }
 
 // retentionInfo describes a rule for the model.
-func retentionInfo[T any](a *App, r *retentionRule[T]) *model.Retention {
+func retentionInfo(a *App, r *retentionRule) *model.Retention {
 	if r == nil {
 		return nil
 	}
@@ -268,7 +268,7 @@ func retentionInfo[T any](a *App, r *retentionRule[T]) *model.Retention {
 
 // retainOnce runs the store's retention once at the app's now, without its
 // loop: what the command line and a test ask for.
-func (s *StoreService[T]) retainOnce(ctx context.Context, a *App, mode string) (erased, deleted int, err error) {
+func (s *storeCore) retainOnce(ctx context.Context, a *App, mode string) (erased, deleted int, err error) {
 	if !s.retains() {
 		return 0, 0, nil
 	}
@@ -297,7 +297,7 @@ func (s *StoreService[T]) retainOnce(ctx context.Context, a *App, mode string) (
 }
 
 // retains reports whether the store erases or deletes on its own.
-func (s *StoreService[T]) retains() bool { return s.privacy.hasRetention() }
+func (s *storeCore) retains() bool { return s.privacy.hasRetention() }
 
 // addRetention registers the component that runs the stores' retention
 // loops, as KIT_RETENTION says: on, dry-run, or not at all.

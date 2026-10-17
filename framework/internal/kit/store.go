@@ -8,7 +8,6 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"sync/atomic"
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
@@ -44,12 +43,6 @@ type StoreService[T any] struct {
 	// storeCore is the store without its entity type (store_core.go).
 	storeCore
 	key func(T) string
-	// privacy is what the store declares about personal data, its retention
-	// included (retention.go); nil when it declares nothing.
-	privacy *storePrivacy[T]
-	// bin is the running trash's agenda and loop (trash_run.go); nil while
-	// none runs.
-	bin atomic.Pointer[trashRun[T]]
 }
 
 // storeRole is what a store is kept for: a product's data, or kit's own
@@ -829,7 +822,7 @@ func (s *storeCore) stop(_ context.Context, _ *App) error {
 
 // describe fills the graph node out with what the Store declares, and returns
 // its edges.
-func (s *StoreService[T]) describe(a *App, out *model.Node) []model.Edge {
+func (s *storeCore) describe(a *App, out *model.Node) []model.Edge {
 	backend, location, database := s.whereKept(a)
 	table := ""
 	if database != "" {

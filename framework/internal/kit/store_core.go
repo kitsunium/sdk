@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
@@ -34,9 +35,9 @@ type storeCore struct {
 	decls []indexDecl
 	// passwords are the password policies of its fields (passwords.go).
 	passwords []*passwordRule
-	// heldFor is the store's HeldUntil on an entity, nil when it declares
-	// none (retention.go).
-	heldFor func(v any) (time.Time, bool)
+	// privacy is what the store declares about personal data, its retention
+	// included (retention.go); nil when it declares nothing.
+	privacy *storePrivacy
 	// inMemory keeps the store in memory, whatever the app keeps (InMemory).
 	inMemory bool
 	// readModel marks the store as derived from others (ReadModel).
@@ -69,6 +70,9 @@ type storeCore struct {
 	// trashFor is the store's <store>-trash, declared with its revisions:
 	// how long the trash keeps what the product deletes (trash.go).
 	trashFor *SettingService[time.Duration]
+	// bin is the running trash's agenda and loop (trash_run.go); nil while
+	// none runs.
+	bin atomic.Pointer[trashRun]
 	// states name the state field of each workflow over the store: a
 	// restore keeps them as they are, and a transition that changes only
 	// one makes no version (revisions.go).

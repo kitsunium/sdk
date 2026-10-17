@@ -15,8 +15,8 @@ import (
 
 // retentionRun is one store's retention in a running app: its agenda — each
 // record's next due instant, kept from the store's writes — and its loop.
-type retentionRun[T any] struct {
-	s     *StoreService[T]
+type retentionRun struct {
+	s     *storeCore
 	a     *App
 	state *loopState
 	mode  string
@@ -43,7 +43,7 @@ type retentionRunner interface {
 //
 // Goroutine lifecycle: one goroutine runs the retention loop until
 // stopRetention cancels its context and waits for it.
-func (s *StoreService[T]) startRetention(ctx context.Context, a *App, mode string) error {
+func (s *storeCore) startRetention(ctx context.Context, a *App, mode string) error {
 	p := s.privacy
 	if !p.hasRetention() || mode == model.RetentionOff {
 		return nil
@@ -70,8 +70,8 @@ func (s *StoreService[T]) startRetention(ctx context.Context, a *App, mode strin
 
 // newRetentionRun is a store's retention, its loop registered with the
 // daemon's.
-func newRetentionRun[T any](s *StoreService[T], a *App, mode string) *retentionRun[T] {
-	r := &retentionRun[T]{
+func newRetentionRun(s *storeCore, a *App, mode string) *retentionRun {
+	r := &retentionRun{
 		s: s, a: a, mode: mode, agenda: map[string]time.Time{},
 		wake: make(chan struct{}, 1), done: make(chan struct{}),
 	}
@@ -80,7 +80,7 @@ func newRetentionRun[T any](s *StoreService[T], a *App, mode string) *retentionR
 }
 
 // scan puts every record of the store on the agenda.
-func (r *retentionRun[T]) scan(ctx context.Context) error {
+func (r *retentionRun) scan(ctx context.Context) error {
 	all, err := r.s.all(ctx)
 	if err != nil {
 		return err
@@ -94,7 +94,7 @@ func (r *retentionRun[T]) scan(ctx context.Context) error {
 }
 
 // stopRetention stops the loop and takes its hooks back.
-func (s *StoreService[T]) stopRetention(ctx context.Context) error {
+func (s *storeCore) stopRetention(ctx context.Context) error {
 	p := s.privacy
 	if p == nil {
 		return nil
@@ -118,7 +118,7 @@ func (s *StoreService[T]) stopRetention(ctx context.Context) error {
 }
 
 // retention is the running retention, or nil.
-func (s *StoreService[T]) retention() *retentionRun[T] {
+func (s *storeCore) retention() *retentionRun {
 	if s.privacy == nil {
 		return nil
 	}
@@ -128,11 +128,11 @@ func (s *StoreService[T]) retention() *retentionRun[T] {
 }
 
 // schedule is the loop's schedule, in words.
-func (r *retentionRun[T]) schedule() string {
+func (r *retentionRun) schedule() string {
 	var parts []string
 	for _, x := range []struct {
 		what string
-		rule *retentionRule[T]
+		rule *retentionRule
 	}{{"erase", r.s.privacy.erase}, {"delete", r.s.privacy.delete}} {
 		if x.rule == nil {
 			continue
@@ -152,7 +152,7 @@ func (r *retentionRun[T]) schedule() string {
 
 // written recomputes when key is due, after a write of it — the store's
 // hook, which carries no context: the record is read again as it stands.
-func (r *retentionRun[T]) written(key string) {
+func (r *retentionRun) written(key string) {
 	v, err := r.s.read(context.Background(), key)
 	if err != nil {
 		r.forget(key)
@@ -166,7 +166,7 @@ func (r *retentionRun[T]) written(key string) {
 // loop. The wake is sent under the lock the loop reads the agenda with: a
 // loop that reads the record finds its wake already pending, and takes it
 // before it arms a timer (wait).
-func (r *retentionRun[T]) plan(key string, v T) {
+func (r *retentionRun) plan(key string, v any) {
 	at, due := r.s.nextDue(r.a, key, v)
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -181,14 +181,14 @@ func (r *retentionRun[T]) plan(key string, v T) {
 }
 
 // forget takes a deleted record off the agenda.
-func (r *retentionRun[T]) forget(key string) {
+func (r *retentionRun) forget(key string) {
 	r.mu.Lock()
 	delete(r.agenda, key)
 	r.mu.Unlock()
 }
 
 // signal wakes the loop: a burst of writes is one wake.
-func (r *retentionRun[T]) signal() {
+func (r *retentionRun) signal() {
 	select {
 	case r.wake <- struct{}{}:
 	default:
@@ -196,7 +196,7 @@ func (r *retentionRun[T]) signal() {
 }
 
 // earliest is the agenda's first instant, zero when it is empty.
-func (r *retentionRun[T]) earliest() time.Time {
+func (r *retentionRun) earliest() time.Time {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var first time.Time
@@ -209,7 +209,7 @@ func (r *retentionRun[T]) earliest() time.Time {
 }
 
 // dueKeys are the keys due at now, in key order.
-func (r *retentionRun[T]) dueKeys(now time.Time) []string {
+func (r *retentionRun) dueKeys(now time.Time) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var keys []string
@@ -224,7 +224,7 @@ func (r *retentionRun[T]) dueKeys(now time.Time) []string {
 
 // reschedule puts the record under key on the agenda again, from what it
 // holds now: after a hold is placed or lifted, or a run left it.
-func (s *StoreService[T]) reschedule(key string) {
+func (s *storeCore) reschedule(key string) {
 	if r := s.retention(); r != nil {
 		r.written(key)
 	}
@@ -232,7 +232,7 @@ func (s *StoreService[T]) reschedule(key string) {
 
 // loop is the retention's goroutine: it sleeps until the next record is
 // due, or a write brings one forward, handles what is due, and sleeps again.
-func (r *retentionRun[T]) loop(ctx context.Context) {
+func (r *retentionRun) loop(ctx context.Context) {
 	done := r.done
 	defer close(done)
 	ctx = r.a.asLoop(ctx, r.state.Name)
@@ -262,7 +262,7 @@ type retentionBackoff struct {
 
 // nextWake is the agenda's first instant, no earlier than floor, and says so
 // on the loop: idle until then, or until a write when nothing is due.
-func (r *retentionRun[T]) nextWake(floor time.Time) time.Time {
+func (r *retentionRun) nextWake(floor time.Time) time.Time {
 	next := r.earliest()
 	if !next.IsZero() && next.Before(floor) {
 		next = floor
@@ -274,7 +274,7 @@ func (r *retentionRun[T]) nextWake(floor time.Time) time.Time {
 // runOnce handles what is due now. A run that fails waits a backoff, one
 // second doubling up to a minute; a run that succeeds, the least gap a
 // deadline waits after a run.
-func (r *retentionRun[T]) runOnce(ctx context.Context, reason string, b *retentionBackoff) {
+func (r *retentionRun) runOnce(ctx context.Context, reason string, b *retentionBackoff) {
 	a := r.a
 	started := a.clock.Now()
 	r.state.begin(a, reason)
@@ -303,7 +303,7 @@ func (r *retentionRun[T]) runOnce(ctx context.Context, reason string, b *retenti
 // before it moves the clock; moved between the loop's reading of the clock
 // and its timer, the clock would put the timer past the instant it moved
 // to.
-func (r *retentionRun[T]) wait(ctx context.Context, next, floor time.Time) (reason string, run, ok bool) {
+func (r *retentionRun) wait(ctx context.Context, next, floor time.Time) (reason string, run, ok bool) {
 	select {
 	case <-r.wake:
 		return r.woken(floor)
@@ -331,7 +331,7 @@ func (r *retentionRun[T]) wait(ctx context.Context, next, floor time.Time) (reas
 // woken says whether a write that moved the agenda makes the loop run now —
 // a record due, and floor, the backoff, past — or only sleep again, until
 // the agenda's new first instant.
-func (r *retentionRun[T]) woken(floor time.Time) (reason string, run, ok bool) {
+func (r *retentionRun) woken(floor time.Time) (reason string, run, ok bool) {
 	now := r.a.clock.Now()
 	if first := r.earliest(); !first.IsZero() && !first.After(now) && !now.Before(floor) {
 		return model.WakeChange, true, true
@@ -340,7 +340,7 @@ func (r *retentionRun[T]) woken(floor time.Time) (reason string, run, ok bool) {
 }
 
 // setTimer records when the loop's timer fires, for written to compare.
-func (r *retentionRun[T]) setTimer(at time.Time) {
+func (r *retentionRun) setTimer(at time.Time) {
 	r.mu.Lock()
 	r.timer = at
 	r.mu.Unlock()

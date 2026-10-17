@@ -134,7 +134,7 @@ func identities(ids []string) []string {
 // receives them — their secret members and fields left out, as deep as a
 // record goes —, or as the Studio's preview shows them, every personal,
 // special and secret value redacted.
-func (s *StoreService[T]) exportOf(ctx context.Context, keys []string, preview bool) (storeExport, error) {
+func (s *storeCore) exportOf(ctx context.Context, keys []string, preview bool) (storeExport, error) {
 	var out storeExport
 	for _, key := range keys {
 		raw, found, err := s.exportRecord(ctx, key, preview)
@@ -165,7 +165,7 @@ func (s *StoreService[T]) exportOf(ctx context.Context, keys []string, preview b
 
 // exportRecords are the records under keys as a person receives them: their
 // secret members left out, as deep as a record goes.
-func (s *StoreService[T]) exportRecords(ctx context.Context, keys []string) ([]json.RawMessage, error) {
+func (s *storeCore) exportRecords(ctx context.Context, keys []string) ([]json.RawMessage, error) {
 	out := make([]json.RawMessage, 0, len(keys))
 	for _, key := range keys {
 		raw, found, err := s.exportRecord(ctx, key, false)
@@ -181,7 +181,7 @@ func (s *StoreService[T]) exportRecords(ctx context.Context, keys []string) ([]j
 
 // exportRecord is the record under key as its person receives it, or as the
 // Studio's preview shows it; found is false when there is none.
-func (s *StoreService[T]) exportRecord(ctx context.Context, key string, preview bool) (json.RawMessage, bool, error) {
+func (s *storeCore) exportRecord(ctx context.Context, key string, preview bool) (json.RawMessage, bool, error) {
 	v, err := s.read(ctx, key)
 	switch {
 	case isNotFound(err):

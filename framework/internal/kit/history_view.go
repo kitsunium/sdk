@@ -22,7 +22,7 @@ import (
 
 // historyInfo describes what the store remembers, for the model: nil when
 // it remembers nothing, keeps no revisions and has no password policy.
-func (s *StoreService[T]) historyInfo(a *App) *model.StoreHistory {
+func (s *storeCore) historyInfo(a *App) *model.StoreHistory {
 	keeps := s.keeps()
 	if len(keeps) == 0 && len(s.passwords) == 0 && s.revisions == 0 {
 		return nil
@@ -109,7 +109,7 @@ type formerSource interface {
 // too, without its value —, each value as shownFormer says. It reads the
 // store as the data browser does, in no span: the Studio is no caller of
 // the product's.
-func (s *StoreService[T]) formerShown(ctx context.Context, key string) (model.RecordHistory, error) {
+func (s *storeCore) formerShown(ctx context.Context, key string) (model.RecordHistory, error) {
 	h := s.historied()
 	if h == nil || len(h.keeps) == 0 {
 		return model.RecordHistory{}, Invalid(s.name + " keeps no former values: tag a field history=N")
