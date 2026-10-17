@@ -18,7 +18,7 @@ never drift from the code.
 |---|---|---|
 | `prebuild` | `scripts/sync-versions.mjs` | `src/content/docs/<release>/<major>/**` (gitignored); for a release whose tree has `docs/api`, one API page model per package page in `src/content/api/<release>/<major>/<path>.json` and, for a package with a `BENCH.md`, its benchmarks in `src/content/bench/…` (both gitignored); `src/data/versions.json` (a release with `docs/api` flagged `api`), `src/data/build-info.json`, the `src/data/features-<release>-<major>.json` banner data (curated in `src/data/features.mjs`; `scripts/gen-features.mjs` regenerates the local release's alone) |
 | | `scripts/gen-symbols.mjs` | `public/_search/symbols-<release>-<major>.json`, the ⌘K symbol index of each release flagged `api`, from its page models — Node only, no go command |
-| `build` | `scripts/sync-content.mjs`, then `astro build` + `pagefind` | `node_modules/.astro/data-store.json` (the content store, written before the build reads it), then `dist/` + `dist/_pagefind/` |
+| `build` | `scripts/build-site.mjs` — per batch of at most `DOCS_BATCH_SIZE` releases (default 6), `scripts/sync-content.mjs` then `astro build`, the batches merged into `dist/` — then `pagefind` | per batch, `node_modules/.astro/data-store.json` (the content store, written before the build reads it); then `dist/` + `dist/_pagefind/` |
 | `test` | `node --test scripts/lib/*.test.mjs` | tag-format, feature-catalog, package-discovery, page-catalog, ADR-link and docs/api-reader unit tests |
 | `check` | `scripts/check-api-counts.mjs`, `scripts/check-links.mjs` | nothing: fails unless the ⌘K index and the API sections equal `docs/api`, and every link of `dist/` resolves (§Checks) |
 
@@ -34,6 +34,25 @@ CLI exiting the process as soon as its command resolves. `sync-content.mjs`
 runs the same sync through Astro's JavaScript API and lets Node exit once the
 write has landed; `astro build` then loads the complete store and re-syncs
 only what changed, in seconds.
+
+**A build holds a bounded number of releases, never the whole history.**
+`astro build` keeps the content store in its own heap, turns it into a
+JavaScript module (`astro:data-layer-content`), bundles that module into the
+server build and imports it again to prerender — so its heap grows with every
+release the store holds. The deploy of 42 releases died at Node's default 4 GB
+heap, in the client build (Docs Deploy, 17 October 2026). A page reads only its
+own release's entries, so `scripts/build-site.mjs` builds the releases in
+batches of at most `DOCS_BATCH_SIZE` (default 6), each in processes of its own,
+the collections limited to the batch by `DOCS_BATCH_RELEASES`
+(`src/content.config.ts` — set by the script, never by hand), and merges them
+into `dist/`: the first batch holds the default release and `local` (the 404
+page suggests the default release's pages), a file two batches both write must
+be the same bytes or the build fails naming it, and `rss.xml` and the sitemap
+list the union of every batch's pages. The pages' Markdown source is not kept in
+the store (`retainBody: false`): only its rendered HTML is read. With six
+releases or fewer — `make docs-check`'s `local` alone — it is one plain build
+into `dist/`. The deploy also raises the heap limit (`NODE_OPTIONS` in
+`docs-deploy.yml`), a margin over a batch's peak, not the means.
 
 `DOCS_RELEASES=local` (or `local,0.18.0`, …) materialises the releases it names
 and no other — the dropdowns list exactly those, and asking for `local` alone
