@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "workflowprobe_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/kitsunium/sdk/framework/kit/testdata/workflowprobe",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/internal/kit",
+        "//framework/kit/workflow",
+    ],
+)
+
+go_binary(
+    name = "workflowprobe",
+    embed = [":workflowprobe_lib"],
+    visibility = ["//visibility:public"],
+)

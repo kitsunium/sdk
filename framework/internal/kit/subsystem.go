@@ -51,7 +51,9 @@ type subsystem struct {
 // package of ADR 0179 §1, each added by the step that takes its subsystem out
 // of the core: the stores' since step 3, linked when framework/kit/store set
 // plug.Stores and kit's own store code (EnableStores, step 3b); the queues'
-// since step 4, linked when framework/kit/queue set plug.Queues. A test sets
+// since step 4, linked when framework/kit/queue set plug.Queues; the
+// workflows' since step 5, linked when framework/kit/workflow set
+// plug.Workflows. A test sets
 // the hooks as a program that does not import the package would see them.
 var subsystems = []subsystem{{
 	name: "store", pkg: storePackage,
@@ -61,6 +63,9 @@ var subsystems = []subsystem{{
 	name: "queue", pkg: queuePackage,
 	kinds: []model.NodeKind{model.KindTopic, model.KindSubscription},
 	needs: needsQueue, linked: queuesLinked,
+}, {
+	name: "workflow", pkg: workflowPackage,
+	kinds: []model.NodeKind{model.KindWorkflow}, linked: workflowsLinked,
 }}
 
 // needsQueue reports whether n needs the queue subsystem beside the topics

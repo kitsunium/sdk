@@ -2,7 +2,6 @@ package kit
 
 import (
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
-	"github.com/kitsunium/sdk/pkg/v1/app/statemachine"
 )
 
 // : Asserts at compile time every role a type is handed through an interface.
@@ -30,8 +29,9 @@ var (
 	_ plug.StoreEngine = (*sealedEngine)(nil)
 	_ plug.StoreEngine = (*historied)(nil)
 
-	_ statemachine.Store[struct{}] = storePort[struct{}]{}
-	_ statemachine.Journal[string] = (*workflowJournal[struct{}, string])(nil)
+	_ plug.WorkflowStore   = workflowPort[struct{}, string]{}
+	_ plug.WorkflowJournal = (*workflowJournal)(nil)
+	_ plug.WorkflowJournal = (*sqlJournal)(nil)
 
 	_ CommandConfigurer  = callOption(nil)
 	_ EndpointConfigurer = callOption(nil)

@@ -4822,7 +4822,7 @@ WorkflowService is a state machine over the entities of one store: the states an
   - timer transitions at an instant the entity carries ([WorkflowService.At](#WorkflowService.At)) — a due date, a deadline — fired by the same loop when it comes;
   - guard transitions ([WorkflowService.When](#WorkflowService.When)), fired by the same loop as soon as a condition on the entity holds.
 
-The SDK's state-machine engine runs it (statemachine). Its loop never polls: it keeps an agenda of the transitions due, sleeps until the earliest, and a write of the store — which may bring one forward — wakes it. A workflow with nothing due does not run at all. Transitions of one entity run one at a time, of different entities at once.
+The SDK's state-machine engine runs it (statemachine), which the workflow subsystem plugs in (framework/kit/workflow, ADR 0179 step 5). Its loop never polls: it keeps an agenda of the transitions due, sleeps until the earliest, and a write of the store — which may bring one forward — wakes it. A workflow with nothing due does not run at all. Transitions of one entity run one at a time, of different entities at once.
 
 The entity's state lives in the entity itself (the state function returns a pointer to it), so the store stays the single source of truth; the engine keeps, beside it, when each entity entered its state and the history of its transitions — in the workflow's file under the data directory, so a timer keeps counting across a restart.
 

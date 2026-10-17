@@ -4797,7 +4797,8 @@ packages:
             - guard transitions ([WorkflowService.When]), fired by the same loop as soon as
               a condition on the entity holds.
 
-          The SDK's state-machine engine runs it (statemachine). Its loop never
+          The SDK's state-machine engine runs it (statemachine), which the workflow
+          subsystem plugs in (framework/kit/workflow, ADR 0179 step 5). Its loop never
           polls: it keeps an agenda of the transitions due, sleeps until the
           earliest, and a write of the store — which may bring one forward — wakes
           it. A workflow with nothing due does not run at all. Transitions of one
@@ -5205,12 +5206,172 @@ packages:
         name: RefusalOutOfOrder
         type: Refusal
         value: "22"
+      - doc: |-
+          WorkflowCreateEvent is the event of a transition Start fires: an entity
+          entering its workflow.
+        name: WorkflowCreateEvent
+        type: string
+        value: "\"create\""
+      - blockDoc: The triggers of a transition.
+        doc: WorkflowTriggerStart is a creation, which Start fires.
+        name: WorkflowTriggerStart
+        type: WorkflowTrigger
+        value: "0"
+      - blockDoc: The triggers of a transition.
+        doc: WorkflowTriggerEvent is an event code fires.
+        name: WorkflowTriggerEvent
+        type: WorkflowTrigger
+        value: "1"
+      - blockDoc: The triggers of a transition.
+        doc: "WorkflowTriggerDelay is a timer: a duration spent in a state."
+        name: WorkflowTriggerDelay
+        type: WorkflowTrigger
+        value: "2"
+      - blockDoc: The triggers of a transition.
+        doc: WorkflowTriggerDeadline is a timer at an instant the entity carries.
+        name: WorkflowTriggerDeadline
+        type: WorkflowTrigger
+        value: "3"
+      - blockDoc: The triggers of a transition.
+        doc: WorkflowTriggerGuard is a condition on the entity that holds.
+        name: WorkflowTriggerGuard
+        type: WorkflowTrigger
+        value: "4"
+      - blockDoc: Why a run of a workflow's loop started.
+        doc: WorkflowWakeStart is the loop's first run.
+        name: WorkflowWakeStart
+        type: WorkflowWake
+        value: "0"
+      - blockDoc: Why a run of a workflow's loop started.
+        doc: WorkflowWakeDue is a transition coming due.
+        name: WorkflowWakeDue
+        type: WorkflowWake
+        value: "1"
+      - blockDoc: Why a run of a workflow's loop started.
+        doc: WorkflowWakeChange is a write that may have brought one forward.
+        name: WorkflowWakeChange
+        type: WorkflowWake
+        value: "2"
+      - blockDoc: What a workflow's loop reports.
+        doc: WorkflowLoopOther is an event of the loop kit shows nothing of.
+        name: WorkflowLoopOther
+        type: WorkflowLoopEvent
+        value: "0"
+      - blockDoc: What a workflow's loop reports.
+        doc: "WorkflowLoopRunStarted is a run starting: Wake and Started are set."
+        name: WorkflowLoopRunStarted
+        type: WorkflowLoopEvent
+        value: "1"
+      - blockDoc: What a workflow's loop reports.
+        doc: |-
+          WorkflowLoopRunEnded is a run ending: Started, Ended, Next and what
+          it could not fire, Err, are set.
+        name: WorkflowLoopRunEnded
+        type: WorkflowLoopEvent
+        value: "2"
+      - blockDoc: What a workflow's loop reports.
+        doc: |-
+          WorkflowLoopWaiting is the loop asleep until Next, zero for no
+          transition due.
+        name: WorkflowLoopWaiting
+        type: WorkflowLoopEvent
+        value: "3"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: WorkflowFailureNone is no failure kit words.
+        name: WorkflowFailureNone
+        type: WorkflowFailure
+        value: "0"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: |-
+          WorkflowTransitionRefused is an event that leaves no transition from
+          the entity's state.
+        name: WorkflowTransitionRefused
+        type: WorkflowFailure
+        value: "1"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: WorkflowEntityMissing is no entity under the key.
+        name: WorkflowEntityMissing
+        type: WorkflowFailure
+        value: "2"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: WorkflowEntityExists is an entity already under the key Start names.
+        name: WorkflowEntityExists
+        type: WorkflowFailure
+        value: "3"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: WorkflowKeyEmpty is an entity whose key is empty.
+        name: WorkflowKeyEmpty
+        type: WorkflowFailure
+        value: "4"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: |-
+          WorkflowHookFailed is a hook that returned an error, joined to it;
+          its "hook" and "event" fields name the hook's kind and the event.
+        name: WorkflowHookFailed
+        type: WorkflowFailure
+        value: "5"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: |-
+          WorkflowHookPanicked is a hook that panicked; its "hook", "panic" and
+          "stack" fields say which and how.
+        name: WorkflowHookPanicked
+        type: WorkflowFailure
+        value: "6"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: |-
+          WorkflowHookChangedState is an OnEnter hook that changed the state
+          it entered.
+        name: WorkflowHookChangedState
+        type: WorkflowFailure
+        value: "7"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: |-
+          WorkflowHookChangedKey is an OnEnter hook that changed its entity's
+          key.
+        name: WorkflowHookChangedKey
+        type: WorkflowFailure
+        value: "8"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: WorkflowReentrant is an OnEnter hook that fired its own workflow.
+        name: WorkflowReentrant
+        type: WorkflowFailure
+        value: "9"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: WorkflowStoreFailed is the workflow's store that failed.
+        name: WorkflowStoreFailed
+        type: WorkflowFailure
+        value: "10"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: WorkflowJournalFailed is the workflow's journal that failed.
+        name: WorkflowJournalFailed
+        type: WorkflowFailure
+        value: "11"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: |-
+          WorkflowFunctionPanicked is a guard or an instant function that
+          panicked.
+        name: WorkflowFunctionPanicked
+        type: WorkflowFailure
+        value: "12"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: WorkflowLoopPanicked is the loop that panicked.
+        name: WorkflowLoopPanicked
+        type: WorkflowFailure
+        value: "13"
+      - blockDoc: The engine's failures kit tells apart, which it words for the product.
+        doc: |-
+          WorkflowWaitAbandoned is a caller that stopped waiting for its
+          entity: its context ended.
+        name: WorkflowWaitAbandoned
+        type: WorkflowFailure
+        value: "14"
     doc: |-
       Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the
       frontends' file server and the process sampler of the runtime graph
       (framework/kit/server), the Studio's event stream and its profiler
       (framework/kit/studio), the stores and the databases (framework/kit/store),
-      the queues (framework/kit/queue). kit reads what they registered through the
+      the queues (framework/kit/queue), the workflows (framework/kit/workflow).
+      kit reads what they registered through the
       hooks declared here, and imports none of the SDK packages behind them: a
       product that does not import a subsystem neither links nor initialises its
       packages.
@@ -5220,9 +5381,10 @@ packages:
       driver: the store subsystem's engine over documents, its siblings, kit's
       scope on a database and its migrations ([Stores]), which framework/kit/store
       sets; the refusals an engine says in kit's terms ([Refusal]); what kit's
-      transactions offer an engine that takes part in them ([Transaction]); and
-      the queue subsystem's brokers and their consumer ([Queues]), which
-      framework/kit/queue sets.
+      transactions offer an engine that takes part in them ([Transaction]); the
+      queue subsystem's brokers and their consumer ([Queues]), which
+      framework/kit/queue sets; and the workflow subsystem's engine and the
+      ports it runs on ([Workflows]), which framework/kit/workflow sets.
 
       The package imports the standard library and the framework's model only,
       so that kit and every subsystem can import it.
@@ -6606,6 +6768,433 @@ packages:
             - doc: Kind is how kit words it.
               name: Kind
               type: Refusal
+      - doc: |-
+          WorkflowDriverConfig is what framework/kit/workflow plugs into kit: how a
+          workflow's engine opens, and how kit tells the engine's failures apart.
+        name: WorkflowDriverConfig
+        struct:
+          fields:
+            - doc: |-
+                Open opens the engine of one workflow, as cfg declares it: it reads
+                the journal and every entity of the store once.
+              name: Open
+              type: func(ctx context.Context, cfg *WorkflowConfig) (WorkflowEngine, error)
+            - doc: |-
+                Failed reports whether err, or an error it wraps, is the engine's
+                failure of kind: the SDK's sentinels stay in the subsystem, and the
+                error keeps the fields the engine gave it.
+              name: Failed
+              type: func(err error, kind WorkflowFailure) bool
+      - doc: WorkflowTrigger is what fires a transition.
+        name: WorkflowTrigger
+        underlying: uint8
+      - doc: WorkflowWake is why a run of a workflow's loop started.
+        name: WorkflowWake
+        underlying: uint8
+      - doc: WorkflowLoopEvent is what a workflow's loop reports.
+        name: WorkflowLoopEvent
+        underlying: uint8
+      - doc: WorkflowFailure is a failure of a workflow's engine, as kit words it.
+        name: WorkflowFailure
+        underlying: uint8
+      - doc: |-
+          WorkflowConfig is one workflow as its engine runs it: its states and
+          transitions, its hooks, the store and the journal it runs over, and how
+          the app's loop, clock and spans see it.
+        name: WorkflowConfig
+        struct:
+          fields:
+            - doc: Store is the workflow's entities, as the engine reads and writes them.
+              name: Store
+              type: WorkflowStore
+            - doc: |-
+                Journal keeps what the engine knows of each entity — its state, since
+                when, its latest transitions —; nil keeps it in memory alone.
+              name: Journal
+              type: WorkflowJournal
+            - doc: Clock is the app's clock, which the engine stamps and waits on.
+              name: Clock
+              type: Clock
+            - doc: |-
+                Actor names, from the context of a transition someone fired, who
+                fired it.
+              name: Actor
+              type: func(ctx context.Context) string
+            - doc: |-
+                Observe brackets each transition the loop fires: the context it runs
+                with, and the function told how it ended.
+              name: Observe
+              type: func(ctx context.Context, f WorkflowFiringValue) (context.Context, func(err error))
+            - doc: |-
+                Report receives what the engine reports and no caller's return value
+                carries: an OnTransition hook that failed, a panic, a journal's write
+                that failed.
+              name: Report
+              type: func(ctx context.Context, err error)
+            - doc: OnLoop is told each run of the loop, and each wait.
+              name: OnLoop
+              type: func(e WorkflowLoopEventValue)
+            - doc: Initial is the state Start enters an entity in.
+              name: Initial
+              type: string
+            - doc: Transitions are the declared transitions, in declaration order.
+              name: Transitions
+              type: "[]TransitionSpec"
+            - doc: |-
+                OnEnter are the hooks run as an entity enters a state, in
+                declaration order.
+              name: OnEnter
+              type: "[]EnterHookSpec"
+            - doc: |-
+                OnTransition are the hooks run after every stored transition, in
+                declaration order.
+              name: OnTransition
+              type: "[]func(ctx context.Context, c WorkflowChangeValue) error"
+            - doc: MinGap is the least a wake for a due transition waits after a run.
+              name: MinGap
+              type: time.Duration
+            - doc: |-
+                BackoffBase is the wait after a run that failed, doubled after each,
+                up to BackoffMax.
+              name: BackoffBase
+              type: time.Duration
+            - doc: BackoffMax bounds the wait after a run that failed.
+              name: BackoffMax
+              type: time.Duration
+            - doc: MaxHistory caps the transitions remembered per entity.
+              name: MaxHistory
+              type: int
+      - doc: |-
+          TransitionSpec declares one transition: an event's, a timer's after a
+          delay or at an instant the entity carries, or a guard's.
+        name: TransitionSpec
+        struct:
+          fields:
+            - doc: |-
+                Instant is when a deadline's transition comes due, false for no
+                instant for now; set for WorkflowTriggerDeadline.
+              name: Instant
+              type: func(e WorkflowEntityValue) (time.Time, bool)
+            - doc: |-
+                Guard is the condition a guard's transition waits for; set for
+                WorkflowTriggerGuard.
+              name: Guard
+              type: func(e WorkflowEntityValue) bool
+            - doc: Event names the transition.
+              name: Event
+              type: string
+            - doc: From is the state it leaves.
+              name: From
+              type: string
+            - doc: To is the state it enters.
+              name: To
+              type: string
+            - doc: Delay is how long a delay's transition waits in From.
+              name: Delay
+              type: time.Duration
+            - doc: "Trigger is what fires it: an event, a delay, a deadline or a guard."
+              name: Trigger
+              type: WorkflowTrigger
+      - doc: |-
+          EnterHookSpec is one hook run as an entity enters a state, before it is
+          stored: an error cancels the transition.
+        name: EnterHookSpec
+        struct:
+          fields:
+            - doc: |-
+                Fn runs the hook; it may change the entity, not its state nor its
+                key.
+              name: Fn
+              type: func(ctx context.Context, e *WorkflowEntityValue) error
+            - doc: State is the state whose entering runs it.
+              name: State
+              type: string
+      - doc: |-
+          WorkflowEntityValue is one entity as a workflow's engine holds it: the
+          product's, kept as any — the workflow's typed facade asserts it to its
+          type —, and its state as the facade spells it, which the engine reads and
+          sets.
+        name: WorkflowEntityValue
+        struct:
+          fields:
+            - doc: Value is the product's entity.
+              name: Value
+              type: any
+            - doc: State is the entity's state, spelled.
+              name: State
+              type: string
+      - doc: |-
+          WorkflowChangeValue is one stored transition: the entity as stored after
+          it, the states it left and entered, what fired it, who and when.
+        name: WorkflowChangeValue
+        struct:
+          fields:
+            - doc: At is when it happened.
+              name: At
+              type: time.Time
+            - doc: Entity is the entity, as stored after the transition.
+              name: Entity
+              type: WorkflowEntityValue
+            - doc: Key is the entity's key.
+              name: Key
+              type: string
+            - doc: Event is the transition's name; WorkflowCreateEvent for Start.
+              name: Event
+              type: string
+            - doc: From is the state left, "" on creation.
+              name: From
+              type: string
+            - doc: To is the state entered.
+              name: To
+              type: string
+            - doc: Actor is who fired it, "" for the loop.
+              name: Actor
+              type: string
+            - doc: Trigger is what fired it.
+              name: Trigger
+              type: WorkflowTrigger
+      - doc: |-
+          WorkflowFiringValue is one transition the loop is about to fire: the
+          entity's key, the event, the states it leaves and enters, and its trigger.
+        name: WorkflowFiringValue
+        struct:
+          fields:
+            - doc: Key is the entity's key.
+              name: Key
+              type: string
+            - doc: Event is the transition's name.
+              name: Event
+              type: string
+            - doc: From is the state it leaves.
+              name: From
+              type: string
+            - doc: To is the state it enters.
+              name: To
+              type: string
+            - doc: Trigger is what fires it.
+              name: Trigger
+              type: WorkflowTrigger
+      - doc: |-
+          WorkflowRecordValue is what a workflow's engine knows of one entity: its
+          state, since when, and its latest transitions, oldest first.
+        name: WorkflowRecordValue
+        struct:
+          fields:
+            - doc: Entered is when the entity entered its state.
+              name: Entered
+              type: time.Time
+            - doc: Key is the entity's key.
+              name: Key
+              type: string
+            - doc: State is the entity's state.
+              name: State
+              type: string
+            - doc: History are its latest transitions, oldest first.
+              name: History
+              type: "[]WorkflowStepValue"
+      - doc: |-
+          WorkflowStepValue is one transition of an entity's history: the event,
+          the states it left and entered, what fired it, who and when.
+        name: WorkflowStepValue
+        struct:
+          fields:
+            - doc: At is when it happened.
+              name: At
+              type: time.Time
+            - doc: Event is the transition's name.
+              name: Event
+              type: string
+            - doc: From is the state left, "" on creation.
+              name: From
+              type: string
+            - doc: To is the state entered.
+              name: To
+              type: string
+            - doc: Actor is who fired it, "" for the loop.
+              name: Actor
+              type: string
+            - doc: Trigger is what fired it.
+              name: Trigger
+              type: WorkflowTrigger
+      - doc: |-
+          WorkflowLoopEventValue is what a workflow's loop reports: a run started,
+          a run ended, a wait.
+        name: WorkflowLoopEventValue
+        struct:
+          fields:
+            - doc: Err is what a run could not fire, nil for nothing.
+              name: Err
+              type: error
+            - doc: Started is when the run started.
+              name: Started
+              type: time.Time
+            - doc: Ended is when the run ended.
+              name: Ended
+              type: time.Time
+            - doc: Next is when the loop wakes next, zero for no transition due.
+              name: Next
+              type: time.Time
+            - doc: Kind is what the event reports.
+              name: Kind
+              type: WorkflowLoopEvent
+            - doc: Wake is why the run started.
+              name: Wake
+              type: WorkflowWake
+      - doc: |-
+          WorkflowEngine is one workflow's engine as kit's core uses it: the
+          transitions code fires, what a write of the store tells it, what it
+          counts and records, and its loop.
+        interface:
+          methods:
+            - doc: |-
+                Start enters e in the workflow, in the initial state: its OnEnter
+                hooks run, then it is inserted in the store.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: e
+                  type: WorkflowEntityValue
+              name: Start
+              out:
+                - type: WorkflowEntityValue
+                - type: error
+            - doc: |-
+                Fire moves the entity under key along the event's transition leaving
+                its state.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                - name: event
+                  type: string
+              name: Fire
+              out:
+                - type: WorkflowEntityValue
+                - type: error
+            - doc: Changed tells the engine the entity under key was written.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: Changed
+              out:
+                - type: error
+            - doc: Deleted tells the engine the entity under key was deleted.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: Deleted
+              out:
+                - type: error
+            - doc: Census counts the entities per state.
+              name: Census
+              out:
+                - type: map[string]int
+            - doc: Records are what the engine knows of each entity.
+              name: Records
+              out:
+                - type: "[]WorkflowRecordValue"
+            - doc: |-
+                Run runs the loop that fires the timers and the guards, until ctx
+                ends.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Run
+              out:
+                - type: error
+        name: WorkflowEngine
+      - doc: |-
+          WorkflowStore is the port a workflow's engine reads and writes its
+          entities through: the workflow's store.
+        interface:
+          methods:
+            - doc: Key is e's key.
+              in:
+                - name: e
+                  type: WorkflowEntityValue
+              name: Key
+              out:
+                - type: string
+            - doc: Get reads the entity under key; false when there is none.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: Get
+              out:
+                - type: WorkflowEntityValue
+                - type: bool
+                - type: error
+            - doc: Insert writes e unless its key is taken; false when it was.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: e
+                  type: WorkflowEntityValue
+              name: Insert
+              out:
+                - type: bool
+                - type: error
+            - doc: |-
+                Replace writes e over the entity of its key; false when there was
+                none.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: e
+                  type: WorkflowEntityValue
+              name: Replace
+              out:
+                - type: bool
+                - type: error
+            - doc: All yields every entity of the store.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: All
+              out:
+                - type: iter.Seq2[WorkflowEntityValue, error]
+        name: WorkflowStore
+      - doc: |-
+          WorkflowJournal is the port a workflow's engine keeps what it knows of
+          each entity in: the workflow's file under the data directory, or its
+          table on the database that keeps its store.
+        interface:
+          methods:
+            - doc: Load reads every record the journal kept.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Load
+              out:
+                - type: "[]WorkflowRecordValue"
+                - type: error
+            - doc: Save keeps records, in the transaction ctx carries for a database.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: records
+                  type: WorkflowRecordValue
+              name: Save
+              out:
+                - type: error
+              variadic: true
+            - doc: Delete forgets the records of keys; one already gone is no error.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: keys
+                  type: string
+              name: Delete
+              out:
+                - type: error
+              variadic: true
+        name: WorkflowJournal
     variables:
       - doc: |-
           NewHTTPServer builds the HTTP engine an app in the server profile
@@ -6649,6 +7238,12 @@ packages:
           database without it is refused at the start (ADR 0179 §6).
         name: Stores
         type: atomic.Pointer[StoreDriverConfig]
+      - doc: |-
+          Workflows is the workflow subsystem: the engine kit's workflows run on;
+          nil until framework/kit/workflow is imported. A product that declares a
+          workflow without it is refused at the start (ADR 0179 §6).
+        name: Workflows
+        type: atomic.Pointer[WorkflowDriverConfig]
   - doc: |-
       Package queuekit is what framework/kit/queue plugs into kit: the brokers
       kit's consumers' queues run on — the SDK's queue in memory, in the data
@@ -6733,6 +7328,20 @@ packages:
       - doc: Enable plugs the Studio's event stream and profiler into kit.
         name: Enable
     path: github.com/kitsunium/sdk/framework/internal/kit/studiokit
+  - doc: |-
+      Package workflowkit is what framework/kit/workflow plugs into kit: the
+      engine kit's workflows run on — the SDK's statemachine, instantiated once,
+      over kit's entity and the state's spelling (ADR 0179 §1, step 5, Q3) —,
+      its loop of timers and guards, and the conversions between the engine's
+      values and plug's. kit's core imports none of the SDK's statemachine: it
+      reaches it through plug, and a product that declares no workflow links
+      none of it.
+
+      Package workflowkit — the compile-time proof that the engine is kit's.
+    functions:
+      - doc: Enable plugs the workflows' engine into kit.
+        name: Enable
+    path: github.com/kitsunium/sdk/framework/internal/kit/workflowkit
   - aliases:
       - doc: |-
           Principal is what the app's auth data says about the caller to the

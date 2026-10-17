@@ -1,0 +1,40 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "workflowkit",
+    srcs = [
+        "clock.go",
+        "doc.go",
+        "engine.go",
+        "workflowkit.go",
+        "workflowkit_compliance.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/internal/kit/workflowkit",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+    deps = [
+        "//framework/internal/kit/plug",
+        "//pkg/v1/app/resilience",
+        "//pkg/v1/app/statemachine",
+        "//pkg/v1/clock",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":workflowkit",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+)
+
+go_test(
+    name = "workflowkit_test",
+    srcs = ["api_gen_test.go"],
+    deps = [":workflowkit"],
+)

@@ -7,4 +7,5 @@ package kit
 import (
 	_ "github.com/kitsunium/sdk/framework/kit/queue"
 	_ "github.com/kitsunium/sdk/framework/kit/store"
+	_ "github.com/kitsunium/sdk/framework/kit/workflow"
 )

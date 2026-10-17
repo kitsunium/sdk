@@ -67,6 +67,7 @@ go_library(
         "//framework/internal/kit/plug",
         "//framework/kit/queue",
         "//framework/kit/store",
+        "//framework/kit/workflow",
         "//framework/model",
         "//pkg/v1/clock",
         "//pkg/v1/data/sql",

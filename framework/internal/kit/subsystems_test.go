@@ -17,6 +17,10 @@ import (
 	// imports it does (ADR 0179 step 4); subsystems_internal_test.go takes it
 	// out too.
 	_ "github.com/kitsunium/sdk/framework/kit/queue"
+	// The suite's workflows run on the workflow subsystem, as a product that
+	// imports it does (ADR 0179 step 5); subsystems_internal_test.go takes
+	// it out too.
+	_ "github.com/kitsunium/sdk/framework/kit/workflow"
 	// The suite's dev apps serve the Studio's API, as a product that imports
 	// it does.
 	_ "github.com/kitsunium/sdk/framework/kit/studio"

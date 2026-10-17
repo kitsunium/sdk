@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/fs"
 	"iter"
 	"slices"
@@ -13,71 +12,74 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/app/statemachine"
 	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 )
 
-// The SDK's state-machine engine reads and writes a workflow's entities
-// through a port over kit's store, and keeps what it knows of each — the
-// state, since when, the latest transitions — in a journal over the
-// workflow's file, the file kit always kept.
+// The workflow subsystem's engine — the SDK's statemachine, ADR 0179 step
+// 5 — reads and writes a workflow's entities through a port over kit's store
+// (plug.WorkflowStore), and keeps what it knows of each — the state, since
+// when, the latest transitions — in a journal over the workflow's file, the
+// file kit always kept, or its table on a database (plug.WorkflowJournal).
 
-// storePort is the engine's port over a workflow's store. A read inside a
-// transition someone fired, and every write, is a span of the store: the
-// edge the diagram draws from the workflow. The loop's own reads are not.
-// state is the JSON name of the workflow's state field, "" when kit cannot
-// name it: a transition that changes only it makes no version.
-type storePort[E any] struct {
-	s     *StoreService[E]
+// workflowPort is the engine's port over a workflow's store: the facade's
+// entities, each with its state spelled. A read inside a transition someone
+// fired, and every write, is a span of the store: the edge the diagram draws
+// from the workflow. The loop's own reads are not. state is the JSON name of
+// the workflow's state field, "" when kit cannot name it: a transition that
+// changes only it makes no version.
+type workflowPort[E any, S comparable] struct {
+	w     *WorkflowService[E, S]
 	state string
 }
 
-// Key is e's key in the store.
-func (p storePort[E]) Key(e E) string { return p.s.key(e) }
+// Key is d's key in the store.
+func (p workflowPort[E, S]) Key(d plug.WorkflowEntityValue) string {
+	return p.w.store.key(as[E](d.Value))
+}
 
 // Get reads the entity key; false when the store holds none.
-func (p storePort[E]) Get(ctx context.Context, key string) (E, bool, error) {
+func (p workflowPort[E, S]) Get(ctx context.Context, key string) (plug.WorkflowEntityValue, bool, error) {
+	s := p.w.store
 	var e E
 	var err error
 	if trace.SpanContextFromContext(ctx).IsValid() {
 		var v any
-		v, err = p.s.get(ctx, key, model.EdgePersists)
+		v, err = s.get(ctx, key, model.EdgePersists)
 		e = as[E](v)
 	} else {
-		e, err = p.s.read(ctx, key)
+		e, err = s.read(ctx, key)
 	}
 	if ke, ok := errors.AsType[*Error](err); ok && ke.Code == WireNotFound {
-		return e, false, nil
+		return p.w.entityValue(e), false, nil
 	}
-	return e, err == nil, err
+	return p.w.entityValue(e), err == nil, err
 }
 
-// Insert writes e unless its key is taken; false when it was.
-func (p storePort[E]) Insert(ctx context.Context, e E) (bool, error) {
-	return p.s.transitionWrite(ctx, e, plug.WriteInsert, "")
+// Insert writes d unless its key is taken; false when it was.
+func (p workflowPort[E, S]) Insert(ctx context.Context, d plug.WorkflowEntityValue) (bool, error) {
+	return p.w.store.transitionWrite(ctx, p.w.entityOf(d), plug.WriteInsert, "")
 }
 
-// Replace writes e over an entity of its key; false when there was none.
-func (p storePort[E]) Replace(ctx context.Context, e E) (bool, error) {
-	return p.s.transitionWrite(ctx, e, plug.WriteReplace, p.state)
+// Replace writes d over an entity of its key; false when there was none.
+func (p workflowPort[E, S]) Replace(ctx context.Context, d plug.WorkflowEntityValue) (bool, error) {
+	return p.w.store.transitionWrite(ctx, p.w.entityOf(d), plug.WriteReplace, p.state)
 }
 
 // All yields every entity of the store.
-func (p storePort[E]) All(ctx context.Context) iter.Seq2[E, error] {
-	return func(yield func(E, error) bool) {
-		all, err := p.s.all(ctx)
+func (p workflowPort[E, S]) All(ctx context.Context) iter.Seq2[plug.WorkflowEntityValue, error] {
+	return func(yield func(plug.WorkflowEntityValue, error) bool) {
+		all, err := p.w.store.all(ctx)
 		if err != nil {
-			var zero E
 			// A failed read yields its error once, whatever the caller answers.
-			if !yield(zero, err) {
+			if !yield(plug.WorkflowEntityValue{}, err) {
 				return
 			}
 			return
 		}
 		for _, e := range all {
-			if !yield(e, nil) {
+			if !yield(p.w.entityValue(e), nil) {
 				return
 			}
 		}
@@ -156,23 +158,26 @@ func transitionStored(mode plug.WriteMode, raw, err error) (bool, error) {
 // sqlJournal keeps the engine's records on the database that keeps the
 // workflow's store, in the table <service>__<workflow>__workflow: a record
 // is written in its transition's transaction, so that the entity, what its
-// OnEnter hooks wrote and its record commit together.
-type sqlJournal[E any, S comparable] struct {
-	w   *WorkflowService[E, S]
+// OnEnter hooks wrote and its record commit together. It names no entity
+// type: the records spell the states.
+type sqlJournal struct {
 	eng plug.StoreEngine
+	// id is the workflow's node, and declared its declared states, by
+	// spelling: a record naming another is dropped at load.
+	declared map[string]bool
+	id       string
 }
 
 // Load reads every record of the workflow's journal.
-func (j *sqlJournal[E, S]) Load(ctx context.Context) ([]statemachine.Record[S], error) {
+func (j *sqlJournal) Load(ctx context.Context) ([]plug.WorkflowRecordValue, error) {
 	all, err := instancesOf(j.eng.List(ctx))
 	if err != nil {
 		return nil, failure(CodeWorkflowLoad, "WORKFLOW_LOAD", "the workflow's records cannot be read from its database", err,
-			errs.String("workflow", j.w.id))
+			errs.String("workflow", j.id))
 	}
-	states := j.w.statesByName()
-	out := make([]statemachine.Record[S], 0, len(all))
-	for _, inst := range all {
-		if rec, ok := recordOf(inst.ID, inst, states); ok {
+	out := make([]plug.WorkflowRecordValue, 0, len(all))
+	for i := range all {
+		if rec, ok := recordOf(all[i].ID, &all[i], j.declared); ok {
 			out = append(out, rec)
 		}
 	}
@@ -180,9 +185,9 @@ func (j *sqlJournal[E, S]) Load(ctx context.Context) ([]statemachine.Record[S], 
 }
 
 // Save writes records, in the transaction the context carries.
-func (j *sqlJournal[E, S]) Save(ctx context.Context, records ...statemachine.Record[S]) error {
-	for _, rec := range records {
-		d, err := instanceDoc(instanceOf(rec))
+func (j *sqlJournal) Save(ctx context.Context, records ...plug.WorkflowRecordValue) error {
+	for i := range records {
+		d, err := instanceDoc(instanceOf(&records[i]))
 		if err != nil {
 			return err
 		}
@@ -194,7 +199,7 @@ func (j *sqlJournal[E, S]) Save(ctx context.Context, records ...statemachine.Rec
 }
 
 // Delete removes the records of keys; a record already gone is no error.
-func (j *sqlJournal[E, S]) Delete(ctx context.Context, keys ...string) error {
+func (j *sqlJournal) Delete(ctx context.Context, keys ...string) error {
 	for _, key := range keys {
 		if err := j.eng.Delete(ctx, key); err != nil && !plug.Refused(err, plug.RefusalNotFound) {
 			return err
@@ -228,13 +233,13 @@ type journaled interface {
 }
 
 // openSQLJournal opens the workflow's journal on r.
-func (w *WorkflowService[E, S]) openSQLJournal(a *App, r *databaseRun) (*sqlJournal[E, S], error) {
+func (w *WorkflowService[E, S]) openSQLJournal(a *App, r *databaseRun) (*sqlJournal, error) {
 	eng, err := openSQLEngine(a, sqlTable{run: r, table: w.journalTable(), store: w.id}, instanceConfig)
 	if err != nil {
 		return nil, failure(CodeWorkflowLoad, "WORKFLOW_OPEN", "the workflow's records cannot be opened on its database", err,
 			errs.String("workflow", w.id), errs.String("database", r.d.name))
 	}
-	return &sqlJournal[E, S]{w: w, eng: eng}, nil
+	return &sqlJournal{id: w.id, declared: w.declaredStates(), eng: eng}, nil
 }
 
 // workflowJournal keeps the engine's records in the workflow's file,
@@ -242,22 +247,27 @@ func (w *WorkflowService[E, S]) openSQLJournal(a *App, r *databaseRun) (*sqlJour
 // wrote it: the Studio's instances, keyed by entity. A record naming a state
 // the declaration no longer has is dropped at load, and the engine reads the
 // entity's state as entered now. A failed write only costs timer precision
-// after a restart: the engine reports it, and it is logged.
-type workflowJournal[E any, S comparable] struct {
-	w    *WorkflowService[E, S]
+// after a restart: the engine reports it, and it is logged. It names no
+// entity type: the records spell the states.
+type workflowJournal struct {
 	data vfs.FullFS
+	// declared are the workflow's declared states, by spelling.
+	declared map[string]bool
+	// recs are the records the file holds, by entity's key.
+	recs map[string]model.Instance
+	// id is the workflow's node, file its file under data.
+	id   string
 	file string
 
 	// mu makes one rewrite of the file at a time: the engine writes the
 	// records of different entities at once.
-	mu   sync.Mutex
-	recs map[string]model.Instance
+	mu sync.Mutex
 }
 
 // Load reads the transitions the journal kept.
 //
-//ktn:allow-unused-param: the statemachine.Journal interface passes a context the local journal does not take
-func (j *workflowJournal[E, S]) Load(_ context.Context) ([]statemachine.Record[S], error) {
+//ktn:allow-unused-param: the plug.WorkflowJournal interface passes a context the local journal does not take
+func (j *workflowJournal) Load(_ context.Context) ([]plug.WorkflowRecordValue, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.recs = map[string]model.Instance{}
@@ -266,16 +276,15 @@ func (j *workflowJournal[E, S]) Load(_ context.Context) ([]statemachine.Record[S
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, nil
 	case err != nil:
-		return nil, failure(CodeWorkflowLoad, "WORKFLOW_LOAD", "the workflow's file cannot be read", err, errs.String("workflow", j.w.id))
+		return nil, failure(CodeWorkflowLoad, "WORKFLOW_LOAD", "the workflow's file cannot be read", err, errs.String("workflow", j.id))
 	}
 	var stored map[string]model.Instance
 	if err := json.Unmarshal(raw, &stored); err != nil {
-		return nil, failure(CodeWorkflowLoad, "WORKFLOW_LOAD", "the workflow's file is not a workflow file", err, errs.String("workflow", j.w.id))
+		return nil, failure(CodeWorkflowLoad, "WORKFLOW_LOAD", "the workflow's file is not a workflow file", err, errs.String("workflow", j.id))
 	}
-	states := j.w.statesByName()
-	out := make([]statemachine.Record[S], 0, len(stored))
+	out := make([]plug.WorkflowRecordValue, 0, len(stored))
 	for key, inst := range stored {
-		rec, ok := recordOf(key, inst, states)
+		rec, ok := recordOf(key, &inst, j.declared)
 		if !ok {
 			continue
 		}
@@ -287,20 +296,20 @@ func (j *workflowJournal[E, S]) Load(_ context.Context) ([]statemachine.Record[S
 
 // Save keeps records in the journal.
 //
-//ktn:allow-unused-param: the statemachine.Journal interface passes a context the local journal does not take
-func (j *workflowJournal[E, S]) Save(_ context.Context, records ...statemachine.Record[S]) error {
+//ktn:allow-unused-param: the plug.WorkflowJournal interface passes a context the local journal does not take
+func (j *workflowJournal) Save(_ context.Context, records ...plug.WorkflowRecordValue) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	for _, rec := range records {
-		j.recs[rec.Key] = instanceOf(rec)
+	for i := range records {
+		j.recs[records[i].Key] = instanceOf(&records[i])
 	}
 	return j.write()
 }
 
 // Delete forgets the journal's records of keys.
 //
-//ktn:allow-unused-param: the statemachine.Journal interface passes a context the local journal does not take
-func (j *workflowJournal[E, S]) Delete(_ context.Context, keys ...string) error {
+//ktn:allow-unused-param: the plug.WorkflowJournal interface passes a context the local journal does not take
+func (j *workflowJournal) Delete(_ context.Context, keys ...string) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	for _, key := range keys {
@@ -310,7 +319,7 @@ func (j *workflowJournal[E, S]) Delete(_ context.Context, keys ...string) error 
 }
 
 // write rewrites the file, atomically. The caller holds j.mu.
-func (j *workflowJournal[E, S]) write() error {
+func (j *workflowJournal) write() error {
 	raw, err := json.Marshal(j.recs)
 	if err != nil {
 		return err
@@ -318,11 +327,12 @@ func (j *workflowJournal[E, S]) write() error {
 	return j.data.WriteAtomic(j.file, raw, 0o600)
 }
 
-// statesByName maps each declared state to the name the file spells it with.
-func (w *WorkflowService[E, S]) statesByName() map[string]S {
-	out := make(map[string]S, len(w.order))
+// declaredStates are the workflow's declared states, by the spelling the
+// file and the engine know them by.
+func (w *WorkflowService[E, S]) declaredStates() map[string]bool {
+	out := make(map[string]bool, len(w.order))
 	for _, st := range w.order {
-		out[fmt.Sprint(st)] = st
+		out[w.spell(st)] = true
 	}
 	return out
 }
@@ -330,31 +340,32 @@ func (w *WorkflowService[E, S]) statesByName() map[string]S {
 // recordOf reads an instance of the file back as the engine's record; false
 // when its state is not a declared one. A step naming an undeclared state is
 // dropped from the history.
-func recordOf[S comparable](key string, inst model.Instance, states map[string]S) (statemachine.Record[S], bool) {
-	st, ok := states[inst.State]
-	if !ok {
-		return statemachine.Record[S]{}, false
+func recordOf(key string, inst *model.Instance, declared map[string]bool) (plug.WorkflowRecordValue, bool) {
+	if !declared[inst.State] {
+		return plug.WorkflowRecordValue{}, false
 	}
-	rec := statemachine.Record[S]{Key: key, State: st, Entered: inst.EnteredAt}
+	rec := plug.WorkflowRecordValue{Key: key, State: inst.State, Entered: inst.EnteredAt}
 	for _, s := range inst.History {
-		to, known := states[s.To]
-		from, left := states[s.From]
-		if !known || (!left && s.Trigger != model.TriggerCreate) {
+		if !declared[s.To] || (!declared[s.From] && s.Trigger != model.TriggerCreate) {
 			continue
 		}
-		rec.History = append(rec.History, statemachine.Step[S]{
-			Event: s.Event, From: from, To: to, Trigger: engineTrigger(s.Trigger), Actor: s.Caller, At: s.At,
+		from := s.From
+		if !declared[from] {
+			from = "" // a creation leaves no state
+		}
+		rec.History = append(rec.History, plug.WorkflowStepValue{
+			Event: s.Event, From: from, To: s.To, Trigger: engineTrigger(s.Trigger), Actor: s.Caller, At: s.At,
 		})
 	}
 	return rec, true
 }
 
 // instanceOf is the engine's record as the file and the Studio spell it.
-func instanceOf[S comparable](rec statemachine.Record[S]) model.Instance {
-	inst := model.Instance{ID: rec.Key, State: fmt.Sprint(rec.State), EnteredAt: rec.Entered.UTC()}
+func instanceOf(rec *plug.WorkflowRecordValue) model.Instance {
+	inst := model.Instance{ID: rec.Key, State: rec.State, EnteredAt: rec.Entered.UTC()}
 	for _, s := range rec.History {
-		step := model.Step{Event: s.Event, From: fmt.Sprint(s.From), To: fmt.Sprint(s.To), At: s.At.UTC(), Trigger: kitTrigger(s.Trigger), Caller: s.Actor}
-		if s.Trigger == statemachine.TriggerStart {
+		step := model.Step{Event: s.Event, From: s.From, To: s.To, At: s.At.UTC(), Trigger: kitTrigger(s.Trigger), Caller: s.Actor}
+		if s.Trigger == plug.WorkflowTriggerStart {
 			step.From = ""
 		}
 		inst.History = append(inst.History, step)
@@ -364,30 +375,31 @@ func instanceOf[S comparable](rec statemachine.Record[S]) model.Instance {
 
 // kitTrigger is what fired a transition, as the model says it: the engine's
 // delays and deadlines are both timers.
-func kitTrigger(t statemachine.Trigger) string {
+func kitTrigger(t plug.WorkflowTrigger) string {
 	switch t {
-	case statemachine.TriggerStart:
+	case plug.WorkflowTriggerStart:
 		return model.TriggerCreate
-	case statemachine.TriggerDelay, statemachine.TriggerDeadline:
+	case plug.WorkflowTriggerDelay, plug.WorkflowTriggerDeadline:
 		return model.TriggerTimer
-	case statemachine.TriggerGuard:
+	case plug.WorkflowTriggerGuard:
 		return model.TriggerGuard
+	default:
+		return model.TriggerEvent
 	}
-	return model.TriggerEvent
 }
 
 // engineTrigger reads the model's trigger back; a timer is read as a delay,
 // which only the history shows.
-func engineTrigger(t string) statemachine.Trigger {
+func engineTrigger(t string) plug.WorkflowTrigger {
 	switch t {
 	case model.TriggerCreate:
-		return statemachine.TriggerStart
+		return plug.WorkflowTriggerStart
 	case model.TriggerTimer:
-		return statemachine.TriggerDelay
+		return plug.WorkflowTriggerDelay
 	case model.TriggerGuard:
-		return statemachine.TriggerGuard
+		return plug.WorkflowTriggerGuard
 	}
-	return statemachine.TriggerEvent
+	return plug.WorkflowTriggerEvent
 }
 
 // errNotInPlace ends a transition's write in place: it changes more than the

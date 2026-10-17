@@ -340,7 +340,7 @@ created, until step 10 removes those imports.
 | 3 | `storekit` + `framework/kit/store`: the stores' implementation — the code naming `docstore` and the SDK's `sql` — moves there; `kit.Engine` stays in the core and still returns `*sql.DB`, its dialect now kit's own type (Q5); the connectors import `framework/kit/store` — done (2026-10-17, §Step 3, done) | no (the facade imports it) |
 | 3b | kit's own store code — the privacy service and its journal, the holds, sealing, history, revisions, trash, retention, the databases' components, migrations and checks, the dev tools and Main's commands on the stores (`migrate`, `privacy`, `revisions`, `data`, `watch`) — reached only through `framework/kit/store` (`EnableStores`, on `EnableServer`'s model), the core keeping call sites that fall back to an app without a store — done (2026-10-17, §Step 3b, done) | no (the facade imports it) |
 | 4 | `queuekit` + `framework/kit/queue`: the queues' brokers — the code naming the SDK's `queue`, a mailer's sealed outbox on a database among it — move there, behind `plug.Queues`; `framework/kit/queue` imports `framework/kit/store` (Q4) — done (2026-10-17, §Step 4, done) | no (the facade imports it) |
-| 5 | `workflowkit` + `framework/kit/workflow` (Q3) | no |
+| 5 | `workflowkit` + `framework/kit/workflow` (Q3): the SDK's `statemachine` instantiated once, behind `plug.Workflows`; `framework/kit/workflow` imports `framework/kit/store` (Q4) — done (2026-10-17, §Step 5, done) | no (the facade imports it) |
 | 6 | `mailkit` + `framework/kit/mail` | no |
 | 7 | `jobkit` + `framework/kit/jobs` | no |
 | 8 | English a table in kit's core, the other catalogues and the SDK's `i18n` behind `framework/kit/studio` (Q6) | no |
@@ -766,6 +766,103 @@ conversions (+0.012 MB of code, two packages more: `queue` and `queuekit`).
 Not measured: the initialisation's time and the latency, which a product of
 the facade leaves where they were.
 
+### Step 5, done (2026-10-17)
+
+The workflows' engine is `framework/internal/kit/workflowkit`, which
+`framework/kit/workflow` plugs in (`plug.Workflows`) as it is imported, and
+which `framework/kit` itself imports until step 10 (`subsystems.go`, Q8). Per
+Q4, `framework/kit/workflow` imports `framework/kit/store`: a workflow runs
+over a store; `workflowkit` imports `plug` and the SDK alone — the store is
+the core's port —, and a program that imports `framework/kit/store` alone
+links nothing of the workflows. kit's core imports none of
+`pkg/v1/app/statemachine`: the initgraph test took it off its allow-list.
+
+Per Q3, the SDK's statemachine is instantiated once, at
+`plug.WorkflowEntityValue` — the product's entity held as `any`, and its
+state spelled — and `string`, the state's spelling: `fmt.Sprint`, the name
+the workflow's file and the Studio always wrote a state with.
+`WorkflowService[E, S]` stays the typed facade, `svc.Workflow` and every
+method unchanged: it declares the workflow with a `plug.WorkflowConfig` — its
+transitions (`plug.TransitionSpec`), its `OnEnter` and `OnTransition` hooks,
+its guards and instants, each wrapped once into a function of a
+`WorkflowEntityValue`, the entity's state field set from the spelling the
+engine set (`entityOf`) and spelled back from it (`entityValue`), so that an
+`OnEnter` hook that changes its state is still refused —, opens it through
+the hook and holds a `plug.WorkflowEngine`. The ports the engine runs on are
+the core's and name no entity type: `plug.WorkflowStore`, over the workflow's
+store (`workflowPort`), and `plug.WorkflowJournal`, over the workflow's file
+or its table on a database (`workflowJournal`, `sqlJournal`, no longer
+generic). The engine's failures stay the SDK's errors, their fields kept; the
+core tells the ones it words apart through the driver's `Failed`
+(`plug.WorkflowFailure`), never by matching a sentinel itself, and an
+`OnTransition` hook a transaction held is reported without building one. The
+bytes at rest are unchanged: the same workflow files
+(`<service>/<workflow>.workflow.json`), the same tables
+(`<service>__<workflow>__workflow`).
+
+The start's check of §6 gains the workflow row: a workflow declared without
+`framework/kit/workflow` is refused with `CodeSubsystemMissing`, every
+declaration at once (`TestAWorkflowWithoutItsSubsystemIsRefused`), and a
+workflow started without it — which the check makes unreachable — says the
+import it needs (`workflowsMissing`).
+
+`initgraph_external_test.go` follows: `stillInCore` loses `statemachine`,
+`kitEngines` gains `framework/internal/kit/workflowkit` for
+`framework/kit/workflow`; `coreprobe` links no symbol of either — not even
+`statemachine`'s init, the package being out of its graph —, `storeprobe`
+and `queueprobe` none either, and
+`TestAProductThatImportsTheWorkflowsLinksThem` builds `testdata/workflowprobe`
+(coreprobe with `framework/kit/workflow`) and requires `workflowkit`'s and
+the SDK's statemachine's code linked, the store subsystem's, nothing of the
+queues', and the engine instantiated at kit's entity alone.
+
+Measured as the steps before (Go 1.27.2, `-trimpath`, MB = 10⁶ bytes, text
+symbols `T`/`t` by `go tool nm -size`, init medians of 50 runs at a 1-minute
+load under 1.5), before on `origin/main` at 63ec721a:
+
+| | coreprobe before | coreprobe after | storeprobe before | storeprobe after | queueprobe before | queueprobe after | workflowprobe after | cliprobe before | cliprobe after |
+|---|---|---|---|---|---|---|---|---|---|
+| packages (`go list -deps`) | 357 | **354** | 363 | 360 | 366 | 363 | 365 | 367 | 369 |
+| file | 14.781 | 14.767 | 17.783 | 17.771 | 18.255 | 18.242 | 18.197 | 18.265 | **18.684 (+0.42)** |
+| `.text` | 4.634 | 4.633 | 5.661 | 5.660 | 5.842 | 5.841 | 5.775 | 5.843 | 5.956 |
+| text symbols | 4.481 | 4.480 | 5.476 | 5.475 | 5.653 | 5.652 | 5.583 | 5.654 | 5.760 |
+| `.gopclntab` / debug | 3.528 / 3.687 | 3.528 / 3.685 | 4.310 / 4.344 | 4.310 / 4.344 | 4.424 / 4.436 | 4.424 / 4.436 | 4.425 / 4.419 | 4.427 / 4.441 | 4.540 / 4.518 |
+| kit's core | 0.421 | 0.421 | 0.988 | 0.988 | 0.989 | 0.989 | 0.995 | 0.989 | 0.995 |
+| `workflowkit` | — | 0 | — | 0 | — | 0 | 0.010 | — | 0.010 |
+| SDK `statemachine` (core and service) | 0.001 (its inits) | **0** | 0.001 | **0** | 0.001 | **0** | 0.077 | 0.001 | 0.077 |
+| init lines / median of 50 (`inittrace`) | 145 / 0.82 ms | 144 / 0.70 ms | 149 / 0.78 ms | 148 / 0.76 ms | 151 / 0.80 ms | 150 / 0.80 ms | 151 / 0.79 ms | 152 / 0.78 ms | 154 / 0.85 ms |
+
+And a product that declares workflows — a throwaway one on the facade, built
+in both trees and not kept, declaring 1 or 11 workflows over stores of
+distinct entity and state types, each with an event, a timer, a deadline and
+a guard, each called through `Start`, `Fire` and `Census`:
+
+| | 1 workflow before | 1 workflow after | 11 workflows before | 11 workflows after |
+|---|---|---|---|---|
+| file | 18.971 | 19.007 | 22.883 | **21.194 (−1.69)** |
+| text symbols | 5.849 | 5.859 | 7.158 | **6.540 (−0.62)** |
+| SDK `statemachine` | 0.085 | 0.084 | 0.654 | **0.084** |
+| kit's core | 1.078 | 1.078 | 1.799 | 1.743 |
+
+**Reading.** On kit's core alone, three packages fewer —
+`pkg/v1/app/statemachine` and its core and service halves —, one init fewer,
+and the 0.001 MB of their inits; the kernel's heap stays in the graph, which
+other code of the core imports. `storeprobe` and `queueprobe` lose the same.
+The gain is a product with workflows: before, the SDK's engine was compiled
+once per workflow's entity and state types, about **0.057 MB of code and
+0.17 MB of file per workflow type** on top of its facade and its store; after,
+it is compiled once — 0.084 MB of code with its loop — whatever the product
+declares, a workflow type costing its facade and its store alone (0.068 MB of
+code and 0.22 MB of file per type, against 0.131 MB and 0.39 MB before). The
+price is on the facade until step 10: since the hook holds the engine, a
+product of the facade links it whether it declares a workflow or not —
+`cliprobe` +0.107 MB of code and +0.42 MB of file, two packages more
+(`workflow` and `workflowkit`) —, what a product that declares one paid
+already; a product that imports only the registration packages it needs, as
+`kit gen` will write them (§5), pays it only with a workflow. The init medians
+are single series of 50 at a 1-minute load under 1.5: within the noise, and
+not claimed. Not measured: the latency of a fresh process.
+
 ### Risks
 
 - **A read decodes.** The generic engine hands back a `T`; the document engine
@@ -901,6 +998,7 @@ release note.
 | Accepted, step 3 done | 2026-10-17 | The migration table marks step 3 done; §Step 3, done records the stores' engines in `storekit` behind `framework/kit/store`, the core importing neither the SDK's `docstore` nor its `sql`, the two parts of §3's contract step 2 left settled (`plug.StoreConfig` with `Held(ctx, key)`, the stamp and kit's transaction; kit's own refusal kinds), `kit.Engine`'s dialect kit's own type (Q5), the SDK's sql still reached through the queues until step 4, `kit.Migrations`' facade conversion and the open point it leaves for step 10, and the measure — on kit's core alone, `docstore` gone, 0.32 MB of code and 0.94 MB of file less —, which says that the core's own store code is still reached from `App.Main`: the cut of that reachability is the next change. No decision changed |
 | Accepted, step 3b done | 2026-10-17 | The migration table gains step 3b, done; §Step 3b, done records kit's own store code reached only through `framework/kit/store` (`EnableStores`), the start's check extended to a node that seals at rest, Main's commands on the stores refused without it, and the measure — on kit's core alone, §Measurement's probe target met against step 0's base. No decision changed |
 | Accepted, step 4 done | 2026-10-17 | The migration table marks step 4 done; §Step 4, done records the queues' brokers in `queuekit` behind `framework/kit/queue`, which imports `framework/kit/store` (Q4) — `queuekit` reaching a database through `storekit.SQLOf` —, kit's core importing neither the SDK's `queue` nor, through it, its `sql`, the queues' contract in `plug` (`Queues`, `QueueConfig`, `Broker`, `MessageMover`, `Clock`), the start's check gaining the queue row (a topic, a subscription, a watch, a queued command, a mailer whose outbox is on a database), `plug.HandleProvider` off the queues and kept for the mail spool alone until step 6, and the measure — the smallest product two packages fewer, a product with stores and no queue 0.43 MB of file and 0.17 MB of code less. No decision changed |
+| Accepted, step 5 done | 2026-10-17 | The migration table marks step 5 done; §Step 5, done records the workflows' engine in `workflowkit` behind `framework/kit/workflow`, which imports `framework/kit/store` (Q4), the SDK's statemachine instantiated once at `plug.WorkflowEntityValue` and the state's spelling (Q3), `WorkflowService[E, S]` the typed facade over it with its ports (`plug.WorkflowStore`, `plug.WorkflowJournal`) in the core, kit's core importing none of the SDK's statemachine, the start's check gaining the workflow row, and the measure — the smallest product three packages fewer, a product of 11 workflows 0.62 MB of code and 1.69 MB of file less, the engine linked by a product of the facade until step 10 (+0.11 MB of code). No decision changed |
 
 ## Deferred
 
