@@ -15,13 +15,6 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
-// The write modes, as a store's engine takes them.
-const (
-	upsert      = plug.WriteUpsert  // anything: create or replace
-	insertOnly  = plug.WriteInsert  // nothing: a Conflict otherwise
-	replaceOnly = plug.WriteReplace // an entity: a NotFound otherwise, never a resurrection
-)
-
 // StoreService is a typed, keyed collection of entities. Every read returns a copy
 // and every write stores one: an entity is kept as its JSON encoding, so what
 // a handler holds can never alias what the store holds, and the memory and
@@ -36,9 +29,6 @@ const (
 // document store, in memory, in files or over SQL —; kit makes it a node of
 // the graph, observes every call, and speaks for its refusals. Its writes
 // join the transaction their context carries ([Transact]).
-//
-// It is the typed facade over the store's core (store_core.go, ADR 0179 §2):
-// its methods encode the entity, call the core, and decode what comes back.
 type StoreService[T any] struct {
 	// storeCore is the store without its entity type (store_core.go).
 	storeCore
@@ -127,10 +117,16 @@ func notRunning(n *nodeBase) error {
 
 // The typed facade ----------------------------------------------------------------
 
-// as is v as the store's type: the zero value for none.
+// as is v as the store's type: the zero value for none — what the core
+// returns beside a refusal.
 func as[T any](v any) T {
-	t, _ := v.(T)
-	return t
+	switch t := v.(type) {
+	case T:
+		return t
+	default:
+		var zero T
+		return zero
+	}
 }
 
 // asAll is vs as the store's type.
@@ -157,13 +153,13 @@ func changing[T any](fn func(*T) error) func(v any) (any, error) {
 
 // Get returns the entity with the given key, or a [NotFound] error.
 func (s *StoreService[T]) Get(ctx context.Context, key string) (T, error) {
-	v, err := s.storeCore.get(ctx, key, model.EdgeReads)
+	v, err := s.get(ctx, key, model.EdgeReads)
 	return as[T](v), err
 }
 
 // List returns every entity, ordered by key.
 func (s *StoreService[T]) List(ctx context.Context) ([]T, error) {
-	vs, err := s.storeCore.list(ctx, model.EdgeReads, "List")
+	vs, err := s.list(ctx, model.EdgeReads, "List")
 	return asAll[T](vs), err
 }
 
@@ -172,12 +168,12 @@ func (s *StoreService[T]) Count(ctx context.Context) (int, error) { return s.cou
 
 // Put stores the entity, replacing any entity with the same key.
 func (s *StoreService[T]) Put(ctx context.Context, v T) error {
-	return s.storeCore.put(ctx, v, upsert, model.EdgeWrites, "Put")
+	return s.put(ctx, v, plug.WriteUpsert, model.EdgeWrites, "Put")
 }
 
 // Insert stores a new entity; it is a [Conflict] error when the key exists.
 func (s *StoreService[T]) Insert(ctx context.Context, v T) error {
-	return s.storeCore.put(ctx, v, insertOnly, model.EdgeWrites, "Insert")
+	return s.put(ctx, v, plug.WriteInsert, model.EdgeWrites, "Insert")
 }
 
 // Update applies fn to the entity with the given key and stores the result,
@@ -189,7 +185,7 @@ func (s *StoreService[T]) Insert(ctx context.Context, v T) error {
 // not write to it, nor fire a workflow over it — either would wait for the
 // write fn is part of.
 func (s *StoreService[T]) Update(ctx context.Context, key string, fn func(*T) error) (T, error) {
-	v, err := s.storeCore.update(ctx, key, changing(fn), model.EdgeWrites)
+	v, err := s.update(ctx, key, changing(fn), model.EdgeWrites)
 	return as[T](v), err
 }
 
@@ -888,11 +884,11 @@ func (s *storeCore) items(limit int) []json.RawMessage {
 // with key: [Service.Store] makes one and declares it, which is how a product
 // gets one.
 func NewStoreService[T any](key func(T) string) *StoreService[T] {
-	st := &StoreService[T]{key: key}
-	st.ent = entityType{typ: reflect.TypeFor[T]()}
+	ent := entityType{typ: reflect.TypeFor[T]()}
 	if key != nil {
-		st.ent = entityOf(key)
+		ent = entityOf(key)
 	}
+	st := &StoreService[T]{key: key, ent: ent}
 	st.self = st
 	return st
 }

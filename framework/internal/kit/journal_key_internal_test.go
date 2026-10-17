@@ -172,7 +172,7 @@ func legacyEntry(t *testing.T, app *App, j *StoreService[journalRecord], keys *r
 	se := j.sealing()
 	sealed, err := se.seal(ctx, raw, e.key(), keys.ownRef(j.id, e.key()), nil)
 	must(t, err)
-	must(t, se.inner.Write(ctx, plug.DocumentValue{JSON: sealed, Value: e}, insertOnly))
+	must(t, se.inner.Write(ctx, plug.DocumentValue{JSON: sealed, Value: e}, plug.WriteInsert))
 	app.privacy.seq, app.privacy.last = e.Seq, e.Hash
 	return e
 }

@@ -77,7 +77,8 @@ func (e *sealedEngine) docKey(d plug.DocumentValue) string {
 	if d.Value != nil {
 		return e.s.keyOf(d.Value)
 	}
-	return e.restingKey(d.JSON)
+	key, _ := e.restingKey(d.JSON)
+	return key
 }
 
 // keyAtRest is the key of a record as it rests that holds a box, read from
@@ -91,16 +92,16 @@ func (e *sealedEngine) keyAtRest(raw json.RawMessage) (string, bool) {
 }
 
 // restingKey is the key of a record as it rests: read from its clear
-// members, or from the record decoded; "" when it does not decode.
-func (e *sealedEngine) restingKey(raw json.RawMessage) string {
+// members, or from the record decoded; false when it does not decode.
+func (e *sealedEngine) restingKey(raw json.RawMessage) (string, bool) {
 	if key, ok := e.keyAtRest(raw); ok {
-		return key
+		return key, true
 	}
 	v, err := e.s.decodeEntity(raw)
 	if err != nil {
-		return ""
+		return "", false
 	}
-	return e.s.keyOf(v)
+	return e.s.keyOf(v), true
 }
 
 // decodeAtRest is the entity a record as it rests holds, opened: what the
@@ -122,7 +123,11 @@ func (e *sealedEngine) lenient(raw []byte) any {
 	if err != nil || e.s.ent.decode == nil {
 		return e.s.addressable(nil).Interface()
 	}
-	v, _ := e.s.ent.decode(doc)
+	v, err := e.s.ent.decode(doc)
+	if err != nil {
+		// Decoded as far as it decodes: the key reads what it can.
+		return v
+	}
 	return v
 }
 

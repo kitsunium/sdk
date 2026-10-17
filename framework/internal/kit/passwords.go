@@ -125,7 +125,7 @@ func (s *StoreService[T]) Passwords(field func(*T) *string, opts ...PasswordConf
 			opt.passwordConfigure(&o)
 		}
 	}
-	p := &PasswordPolicyService[T]{s: s, passwordRule: passwordRule{store: &s.storeCore, decl: callerPos(), minLength: o.minLength, notReused: o.notReused, notCommon: o.notCommon}}
+	p := &PasswordPolicyService[T]{s: s, store: &s.storeCore, decl: callerPos(), minLength: o.minLength, notReused: o.notReused, notCommon: o.notCommon}
 	p.member = s.passwordField(field, p.decl)
 	s.judgePolicy(&p.passwordRule, o)
 	s.passwords = append(s.passwords, &p.passwordRule)

@@ -161,14 +161,14 @@ func endedWithoutWriting(err error) bool {
 
 // anonymise is v with the store's Anonymise function run on it, when it
 // declares one; false when the function panicked.
-func (s *storeCore) anonymise(v any) (out any, ok bool) {
+func (s *storeCore) anonymise(v any) (anonymised any, ok bool) {
 	p := s.privacy
 	if p == nil || p.anonymise == nil {
 		return v, true
 	}
 	defer func() {
 		if recover() != nil {
-			out, ok = v, false
+			anonymised, ok = v, false
 		}
 	}()
 	return p.anonymise(v), true

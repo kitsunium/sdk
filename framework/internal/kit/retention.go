@@ -120,14 +120,14 @@ type privacyFuncs struct {
 // privacyFuncsOf are the option functions of an entity of type T.
 func privacyFuncsOf[T any]() privacyFuncs {
 	return privacyFuncs{
-		instant: func(fn any) (func(v any) (time.Time, bool), bool, bool) {
+		instant: func(fn any) (wrapped func(v any) (time.Time, bool), ok, isNil bool) {
 			typed, ok := fn.(func(T) (time.Time, bool))
 			if !ok || typed == nil {
 				return nil, ok, typed == nil
 			}
 			return func(v any) (time.Time, bool) { return typed(as[T](v)) }, true, false
 		},
-		anonymise: func(fn any) (func(v any) any, bool, bool) {
+		anonymise: func(fn any) (wrapped func(v any) any, ok, isNil bool) {
 			typed, ok := fn.(func(*T))
 			if !ok || typed == nil {
 				return nil, ok, typed == nil

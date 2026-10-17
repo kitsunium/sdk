@@ -186,9 +186,9 @@ func (e *sqlEngine) Write(ctx context.Context, d plug.DocumentValue, mode plug.W
 	defer done()
 	r := recordFor(d)
 	switch mode {
-	case insertOnly:
+	case plug.WriteInsert:
 		err = e.ds.InsertStamped(c, r, stamp)
-	case replaceOnly:
+	case plug.WriteReplace:
 		err = e.ds.ReplaceStamped(c, r, stamp)
 	default:
 		err = e.ds.PutStamped(c, r, stamp)

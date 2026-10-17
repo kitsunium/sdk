@@ -118,9 +118,8 @@ func (s *storeCore) keyOf(v any) (key string) {
 			key = ""
 		}
 	}()
-	if s.ent.key == nil {
-		return ""
-	}
+	// A store declared with no key function has none to call: the call
+	// panics, and the key is empty.
 	return s.ent.key(v)
 }
 
@@ -137,9 +136,9 @@ func (s *storeCore) addressable(v any) reflect.Value {
 
 // subjectOf is v's subject, as written; "" when it has none.
 func (s *storeCore) subjectOf(v any) string {
-	if v == nil {
-		return ""
+	id := ""
+	if v != nil {
+		id, _ = s.plan().subjectOf(reflect.ValueOf(v))
 	}
-	id, _ := s.plan().subjectOf(reflect.ValueOf(v))
 	return id
 }

@@ -120,6 +120,27 @@ var (
 	_ sealAller       = (*StoreService[struct{}])(nil)
 	_ tabled          = (*StoreService[struct{}])(nil)
 
+	// A store's roles are its core's (store_core.go, ADR 0179 §2): the
+	// typed facade above has them by embedding it.
+	_ Keeper          = (*storeCore)(nil)
+	_ copyPartser     = (*storeCore)(nil)
+	_ feeder          = (*storeCore)(nil)
+	_ formerSource    = (*storeCore)(nil)
+	_ itemsSource     = (*storeCore)(nil)
+	_ marking         = (*storeCore)(nil)
+	_ node            = (*storeCore)(nil)
+	_ placementSource = (*storeCore)(nil)
+	_ recordsPort     = (*storeCore)(nil)
+	_ retentionRunner = (*storeCore)(nil)
+	_ revisionsSource = (*storeCore)(nil)
+	_ sealAller       = (*storeCore)(nil)
+	_ sealingSource   = (*storeCore)(nil)
+	_ starter         = (*storeCore)(nil)
+	_ tabled          = (*storeCore)(nil)
+	_ trashRunner     = (*storeCore)(nil)
+	_ trashSource     = (*storeCore)(nil)
+	_ typeSource      = (*storeCore)(nil)
+
 	_ plug.Folder = (*docEngine)(nil)
 	_ plug.Folder = (*historied)(nil)
 	_ plug.Folder = (*sealedEngine)(nil)

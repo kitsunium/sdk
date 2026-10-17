@@ -112,7 +112,8 @@ func (e *sealedEngine) Find(ctx context.Context, index, key string) ([]plug.Docu
 
 // openFound opens a record an index found, its key read first.
 func (e *sealedEngine) openFound(ctx context.Context, d plug.DocumentValue) (plug.DocumentValue, error) {
-	return e.opened(ctx, e.restingKey(d.JSON), d)
+	key, _ := e.restingKey(d.JSON)
+	return e.opened(ctx, key, d)
 }
 
 // Count is how many records the store holds.
@@ -132,16 +133,16 @@ func (e *sealedEngine) Entries(ctx context.Context, limit int) ([]json.RawMessag
 // replaces when another writer inserted it meanwhile.
 func (e *sealedEngine) Write(ctx context.Context, d plug.DocumentValue, mode plug.WriteMode) error {
 	key := e.s.keyOf(d.Value)
-	if mode == insertOnly || key == "" || !e.s.plan().sealsAny() {
+	if mode == plug.WriteInsert || key == "" || !e.s.plan().sealsAny() {
 		return e.insert(ctx, d, mode)
 	}
 	var err error
 	for range writeAttempts {
 		err = e.replace(ctx, key, d)
-		if mode == replaceOnly || !errors.Is(err, docstore.DocumentNotFound) {
+		if mode == plug.WriteReplace || !errors.Is(err, docstore.DocumentNotFound) {
 			return err
 		}
-		if err = e.insert(ctx, d, insertOnly); !errors.Is(err, docstore.DocumentExists) {
+		if err = e.insert(ctx, d, plug.WriteInsert); !errors.Is(err, docstore.DocumentExists) {
 			return err
 		}
 	}

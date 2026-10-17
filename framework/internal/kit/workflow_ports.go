@@ -44,7 +44,7 @@ func (p storePort[E]) Get(ctx context.Context, key string) (E, bool, error) {
 	var err error
 	if trace.SpanContextFromContext(ctx).IsValid() {
 		var v any
-		v, err = p.s.storeCore.get(ctx, key, model.EdgePersists)
+		v, err = p.s.get(ctx, key, model.EdgePersists)
 		e = as[E](v)
 	} else {
 		e, err = p.s.read(ctx, key)
@@ -57,12 +57,12 @@ func (p storePort[E]) Get(ctx context.Context, key string) (E, bool, error) {
 
 // Insert writes e unless its key is taken; false when it was.
 func (p storePort[E]) Insert(ctx context.Context, e E) (bool, error) {
-	return p.s.transitionWrite(ctx, e, insertOnly, "")
+	return p.s.transitionWrite(ctx, e, plug.WriteInsert, "")
 }
 
 // Replace writes e over an entity of its key; false when there was none.
 func (p storePort[E]) Replace(ctx context.Context, e E) (bool, error) {
-	return p.s.transitionWrite(ctx, e, replaceOnly, p.state)
+	return p.s.transitionWrite(ctx, e, plug.WriteReplace, p.state)
 }
 
 // All yields every entity of the store.
@@ -100,7 +100,7 @@ func (s *storeCore) transitionWrite(ctx context.Context, v any, mode plug.WriteM
 		return false, notRunning(&s.nodeBase)
 	}
 	name := "Put"
-	if mode == insertOnly {
+	if mode == plug.WriteInsert {
 		name = "Insert"
 	}
 	ctx, sp := a.begin(ctx, &spanStart{node: s.id, from: currentNode(ctx), edge: model.EdgePersists, op: model.OpWrite, name: name})
@@ -129,7 +129,7 @@ func (s *storeCore) transitionWrite(ctx context.Context, v any, mode plug.WriteM
 // writeTransition writes a transition's entity v in mode: in place when it
 // changes only the state and the store keeps revisions, else as any write.
 func (s *storeCore) writeTransition(ctx context.Context, eng plug.StoreEngine, v any, mode plug.WriteMode, state string) error {
-	if mode == replaceOnly && state != "" && s.revisions > 0 {
+	if mode == plug.WriteReplace && state != "" && s.revisions > 0 {
 		if err := s.stateOnly(ctx, eng, s.keyOf(v), v, state); !errors.Is(err, errNotInPlace) {
 			return err
 		}
@@ -145,8 +145,8 @@ func (s *storeCore) writeTransition(ctx context.Context, eng plug.StoreEngine, v
 // taken, or an entity gone, is stored false, not an error.
 func transitionStored(mode plug.WriteMode, raw, err error) (bool, error) {
 	switch {
-	case mode == insertOnly && errors.Is(raw, docstore.DocumentExists),
-		mode == replaceOnly && errors.Is(raw, docstore.DocumentNotFound):
+	case mode == plug.WriteInsert && errors.Is(raw, docstore.DocumentExists),
+		mode == plug.WriteReplace && errors.Is(raw, docstore.DocumentNotFound):
 		return false, nil
 	case err != nil:
 		return false, err
@@ -187,7 +187,7 @@ func (j *sqlJournal[E, S]) Save(ctx context.Context, records ...statemachine.Rec
 		if err != nil {
 			return err
 		}
-		if err := j.eng.Write(ctx, d, upsert); err != nil {
+		if err := j.eng.Write(ctx, d, plug.WriteUpsert); err != nil {
 			return err
 		}
 	}
@@ -202,51 +202,6 @@ func (j *sqlJournal[E, S]) Delete(ctx context.Context, keys ...string) error {
 		}
 	}
 	return nil
-}
-
-// instanceConfig is the engine of a workflow's journal on a database: its
-// records, keyed by their entity's key.
-var instanceConfig = &engineConfig{
-	key: func(d plug.DocumentValue) string {
-		inst, _ := d.Value.(model.Instance)
-		return inst.ID
-	},
-	decode: func(raw json.RawMessage) (any, error) {
-		var inst model.Instance
-		if err := json.Unmarshal(raw, &inst); err != nil {
-			return nil, undecodable("workflow", err)
-		}
-		return inst, nil
-	},
-}
-
-// instancesOf are the journal's records ds hold.
-func instancesOf(ds []plug.DocumentValue, err error) ([]model.Instance, error) {
-	if err != nil {
-		return nil, err
-	}
-	out := make([]model.Instance, 0, len(ds))
-	for _, d := range ds {
-		inst, ok := d.Value.(model.Instance)
-		if !ok {
-			v, err := instanceConfig.decode(d.JSON)
-			if err != nil {
-				return nil, err
-			}
-			inst, _ = v.(model.Instance)
-		}
-		out = append(out, inst)
-	}
-	return out, nil
-}
-
-// instanceDoc is inst as the journal's engine keeps it.
-func instanceDoc(inst model.Instance) (plug.DocumentValue, error) {
-	raw, err := json.Marshal(inst)
-	if err != nil {
-		return plug.DocumentValue{}, unencodable("workflow", err)
-	}
-	return plug.DocumentValue{JSON: raw, Value: inst}, nil
 }
 
 // journalTable is the table of the workflow's journal, on the database

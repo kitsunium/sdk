@@ -50,7 +50,7 @@ func (h *historied) write(ctx context.Context, d plug.DocumentValue, mode plug.W
 	if key == "" {
 		return h.StoreEngine.Write(ctx, d, mode) // the engine says why
 	}
-	if mode == insertOnly {
+	if mode == plug.WriteInsert {
 		return h.insert(ctx, key, d)
 	}
 	var err error
@@ -59,7 +59,7 @@ func (h *historied) write(ctx context.Context, d plug.DocumentValue, mode plug.W
 		switch {
 		case errors.Is(err, docstore.DocumentUndecodable):
 			return h.overwrite(ctx, d, mode)
-		case mode == replaceOnly || !errors.Is(err, docstore.DocumentNotFound):
+		case mode == plug.WriteReplace || !errors.Is(err, docstore.DocumentNotFound):
 			return err
 		}
 		if err = h.insert(ctx, key, d); !errors.Is(err, docstore.DocumentExists) {
@@ -82,7 +82,7 @@ func (h *historied) insert(ctx context.Context, key string, d plug.DocumentValue
 			}
 		}
 	}
-	return h.StoreEngine.Write(ctx, d, insertOnly)
+	return h.StoreEngine.Write(ctx, d, plug.WriteInsert)
 }
 
 // overwrite stores d over a record the type no longer decodes: its former
@@ -174,7 +174,7 @@ func (h *historied) undo(ctx context.Context, key string, w *historyWrite) {
 		// another write made a new one meanwhile.
 		var d plug.DocumentValue
 		if d, err = historyDoc(w.before); err == nil {
-			err = h.hist.Write(ctx, d, insertOnly)
+			err = h.hist.Write(ctx, d, plug.WriteInsert)
 		}
 	} else {
 		_, err = h.hist.Update(ctx, key, func(d *plug.DocumentValue) error {

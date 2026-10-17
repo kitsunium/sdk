@@ -98,14 +98,14 @@ func BenchmarkSealing(b *testing.B) {
 	}{{"plain", plain}, {"sealed", sealed}} {
 		// A hundred people, a key each, opened once before the clock runs.
 		for i := range 100 {
-			if err := e.eng.Write(ctx, benchDoc(b, st, benchRecord(i)), upsert); err != nil {
+			if err := e.eng.Write(ctx, benchDoc(b, st, benchRecord(i)), plug.WriteUpsert); err != nil {
 				b.Fatal(err)
 			}
 		}
 		b.Run("write/"+e.name, func(b *testing.B) {
 			i := 0
 			for b.Loop() {
-				if err := e.eng.Write(ctx, benchDoc(b, st, benchRecord(i%1000)), upsert); err != nil {
+				if err := e.eng.Write(ctx, benchDoc(b, st, benchRecord(i%1000)), plug.WriteUpsert); err != nil {
 					b.Fatal(err)
 				}
 				i++

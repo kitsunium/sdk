@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
@@ -336,7 +337,7 @@ func (k keyStore) Get(ctx context.Context, ref string) ([]byte, bool, error) {
 
 // Insert files the wrapped key ref; false when ref is taken.
 func (k keyStore) Insert(ctx context.Context, ref string, wrapped []byte) (bool, error) {
-	err := k.s.write(ctx, wrappedKey{Ref: ref, Wrapped: bytes.Clone(wrapped)}, insertOnly)
+	err := k.s.write(ctx, wrappedKey{Ref: ref, Wrapped: bytes.Clone(wrapped)}, plug.WriteInsert)
 	if isConflict(err) {
 		return false, nil
 	}

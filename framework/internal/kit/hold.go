@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
@@ -164,7 +165,7 @@ func (s *storeCore) holdKey(ctx context.Context, a *App, key, reason string) err
 	if id := s.subjectOf(v); id != "" {
 		h.Subject = keys.subjectRef(id)
 	}
-	if err := holds.write(ctx, h, upsert); err != nil {
+	if err := holds.write(ctx, h, plug.WriteUpsert); err != nil {
 		return err
 	}
 	s.reschedule(key)

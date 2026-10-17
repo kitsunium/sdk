@@ -205,11 +205,11 @@ func (e *docEngine) Write(ctx context.Context, d plug.DocumentValue, mode plug.W
 	stamp := e.stamp(ctx)
 	var err error
 	switch mode {
-	case insertOnly:
+	case plug.WriteInsert:
 		err = e.ds.InsertStamped(r, stamp)
-	case replaceOnly:
+	case plug.WriteReplace:
 		err = e.ds.ReplaceStamped(r, stamp)
-	case upsert:
+	case plug.WriteUpsert:
 		err = e.ds.PutStamped(r, stamp)
 	default:
 		err = e.ds.PutStamped(r, stamp)

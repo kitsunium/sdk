@@ -287,7 +287,7 @@ func (h *historied) put(ctx context.Context, w *historyWrite) error {
 	} else {
 		var d plug.DocumentValue
 		if d, err = historyDoc(w.after); err == nil {
-			err = h.hist.Write(ctx, d, upsert)
+			err = h.hist.Write(ctx, d, plug.WriteUpsert)
 		}
 	}
 	switch {
