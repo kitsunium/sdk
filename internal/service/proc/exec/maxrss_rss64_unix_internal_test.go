@@ -1,4 +1,4 @@
-//go:build unix && !386 && !arm && !mips && !mipsle
+//go:build unix && !darwin && !386 && !arm && !mips && !mipsle
 
 // Package exec — the 64-bit peak-RSS read.
 package exec
@@ -8,13 +8,14 @@ import (
 	"testing"
 )
 
-// Test_maxRSSKB pins the pass-through on a 64-bit GOARCH.
+// Test_maxRSSKB pins the pass-through on a 64-bit GOARCH whose kernel reports
+// kilobytes.
 //
 // The file exists only because Rusage.Maxrss is int64 here and int32 on 32-bit
 // targets, so the 32-bit sibling widens while this one must not cast at all. The
-// unit is kilobytes on every Unix — reporting bytes here would inflate every
-// figure a supervisor logs by a factor of 1024, which looks plausible enough to
-// go unnoticed.
+// unit is kilobytes on Linux and the BSDs — dividing here would shrink every
+// figure a supervisor logs by a factor of 1024; darwin, which reports bytes, has
+// its own test in maxrss_darwin_internal_test.go.
 func Test_maxRSSKB(t *testing.T) {
 	t.Parallel()
 	type tc struct {
