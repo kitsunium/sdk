@@ -13,10 +13,10 @@ once, the refusal naming this import and carrying `CodeSubsystemMissing`
 
 It imports no other registration package: a job runs over nothing a store,
 a queue, a workflow or a mail subsystem provides (ADR 0179 Q4 names no
-import for it). Until ADR 0179's step 10, `framework/kit` imports this
-package itself (`subsystems.go`, Q8): no product needs the line yet, and
-`kit gen` will write it (§5). The status line declares two jobs in its
-daemon role, so it imports it once the products are edited (step 9).
+import for it). `framework/kit` does not import this package (ADR 0179
+step 10; it did until then, Q8): a product that declares a job imports it,
+and `kit gen` writes the line for a designed product (§5). The status line
+declares two jobs in its daemon role, so it imports it.
 
 kit's own job code — the declaration (`Job`, `Every`, `Cron`), the
 scheduler's component and loop, each job's loop and span, the overlap with a

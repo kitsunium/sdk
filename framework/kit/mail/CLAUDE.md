@@ -16,9 +16,10 @@ imports.
 It imports `framework/kit/queue` and `framework/kit/store` (ADR 0179 Q4): a
 mailer's outbox on a database is a queue of the queue subsystem, joined to
 the transaction of the database the store subsystem opened, and sealed under
-kit's data keys, kept in a store of kit's own. Until ADR 0179's step 10,
-`framework/kit` imports this package itself (`subsystems.go`, Q8): no product
-needs the line yet, and `kit gen` will write it (§5).
+kit's data keys, kept in a store of kit's own. `framework/kit` does not
+import this package (ADR 0179 step 10; it did until then, Q8): a product
+that declares a mailer imports it, and `kit gen` writes the line for a
+designed product (§5).
 
 kit's own mailer code — `Mailer`, `Send` and its transaction rules (ADR 0178
 C1, C7 item 7), the mailbox the Studio reads, the SMTP URL read again before

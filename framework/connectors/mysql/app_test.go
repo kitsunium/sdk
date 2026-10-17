@@ -15,7 +15,6 @@ import (
 	"github.com/kitsunium/sdk/framework/connectors/mysql"
 	"github.com/kitsunium/sdk/framework/kit"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // The product the end-to-end tests run: one service, whose store the
@@ -28,9 +27,9 @@ type entry struct {
 // migrations are the product's: one DDL statement each — on MySQL a DDL
 // statement commits by itself. Their tables have no IF NOT EXISTS: running
 // one twice fails.
-var migrations = []sql.Migration{
-	{Version: 20260901120000, Name: "create entries", Up: sql.Statements("CREATE TABLE entries (id VARCHAR(64) PRIMARY KEY)"), Down: sql.Statements("DROP TABLE entries")},
-	{Version: 20260902120000, Name: "create trail", Up: sql.Statements("CREATE TABLE trail (id VARCHAR(64) PRIMARY KEY)"), Down: sql.Statements("DROP TABLE trail")},
+var migrations = []kit.Migration{
+	{Version: 20260901120000, Name: "create entries", Up: kit.Statements("CREATE TABLE entries (id VARCHAR(64) PRIMARY KEY)"), Down: kit.Statements("DROP TABLE entries")},
+	{Version: 20260902120000, Name: "create trail", Up: kit.Statements("CREATE TABLE trail (id VARCHAR(64) PRIMARY KEY)"), Down: kit.Statements("DROP TABLE trail")},
 }
 
 // ledger is the product in production, its data in a directory of the

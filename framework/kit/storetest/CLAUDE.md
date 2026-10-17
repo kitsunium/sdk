@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T00:00:00Z -->
+<!-- updated: 2026-10-17T23:30:00Z -->
 # framework/kit/storetest — the conformance suite of kit's stores
 
 What a store does on every backend (the platform's ADR 0004): run by
@@ -18,6 +18,7 @@ product tested in memory sees what its database does.
 
 - A case declares a service of its own, named after the case, so the cases of one run can share one database: their tables never meet.
 - A case uses the facade (`framework/kit`) only: it sees the stores as a product does.
+- The suite imports the registration packages of what its cases declare — `framework/kit/queue` and `framework/kit/workflow`, which bring `framework/kit/store` —, as a product does since ADR 0179's step 10, when the facade stopped importing them: a caller needs no import of its own for the suite's sake. A case that declares another subsystem adds its import here.
 - A case that waits on time says so (`clocked` in `cases`): it runs on a manual clock at `epoch` (`suite.clock`), never on the wall clock; the others run on the wall clock, as before.
 - A new case is added to `cases`, and runs on every backend of every caller.
 - An error the suite returns itself is typed (rule 2: no `errors.New`, which `make guard` fails on) in this package's own range, `0.4.4.*` — layer 4, PP 4, recorded in `codeRangeOwners`; the package is in `//:audit_sources`.

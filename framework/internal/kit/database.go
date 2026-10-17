@@ -160,21 +160,23 @@ func Keeps(things ...Keeper) DatabaseConfigurer {
 // engine by it.
 type Dialect string
 
-// Migrations are migrations — the SDK's sql.Migration, as the facade takes
-// them —, run when
-// the database starts (<name>-migrate: start) or by `<product> migrate up`,
-// kit's own first, each set under its own version table — and so its own
-// lock. On MySQL a DDL statement commits by itself: write one per migration.
+// Migrations are migrations, kit's own [MigrationValue]s (ADR 0179 step
+// 10), run when the database starts (<name>-migrate: start) or by
+// `<product> migrate up`, kit's own first, each set under its own version
+// table — and so its own lock. On MySQL a DDL statement commits by itself:
+// write one per migration. The store subsystem runs them: a program that
+// declares a database imports framework/kit/store, as its engine module
+// does.
 //
 // Given to [Database], they are the product's, under schema_migrations.
 // Given to [NewModule], they are the module's (ADR 0008), for the data it
 // keeps outside kit's stores: run on the database that keeps the module,
 // under <module>_migrations.
-func Migrations(m ...plug.MigrationValue) interface {
+func Migrations(m ...MigrationValue) interface {
 	DatabaseConfigurer
 	ModuleConfigurer
 } {
-	return migrations(m)
+	return migrations(pluggedMigrations(m))
 }
 
 // Database declares a database the product keeps its stores in, named name,

@@ -127,7 +127,7 @@ func settingNamed(t *testing.T, g *model.Graph, name string) model.Setting {
 func TestInMemoryOpensNoDatabase(t *testing.T) {
 	db := kit.NewFakeDB(sql.DialectPostgres)
 	var logs syncBuffer
-	app := ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), sqlMigrations(migrations...)), kit.InMemory())
+	app := ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), kit.Migrations(migrations...)), kit.InMemory())
 	run(t, app)
 	g := app.Graph()
 	if d := databaseOf(t, g, "database"); d.State != model.DatabaseMemory {

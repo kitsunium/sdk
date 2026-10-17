@@ -11,9 +11,9 @@ without the import is refused at the start, every declaration at once, the
 refusal naming this import and carrying `CodeSubsystemMissing` (0.4.2.83).
 
 It imports `framework/kit/store` (ADR 0179 Q4): a workflow runs over a store.
-Until ADR 0179's step 10, `framework/kit` imports this package itself
-(`subsystems.go`, Q8): no product needs the line yet, and `kit gen` will
-write it (§5).
+`framework/kit` does not import this package (ADR 0179 step 10; it did until
+then, Q8): a product that declares a workflow imports it, and `kit gen`
+writes the line for a designed product (§5).
 
 kit's own workflow code — `WorkflowService[E, S]`, the typed facade, its
 port over the store, its journal in the data directory or on a database, the

@@ -14,6 +14,11 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/kit"
+	// The suite's cases declare stores, a topic and its subscription, and
+	// workflows: it imports their subsystems, as a product does (ADR 0179
+	// step 10) — the queues' and the workflows', which bring the stores'.
+	_ "github.com/kitsunium/sdk/framework/kit/queue"
+	_ "github.com/kitsunium/sdk/framework/kit/workflow"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )

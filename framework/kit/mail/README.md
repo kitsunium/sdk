@@ -12,6 +12,6 @@ Package mail plugs kit's mailers in: the outbox a mailer keeps — the SDK's mai
 import _ "github.com/kitsunium/sdk/framework/kit/mail"
 ```
 
-A product that declares none does not, and links none of that outbox; a program that declares one without it is refused at the start, the refusal naming this import (CodeSubsystemMissing). It imports framework/kit/store and framework/kit/queue: a mailer's outbox on a database is the queue subsystem's, joined to the transaction of the database the store subsystem opened, and sealed under kit's data keys, kept in a store of kit's own. framework/kit imports it too until ADR 0179's last step: no product needs the line yet.
+A product that declares none does not, and links none of that outbox; a program that declares one without it is refused at the start, the refusal naming this import (CodeSubsystemMissing). It imports framework/kit/store and framework/kit/queue: a mailer's outbox on a database is the queue subsystem's, joined to the transaction of the database the store subsystem opened, and sealed under kit's data keys, kept in a store of kit's own. framework/kit does not import it (ADR 0179 step 10): kit gen writes the line for a designed product, and a hand-written one writes it.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

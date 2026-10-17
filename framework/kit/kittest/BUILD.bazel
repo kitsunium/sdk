@@ -33,5 +33,6 @@ go_test(
         ":kittest",
         "//framework/kit",
         "//framework/kit/server",
+        "//framework/kit/store",
     ],
 )

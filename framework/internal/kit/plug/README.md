@@ -1955,7 +1955,7 @@ type MessageValue struct {
 <a name="MigrationValue"></a>
 ## type [MigrationValue](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/plug/store.go>)
 
-MigrationValue is one versioned change of a database's schema and its reversal, as kit's migrations are written: the SDK's own, on the standard library's types.
+MigrationValue is one versioned change of a database's schema and its reversal, as the core hands it to the store subsystem: a product's kit.Migration, or one of kit's own, its steps on the standard library's types.
 
 ```go
 type MigrationValue struct {

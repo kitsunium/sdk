@@ -22,8 +22,8 @@ type notebook struct {
 }
 
 // noteMigrations are the module's: one table.
-var noteMigrations = []sql.Migration{
-	{Version: 20260903120000, Name: "create notes", Up: sql.Statements("CREATE TABLE notes (id TEXT)"), Down: sql.Statements("DROP TABLE notes")},
+var noteMigrations = []kit.MigrationValue{
+	{Version: 20260903120000, Name: "create notes", Up: kit.Statements("CREATE TABLE notes (id TEXT)"), Down: kit.Statements("DROP TABLE notes")},
 }
 
 func newNotebook(parts ...kit.ModuleConfigurer) notebook {
@@ -66,11 +66,11 @@ func TestKeepsPlacesAModule(t *testing.T) {
 func TestAModulesMigrationsRunOnItsDatabase(t *testing.T) {
 	needsFileStore(t)
 	withDatabases(t, "DATABASE", "ARCHIVE")
-	n := newNotebook(sqlMigrations(noteMigrations...))
+	n := newNotebook(kit.Migrations(noteMigrations...))
 	main, archive := kit.NewFakeDB(sql.DialectPostgres), kit.NewFakeDB(sql.DialectPostgres)
 	var logs syncBuffer
 	app := ledgerApp(t, newLedger(), &logs, n.module,
-		kit.Database("database", main.Engine(), sqlMigrations(migrations...)),
+		kit.Database("database", main.Engine(), kit.Migrations(migrations...)),
 		kit.Database("archive", archive.Engine(), kit.Keeps(n.module)))
 	run(t, app)
 	if got := archive.Versions("notebook_migrations"); !slices.Equal(got, []int64{20260903120000}) {
@@ -97,7 +97,7 @@ func TestAModulesMigrationsRunOnItsDatabase(t *testing.T) {
 // kit.Keeps of a module the app does not mount.
 func TestAModuleOnTwoDatabasesIsRefused(t *testing.T) {
 	withDatabases(t, "DATABASE", "ARCHIVE")
-	n := newNotebook(sqlMigrations(noteMigrations...))
+	n := newNotebook(kit.Migrations(noteMigrations...))
 	other := newNotebook()
 	var logs syncBuffer
 	err := ledgerApp(t, newLedger(), &logs, n.module,

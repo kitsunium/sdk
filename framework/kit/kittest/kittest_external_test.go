@@ -11,6 +11,7 @@ import (
 	"github.com/kitsunium/sdk/framework/kit"
 	"github.com/kitsunium/sdk/framework/kit/kittest"
 	_ "github.com/kitsunium/sdk/framework/kit/server"
+	_ "github.com/kitsunium/sdk/framework/kit/store"
 )
 
 // The product of these tests: a desk whose notes are about someone, their

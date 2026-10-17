@@ -1,8 +1,9 @@
 # ADR 0179 — a store is a non-generic engine under a typed facade, and a subsystem is imported
 
-- **Status**: Accepted on 2026-10-16 by the owner, who retained the recommendation of each of the eight questions (Q1 to Q8), as written; no text changed but the status, each question's *Decision* line, and the passages that depended on an open question (Q2, Q3, Q5, Q6)
+- **Status**: Accepted on 2026-10-16 by the owner, who retained the recommendation of each of the eight questions (Q1 to Q8), as written; no text changed but the status, each question's *Decision* line, and the passages that depended on an open question (Q2, Q3, Q5, Q6); implemented on 2026-10-17, its ten steps done (§Step 10, done), with the owner's decisions of 17 October recorded
 - **Date**: 2026-10-16
 - **Accepted**: 2026-10-16
+- **Implemented**: 2026-10-17 — steps 0 to 10 done, step 9 on kitsunium/platform (§Step 10, done)
 - **Deciders**: SDK maintainers (issues #273 and #276; the owner's decision of 2026-10-16 to take the clean architecture: a non-generic store engine under a typed `Store[T]`, every subsystem plugged in by an import, breaking under ADR 0040); arbitrated by the owner
 - **Amends**: [ADR 0172](0172-a-product-initialises-what-it-imports-and-the-stores-stay-in-the-core.md) §4 — the declared subsystems leave the core; its §1 rule is kept and applied to them
 - **Related**: [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the framework above `pkg`), [ADR 0139](0139-a-document-store-over-sql-joins-the-transaction-its-context-carries.md) and [ADR 0178](0178-kits-effects-join-the-transaction-on-the-database-that-keeps-their-queue.md) (the transactions the engine must keep), [ADR 0176](0176-an-error-sentinel-is-static-data-and-its-options-are-the-designs-fields.md) (the last non-breaking lever of #276), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (siblings, never a widening), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the v0 licence), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (what a published port promises), [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) and [ADR 0171](0171-a-module-per-family-and-a-version-is-never-reused.md) (the framework is the root module), issues #272, #273, #276, kitsunium/statusline#3
@@ -344,8 +345,8 @@ created, until step 10 removes those imports.
 | 6 | `mailkit` + `framework/kit/mail`: the mailers' outbox — the SDK's mail spool — and transports move there, behind `plug.Mail`; `framework/kit/mail` imports `framework/kit/queue` and `framework/kit/store` (Q4); `plug.HandleProvider` goes — done (2026-10-17, §Step 6, done) | no (the facade imports it) |
 | 7 | `jobkit` + `framework/kit/jobs`: the jobs' scheduler — the SDK's `scheduler` — and the schedules it reads from a job's declaration move there, behind `plug.Jobs`; `framework/kit/jobs` imports no other registration package — done (2026-10-17, §Step 7, done) | no (the facade imports it) |
 | 8 | English a table in kit's core, the other catalogues and the SDK's `i18n` behind `framework/kit/studio` (Q6) — done (2026-10-17, §Step 8, done) | no (a graph a program without the Studio writes carries its diagnostics in English alone, Q6) |
-| 9 | platform: `kit gen` writes the imports, `kit check` checks them; statusline, todo, moderation and platform regenerated or edited to import what they declare — while the facade still imports everything, so nothing breaks yet | no |
-| 10 | `framework/kit` drops its blank imports; the allow-list is gone; a root-module minor under ADR 0040 | **yes** |
+| 9 | platform: `kit gen` writes the imports, `kit check` checks them; statusline, todo, moderation and platform regenerated or edited to import what they declare — while the facade still imports everything, so nothing breaks yet — done on the platform's side (kitsunium/platform #99, 2026-10-17: its `subsystem` package holds the runtime's table and is held to it, `kit gen` writes the blank imports, `kit check`'s `subsystems` rule holds them); the products move at their next SDK bump, being pinned on v0.16 and v0.18 | no |
+| 10 | `framework/kit` drops its blank imports; the allow-list is gone; a root-module minor under ADR 0040 — done (2026-10-17, §Step 10, done), with `kit.Migration` kit's own (§Decisions of 17 October) | **yes** |
 
 Step 2 is the bulk: about 6,450 lines of generic bodies in 43 files, and the
 32 test files that name the SDK's packages. It is also measurable alone: the
@@ -1217,6 +1218,99 @@ noise at a load that moved between the two series, and not claimed. Not
 measured: the latency of a fresh process, and the status line, which imports
 the facade.
 
+### Step 10, done (2026-10-17)
+
+`framework/kit` imports no registration package: `subsystems.go` is gone,
+and a product imports the subsystems it declares — `kit gen` writes them for
+a designed product since step 9, a hand-written one writes them (§4). The
+allow-list is gone with it: `framework/kit`'s initgraph test has no
+exception left. `TestTheFacadeImportsNoOptInSubsystem` refuses in the
+facade's graph every registration package, every subsystem's implementation
+and every SDK package of §1 with its two halves; `TestTheCoreImportsNoSubsystem`
+the same in the core's; `TestTheSmallestProductLinksNoSubsystem` builds
+`cliprobe` — the facade alone, this ADR's measure — and `coreprobe`, its
+control on the core alone, and refuses in either a text symbol of any
+subsystem, of kit's own store code or of the SDK's mail transports beyond
+their inits, and the French catalogue; the probes that import one
+registration package each still require what it brings and nothing more
+(§7's other half). Run against the tree before this step, the facade's and
+the smallest product's tests fail on `cliprobe`, as they should, and pass on
+`coreprobe`.
+
+The refusal of §6 is now one a product meets. `testdata/missingprobe`
+declares a store on the facade alone; `TestAProductThatDeclaresAStoreWithoutItsImportIsRefused`
+builds and runs it, and requires exit status 78, nothing on standard output,
+and on standard error the store and the line to add
+(`add import _ "github.com/kitsunium/sdk/framework/kit/store"`), with
+nothing of the stores linked. A CLI command — the status line's shape —
+printed only the refusal's public text until now, which named no import:
+a command whose start is refused for its declarations prints every problem,
+as `serve` does (`startMessage`); any other refusal still prints its public
+text, and a fail-safe command still writes nothing its shell reads.
+
+`kit.Migrations` takes kit's own `kit.Migration` (the owner's decision of 17
+October on the point step 3 left open): `Version`, `Name`, `Up` and `Down`,
+the SDK's shape, its steps `kit.MigrationStep`s over a
+`kit.MigrationExecutor` — the standard library's types —, with
+`kit.Statements` and `kit.Irreversible` for the SDK's `sql.Statements` and
+`sql.Irreversible`. The core defines them (`MigrationValue`, beside
+`Dialect`, as step 3 defined kit's dialect), hands them to the store
+subsystem as `plug.MigrationValue`s, and `storekit` runs them on the SDK's
+migrator as before: the same versions, names and steps, the same version
+tables, a nil step refused there as before. An irreversible Down refuses
+with `CodeMigrationIrreversible` (0.4.2.84, reason `MIGRATION_IRREVERSIBLE`,
+allocated by this step), and `<product> migrate down` below its version
+stops there, the set unchanged (`TestAnIrreversibleMigrationIsNotReversed`).
+The facade imports none of the SDK's sql: the invariant of §7 holds without
+an exception. The tests and the connectors' suites that wrote `sql.Migration`
+write `kit.Migration`; `framework/kit/kittest`'s suite, whose desk keeps
+notes, imports `framework/kit/store` — the facade's own tests needed nothing
+else, since they declare no subsystem they do not import.
+
+Measured as the steps before (Go 1.27.2, `GOTOOLCHAIN=local`, `-trimpath`,
+`GOWORK=off`, MB = 10⁶ bytes, text symbols `T`/`t` by `go tool nm -size`),
+before on `origin/main` at c68514b5 — the tree after step 8 —, at a 1-minute
+load of 1.8 to 2.6, the machine shared:
+
+| | cliprobe before | cliprobe after | coreprobe before | coreprobe after |
+|---|---|---|---|---|
+| packages (`go list -deps`) | 370 | **341 (−29)** | 340 | 340 |
+| file | 18.787 | **14.451 (−4.34, −23 %)** | 14.441 | 14.440 |
+| `.text` | 6.009 | 4.545 | 4.542 | 4.542 |
+| text symbols | 5.811 | **4.394 (−1.42)** | 4.391 | 4.391 |
+| `.gopclntab` / debug | 4.583 / 4.554 | 3.465 / 3.631 | 3.461 / 3.625 | 3.461 / 3.625 |
+| kit's core | 1.0003 | 0.4276 | 0.4274 | 0.4275 |
+| `storekit`, `queuekit`, `workflowkit`, `mailkit`, `jobkit` | 0.046, 0.017, 0.010, 0.007, 0.002 | **0** | 0 | 0 |
+| SDK `docstore`, `sql`, `queue`, `statemachine`, spool, `scheduler` | 0.162, 0.041, 0.122, 0.076, 0.010, 0.020 | **0** | 0 | 0 |
+| `database/sql` (its types, Q5) | 0.062 | 0.028 | 0.028 | 0.028 |
+| init lines (`inittrace`) | 154 | **137** | 136 | 136 |
+| init, median of 50 (two series, alternated) | 0.95 / 0.99 ms | 0.97 / 0.90 ms | 0.89 ms | 0.90 ms |
+
+The probes that import one registration package, built on the core, do not
+move (`storeprobe` 17.444 MB and 5.390 MB of code, `queueprobe` 17.933 and
+5.567, `workflowprobe` 18.337 and 5.629, `mailprobe` 18.343 and 5.712,
+`jobsprobe` 14.540 and 4.418, `studioprobe` 16.874 and 5.183, each within
+0.005 MB of before); `missingprobe` — cliprobe with a store declared and no
+import — is 15.413 MB and 4.692 MB of code: the store's typed facade and the
+start's check, nothing of a subsystem.
+
+**Reading.** The smallest product of the facade is now the smallest product
+of the core: `cliprobe` is within 0.011 MB of file and 0.003 MB of code of
+`coreprobe`, 29 packages and 17 inits fewer than before this step. Against
+step 0's base (§Step 0, measured: the probe's file 22.06 MB, its text
+symbols 6.80 MB), the product a status line is lost **7.61 MB of file
+(−34 %) and 2.41 MB of code (−35 %)** — §Measurement's targets, at least 6.8
+MB and 2.15 MB, met on the facade itself, and the probe below step 0's ceiling
+(14.55 MB, 4.41 MB), which kept the subsystems' packages imported and
+subtracted their inits. What remains of §1 in it is `database/sql`'s types
+(0.028 MB, Q5) and `pkg/v1/app/mail` with `net/smtp`, initialised and not
+linked, as the types `Mailer.Send` names (step 6); `net/http` and its closure
+are §Deferred. The init medians are two series of 50 at a load of about 2.5:
+within the noise, and not claimed, as the steps before. Not measured: the
+latency of a fresh process and the status line, which moves when it bumps
+the SDK (step 9) — its import of `framework/kit/jobs` will link the jobs
+subsystem alone.
+
 ### Risks
 
 - **A read decodes.** The generic engine hands back a `T`; the document engine
@@ -1240,13 +1334,38 @@ the facade.
 
 ## Breaking changes
 
-At step 10, under ADR 0040's v0 licence, which the root module still holds:
+At step 10, under ADR 0040's v0 licence, which the root module still holds —
+a minor of the root module (`release:minor`):
 
 - A product that declares a store or a database, a topic, a subscription, a
   watch or a queued command, a workflow, a mailer or a job, and does not import
   the matching registration package, is refused at the start with
-  `CodeSubsystemMissing` (allocated by the implementing change). It was
-  accepted before.
+  `CodeSubsystemMissing` (0.4.2.83, allocated by step 1), every declaration at
+  once, each naming the line to add. It was accepted before. The imports to
+  add, in the package that builds the binary — `kit gen` writes them for a
+  designed product (step 9):
+  - a store, or a database (`kit.Database`): `_ "github.com/kitsunium/sdk/framework/kit/store"`
+    — a connector imports it already;
+  - a topic, a subscription, a watch, a queued command: `_ "github.com/kitsunium/sdk/framework/kit/queue"`
+    (which brings the stores);
+  - a workflow: `_ "github.com/kitsunium/sdk/framework/kit/workflow"` (which
+    brings the stores);
+  - a mailer: `_ "github.com/kitsunium/sdk/framework/kit/mail"` (which brings
+    the queues and the stores);
+  - a job (`Every`, `Cron`): `_ "github.com/kitsunium/sdk/framework/kit/jobs"`.
+
+  A product's tests import the same in a test file when the package under
+  test does not; a CLI command refused so prints the problems, the import
+  included, and exits 78 (§Step 10, done).
+- `kit.Migrations` takes `kit.Migration`, kit's own type, instead of the
+  SDK's `sql.Migration` (§Decisions of 17 October): a product that wrote
+  `sql.Migration{…}` writes `kit.Migration{…}`, `sql.Statements(…)`
+  `kit.Statements(…)`, `sql.Irreversible` `kit.Irreversible`, and a step it
+  wrote by hand takes a `kit.MigrationExecutor` where it took an
+  `sql.Executor` — the same three methods. Nothing at rest changes: the same
+  versions, names and version tables. An irreversible Down's refusal carries
+  `kit.CodeMigrationIrreversible` (0.4.2.84) where it carried the SDK's
+  `CodeMigrationIrreversible` (0.2.24.5).
 - Nothing for kit's languages (Q6): only the Studio shows a language
   other than English, and a program that mounts the Studio imports
   `framework/kit/studio` already. Since step 8, a graph written by a program
@@ -1343,6 +1462,20 @@ the break alone in step 10, after `kit gen` and the products have the imports
 — every product moves before anything refuses it, and the break is one
 release note.
 
+## Decisions of 17 October
+
+**The open point of step 3 — `kit.Migrations` and the SDK's sql.**
+**Decision.** `kit.Migrations` takes a migration type of the framework's own,
+`kit.Migration` — a version, a name, the steps to apply and reverse it, the
+shape the SDK's sql takes —, defined in the core and published by the facade
+as `kit.Dialect` was at step 3; the store subsystem translates it into the
+SDK's `sql.Migration`, and the facade no longer imports the SDK's sql.
+Breaking, under ADR 0040 (§Breaking changes).
+
+**kit's names in exported code.** Recorded, not applied here: only the
+kit/Studio tool is barred from the exported code; the runtime framework stays
+and will be renamed by an ADR to come — nothing is renamed by this one.
+
 ## Revision history
 
 | Version | Date | What changed |
@@ -1359,6 +1492,7 @@ release note.
 | Accepted, step 6 done | 2026-10-17 | The migration table marks step 6 done; §Step 6, done records the mailers' outbox and transports in `mailkit` behind `framework/kit/mail`, which imports `framework/kit/queue` and `framework/kit/store` (Q4) — `mailkit` reaching an outbox on a database through `queuekit.BrokerOf` and `storekit.SQLOf` —, kit's core importing no `mail/spool` and, through it, neither the SDK's `queue` nor its `sql`, `pkg/v1/app/mail` kept in its graph as the type `Mailer.Send` takes, its transports and `net/smtp` unlinked, the mail's contract in `plug` (`Mail`, `MailSpoolConfig`, `MailSpool`, `MailSink`, `MailCaptureSource`, `MailRefusal`), `plug.HandleProvider` and its two ktn exclusions gone, a mailer's sender judged at the start, the start's check gaining the mail row beside the queue row, and the measure — the smallest product eight packages fewer, a product of the facade +0.10 MB of code until step 10. No decision changed |
 | Accepted, step 7 done | 2026-10-17 | The migration table marks step 7 done; §Step 7, done records the jobs' scheduler in `jobkit` behind `framework/kit/jobs`, which imports no other registration package, kit's core importing none of the SDK's scheduler, a job's schedule read from its declaration at the start through the hook (`Every`, `Cron`) — never at the declaration —, the jobs' contract in `plug` (`Jobs`, `JobScheduleFunc`, `JobSchedulerConfig`, `JobScheduler`, `JobEntryValue`, `JobResultValue`), the core's `idleScheduler` for an app that declares no job, the start's check gaining the jobs row, and the measure — the smallest product three packages fewer and 0.009 MB of code less, a product of the facade +0.015 MB of code until step 10. No decision changed |
 | Accepted, step 8 done | 2026-10-17 | The migration table marks step 8 done; §Step 8, done records kit's English as a table of its core, read from `locales/en.json` and compiled in the SDK i18n's grammar, byte for byte what the SDK's i18n said (`TestKitsEnglishIsTheSDKsEnglish`), the French catalogue and the SDK's `i18n` in `studiokit` behind `plug.Words` (`WordsConfig`, `Translator`), set by `framework/kit/studio`, which the facade does not import (Q6), kit's core importing none of the SDK's i18n and the allow-list empty, a diagnostic's other languages written when the Studio asks, `CATALOGUE_INVALID` for an English sentence that does not compile, the visible change — a graph a program without the Studio writes (`<product> graph`, `kit graph`) carries its diagnostics' `texts` in English alone — stated in §Step 8 and §Breaking changes, `testdata/studioprobe`, and the measure — every probe without the Studio, a product of the facade included, three packages fewer, 0.066 MB of code and 0.24 MB of file less. No decision changed |
+| Implemented, steps 9 and 10 done | 2026-10-17 | The header gains *Implemented*; the migration table marks step 9 done on the platform's side (kitsunium/platform #99: `kit gen` writes the imports, `kit check` holds them; the products move at their next SDK bump, pinned on v0.16 and v0.18) and step 10 done; §Step 10, done records the facade importing no registration package, the allow-list gone and the initgraph test without an exception, the refusal of §6 met by a real product (`testdata/missingprobe`, exit 78 and the import named, a CLI command now printing its declaration's problems), `kit.Migration` kit's own and `CodeMigrationIrreversible` (0.4.2.84), and the measure — the facade's smallest product 4.34 MB of file and 1.42 MB of code less, 29 packages and 17 inits fewer, against step 0's base 7.61 MB of file (−34 %) and 2.41 MB of code; §Breaking changes completed with the imports to add and `kit.Migration`; §Decisions of 17 October records the owner's decision on step 3's open point and, in one line, that only the kit/Studio tool is barred from exported code, the runtime framework to be renamed by an ADR to come. No decision of 16 October changed |
 
 ## Deferred
 

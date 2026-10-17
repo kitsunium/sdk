@@ -180,13 +180,24 @@ func (a *App) runCLI(ctx context.Context, c *CLI, args []string, stdio StdioValu
 func (a *App) startFailed(ctx context.Context, c *CLI, err error, stdio StdioValue) int {
 	if c.opts.failSafe {
 		logger.Warn(ctx, a.log, "a fail-safe CLI command could not start", logger.String("node", c.id),
-			logger.String("error", errs.PublicOf(err)))
+			logger.String("error", startMessage(err)))
 		return statusOf(err)
 	}
-	if _, werr := io.WriteString(stdio.Err, errs.PublicOf(err)+"\n"); werr != nil {
+	if _, werr := io.WriteString(stdio.Err, startMessage(err)+"\n"); werr != nil {
 		logger.Warn(ctx, a.log, "the command's error could not be written", logger.String("error", werr.Error()))
 	}
 	return statusOf(err)
+}
+
+// startMessage is what a command says of a start that failed: the
+// declaration's problems, every one, as serve prints them — a subsystem
+// whose import is missing names the import to add (ADR 0179 §6) —, or the
+// error's public text.
+func startMessage(err error) string {
+	if isDiagnostics(err) {
+		return err.Error()
+	}
+	return errs.PublicOf(err)
 }
 
 // runCommand starts the app, runs c in its span and stops the app.

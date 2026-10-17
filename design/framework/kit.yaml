@@ -352,6 +352,15 @@ packages:
             name: CodeSubsystemMissing
             value: "0x00_04_02_53"
         type: errs.Code
+      - const:
+          - comment: "0.4.2.84 — a migration's Down is kit.Irreversible: reversing it takes a new forward migration"
+            doc: |-
+              CodeMigrationIrreversible refuses the Down of a migration declared
+              irreversible with [Irreversible] (ADR 0179 step 10): what it changed
+              is undone by a new forward migration, never by migrate down.
+            name: CodeMigrationIrreversible
+            value: "0x00_04_02_54"
+        type: errs.Code
     constants:
       - blockDoc: The environments.
         doc: |-
@@ -1124,11 +1133,13 @@ packages:
           - type: DatabaseConfigurer
         variadic: true
       - doc: |-
-          Migrations are migrations — the SDK's sql.Migration, as the facade takes
-          them —, run when
-          the database starts (<name>-migrate: start) or by `<product> migrate up`,
-          kit's own first, each set under its own version table — and so its own
-          lock. On MySQL a DDL statement commits by itself: write one per migration.
+          Migrations are migrations, kit's own [MigrationValue]s (ADR 0179 step
+          10), run when the database starts (<name>-migrate: start) or by
+          `<product> migrate up`, kit's own first, each set under its own version
+          table — and so its own lock. On MySQL a DDL statement commits by itself:
+          write one per migration. The store subsystem runs them: a program that
+          declares a database imports framework/kit/store, as its engine module
+          does.
 
           Given to [Database], they are the product's, under schema_migrations.
           Given to [NewModule], they are the module's (ADR 0008), for the data it
@@ -1136,11 +1147,34 @@ packages:
           under <module>_migrations.
         in:
           - name: m
-            type: plug.MigrationValue
+            type: MigrationValue
         name: Migrations
         out:
           - type: interface{DatabaseConfigurer; ModuleConfigurer}
         variadic: true
+      - doc: |-
+          Statements is the [MigrationStep] that runs stmts in order on its
+          executor, stopping at the first that fails — whose error it returns as
+          the driver said it.
+        in:
+          - name: stmts
+            type: string
+        name: Statements
+        out:
+          - type: MigrationStep
+        variadic: true
+      - doc: |-
+          Irreversible is the Down of a migration that cannot be reversed, said out
+          loud rather than left nil: it refuses, with [CodeMigrationIrreversible],
+          and `<product> migrate down` below its version stops there.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: ex
+            type: MigrationExecutor
+        name: Irreversible
+        out:
+          - type: error
       - doc: |-
           Database declares a database the product keeps its stores in, named name,
           on engine — an engine module's, which the product's main imports:
@@ -2454,7 +2488,6 @@ packages:
       logger: github.com/kitsunium/sdk/pkg/v1/observe/logger
       mail: github.com/kitsunium/sdk/pkg/v1/app/mail
       model: github.com/kitsunium/sdk/framework/model
-      plug: github.com/kitsunium/sdk/framework/internal/kit/plug
       secret: github.com/kitsunium/sdk/pkg/v1/security/secret
       stdsql: database/sql
     path: github.com/kitsunium/sdk/framework/internal/kit
@@ -2971,6 +3004,86 @@ packages:
         interface:
           unexported: true
         name: Keeper
+      - doc: |-
+          MigrationValue is one versioned change of a database's schema and its
+          reversal, kit's own (ADR 0179 step 10): the shape the SDK's sql runs,
+          which the store subsystem hands it.
+
+          	kit.Migration{
+          		Version: 20261017120000,
+          		Name:    "notes",
+          		Up:      kit.Statements("CREATE TABLE notes (id TEXT PRIMARY KEY, body TEXT)"),
+          		Down:    kit.Statements("DROP TABLE notes"),
+          	}
+        name: MigrationValue
+        struct:
+          fields:
+            - doc: |-
+                Version orders the migration in its set: non-zero and unique; a UTC
+                timestamp is the convention, so that two branches do not collide.
+              name: Version
+              type: uint64
+            - doc: Name labels it in the version table; required.
+              name: Name
+              type: string
+            - doc: Up applies the change; required.
+              name: Up
+              type: MigrationStep
+            - doc: |-
+                Down reverses it; required — [Irreversible] says out loud that it
+                cannot be reversed.
+              name: Down
+              type: MigrationStep
+      - doc: |-
+          MigrationStep is one direction of a migration, run on ex — the
+          transaction its version row is written in, so that both commit
+          together.
+        name: MigrationStep
+        underlying: func(ctx context.Context, ex MigrationExecutor) error
+      - doc: |-
+          MigrationExecutor is what a migration's step runs its statements on: a
+          transaction, which a step cannot end.
+        interface:
+          methods:
+            - doc: ExecContext runs a statement that returns no rows.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: query
+                  type: string
+                - name: args
+                  type: any
+              name: ExecContext
+              out:
+                - type: stdsql.Result
+                - type: error
+              variadic: true
+            - doc: QueryContext runs a query that returns rows; the caller closes them.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: query
+                  type: string
+                - name: args
+                  type: any
+              name: QueryContext
+              out:
+                - type: "*stdsql.Rows"
+                - type: error
+              variadic: true
+            - doc: QueryRowContext runs a query that returns at most one row.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: query
+                  type: string
+                - name: args
+                  type: any
+              name: QueryRowContext
+              out:
+                - type: "*stdsql.Row"
+              variadic: true
+        name: MigrationExecutor
       - doc: |-
           EmptyValue is the request or the response of an endpoint that has none. An
           endpoint answering EmptyValue replies 204 No Content.
@@ -6556,8 +6669,9 @@ packages:
               type: string
       - doc: |-
           MigrationValue is one versioned change of a database's schema and its
-          reversal, as kit's migrations are written: the SDK's own, on the standard
-          library's types.
+          reversal, as the core hands it to the store subsystem: a product's
+          kit.Migration, or one of kit's own, its steps on the standard library's
+          types.
         name: MigrationValue
         struct:
           fields:
@@ -8026,6 +8140,30 @@ packages:
           deadline. An engine that does not implement it keeps its own wait.
         name: LockWaiter
         target: ikit.LockWaiter
+      - doc: |-
+          Migration is one versioned change of a database's schema and its
+          reversal, kit's own (ADR 0179 step 10): the shape the SDK's sql runs,
+          which the store subsystem hands it.
+
+          	kit.Migration{
+          		Version: 20261017120000,
+          		Name:    "notes",
+          		Up:      kit.Statements("CREATE TABLE notes (id TEXT PRIMARY KEY, body TEXT)"),
+          		Down:    kit.Statements("DROP TABLE notes"),
+          	}
+        name: Migration
+        target: ikit.MigrationValue
+      - doc: |-
+          MigrationStep is one direction of a [Migration], run on ex — the
+          transaction its version row is written in, so that both commit
+          together.
+        name: MigrationStep
+        target: ikit.MigrationStep
+      - doc: |-
+          MigrationExecutor is what a migration's step runs its statements on: a
+          transaction, which a step cannot end.
+        name: MigrationExecutor
+        target: ikit.MigrationExecutor
       - doc: "DatabaseOption configures a database: [Keeps], [Migrations]."
         name: DatabaseOption
         target: ikit.DatabaseConfigurer
@@ -8950,6 +9088,13 @@ packages:
         name: CodeSubsystemMissing
         type: errs.Code
         value: "0x00_04_02_53"
+      - doc: |-
+          CodeMigrationIrreversible refuses the Down of a migration declared
+          irreversible with [Irreversible]: what it changed is undone by a new
+          forward migration, never by migrate down.
+        name: CodeMigrationIrreversible
+        type: errs.Code
+        value: "0x00_04_02_54"
     doc: |-
       Package kit — who may call an operation: the principal, the rules and their
       checks.
@@ -9494,10 +9639,13 @@ packages:
           - type: DatabaseOption
         variadic: true
       - doc: |-
-          Migrations are migrations, values of the SDK's sql.Migration, run when
-          the database starts (<name>-migrate: start) or by `<product> migrate up`,
-          kit's own first, each set under its own version table — and so its own
-          lock. On MySQL a DDL statement commits by itself: write one per migration.
+          Migrations are migrations, kit's own [Migration]s (ADR 0179 step 10),
+          run when the database starts (<name>-migrate: start) or by
+          `<product> migrate up`, kit's own first, each set under its own version
+          table — and so its own lock. On MySQL a DDL statement commits by itself:
+          write one per migration. The store subsystem runs them: a program that
+          declares a database imports framework/kit/store, as its engine module
+          does.
 
           Given to [Database], they are the product's, under schema_migrations.
           Given to [NewModule], they are the module's (ADR 0008), for the data it
@@ -9505,11 +9653,34 @@ packages:
           under <module>_migrations.
         in:
           - name: m
-            type: sql.Migration
+            type: Migration
         name: Migrations
         out:
           - type: interface{DatabaseOption; ModulePart}
         variadic: true
+      - doc: |-
+          Statements is the [MigrationStep] that runs stmts in order on its
+          executor, stopping at the first that fails — whose error it returns as
+          the driver said it.
+        in:
+          - name: stmts
+            type: string
+        name: Statements
+        out:
+          - type: MigrationStep
+        variadic: true
+      - doc: |-
+          Irreversible is the Down of a migration that cannot be reversed, said out
+          loud rather than left nil: it refuses, with [CodeMigrationIrreversible],
+          and `<product> migrate down` below its version stops there.
+        in:
+          - name: ctx
+            type: context.Context
+          - name: ex
+            type: MigrationExecutor
+        name: Irreversible
+        out:
+          - type: error
       - doc: |-
           Database declares a database the product keeps its stores in, named name,
           on engine — an engine module's, which the product's main imports:
@@ -10662,7 +10833,6 @@ packages:
       logger: github.com/kitsunium/sdk/pkg/v1/observe/logger
       model: github.com/kitsunium/sdk/framework/model
       secret: github.com/kitsunium/sdk/pkg/v1/security/secret
-      sql: github.com/kitsunium/sdk/pkg/v1/data/sql
     path: github.com/kitsunium/sdk/framework/kit
     variables:
       - doc: |-

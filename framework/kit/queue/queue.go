@@ -11,8 +11,8 @@
 // naming this import (CodeSubsystemMissing). It imports framework/kit/store:
 // a queue on a database joins the store subsystem's transactions, and a
 // sealed message is sealed under data keys kit keeps in a store of its own.
-// framework/kit imports it too until ADR 0179's last step: no product needs
-// the line yet.
+// framework/kit does not import it (ADR 0179 step 10): kit gen writes the
+// line for a designed product, and a hand-written one writes it.
 package queue
 
 import (

@@ -19,7 +19,7 @@ restart reading everything back (ADR 0175, ported from kitsunium/platform
 ## Rules
 
 - This package uses the facade (`framework/kit`) only, so it sees an app as a product does. kit's own internal tests cannot import it, because it imports their package through the facade.
-- A test that runs an app imports `framework/kit/server`, because the default profile serves HTTP.
+- A test that runs an app imports `framework/kit/server`, because the default profile serves HTTP, and the registration package of each subsystem its app declares — `framework/kit/store` for this package's own suite, whose desk keeps notes: since ADR 0179's step 10 the facade imports none of them, and the start refuses a declaration whose package is not imported (`CodeSubsystemMissing`).
 
 ## Verify
 

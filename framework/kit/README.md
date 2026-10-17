@@ -223,6 +223,7 @@ Package kit — workflows: a state machine over the entities of one store.
 - [func InMemory\(\) interface{StoreOption; AppOption}](<#InMemory>)
 - [func Index\[T any\]\(name string, keys func\(T\) \[\]string\) StoreOption](<#Index>)
 - [func Invalid\(message string\) \*Error](<#Invalid>)
+- [func Irreversible\(ctx context.Context, ex MigrationExecutor\) error](<#Irreversible>)
 - [func KeepVersions\(n int\) SecretOption](<#KeepVersions>)
 - [func Keeps\(things ...Keepable\) DatabaseOption](<#Keeps>)
 - [func Listen\(addr string\) AppOption](<#Listen>)
@@ -231,7 +232,7 @@ Package kit — workflows: a state machine over the entities of one store.
 - [func MailAttempts\(n int\) MailerOption](<#MailAttempts>)
 - [func MaxBody\(bytes int64\) EndpointOption](<#MaxBody>)
 - [func MaxDeliveries\(n int\) DeliveryOption](<#MaxDeliveries>)
-- [func Migrations\(m ...sql.Migration\) interface{DatabaseOption; ModulePart}](<#Migrations>)
+- [func Migrations\(m ...Migration\) interface{DatabaseOption; ModulePart}](<#Migrations>)
 - [func MinLength\(n int\) PasswordOption](<#MinLength>)
 - [func Mount\(m \*Module, opts ...MountOption\) AppOption](<#Mount>)
 - [func Name\(name string\) EndpointOption](<#Name>)
@@ -275,6 +276,7 @@ Package kit — workflows: a state machine over the entities of one store.
 - [func SocketPath\(path string\) ListenerOption](<#SocketPath>)
 - [func SocketPathFor\(product string, service string, name string, scopes ...Scope\) \(string, error\)](<#SocketPathFor>)
 - [func SocketPer\(scopes ...Scope\) ListenerOption](<#SocketPer>)
+- [func Statements\(stmts ...string\) MigrationStep](<#Statements>)
 - [func Stop\(ctx context.Context\) bool](<#Stop>)
 - [func Studio\(on bool\) AppOption](<#Studio>)
 - [func Telemetry\(path string, gids ...int\) AppOption](<#Telemetry>)
@@ -365,6 +367,12 @@ Package kit — workflows: a state machine over the entities of one store.
   - [func \(\*Mailer\) Send\(ctx context.Context, msg mail.Message\) \(string, error\)](<#Mailer.Send>)
 - [type MailerOption](<#MailerOption>)
 - [type Mark](<#Mark>)
+- [type Migration](<#Migration>)
+- [type MigrationExecutor](<#MigrationExecutor>)
+  - [func \(MigrationExecutor\) ExecContext\(ctx context.Context, query string, args ...any\) \(stdsql.Result, error\)](<#MigrationExecutor.ExecContext>)
+  - [func \(MigrationExecutor\) QueryContext\(ctx context.Context, query string, args ...any\) \(\*stdsql.Rows, error\)](<#MigrationExecutor.QueryContext>)
+  - [func \(MigrationExecutor\) QueryRowContext\(ctx context.Context, query string, args ...any\) \*stdsql.Row](<#MigrationExecutor.QueryRowContext>)
+- [type MigrationStep](<#MigrationStep>)
 - [type Module](<#Module>)
   - [func \(\*Module\) Name\(\) string](<#Module.Name>)
   - [func \(\*Module\) Prefix\(\) string](<#Module.Prefix>)
@@ -835,6 +843,17 @@ CodeMigrateRefused is CodeMigrateRefused.
 Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeMigrateRefused`.
 
 Code `0.4.2.55`
+
+<a name="CodeMigrationIrreversible"></a>
+```go
+const CodeMigrationIrreversible errs.Code = 262740
+```
+
+CodeMigrationIrreversible refuses the Down of a migration declared irreversible with [Irreversible](#Irreversible): what it changed is undone by a new forward migration, never by migrate down.
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/kit.CodeMigrationIrreversible`.
+
+Code `0.4.2.84`
 
 <a name="CodeNotMounted"></a>
 ```go
@@ -2064,6 +2083,15 @@ func Invalid(message string) *Error
 
 Invalid reports a request the caller must change before retrying (400).
 
+<a name="Irreversible"></a>
+## func [Irreversible](<https://github.com/kitsunium/sdk/blob/main/framework/kit/database.go>)
+
+```go
+func Irreversible(ctx context.Context, ex MigrationExecutor) error
+```
+
+Irreversible is the Down of a migration that cannot be reversed, said out loud rather than left nil: it refuses, with [CodeMigrationIrreversible](#CodeMigrationIrreversible), and \`\<product> migrate down\` below its version stops there.
+
 <a name="KeepVersions"></a>
 ## func [KeepVersions](<https://github.com/kitsunium/sdk/blob/main/framework/kit/secret.go>)
 
@@ -2146,10 +2174,10 @@ IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller 
 ## func [Migrations](<https://github.com/kitsunium/sdk/blob/main/framework/kit/database.go>)
 
 ```go
-func Migrations(m ...sql.Migration) interface{DatabaseOption; ModulePart}
+func Migrations(m ...Migration) interface{DatabaseOption; ModulePart}
 ```
 
-Migrations are migrations, values of the SDK's sql.Migration, run when the database starts (\<name>-migrate: start) or by \`\<product> migrate up\`, kit's own first, each set under its own version table — and so its own lock. On MySQL a DDL statement commits by itself: write one per migration.
+Migrations are migrations, kit's own \[Migration]s (ADR 0179 step 10), run when the database starts (\<name>-migrate: start) or by \`\<product> migrate up\`, kit's own first, each set under its own version table — and so its own lock. On MySQL a DDL statement commits by itself: write one per migration. The store subsystem runs them: a program that declares a database imports framework/kit/store, as its engine module does.
 
 Given to [Database](#Database), they are the product's, under schema\_migrations. Given to [NewModule](#NewModule), they are the module's (ADR 0008), for the data it keeps outside kit's stores: run on the database that keeps the module, under \<module>\_migrations.
 
@@ -2619,6 +2647,15 @@ func SocketPer(scopes ...Scope) ListenerOption
 SocketPer names the listener's socket after the value of scopes in this process — \<runtime dir of the app>/\<service>-\<name>-\<key>.sock, the key being [ScopeKey](#ScopeKey)'s —: one daemon per user, per executable, per configuration directory. A client finds it with SocketPathIn or DialIn, which compute the same key from the same declaration.
 
 IFACE-OPAQUE: ListenerOption is sealed — its one method is unexported — so only this package makes one, and a caller only passes it to Listen.
+
+<a name="Statements"></a>
+## func [Statements](<https://github.com/kitsunium/sdk/blob/main/framework/kit/database.go>)
+
+```go
+func Statements(stmts ...string) MigrationStep
+```
+
+Statements is the [MigrationStep](#MigrationStep) that runs stmts in order on its executor, stopping at the first that fails — whose error it returns as the driver said it.
 
 <a name="Stop"></a>
 ## func [Stop](<https://github.com/kitsunium/sdk/blob/main/framework/kit/app_profiles.go>)
@@ -3876,6 +3913,105 @@ Mark is an alias of `github.com/kitsunium/sdk/framework/internal/kit.Mark`, decl
 
 ```go
 type Mark string
+```
+
+<a name="Migration"></a>
+## type [Migration](<https://github.com/kitsunium/sdk/blob/main/framework/kit/database.go>)
+
+Migration is one versioned change of a database's schema and its reversal, kit's own (ADR 0179 step 10): the shape the SDK's sql runs, which the store subsystem hands it.
+
+```
+kit.Migration{
+	Version: 20261017120000,
+	Name:    "notes",
+	Up:      kit.Statements("CREATE TABLE notes (id TEXT PRIMARY KEY, body TEXT)"),
+	Down:    kit.Statements("DROP TABLE notes"),
+}
+```
+
+```go
+type Migration = ikit.MigrationValue
+```
+
+Migration is an alias of `github.com/kitsunium/sdk/framework/internal/kit.MigrationValue`, declared as:
+
+```go
+type Migration struct {
+	// Version orders the migration in its set: non-zero and unique; a UTC
+	// timestamp is the convention, so that two branches do not collide.
+	Version uint64
+	// Name labels it in the version table; required.
+	Name    string
+	// Up applies the change; required.
+	Up      MigrationStep
+	// Down reverses it; required — [Irreversible] says out loud that it
+	// cannot be reversed.
+	Down    MigrationStep
+}
+```
+
+<a name="MigrationExecutor"></a>
+## type [MigrationExecutor](<https://github.com/kitsunium/sdk/blob/main/framework/kit/database.go>)
+
+MigrationExecutor is what a migration's step runs its statements on: a transaction, which a step cannot end.
+
+```go
+type MigrationExecutor = ikit.MigrationExecutor
+```
+
+MigrationExecutor is an alias of `github.com/kitsunium/sdk/framework/internal/kit.MigrationExecutor`, declared as:
+
+```go
+type MigrationExecutor interface {
+	// ExecContext runs a statement that returns no rows.
+	ExecContext(ctx context.Context, query string, args ...any) (stdsql.Result, error)
+	// QueryContext runs a query that returns rows; the caller closes them.
+	QueryContext(ctx context.Context, query string, args ...any) (*stdsql.Rows, error)
+	// QueryRowContext runs a query that returns at most one row.
+	QueryRowContext(ctx context.Context, query string, args ...any) *stdsql.Row
+}
+```
+
+<a name="MigrationExecutor.ExecContext"></a>
+### func \(MigrationExecutor\) [ExecContext](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go>)
+
+```go
+func (MigrationExecutor) ExecContext(ctx context.Context, query string, args ...any) (stdsql.Result, error)
+```
+
+ExecContext runs a statement that returns no rows.
+
+<a name="MigrationExecutor.QueryContext"></a>
+### func \(MigrationExecutor\) [QueryContext](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go>)
+
+```go
+func (MigrationExecutor) QueryContext(ctx context.Context, query string, args ...any) (*stdsql.Rows, error)
+```
+
+QueryContext runs a query that returns rows; the caller closes them.
+
+<a name="MigrationExecutor.QueryRowContext"></a>
+### func \(MigrationExecutor\) [QueryRowContext](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go>)
+
+```go
+func (MigrationExecutor) QueryRowContext(ctx context.Context, query string, args ...any) *stdsql.Row
+```
+
+QueryRowContext runs a query that returns at most one row.
+
+<a name="MigrationStep"></a>
+## type [MigrationStep](<https://github.com/kitsunium/sdk/blob/main/framework/kit/database.go>)
+
+MigrationStep is one direction of a [Migration](#Migration), run on ex — the transaction its version row is written in, so that both commit together.
+
+```go
+type MigrationStep = ikit.MigrationStep
+```
+
+MigrationStep is an alias of `github.com/kitsunium/sdk/framework/internal/kit.MigrationStep`, declared as:
+
+```go
+type MigrationStep func(ctx context.Context, ex MigrationExecutor) error
 ```
 
 <a name="Module"></a>

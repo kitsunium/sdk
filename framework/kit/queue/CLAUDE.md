@@ -15,9 +15,10 @@ start, every declaration at once, the refusal naming this import and carrying
 It imports `framework/kit/store` (ADR 0179 Q4): a queue on a database joins
 the store subsystem's transactions — the queues' SQL broker runs on the
 transaction manager `storekit` opened — and a sealed message is sealed under
-data keys kit keeps in a store of its own. Until ADR 0179's step 10,
-`framework/kit` imports this package itself (`subsystems.go`, Q8): no product
-needs the line yet, and `kit gen` will write it (§5). `framework/kit/mail`
+data keys kit keeps in a store of its own. `framework/kit` does not import
+this package (ADR 0179 step 10; it did until then, Q8): a product that
+declares a topic, a subscription, a watch or a queued command imports it,
+and `kit gen` writes the line for a designed product (§5). `framework/kit/mail`
 imports it too (step 6, Q4): a mailer's outbox on a database is a queue of
 this subsystem, which `mailkit` takes the SDK's broker of (`queuekit.BrokerOf`).
 
