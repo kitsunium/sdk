@@ -3240,7 +3240,9 @@ packages:
           and delivers nothing. Outside dev, the capture transport is reported as a
           warning. The URL is read again before every delivery: replacing it where
           it lives — a new version in the store, a new file behind
-          KIT_SMTP_URL_FILE — takes effect at the next mail.
+          KIT_SMTP_URL_FILE — takes effect at the next mail. The outbox and the
+          transports are the SDK's, which the mail subsystem plugs in
+          (framework/kit/mail, ADR 0179 step 6).
         methods:
           - doc: |-
               Send validates msg with the SDK's mail rules — a header carrying a line
@@ -5045,7 +5047,75 @@ packages:
           one process per configuration home.
         name: PerConfigDir
         type: ScopeValue
+  - doc: |-
+      Package mailkit is what framework/kit/mail plugs into kit: the outbox
+      kit's mailers keep — the SDK's mail spool, on the database that keeps the
+      mailer's service in the queue subsystem's sealed broker, else in the data
+      directory or in memory — and the transports that empty it, the SDK's SMTP
+      transport and its capture transport (ADR 0179 §1, step 6). kit's core
+      imports neither the SDK's spool nor a transport: it reaches them through
+      plug, and a product that declares no mailer links none of them.
+
+      Package mailkit — the compile-time proof that the outbox is kit's.
+    functions:
+      - doc: Enable plugs the mailers' outbox and their transports into kit.
+        name: Enable
+    path: github.com/kitsunium/sdk/framework/internal/kit/mailkit
   - constants:
+      - blockDoc: The spool's refusals kit tells apart, which it words for the product.
+        doc: MailRefusalNone is no refusal kit words.
+        name: MailRefusalNone
+        type: MailRefusal
+        value: "0"
+      - blockDoc: The spool's refusals kit tells apart, which it words for the product.
+        doc: |-
+          MailRefusalClosed is a spool that is closed: its mailer is not
+          running.
+        name: MailRefusalClosed
+        type: MailRefusal
+        value: "1"
+      - blockDoc: The spool's refusals kit tells apart, which it words for the product.
+        doc: MailRefusalUnencodable is a mail the outbox cannot encode.
+        name: MailRefusalUnencodable
+        type: MailRefusal
+        value: "2"
+      - blockDoc: The spool's refusals kit tells apart, which it words for the product.
+        doc: |-
+          MailRefusalInvalidURL is an SMTP URL that is not one of the form
+          smtp://user:password@host:port; its "problem" field says the clause.
+        name: MailRefusalInvalidURL
+        type: MailRefusal
+        value: "3"
+      - blockDoc: What a spool reports of a mail.
+        doc: MailEventOther is an event of the spool kit shows nothing of.
+        name: MailEventOther
+        type: MailEvent
+        value: "0"
+      - blockDoc: What a spool reports of a mail.
+        doc: MailEventQueued is a mail put in the outbox.
+        name: MailEventQueued
+        type: MailEvent
+        value: "1"
+      - blockDoc: What a spool reports of a mail.
+        doc: MailEventSent is a mail the transport accepted.
+        name: MailEventSent
+        type: MailEvent
+        value: "2"
+      - blockDoc: What a spool reports of a mail.
+        doc: MailEventRetrying is a failed attempt that will be retried.
+        name: MailEventRetrying
+        type: MailEvent
+        value: "3"
+      - blockDoc: What a spool reports of a mail.
+        doc: MailEventDeadLettered is a mail given up on after its last attempt.
+        name: MailEventDeadLettered
+        type: MailEvent
+        value: "4"
+      - blockDoc: What a spool reports of a mail.
+        doc: MailEventDuplicate is a redelivery of a mail already sent, dropped.
+        name: MailEventDuplicate
+        type: MailEvent
+        value: "5"
       - doc: LabelNode is the pprof label naming the node a goroutine works for.
         name: LabelNode
         type: string
@@ -5370,8 +5440,8 @@ packages:
       frontends' file server and the process sampler of the runtime graph
       (framework/kit/server), the Studio's event stream and its profiler
       (framework/kit/studio), the stores and the databases (framework/kit/store),
-      the queues (framework/kit/queue), the workflows (framework/kit/workflow).
-      kit reads what they registered through the
+      the queues (framework/kit/queue), the workflows (framework/kit/workflow),
+      the mailers (framework/kit/mail). kit reads what they registered through the
       hooks declared here, and imports none of the SDK packages behind them: a
       product that does not import a subsystem neither links nor initialises its
       packages.
@@ -5383,8 +5453,9 @@ packages:
       sets; the refusals an engine says in kit's terms ([Refusal]); what kit's
       transactions offer an engine that takes part in them ([Transaction]); the
       queue subsystem's brokers and their consumer ([Queues]), which
-      framework/kit/queue sets; and the workflow subsystem's engine and the
-      ports it runs on ([Workflows]), which framework/kit/workflow sets.
+      framework/kit/queue sets; the workflow subsystem's engine and the ports
+      it runs on ([Workflows]), which framework/kit/workflow sets; and the mail
+      subsystem's outbox and transports ([Mail]), which framework/kit/mail sets.
 
       The package imports the standard library and the framework's model only,
       so that kit and every subsystem can import it.
@@ -5416,6 +5487,274 @@ packages:
       sql: database/sql
     path: github.com/kitsunium/sdk/framework/internal/kit/plug
     types:
+      - doc: |-
+          MailDriverConfig is what framework/kit/mail plugs into kit: how a
+          mailer's outbox opens, the SDK's verdict on a mail, the transports a
+          mailer hands its mail to, and how kit tells the spool's refusals apart.
+        name: MailDriverConfig
+        struct:
+          fields:
+            - doc: Open opens one mailer's outbox as cfg says, closed until it runs.
+              name: Open
+              type: func(cfg *MailSpoolConfig) (MailSpool, error)
+            - doc: |-
+                Validate is the SDK's verdict on a mail: nil when the outbox takes it,
+                else what is wrong with it, in the SDK's public words.
+              name: Validate
+              type: func(msg MailValue) error
+            - doc: |-
+                Capture is a transport that delivers nothing and keeps the last
+                message it composed (MailCaptureSource).
+              name: Capture
+              type: func() MailSink
+            - doc: |-
+                ParseSMTP reads an SMTP URL — smtp://user:password@host:port?tls=
+                starttls|implicit|none, smtps:// for implicit TLS — as the SDK's
+                SMTP transport would take it.
+              name: ParseSMTP
+              type: func(url string) (MailRelayValue, error)
+            - doc: |-
+                NewSMTP is the SDK's SMTP transport to relay, which dials nothing
+                until a mail is sent.
+              name: NewSMTP
+              type: func(relay *MailRelayValue) (MailSink, error)
+            - doc: |-
+                Refused reports whether err, or an error it wraps, is the spool's or
+                the URL's refusal of kind: the SDK's sentinels stay in the subsystem,
+                and the error keeps the fields the SDK gave it.
+              name: Refused
+              type: func(err error, kind MailRefusal) bool
+      - doc: MailRefusal is a refusal of the mail subsystem, as kit words it.
+        name: MailRefusal
+        underlying: uint8
+      - doc: MailEvent is what a spool reports of a mail.
+        name: MailEvent
+        underlying: uint8
+      - doc: |-
+          MailSpoolConfig is one mailer's outbox: the transport each attempt runs,
+          the app's clock, what kit hears of its mails, its retries, and where it
+          keeps them — a queue on the database that keeps the mailer's service, a
+          directory, or memory.
+        name: MailSpoolConfig
+        struct:
+          fields:
+            - doc: |-
+                Transport makes one delivery attempt of msg; the spool retries a
+                failure, or dead-letters the mail after its last attempt.
+              name: Transport
+              type: func(ctx context.Context, msg MailValue, attempt MailAttemptValue) error
+            - doc: Clock is the app's clock, which the spool stamps and waits on.
+              name: Clock
+              type: Clock
+            - doc: Observe is told each event of each mail.
+              name: Observe
+              type: func(e *MailEventValue)
+            - doc: |-
+                Annotate is what the spool keeps of a Send for its deliveries, read
+                from the Send's context.
+              name: Annotate
+              type: func(ctx context.Context) map[string]string
+            - doc: NewID mints a mail's outbox ID.
+              name: NewID
+              type: func() (string, error)
+            - doc: |-
+                Outbox is the queue the spool keeps its mails in on a database —
+                the queue subsystem's, sealed —, nil for a directory or memory.
+              name: Outbox
+              type: Broker
+            - doc: |-
+                Database is the database Outbox is on, whose transaction a mail sent
+                in one joins; nil for none.
+              name: Database
+              type: Database
+            - doc: |-
+                From is the sender of every mail that names none: the SDK's
+                mail.Address, held as any.
+              name: From
+              type: MailValue
+            - doc: |-
+                Dir is the directory the spool keeps its own queue in; with no Outbox
+                and no Dir, the outbox is in memory.
+              name: Dir
+              type: string
+            - doc: |-
+                BackoffBase is the wait after a failed attempt, doubled after each,
+                up to BackoffMax.
+              name: BackoffBase
+              type: time.Duration
+            - doc: BackoffMax bounds the wait after a failed attempt.
+              name: BackoffMax
+              type: time.Duration
+            - doc: SendTimeout bounds one attempt.
+              name: SendTimeout
+              type: time.Duration
+            - doc: PollInterval bounds an idle wait.
+              name: PollInterval
+              type: time.Duration
+            - doc: |-
+                MaxAttempts is how many attempts a mail gets before it is
+                dead-lettered.
+              name: MaxAttempts
+              type: int
+            - doc: |-
+                MaxMessageBytes bounds one mail in the spool's own queue; zero is the
+                spool's own bound.
+              name: MaxMessageBytes
+              type: int
+      - doc: |-
+          MailValue is a value of the SDK's mail package as it crosses the
+          contract: a mail.Message, or a sender's mail.Address, held as any — kit's
+          core names the SDK's mail types, plug names none.
+        name: MailValue
+        struct:
+          fields:
+            - doc: Value is the SDK's mail value.
+              name: Value
+              type: any
+      - doc: |-
+          MailRelayValue is an SMTP relay as the SDK's transport takes it: its
+          configuration, which holds the password and is handed to NewSMTP and never
+          kept or printed, and what may be shown of it.
+        name: MailRelayValue
+        struct:
+          fields:
+            - doc: Config is the SDK's SMTP configuration, held as any.
+              name: Config
+              type: any
+            - doc: Server is where it delivers, host:port.
+              name: Server
+              type: string
+            - doc: "TLS is its TLS mode as the URL spells it: starttls, implicit or none."
+              name: TLS
+              type: string
+      - doc: |-
+          MailAttemptValue is one delivery attempt of a mail: its outbox ID, its
+          number, when the mail was queued, and what the spool kept of its Send.
+        name: MailAttemptValue
+        struct:
+          fields:
+            - doc: QueuedAt is when the mail was put in the outbox.
+              name: QueuedAt
+              type: time.Time
+            - doc: Meta is what Annotate kept of the Send.
+              name: Meta
+              type: map[string]string
+            - doc: ID is the mail's outbox ID.
+              name: ID
+              type: string
+            - doc: Attempt numbers the attempt, from 1.
+              name: Attempt
+              type: int
+      - doc: |-
+          MailEventValue is what a spool reports of a mail: its kind, the mail and
+          its outbox ID, the attempt, when, and the failure of a failed attempt.
+        name: MailEventValue
+        struct:
+          fields:
+            - doc: Err is a failed attempt's failure.
+              name: Err
+              type: error
+            - doc: Meta is what Annotate kept of the Send.
+              name: Meta
+              type: map[string]string
+            - doc: At is when the event happened.
+              name: At
+              type: time.Time
+            - doc: QueuedAt is when the mail was put in the outbox.
+              name: QueuedAt
+              type: time.Time
+            - doc: Message is the mail.
+              name: Message
+              type: MailValue
+            - doc: ID is the mail's outbox ID.
+              name: ID
+              type: string
+            - doc: Attempt numbers the attempt the event is about.
+              name: Attempt
+              type: int
+            - doc: Kind is what happened.
+              name: Kind
+              type: MailEvent
+      - doc: |-
+          MailSpool is one mailer's outbox as kit's core uses it: a mail put in it
+          at once or under an ID kit minted, the loop that hands each mail to the
+          transport, and its dead letters.
+        interface:
+          methods:
+            - doc: |-
+                Send puts msg in the outbox — in the transaction ctx carries for its
+                database, when it lives on one — and returns its outbox ID.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: msg
+                  type: MailValue
+              name: Send
+              out:
+                - type: string
+                - type: error
+            - doc: SendWithID puts msg in the outbox under id, minted by kit.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: id
+                  type: string
+                - name: msg
+                  type: MailValue
+              name: SendWithID
+              out:
+                - type: error
+            - doc: |-
+                DeadLetters counts up to maxLetters of the mails earlier runs gave up
+                on.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: maxLetters
+                  type: int
+              name: DeadLetters
+              out:
+                - type: int
+                - type: error
+            - doc: Run hands each mail to the transport until ctx ends.
+              in:
+                - name: ctx
+                  type: context.Context
+              name: Run
+              out:
+                - type: error
+            - doc: Close releases the outbox.
+              name: Close
+              out:
+                - type: error
+        name: MailSpool
+      - doc: |-
+          MailSink is what a mailer hands a mail to: the SDK's SMTP transport,
+          or its capture transport, which delivers nothing. It grows by the sibling
+          below.
+        interface:
+          methods:
+            - doc: Send delivers msg.
+              in:
+                - name: ctx
+                  type: context.Context
+                - name: msg
+                  type: MailValue
+              name: Send
+              out:
+                - type: error
+        name: MailSink
+      - doc: |-
+          MailCaptureSource is a transport that keeps what it composed: the capture
+          transport, whose last message the Studio's mailbox shows. A sibling of
+          [MailSink].
+        interface:
+          methods:
+            - doc: Composed is the last message the transport composed, nil for none.
+              name: Composed
+              out:
+                - type: "[]byte"
+        name: MailCaptureSource
       - doc: |-
           HTTPConfig is what kit asks of the HTTP engine: where to listen, its one
           socket, its bounds, and the handler.
@@ -6311,24 +6650,6 @@ packages:
               variadic: true
         name: Executor
       - doc: |-
-          HandleProvider is a value of a subsystem that hands one of the SDK's own
-          handles on: the value dst points at set, and true; false for a handle it
-          has none of. It serves the mailer's spool, still in kit's core, which takes
-          the SDK's types — a Database's transaction manager as the spool's
-          Deferrer, a queue's broker (Broker) as its outbox — until the mailers
-          leave the core (ADR 0179, step 6), and the core never names the type it
-          asks for. A sibling of [Database] and of [Broker].
-        interface:
-          methods:
-            - doc: Handle sets what dst points at to the SDK's handle of its type.
-              in:
-                - name: dst
-                  type: any
-              name: Handle
-              out:
-                - type: bool
-        name: HandleProvider
-      - doc: |-
           Transaction is kit's transaction as a store's engine takes part in it
           (ADR 0139, ADR 0178): the core implements it, an engine calls it with its
           caller's context.
@@ -7197,6 +7518,13 @@ packages:
         name: WorkflowJournal
     variables:
       - doc: |-
+          Mail is the mail subsystem: the outbox kit's mailers keep and the
+          transports that empty it; nil until framework/kit/mail is imported. A
+          product that declares a mailer without it is refused at the start (ADR
+          0179 §6).
+        name: Mail
+        type: atomic.Pointer[MailDriverConfig]
+      - doc: |-
           NewHTTPServer builds the HTTP engine an app in the server profile
           serves on; nil until framework/kit/server is imported.
         name: NewHTTPServer
@@ -7257,9 +7585,24 @@ packages:
       Package queuekit — the compile-time proof that the brokers are kit's.
     functions:
       - doc: |-
+          BrokerOf is the SDK's broker behind b, a queue this package opened: what a
+          mailer's spool keeps its outbox in on a database (ADR 0179 step 6) — the
+          sealed outbox, behind a test's wrapper when it set one —; false for a
+          queue it did not open.
+        in:
+          - name: b
+            type: plug.Broker
+        name: BrokerOf
+        out:
+          - type: queue.Broker
+          - type: bool
+      - doc: |-
           Enable plugs the queues' brokers, their consumer and the migration of a
           queue's table into kit.
         name: Enable
+    imports:
+      plug: github.com/kitsunium/sdk/framework/internal/kit/plug
+      queue: github.com/kitsunium/sdk/pkg/v1/data/queue
     path: github.com/kitsunium/sdk/framework/internal/kit/queuekit
   - doc: |-
       Package serverkit is what framework/kit/server plugs into kit: the HTTP
@@ -7290,8 +7633,9 @@ packages:
       - doc: |-
           SQLOf is the SDK's transaction manager and dialect of db, a database this
           package opened: what the queues' SQL broker runs on, so that a
-          publication joins the transaction its context carries (ADR 0179 step 4);
-          false for a database it did not open.
+          publication joins the transaction its context carries (ADR 0179 step 4),
+          and what a mailer's spool defers its announcements on (step 6); false for
+          a database it did not open.
         in:
           - name: db
             type: plug.Database
@@ -7610,7 +7954,9 @@ packages:
           and delivers nothing. Outside dev, the capture transport is reported as a
           warning. The URL is read again before every delivery: replacing it where
           it lives — a new version in the store, a new file behind
-          KIT_SMTP_URL_FILE — takes effect at the next mail.
+          KIT_SMTP_URL_FILE — takes effect at the next mail. The outbox and the
+          transports are the SDK's, which the mail subsystem plugs in
+          (framework/kit/mail, ADR 0179 step 6).
         name: Mailer
         target: ikit.Mailer
       - doc: MailerOption configures a mailer.

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/mail"
-	mailspool "github.com/kitsunium/sdk/pkg/v1/app/mail/spool"
 )
 
 func TestParseSMTPURL(t *testing.T) {
@@ -36,24 +36,13 @@ func TestParseSMTPURL(t *testing.T) {
 			if !said.empty() {
 				return
 			}
-			if smtpServer(&cfg) != c.server || tlsName(cfg.TLS) != c.tls || cfg.TLS != c.mode || cfg.Username != c.user || cfg.Password != c.password {
-				t.Errorf("parsed %s %s %v %q, want %s %s %v %q", smtpServer(&cfg), tlsName(cfg.TLS), cfg.TLS, cfg.Username, c.server, c.tls, c.mode, c.user)
+			// The relay's configuration is the SDK's, which the mail
+			// subsystem read and hands on to its transport.
+			smtp, _ := cfg.Config.(mail.SMTPConfig)
+			if cfg.Server != c.server || cfg.TLS != c.tls || smtp.TLS != c.mode || smtp.Username != c.user || smtp.Password != c.password {
+				t.Errorf("parsed %s %s %v %q, want %s %s %v %q", cfg.Server, cfg.TLS, smtp.TLS, smtp.Username, c.server, c.tls, c.mode, c.user)
 			}
 		})
-	}
-}
-
-func TestMailBackoff(t *testing.T) {
-	var got []time.Duration
-	for attempt := 1; attempt <= 12; attempt++ {
-		got = append(got, mailRetry.Delay(attempt))
-	}
-	want := []time.Duration{1, 2, 4, 8, 16, 32, 64, 128, 256, 300, 300, 300}
-	for i := range want {
-		want[i] *= time.Second
-	}
-	if !slices.Equal(got, want) {
-		t.Fatalf("backoff %v, want %v", got, want)
 	}
 }
 
@@ -84,10 +73,10 @@ func TestMailboxRing(t *testing.T) {
 	}
 
 	// Without the capture transport, the ring keeps summaries only.
-	env := &mailspool.Event{ID: "mail_1", QueuedAt: time.Now(), Message: mail.Message{
+	env := &plug.MailEventValue{ID: "mail_1", QueuedAt: time.Now(), Message: plug.MailValue{Value: mail.Message{
 		From: mail.Address{Name: "A", Addr: "a@example.com"}, To: []mail.Address{{Addr: "b@example.com"}},
 		Bcc: []mail.Address{{Addr: "hidden@example.com"}}, Subject: "S", Text: "secret body", HTML: "<p>secret</p>",
-	}}
+	}}}
 	smtp := (&Mailer{}).messageOf(env, false)
 	if smtp.Text != "" || smtp.HTML != "" || smtp.Headers != nil || smtp.From != "A <a@example.com>" || !slices.Equal(smtp.To, []string{"b@example.com"}) {
 		t.Errorf("an SMTP record %+v", smtp)

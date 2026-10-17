@@ -74,11 +74,18 @@
       "doc": "Package kit — who may call an operation: the principal, the rules and their\nchecks.\n\nPackage kit — activities: what a daemon's idle stop waits for besides its\nconnections, a notion of the product's own — sessions still open, work\nstill queued.\n\nPackage kit — the App: the services a product mounts, served by one process.\n\nPackage kit — the static analysis a product can be given: the platform's\nanalyzer, run in the background in dev (ADR 0147 §1).\n\nPackage kit — process profiles: what an app does with its process (ADR\n0147 §5) — serve, run as a daemon, or run one CLI command — and the\nsingleton lock.\n\nPackage kit — the architecture the graph draws: where each store keeps its\ndata.\n\nPackage kit — authentication: the handler that says who calls, and the user\nit names.\n\nPackage kit — the build a graph describes: the modules and versions it was\nmade of.\n\nPackage kit — the catalog of the generic mechanics a node is built from.\n\nPackage kit — the kit tag: the classes and words a field of personal data\ncarries.\n\nPackage kit — the plan of a Go type's classified members, computed once per\ntype.\n\nPackage kit — the walk of a value along its classification plan.\n\nPackage kit — the warnings for fields whose name suggests personal data left\nunclassified.\n\nPackage kit — CLI commands: a short command of the product that Main runs\nonce, in the CLI profile, and whose status is the process's.\n\nPackage kit — commands: an operation that changes something, with one\nhandler.\n\nPackage kit — the app's options and environments.\n\nPackage kit — the config command: every setting, its value and where it\ncomes from.\n\nPackage kit — the consumer that drains a queue into its handler.\n\nPackage kit — the daemon: what a running app knows of itself beyond its\nnodes.\n\nPackage kit — the daemon's HTTP server as the Studio sees it: its loop,\nits counters, and the middleware every request goes through.\n\nPackage kit — the daemon's loops: their states, the scheduler that fires\nthe jobs, and the goroutine labels that name them.\n\nPackage kit — databases: the SQL engines a store can be kept on.\n\nPackage kit — the start's judgement of the declared databases.\n\nPackage kit — the interfaces of databases: the engine a connector gives, and\nwhat kit asks of it.\n\nPackage kit — the migrations a database runs, and their lock.\n\nPackage kit — the placement of each store: which database keeps its data.\n\nPackage kit — a database in a running app.\n\nPackage kit — the databases as the graph shows them.\n\nPackage kit — the decoding of a request into its typed value.\n\nPackage kit — the dev tools' routes of the Studio, read-only.\n\nPackage kit is the implementation of framework/kit, the framework in which\nevery product is its own diagram. A product imports framework/kit, whose\nnames alias and forward to this package's: here, the types carry the role\ntheir name says — StoreService, EndpointService, AppConfigurer — and the\nfacade keeps the names a product writes — Store, Endpoint, AppOption.\n\nPackage kit — endpoints: an HTTP route and the operation it serves.\n\nPackage kit — the errors a product returns to its callers, and their wire\nmapping.\n\nPackage kit — exposures: an operation an endpoint serves over HTTP.\n\nPackage kit — what an exposure takes, and what it exposes.\n\nPackage kit — the Go modules of the running binary, read from its build\ninfo.\n\nPackage kit — the graph: the product as a diagram of what it mounts.\n\nPackage kit — history: the former values of the fields that keep them.\n\nPackage kit — the history's storage: former values kept beside each record.\n\nPackage kit — reading a record's former values.\n\nPackage kit — the history as the graph and the Studio show it.\n\nPackage kit — what kit's own writes mean to the history.\n\nPackage kit — legal holds: records kept whatever their retention says.\n\nPackage kit — secondary indexes of a store.\n\nPackage kit — the Studio's read API: the graph, the events, the sources.\n\nPackage kit — what the source endpoint needs of the root it reads.\n\nPackage kit — how the source endpoint opens a file on Unix.\n\nPackage kit — how the source endpoint opens a file on Windows: the link\nitself, never its target.\n\nPackage kit — jobs: scheduled work run by the daemon's loop.\n\nPackage kit — the privacy journal: what kit did to personal data, and why.\n\nPackage kit — idempotency keys and their leases.\n\nPackage kit — the compile-time proof of which roles each declaration plays:\nthe interfaces the app reaches its nodes and options through.\n\nPackage kit — listeners: inbound ports that are not HTTP, a private socket\nspeaking a versioned contract (ADR 0148).\n\nPackage kit — the compile-time proof that a listener is a starter.\n\nPackage kit — what a listener needs of the socket it accepts on.\n\nPackage kit — the product's logger and the logs the Studio shows.\n\nPackage kit — loops: work the daemon waits for, woken by time or by events.\n\nPackage kit — mailers: a durable outbox and the transport that empties it.\n\nPackage kit — what building an SMTP transport needs of its URL.\n\nPackage kit — Main: the whole main function of a product.\n\nPackage kit — the migrate command.\n\nPackage kit — modules: a set of services a product mounts as one.\n\nPackage kit — the start's checks of the modules an app mounts.\n\nPackage kit — what a module keeps: its stores and its migrations.\n\nPackage kit — the mount of a module: its prefix and its bindings.\n\nPackage kit — nodes: what every declaration shares, and its source position.\n\nPackage kit — the interfaces of nodes: what every declaration is, and the\nroles some play.\n\nPackage kit — observation: the spans and events of a running product.\n\nPackage kit — operations: a typed request answered by a typed response.\n\nPackage kit — the password policy of a store's fields.\n\nPackage kit — hashing and verifying passwords under their policy.\n\nPackage kit — the warnings for endpoints that set passwords outside a\npolicy.\n\nPackage kit — ports: an operation a service needs and does not implement.\n\nPackage kit — privacy: kit's own service for holds and the journal.\n\nPackage kit — erasure: a record's personal data removed as its retention\nwould.\n\nPackage kit — export: a person's data as kit gives it back.\n\nPackage kit — a store's personal data as the graph shows it.\n\nPackage kit — the keys that index personal data without revealing it.\n\nPackage kit — the Studio's privacy pages: the journal, the holds, the\nregister.\n\nPackage kit — the privacy command.\n\nPackage kit — what the privacy command prints.\n\nPackage kit — `privacy seal`: a whole store sealed now.\n\nPackage kit — the process sample: what the running process uses.\n\nPackage kit — the Studio's profiler: the live heap and the goroutines,\nfolded onto the graph.\n\nPackage kit — queries: an operation that reads and changes nothing.\n\nPackage kit — queued commands: a command run later, from its queue.\n\nPackage kit — rate limits on an endpoint, per client.\n\nPackage kit — records: the product's data as modules and the Studio reach\nit.\n\nPackage kit — redaction: what a value shows once its secrets are hidden.\n\nPackage kit — the register of processing: each store's line.\n\nPackage kit — replacements: a test's substitute for an operation.\n\nPackage kit — the HTTP request and response an endpoint can reach.\n\nPackage kit — retention: how long a store keeps its personal data.\n\nPackage kit — the retention of a store in a running app.\n\nPackage kit — one pass of retention: what is due is erased or deleted.\n\nPackage kit — record revisions: a store's previous versions of each record.\n\nPackage kit — what changed between two versions, and a version written back.\n\nPackage kit — where a store's versions are kept, engine by engine.\n\nPackage kit — what the privacy rules ask of a record's versions.\n\nPackage kit — a record's version written back.\n\nPackage kit — what the Studio sees of a record's versions.\n\nPackage kit — the revisions command: a version of a record written back.\n\nPackage kit — binaries and their process roles: one executable, several\nApps, and the versioned contracts between them (D22).\n\nPackage kit — schemas: the JSON Schema of an operation's types.\n\nPackage kit — scopes: the parts of a singleton's lock or of a socket's\npath that are only known at the start — the user, the executable, a\nconfiguration directory —, so one declaration keeps one process per user,\nper installed copy or per configuration.\n\nPackage kit — the current user outside Windows: the process's UID, read\nfrom the kernel. os/user would ask libc through cgo — linking the program\ndynamically — or read /etc/passwd, for a number the kernel gives at once.\n\nPackage kit — the current user on Windows: its SID, from os/user, which\nreads the process token there without cgo.\n\nPackage kit — sealing at rest: members sealed where kit keeps them.\n\nPackage kit — where the data keys are, against what they seal.\n\nPackage kit — cryptographic erasure: a data key destroyed.\n\nPackage kit — a document as it lies at rest, sealed member by member.\n\nPackage kit — messages at rest: a queue's members sealed.\n\nPackage kit — a store that seals: its records as they rest.\n\nPackage kit — a store that seals, as kit's port sees it.\n\nPackage kit — secrets: the values the product declares and the operator\nprovides.\n\nPackage kit — the secrets command.\n\nPackage kit — where the secrets are kept, per environment.\n\nPackage kit — services: a bounded context and the building blocks it owns.\n\nPackage kit — settings: a value the environment gives a service.\n\nPackage kit — the interfaces of settings: the values a setting holds, and\nwhat kit reads of a declaration.\n\nPackage kit — frontends: static assets the product serves.\n\nPackage kit — stores: a typed, keyed collection of entities.\n\nPackage kit — the engines a store runs on: memory, files or a database.\n\nPackage kit — stores on SQL: the SDK's document store over a database.\n\nPackage kit — kit's own migrations on a database.\n\nPackage kit — telemetry: the numbers a product reports, exported on a\nprivate socket when the deployment asks for them (ADR 0149).\n\nPackage kit — topics and subscriptions: asynchronous messages of one type.\n\nPackage kit — transactions: kit.Transact and its levels.\n\nPackage kit — a transaction on a database, the database's own.\n\nPackage kit — the data's writer turn, where there are no transactions.\n\nPackage kit — a transaction writes one database: the dev warning.\n\nPackage kit — watches: how a module hears the writes of a product's marked\nfields.\n\nPackage kit — a watch in a running app: its queue and its consumer.\n\nPackage kit — the sentences kit says, in every language it speaks.\n\nPackage kit — workflows: a state machine over the entities of one store.\n\nPackage kit — the ports the workflow engine reaches a store through.\n"
     },
     {
+      "path": "github.com/kitsunium/sdk/framework/internal/kit/mailkit",
+      "name": "mailkit",
+      "dir": "framework/internal/kit/mailkit",
+      "layer": "framework",
+      "doc": "Package mailkit is what framework/kit/mail plugs into kit: the outbox\nkit's mailers keep — the SDK's mail spool, on the database that keeps the\nmailer's service in the queue subsystem's sealed broker, else in the data\ndirectory or in memory — and the transports that empty it, the SDK's SMTP\ntransport and its capture transport (ADR 0179 §1, step 6). kit's core\nimports neither the SDK's spool nor a transport: it reaches them through\nplug, and a product that declares no mailer links none of them.\n\nPackage mailkit — the compile-time proof that the outbox is kit's.\n"
+    },
+    {
       "path": "github.com/kitsunium/sdk/framework/internal/kit/plug",
       "name": "plug",
       "dir": "framework/internal/kit/plug",
       "layer": "framework",
-      "doc": "Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the\nfrontends' file server and the process sampler of the runtime graph\n(framework/kit/server), the Studio's event stream and its profiler\n(framework/kit/studio), the stores and the databases (framework/kit/store),\nthe queues (framework/kit/queue), the workflows (framework/kit/workflow).\nkit reads what they registered through the\nhooks declared here, and imports none of the SDK packages behind them: a\nproduct that does not import a subsystem neither links nor initialises its\npackages.\n\nIt is also the contract between kit's core and the subsystems ADR 0179\ntakes out of it, as database/sql/driver is between database/sql and a\ndriver: the store subsystem's engine over documents, its siblings, kit's\nscope on a database and its migrations ([Stores]), which framework/kit/store\nsets; the refusals an engine says in kit's terms ([Refusal]); what kit's\ntransactions offer an engine that takes part in them ([Transaction]); the\nqueue subsystem's brokers and their consumer ([Queues]), which\nframework/kit/queue sets; and the workflow subsystem's engine and the\nports it runs on ([Workflows]), which framework/kit/workflow sets.\n\nThe package imports the standard library and the framework's model only,\nso that kit and every subsystem can import it.\n"
+      "doc": "Package plug is where kit's opt-in subsystems plug in: the HTTP engine, the\nfrontends' file server and the process sampler of the runtime graph\n(framework/kit/server), the Studio's event stream and its profiler\n(framework/kit/studio), the stores and the databases (framework/kit/store),\nthe queues (framework/kit/queue), the workflows (framework/kit/workflow),\nthe mailers (framework/kit/mail). kit reads what they registered through the\nhooks declared here, and imports none of the SDK packages behind them: a\nproduct that does not import a subsystem neither links nor initialises its\npackages.\n\nIt is also the contract between kit's core and the subsystems ADR 0179\ntakes out of it, as database/sql/driver is between database/sql and a\ndriver: the store subsystem's engine over documents, its siblings, kit's\nscope on a database and its migrations ([Stores]), which framework/kit/store\nsets; the refusals an engine says in kit's terms ([Refusal]); what kit's\ntransactions offer an engine that takes part in them ([Transaction]); the\nqueue subsystem's brokers and their consumer ([Queues]), which\nframework/kit/queue sets; the workflow subsystem's engine and the ports\nit runs on ([Workflows]), which framework/kit/workflow sets; and the mail\nsubsystem's outbox and transports ([Mail]), which framework/kit/mail sets.\n\nThe package imports the standard library and the framework's model only,\nso that kit and every subsystem can import it.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/internal/kit/queuekit",
@@ -170,6 +177,13 @@
       "dir": "framework/kit/kittest",
       "layer": "framework",
       "doc": "Package kittest runs a product in its own tests as production runs it: on\na data directory, where kit seals what it keeps at rest, a transaction\nwrites files and a rollback writes them back, a store's retention erases\nand folds what it overwrote, and a restart reads everything back — none\nof which a product kept in memory (kit.InMemory) ever meets: kit seals\nnothing in memory.\n\nA suite keeps most of its tests in memory, fast and hermetic, and runs on\ndisk those that are about what rests there:\n\n\tfunc TestNothingPersonalRestsInClear(t *testing.T) {\n\t\tdisk := kittest.NewDisk(t)\n\t\tapp := start(t, disk) // the suite's own helper, in memory unless told otherwise\n\t\tfileReport(t, app, \"ann@example.com\")\n\t\tif files := disk.Holding(t, \"ann@example.com\"); len(files) > 0 {\n\t\t\tt.Errorf(\"in clear on disk: %v\", files)\n\t\t}\n\t}\n\nA Disk is an AppOption: kit.DataDir(disk.Dir), which wins over a\nkit.InMemory given before it. Given to the product started again — once\nthe first app stopped — it is the same data and the same secrets: a\nrestart.\n"
+    },
+    {
+      "path": "github.com/kitsunium/sdk/framework/kit/mail",
+      "name": "mail",
+      "dir": "framework/kit/mail",
+      "layer": "framework",
+      "doc": "Package mail plugs kit's mailers in: the outbox a mailer keeps — the SDK's\nmail spool, sealed on the database that keeps the mailer's service, else in\nthe data directory or in memory — and the transports that empty it, the\nSDK's SMTP transport and its capture transport. A product that declares a\nmailer imports it:\n\n\timport _ \"github.com/kitsunium/sdk/framework/kit/mail\"\n\nA product that declares none does not, and links none of that outbox; a\nprogram that declares one without it is refused at the start, the refusal\nnaming this import (CodeSubsystemMissing). It imports framework/kit/store\nand framework/kit/queue: a mailer's outbox on a database is the queue\nsubsystem's, joined to the transaction of the database the store subsystem\nopened, and sealed under kit's data keys, kept in a store of kit's own.\nframework/kit imports it too until ADR 0179's last step: no product needs\nthe line yet.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/kit/queue",
@@ -6080,7 +6094,7 @@
       "name": "Mailer",
       "spelled": "struct{}",
       "canonical": "struct{}",
-      "doc": "Mailer is outbound mail: a durable outbox and the transport that empties\nit. [Mailer.Send] only queues — it returns once the message is safely in\nthe outbox — and the mailer's own loop hands each message to the transport,\nretrying a failure and dead-lettering a message after its last attempt.\n\nThe transport is the SDK's mail package: SMTP when the mail connector's\nsecret smtp-url is set — KIT_SMTP_URL, smtp://user:password@host:587?tls=\nstarttls|implicit|none — and otherwise the capture transport, which keeps\nevery message for the Studio's mailbox and for tests ([Mailer.Captured])\nand delivers nothing. Outside dev, the capture transport is reported as a\nwarning. The URL is read again before every delivery: replacing it where\nit lives — a new version in the store, a new file behind\nKIT_SMTP_URL_FILE — takes effect at the next mail.\n",
+      "doc": "Mailer is outbound mail: a durable outbox and the transport that empties\nit. [Mailer.Send] only queues — it returns once the message is safely in\nthe outbox — and the mailer's own loop hands each message to the transport,\nretrying a failure and dead-lettering a message after its last attempt.\n\nThe transport is the SDK's mail package: SMTP when the mail connector's\nsecret smtp-url is set — KIT_SMTP_URL, smtp://user:password@host:587?tls=\nstarttls|implicit|none — and otherwise the capture transport, which keeps\nevery message for the Studio's mailbox and for tests ([Mailer.Captured])\nand delivers nothing. Outside dev, the capture transport is reported as a\nwarning. The URL is read again before every delivery: replacing it where\nit lives — a new version in the store, a new file behind\nKIT_SMTP_URL_FILE — takes effect at the next mail. The outbox and the\ntransports are the SDK's, which the mail subsystem plugs in\n(framework/kit/mail, ADR 0179 step 6).\n",
       "file": "framework/internal/kit/mailer.go",
       "layer": "framework"
     },
@@ -8644,6 +8658,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/mailkit.Enable",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/mailkit",
+      "name": "Enable",
+      "spelled": "func()",
+      "canonical": "func()",
+      "doc": "Enable plugs the mailers' outbox and their transports into kit.\n",
+      "file": "framework/internal/kit/mailkit/mailkit.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Broker",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
@@ -9487,29 +9512,6 @@
       "layer": "framework"
     },
     {
-      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.HandleProvider",
-      "kind": "type",
-      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
-      "name": "HandleProvider",
-      "spelled": "interface{Handle(dst any) bool}",
-      "canonical": "interface{Handle(dst any) bool}",
-      "doc": "HandleProvider is a value of a subsystem that hands one of the SDK's own\nhandles on: the value dst points at set, and true; false for a handle it\nhas none of. It serves the mailer's spool, still in kit's core, which takes\nthe SDK's types — a Database's transaction manager as the spool's\nDeferrer, a queue's broker (Broker) as its outbox — until the mailers\nleave the core (ADR 0179, step 6), and the core never names the type it\nasks for. A sibling of [Database] and of [Broker].\n",
-      "file": "framework/internal/kit/plug/store_interface.go",
-      "layer": "framework"
-    },
-    {
-      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.HandleProvider.Handle",
-      "kind": "method",
-      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
-      "name": "Handle",
-      "recv": "HandleProvider",
-      "spelled": "func(dst any) bool",
-      "canonical": "func(dst any) bool",
-      "doc": "Handle sets what dst points at to the SDK's handle of its type.\n",
-      "file": "framework/internal/kit/plug/store_interface.go",
-      "layer": "framework"
-    },
-    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.IndexSpec",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
@@ -9615,6 +9617,539 @@
       ],
       "doc": "LiveMessageValue is a message waiting in its queue, as it lies: when it\nis next visible, how many times it was delivered, and whether a consumer\nholds it.\n",
       "file": "framework/internal/kit/plug/queue.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.Mail",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Mail",
+      "spelled": "atomic.Pointer[MailDriverConfig]",
+      "canonical": "sync/atomic.Pointer[github.com/kitsunium/sdk/framework/internal/kit/plug.MailDriverConfig]",
+      "doc": "Mail is the mail subsystem: the outbox kit's mailers keep and the\ntransports that empty it; nil until framework/kit/mail is imported. A\nproduct that declares a mailer without it is refused at the start (ADR\n0179 §6).\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailAttemptValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailAttemptValue",
+      "spelled": "struct{QueuedAt time.Time; Meta map[string]string; ID string; Attempt int}",
+      "canonical": "struct{QueuedAt time.Time; Meta map[string]string; ID string; Attempt int}",
+      "fields": [
+        {
+          "name": "QueuedAt",
+          "type": "time.Time",
+          "doc": "QueuedAt is when the mail was put in the outbox.\n"
+        },
+        {
+          "name": "Meta",
+          "type": "map[string]string",
+          "doc": "Meta is what Annotate kept of the Send.\n"
+        },
+        {
+          "name": "ID",
+          "type": "string",
+          "doc": "ID is the mail's outbox ID.\n"
+        },
+        {
+          "name": "Attempt",
+          "type": "int",
+          "doc": "Attempt numbers the attempt, from 1.\n"
+        }
+      ],
+      "doc": "MailAttemptValue is one delivery attempt of a mail: its outbox ID, its\nnumber, when the mail was queued, and what the spool kept of its Send.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailCaptureSource",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailCaptureSource",
+      "spelled": "interface{Composed() []byte}",
+      "canonical": "interface{Composed() []byte}",
+      "doc": "MailCaptureSource is a transport that keeps what it composed: the capture\ntransport, whose last message the Studio's mailbox shows. A sibling of\n[MailSink].\n",
+      "file": "framework/internal/kit/plug/mail_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailCaptureSource.Composed",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Composed",
+      "recv": "MailCaptureSource",
+      "spelled": "func() []byte",
+      "canonical": "func() []byte",
+      "doc": "Composed is the last message the transport composed, nil for none.\n",
+      "file": "framework/internal/kit/plug/mail_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailDriverConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailDriverConfig",
+      "spelled": "struct{Open func(cfg *MailSpoolConfig) (MailSpool, error); Validate func(msg MailValue) error; Capture func() MailSink; ParseSMTP func(url string) (MailRelayValue, error); NewSMTP func(relay *MailRelayValue) (MailSink, error); Refused func(err error, kind MailRefusal) bool}",
+      "canonical": "struct{Open func(cfg *github.com/kitsunium/sdk/framework/internal/kit/plug.MailSpoolConfig) (github.com/kitsunium/sdk/framework/internal/kit/plug.MailSpool, error); Validate func(msg github.com/kitsunium/sdk/framework/internal/kit/plug.MailValue) error; Capture func() github.com/kitsunium/sdk/framework/internal/kit/plug.MailSink; ParseSMTP func(url string) (github.com/kitsunium/sdk/framework/internal/kit/plug.MailRelayValue, error); NewSMTP func(relay *github.com/kitsunium/sdk/framework/internal/kit/plug.MailRelayValue) (github.com/kitsunium/sdk/framework/internal/kit/plug.MailSink, error); Refused func(err error, kind github.com/kitsunium/sdk/framework/internal/kit/plug.MailRefusal) bool}",
+      "fields": [
+        {
+          "name": "Open",
+          "type": "func(cfg *MailSpoolConfig) (MailSpool, error)",
+          "doc": "Open opens one mailer's outbox as cfg says, closed until it runs.\n"
+        },
+        {
+          "name": "Validate",
+          "type": "func(msg MailValue) error",
+          "doc": "Validate is the SDK's verdict on a mail: nil when the outbox takes it,\nelse what is wrong with it, in the SDK's public words.\n"
+        },
+        {
+          "name": "Capture",
+          "type": "func() MailSink",
+          "doc": "Capture is a transport that delivers nothing and keeps the last\nmessage it composed (MailCaptureSource).\n"
+        },
+        {
+          "name": "ParseSMTP",
+          "type": "func(url string) (MailRelayValue, error)",
+          "doc": "ParseSMTP reads an SMTP URL — smtp://user:password@host:port?tls=\nstarttls|implicit|none, smtps:// for implicit TLS — as the SDK's\nSMTP transport would take it.\n"
+        },
+        {
+          "name": "NewSMTP",
+          "type": "func(relay *MailRelayValue) (MailSink, error)",
+          "doc": "NewSMTP is the SDK's SMTP transport to relay, which dials nothing\nuntil a mail is sent.\n"
+        },
+        {
+          "name": "Refused",
+          "type": "func(err error, kind MailRefusal) bool",
+          "doc": "Refused reports whether err, or an error it wraps, is the spool's or\nthe URL's refusal of kind: the SDK's sentinels stay in the subsystem,\nand the error keeps the fields the SDK gave it.\n"
+        }
+      ],
+      "doc": "MailDriverConfig is what framework/kit/mail plugs into kit: how a\nmailer's outbox opens, the SDK's verdict on a mail, the transports a\nmailer hands its mail to, and how kit tells the spool's refusals apart.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailEvent",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailEvent",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "MailEvent is what a spool reports of a mail.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailEventDeadLettered",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailEventDeadLettered",
+      "spelled": "MailEvent",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.MailEvent",
+      "value": "4",
+      "doc": "MailEventDeadLettered is a mail given up on after its last attempt.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailEventDuplicate",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailEventDuplicate",
+      "spelled": "MailEvent",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.MailEvent",
+      "value": "5",
+      "doc": "MailEventDuplicate is a redelivery of a mail already sent, dropped.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailEventOther",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailEventOther",
+      "spelled": "MailEvent",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.MailEvent",
+      "value": "0",
+      "doc": "MailEventOther is an event of the spool kit shows nothing of.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailEventQueued",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailEventQueued",
+      "spelled": "MailEvent",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.MailEvent",
+      "value": "1",
+      "doc": "MailEventQueued is a mail put in the outbox.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailEventRetrying",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailEventRetrying",
+      "spelled": "MailEvent",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.MailEvent",
+      "value": "3",
+      "doc": "MailEventRetrying is a failed attempt that will be retried.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailEventSent",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailEventSent",
+      "spelled": "MailEvent",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.MailEvent",
+      "value": "2",
+      "doc": "MailEventSent is a mail the transport accepted.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailEventValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailEventValue",
+      "spelled": "struct{Err error; Meta map[string]string; At time.Time; QueuedAt time.Time; Message MailValue; ID string; Attempt int; Kind MailEvent}",
+      "canonical": "struct{Err error; Meta map[string]string; At time.Time; QueuedAt time.Time; Message github.com/kitsunium/sdk/framework/internal/kit/plug.MailValue; ID string; Attempt int; Kind github.com/kitsunium/sdk/framework/internal/kit/plug.MailEvent}",
+      "fields": [
+        {
+          "name": "Err",
+          "type": "error",
+          "doc": "Err is a failed attempt's failure.\n"
+        },
+        {
+          "name": "Meta",
+          "type": "map[string]string",
+          "doc": "Meta is what Annotate kept of the Send.\n"
+        },
+        {
+          "name": "At",
+          "type": "time.Time",
+          "doc": "At is when the event happened.\n"
+        },
+        {
+          "name": "QueuedAt",
+          "type": "time.Time",
+          "doc": "QueuedAt is when the mail was put in the outbox.\n"
+        },
+        {
+          "name": "Message",
+          "type": "MailValue",
+          "doc": "Message is the mail.\n"
+        },
+        {
+          "name": "ID",
+          "type": "string",
+          "doc": "ID is the mail's outbox ID.\n"
+        },
+        {
+          "name": "Attempt",
+          "type": "int",
+          "doc": "Attempt numbers the attempt the event is about.\n"
+        },
+        {
+          "name": "Kind",
+          "type": "MailEvent",
+          "doc": "Kind is what happened.\n"
+        }
+      ],
+      "doc": "MailEventValue is what a spool reports of a mail: its kind, the mail and\nits outbox ID, the attempt, when, and the failure of a failed attempt.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailRefusal",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailRefusal",
+      "spelled": "uint8",
+      "canonical": "uint8",
+      "doc": "MailRefusal is a refusal of the mail subsystem, as kit words it.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailRefusalClosed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailRefusalClosed",
+      "spelled": "MailRefusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.MailRefusal",
+      "value": "1",
+      "doc": "MailRefusalClosed is a spool that is closed: its mailer is not\nrunning.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailRefusalInvalidURL",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailRefusalInvalidURL",
+      "spelled": "MailRefusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.MailRefusal",
+      "value": "3",
+      "doc": "MailRefusalInvalidURL is an SMTP URL that is not one of the form\nsmtp://user:password@host:port; its \"problem\" field says the clause.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailRefusalNone",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailRefusalNone",
+      "spelled": "MailRefusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.MailRefusal",
+      "value": "0",
+      "doc": "MailRefusalNone is no refusal kit words.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailRefusalUnencodable",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailRefusalUnencodable",
+      "spelled": "MailRefusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/kit/plug.MailRefusal",
+      "value": "2",
+      "doc": "MailRefusalUnencodable is a mail the outbox cannot encode.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailRelayValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailRelayValue",
+      "spelled": "struct{Config any; Server string; TLS string}",
+      "canonical": "struct{Config any; Server string; TLS string}",
+      "fields": [
+        {
+          "name": "Config",
+          "type": "any",
+          "doc": "Config is the SDK's SMTP configuration, held as any.\n"
+        },
+        {
+          "name": "Server",
+          "type": "string",
+          "doc": "Server is where it delivers, host:port.\n"
+        },
+        {
+          "name": "TLS",
+          "type": "string",
+          "doc": "TLS is its TLS mode as the URL spells it: starttls, implicit or none.\n"
+        }
+      ],
+      "doc": "MailRelayValue is an SMTP relay as the SDK's transport takes it: its\nconfiguration, which holds the password and is handed to NewSMTP and never\nkept or printed, and what may be shown of it.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailSink",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailSink",
+      "spelled": "interface{Send(ctx context.Context, msg MailValue) error}",
+      "canonical": "interface{Send(ctx context.Context, msg github.com/kitsunium/sdk/framework/internal/kit/plug.MailValue) error}",
+      "doc": "MailSink is what a mailer hands a mail to: the SDK's SMTP transport,\nor its capture transport, which delivers nothing. It grows by the sibling\nbelow.\n",
+      "file": "framework/internal/kit/plug/mail_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailSink.Send",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Send",
+      "recv": "MailSink",
+      "spelled": "func(ctx context.Context, msg MailValue) error",
+      "canonical": "func(ctx context.Context, msg github.com/kitsunium/sdk/framework/internal/kit/plug.MailValue) error",
+      "doc": "Send delivers msg.\n",
+      "file": "framework/internal/kit/plug/mail_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailSpool",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailSpool",
+      "spelled": "interface{Close() error; DeadLetters(ctx context.Context, maxLetters int) (int, error); Run(ctx context.Context) error; Send(ctx context.Context, msg MailValue) (string, error); SendWithID(ctx context.Context, id string, msg MailValue) error}",
+      "canonical": "interface{Close() error; DeadLetters(ctx context.Context, maxLetters int) (int, error); Run(ctx context.Context) error; Send(ctx context.Context, msg github.com/kitsunium/sdk/framework/internal/kit/plug.MailValue) (string, error); SendWithID(ctx context.Context, id string, msg github.com/kitsunium/sdk/framework/internal/kit/plug.MailValue) error}",
+      "doc": "MailSpool is one mailer's outbox as kit's core uses it: a mail put in it\nat once or under an ID kit minted, the loop that hands each mail to the\ntransport, and its dead letters.\n",
+      "file": "framework/internal/kit/plug/mail_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailSpool.Close",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Close",
+      "recv": "MailSpool",
+      "spelled": "func() error",
+      "canonical": "func() error",
+      "doc": "Close releases the outbox.\n",
+      "file": "framework/internal/kit/plug/mail_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailSpool.DeadLetters",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "DeadLetters",
+      "recv": "MailSpool",
+      "spelled": "func(ctx context.Context, maxLetters int) (int, error)",
+      "canonical": "func(ctx context.Context, maxLetters int) (int, error)",
+      "doc": "DeadLetters counts up to maxLetters of the mails earlier runs gave up\non.\n",
+      "file": "framework/internal/kit/plug/mail_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailSpool.Run",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Run",
+      "recv": "MailSpool",
+      "spelled": "func(ctx context.Context) error",
+      "canonical": "func(ctx context.Context) error",
+      "doc": "Run hands each mail to the transport until ctx ends.\n",
+      "file": "framework/internal/kit/plug/mail_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailSpool.Send",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "Send",
+      "recv": "MailSpool",
+      "spelled": "func(ctx context.Context, msg MailValue) (string, error)",
+      "canonical": "func(ctx context.Context, msg github.com/kitsunium/sdk/framework/internal/kit/plug.MailValue) (string, error)",
+      "doc": "Send puts msg in the outbox — in the transaction ctx carries for its\ndatabase, when it lives on one — and returns its outbox ID.\n",
+      "file": "framework/internal/kit/plug/mail_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailSpool.SendWithID",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "SendWithID",
+      "recv": "MailSpool",
+      "spelled": "func(ctx context.Context, id string, msg MailValue) error",
+      "canonical": "func(ctx context.Context, id string, msg github.com/kitsunium/sdk/framework/internal/kit/plug.MailValue) error",
+      "doc": "SendWithID puts msg in the outbox under id, minted by kit.\n",
+      "file": "framework/internal/kit/plug/mail_interface.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailSpoolConfig",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailSpoolConfig",
+      "spelled": "struct{Transport func(ctx context.Context, msg MailValue, attempt MailAttemptValue) error; Clock Clock; Observe func(e *MailEventValue); Annotate func(ctx context.Context) map[string]string; NewID func() (string, error); Outbox Broker; Database Database; From MailValue; Dir string; BackoffBase time.Duration; BackoffMax time.Duration; SendTimeout time.Duration; PollInterval time.Duration; MaxAttempts int; MaxMessageBytes int}",
+      "canonical": "struct{Transport func(ctx context.Context, msg github.com/kitsunium/sdk/framework/internal/kit/plug.MailValue, attempt github.com/kitsunium/sdk/framework/internal/kit/plug.MailAttemptValue) error; Clock github.com/kitsunium/sdk/framework/internal/kit/plug.Clock; Observe func(e *github.com/kitsunium/sdk/framework/internal/kit/plug.MailEventValue); Annotate func(ctx context.Context) map[string]string; NewID func() (string, error); Outbox github.com/kitsunium/sdk/framework/internal/kit/plug.Broker; Database github.com/kitsunium/sdk/framework/internal/kit/plug.Database; From github.com/kitsunium/sdk/framework/internal/kit/plug.MailValue; Dir string; BackoffBase time.Duration; BackoffMax time.Duration; SendTimeout time.Duration; PollInterval time.Duration; MaxAttempts int; MaxMessageBytes int}",
+      "fields": [
+        {
+          "name": "Transport",
+          "type": "func(ctx context.Context, msg MailValue, attempt MailAttemptValue) error",
+          "doc": "Transport makes one delivery attempt of msg; the spool retries a\nfailure, or dead-letters the mail after its last attempt.\n"
+        },
+        {
+          "name": "Clock",
+          "type": "Clock",
+          "doc": "Clock is the app's clock, which the spool stamps and waits on.\n"
+        },
+        {
+          "name": "Observe",
+          "type": "func(e *MailEventValue)",
+          "doc": "Observe is told each event of each mail.\n"
+        },
+        {
+          "name": "Annotate",
+          "type": "func(ctx context.Context) map[string]string",
+          "doc": "Annotate is what the spool keeps of a Send for its deliveries, read\nfrom the Send's context.\n"
+        },
+        {
+          "name": "NewID",
+          "type": "func() (string, error)",
+          "doc": "NewID mints a mail's outbox ID.\n"
+        },
+        {
+          "name": "Outbox",
+          "type": "Broker",
+          "doc": "Outbox is the queue the spool keeps its mails in on a database —\nthe queue subsystem's, sealed —, nil for a directory or memory.\n"
+        },
+        {
+          "name": "Database",
+          "type": "Database",
+          "doc": "Database is the database Outbox is on, whose transaction a mail sent\nin one joins; nil for none.\n"
+        },
+        {
+          "name": "From",
+          "type": "MailValue",
+          "doc": "From is the sender of every mail that names none: the SDK's\nmail.Address, held as any.\n"
+        },
+        {
+          "name": "Dir",
+          "type": "string",
+          "doc": "Dir is the directory the spool keeps its own queue in; with no Outbox\nand no Dir, the outbox is in memory.\n"
+        },
+        {
+          "name": "BackoffBase",
+          "type": "time.Duration",
+          "doc": "BackoffBase is the wait after a failed attempt, doubled after each,\nup to BackoffMax.\n"
+        },
+        {
+          "name": "BackoffMax",
+          "type": "time.Duration",
+          "doc": "BackoffMax bounds the wait after a failed attempt.\n"
+        },
+        {
+          "name": "SendTimeout",
+          "type": "time.Duration",
+          "doc": "SendTimeout bounds one attempt.\n"
+        },
+        {
+          "name": "PollInterval",
+          "type": "time.Duration",
+          "doc": "PollInterval bounds an idle wait.\n"
+        },
+        {
+          "name": "MaxAttempts",
+          "type": "int",
+          "doc": "MaxAttempts is how many attempts a mail gets before it is\ndead-lettered.\n"
+        },
+        {
+          "name": "MaxMessageBytes",
+          "type": "int",
+          "doc": "MaxMessageBytes bounds one mail in the spool's own queue; zero is the\nspool's own bound.\n"
+        }
+      ],
+      "doc": "MailSpoolConfig is one mailer's outbox: the transport each attempt runs,\nthe app's clock, what kit hears of its mails, its retries, and where it\nkeeps them — a queue on the database that keeps the mailer's service, a\ndirectory, or memory.\n",
+      "file": "framework/internal/kit/plug/mail.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/plug.MailValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/plug",
+      "name": "MailValue",
+      "spelled": "struct{Value any}",
+      "canonical": "struct{Value any}",
+      "fields": [
+        {
+          "name": "Value",
+          "type": "any",
+          "doc": "Value is the SDK's mail value.\n"
+        }
+      ],
+      "doc": "MailValue is a value of the SDK's mail package as it crosses the\ncontract: a mail.Message, or a sender's mail.Address, held as any — kit's\ncore names the SDK's mail types, plug names none.\n",
+      "file": "framework/internal/kit/plug/mail.go",
       "layer": "framework"
     },
     {
@@ -12150,6 +12685,17 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/kit/queuekit.BrokerOf",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/internal/kit/queuekit",
+      "name": "BrokerOf",
+      "spelled": "func(b plug.Broker) (queue.Broker, bool)",
+      "canonical": "func(b github.com/kitsunium/sdk/framework/internal/kit/plug.Broker) (github.com/kitsunium/sdk/pkg/v1/data/queue.Broker, bool)",
+      "doc": "BrokerOf is the SDK's broker behind b, a queue this package opened: what a\nmailer's spool keeps its outbox in on a database (ADR 0179 step 6) — the\nsealed outbox, behind a test's wrapper when it set one —; false for a\nqueue it did not open.\n",
+      "file": "framework/internal/kit/queuekit/broker.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/kit/queuekit.Enable",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/framework/internal/kit/queuekit",
@@ -12189,7 +12735,7 @@
       "name": "SQLOf",
       "spelled": "func(db plug.Database) (tm sql.Transactor, dialect sql.Dialect, ok bool)",
       "canonical": "func(db github.com/kitsunium/sdk/framework/internal/kit/plug.Database) (tm github.com/kitsunium/sdk/pkg/v1/data/sql.Transactor, dialect github.com/kitsunium/sdk/pkg/v1/data/sql.Dialect, ok bool)",
-      "doc": "SQLOf is the SDK's transaction manager and dialect of db, a database this\npackage opened: what the queues' SQL broker runs on, so that a\npublication joins the transaction its context carries (ADR 0179 step 4);\nfalse for a database it did not open.\n",
+      "doc": "SQLOf is the SDK's transaction manager and dialect of db, a database this\npackage opened: what the queues' SQL broker runs on, so that a\npublication joins the transaction its context carries (ADR 0179 step 4),\nand what a mailer's spool defers its announcements on (step 6); false for\na database it did not open.\n",
       "file": "framework/internal/kit/storekit/database.go",
       "layer": "framework"
     },
@@ -16078,7 +16624,7 @@
       "spelled": "ikit.Mailer",
       "canonical": "github.com/kitsunium/sdk/framework/internal/kit.Mailer",
       "owner": "go:github.com/kitsunium/sdk/framework/internal/kit.Mailer",
-      "doc": "Mailer is outbound mail: a durable outbox and the transport that empties\nit. [Mailer].Send only queues — it returns once the message is safely in\nthe outbox — and the mailer's own loop hands each message to the transport,\nretrying a failure and dead-lettering a message after its last attempt.\n\nThe transport is the SDK's mail package: SMTP when the mail connector's\nsecret smtp-url is set — KIT_SMTP_URL, smtp://user:password@host:587?tls=\nstarttls|implicit|none — and otherwise the capture transport, which keeps\nevery message for the Studio's mailbox and for tests ([Mailer].Captured)\nand delivers nothing. Outside dev, the capture transport is reported as a\nwarning. The URL is read again before every delivery: replacing it where\nit lives — a new version in the store, a new file behind\nKIT_SMTP_URL_FILE — takes effect at the next mail.\n",
+      "doc": "Mailer is outbound mail: a durable outbox and the transport that empties\nit. [Mailer].Send only queues — it returns once the message is safely in\nthe outbox — and the mailer's own loop hands each message to the transport,\nretrying a failure and dead-lettering a message after its last attempt.\n\nThe transport is the SDK's mail package: SMTP when the mail connector's\nsecret smtp-url is set — KIT_SMTP_URL, smtp://user:password@host:587?tls=\nstarttls|implicit|none — and otherwise the capture transport, which keeps\nevery message for the Studio's mailbox and for tests ([Mailer].Captured)\nand delivers nothing. Outside dev, the capture transport is reported as a\nwarning. The URL is read again before every delivery: replacing it where\nit lives — a new version in the store, a new file behind\nKIT_SMTP_URL_FILE — takes effect at the next mail. The outbox and the\ntransports are the SDK's, which the mail subsystem plugs in\n(framework/kit/mail, ADR 0179 step 6).\n",
       "file": "framework/kit/mailer.go",
       "layer": "framework"
     },

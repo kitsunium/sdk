@@ -31,6 +31,6 @@ Enable plugs the stores' engines, kit's scope on a database and the migrations o
 func SQLOf(db plug.Database) (tm sql.Transactor, dialect sql.Dialect, ok bool)
 ```
 
-SQLOf is the SDK's transaction manager and dialect of db, a database this package opened: what the queues' SQL broker runs on, so that a publication joins the transaction its context carries (ADR 0179 step 4); false for a database it did not open.
+SQLOf is the SDK's transaction manager and dialect of db, a database this package opened: what the queues' SQL broker runs on, so that a publication joins the transaction its context carries (ADR 0179 step 4), and what a mailer's spool defers its announcements on (step 6); false for a database it did not open.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

@@ -21,6 +21,10 @@ import (
 	// imports it does (ADR 0179 step 5); subsystems_internal_test.go takes
 	// it out too.
 	_ "github.com/kitsunium/sdk/framework/kit/workflow"
+	// The suite's mailers run on the mail subsystem, as a product that
+	// imports it does (ADR 0179 step 6); subsystems_internal_test.go takes
+	// it out too.
+	_ "github.com/kitsunium/sdk/framework/kit/mail"
 	// The suite's dev apps serve the Studio's API, as a product that imports
 	// it does.
 	_ "github.com/kitsunium/sdk/framework/kit/studio"

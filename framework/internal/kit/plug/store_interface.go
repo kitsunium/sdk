@@ -71,18 +71,6 @@ type Executor interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// HandleProvider is a value of a subsystem that hands one of the SDK's own
-// handles on: the value dst points at set, and true; false for a handle it
-// has none of. It serves the mailer's spool, still in kit's core, which takes
-// the SDK's types — a Database's transaction manager as the spool's
-// Deferrer, a queue's broker (Broker) as its outbox — until the mailers
-// leave the core (ADR 0179, step 6), and the core never names the type it
-// asks for. A sibling of [Database] and of [Broker].
-type HandleProvider interface {
-	// Handle sets what dst points at to the SDK's handle of its type.
-	Handle(dst any) bool
-}
-
 // Transaction is kit's transaction as a store's engine takes part in it
 // (ADR 0139, ADR 0178): the core implements it, an engine calls it with its
 // caller's context.

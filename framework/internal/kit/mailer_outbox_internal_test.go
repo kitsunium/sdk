@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/mail"
 	"github.com/kitsunium/sdk/pkg/v1/data/queue"
@@ -138,7 +139,7 @@ func TestARolledBackMailFreesItsIdentifier(t *testing.T) {
 	r.mailer.mu.Lock()
 	spool := r.mailer.spool
 	r.mailer.mu.Unlock()
-	must(t, spool.SendWithID(t.Context(), id, roomLetter("again")))
+	must(t, spool.SendWithID(t.Context(), id, plug.MailValue{Value: roomLetter("again")}))
 	if got := r.statuses(t, id, 10*time.Second); !slices.Equal(got, []string{model.MailQueued, model.MailSent}) {
 		t.Errorf("the mailbox heard %v of the identifier a rollback freed; want queued, then sent", got)
 	}

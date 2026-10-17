@@ -16,7 +16,9 @@ import (
 // and delivers nothing. Outside dev, the capture transport is reported as a
 // warning. The URL is read again before every delivery: replacing it where
 // it lives — a new version in the store, a new file behind
-// KIT_SMTP_URL_FILE — takes effect at the next mail.
+// KIT_SMTP_URL_FILE — takes effect at the next mail. The outbox and the
+// transports are the SDK's, which the mail subsystem plugs in
+// (framework/kit/mail, ADR 0179 step 6).
 type Mailer = ikit.Mailer
 
 // MailerOption configures a mailer.

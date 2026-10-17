@@ -108,26 +108,11 @@ func (d *database) Migrator(table string, ms []plug.MigrationValue) (plug.Migrat
 	return migrator{m: m}, nil
 }
 
-// Handle sets what dst points at to the SDK's handle of its type: the
-// transaction manager as a Deferrer that is an Aborter too — what a mailer's
-// spool, still in kit's core, takes (until ADR 0179's step 6).
-func (d *database) Handle(dst any) bool {
-	p, ok := dst.(*sql.Deferrer)
-	if !ok {
-		return false
-	}
-	df, defers := d.tm.(sql.Deferrer)
-	if _, aborts := d.tm.(sql.Aborter); !defers || !aborts {
-		return false
-	}
-	*p = df
-	return true
-}
-
 // SQLOf is the SDK's transaction manager and dialect of db, a database this
 // package opened: what the queues' SQL broker runs on, so that a
-// publication joins the transaction its context carries (ADR 0179 step 4);
-// false for a database it did not open.
+// publication joins the transaction its context carries (ADR 0179 step 4),
+// and what a mailer's spool defers its announcements on (step 6); false for
+// a database it did not open.
 func SQLOf(db plug.Database) (tm sql.Transactor, dialect sql.Dialect, ok bool) {
 	d, ok := db.(*database)
 	if !ok {
