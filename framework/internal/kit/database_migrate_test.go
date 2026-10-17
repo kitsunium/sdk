@@ -136,30 +136,47 @@ func TestAFailedMigrationStopsTheStart(t *testing.T) {
 
 // A migration whose Down is kit.Irreversible is not reversed: `migrate
 // down` below its version refuses, naming it, and the set keeps every
-// version it had; the step itself refuses with CodeMigrationIrreversible
-// (ADR 0179 step 10, kit's own migration).
+// version it had; down to its own version reverses nothing and succeeds; the
+// step itself refuses with CodeMigrationIrreversible (ADR 0179 step 10,
+// kit's own migration).
 func TestAnIrreversibleMigrationIsNotReversed(t *testing.T) {
 	needsFileStore(t)
-	db := kit.NewFakeDB(sql.DialectPostgres)
-	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
-	t.Setenv("LEDGER_DATABASE_MIGRATE", "manual")
-	sealed := append(slices.Clone(migrations), kit.MigrationValue{Version: 20260903120000, Name: "seal", Up: kit.Statements("CREATE TABLE seal (id TEXT)"), Down: kit.Irreversible})
-	var logs syncBuffer
-	newApp := func() *kit.App {
-		return ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), kit.Migrations(sealed...)))
+	all := []int64{20260901120000, 20260902120000, 20260903120000}
+	type tc struct {
+		name, to string
+		refused  bool
 	}
-	if code, _, errOut := migrateCommand(t, newApp, "up"); code != 0 {
-		t.Fatalf("up: %d %s", code, errOut)
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		db := kit.NewFakeDB(sql.DialectPostgres)
+		t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
+		t.Setenv("LEDGER_DATABASE_MIGRATE", "manual")
+		sealed := append(slices.Clone(migrations), kit.MigrationValue{Version: 20260903120000, Name: "seal", Up: kit.Statements("CREATE TABLE seal (id TEXT)"), Down: kit.Irreversible})
+		var logs syncBuffer
+		newApp := func() *kit.App {
+			return ledgerApp(t, newLedger(), &logs, kit.Database("database", db.Engine(), kit.Migrations(sealed...)))
+		}
+		if code, _, errOut := migrateCommand(t, newApp, "up"); code != 0 {
+			t.Fatalf("up: %d %s", code, errOut)
+		}
+		code, out, errOut := migrateCommand(t, newApp, "down", "product", c.to)
+		switch {
+		case c.refused && (code == 0 || strings.Contains(out, "reversed")):
+			t.Fatalf("down past an irreversible migration: %d\n%s%s", code, out, errOut)
+		case c.refused && !strings.Contains(errOut, "20260903120000"):
+			t.Errorf("the refusal does not name the irreversible migration: %s", errOut)
+		case !c.refused && code != 0:
+			t.Fatalf("down to the irreversible migration's own version: %d\n%s%s", code, out, errOut)
+		}
+		if got := db.Versions("schema_migrations"); !slices.Equal(got, all) {
+			t.Errorf("after down to %s: %v", c.to, got)
+		}
 	}
-	code, out, errOut := migrateCommand(t, newApp, "down", "product", "20260901120000")
-	if code == 0 || strings.Contains(out, "reversed") {
-		t.Fatalf("down past an irreversible migration: %d\n%s%s", code, out, errOut)
-	}
-	if !strings.Contains(errOut, "20260903120000") {
-		t.Errorf("the refusal does not name the irreversible migration: %s", errOut)
-	}
-	if got := db.Versions("schema_migrations"); !slices.Equal(got, []int64{20260901120000, 20260902120000, 20260903120000}) {
-		t.Errorf("after a refused down: %v", got)
+	for _, c := range []tc{
+		{"below its version", "20260901120000", true},
+		{"to its own version", "20260903120000", false},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 	if err := kit.Irreversible(t.Context(), nil); !errs.HasCode(err, kit.CodeMigrationIrreversible) {
 		t.Errorf("kit.Irreversible: %v", err)
