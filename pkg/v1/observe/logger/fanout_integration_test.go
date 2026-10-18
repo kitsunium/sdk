@@ -3,8 +3,7 @@
 package logger_test
 
 import (
-	"runtime"
-	"runtime/debug"
+	"fmt"
 	"testing"
 
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
@@ -35,9 +34,9 @@ import (
 // width 2 stays at the baseline — the three-branch escape threshold showing
 // through, which is also why width 2 is kept in the table.
 //
-// Carries //go:build !race (testing.AllocsPerRun reports +1 under -race) and
-// no t.Parallel (AllocsPerRun reads a process-global counter, so a concurrent
-// sibling would corrupt the measurement). Run via
+// Carries //go:build !race (the race detector allocates on its own) and no
+// t.Parallel (mallocsOver, in allocwindow_test.go, sets the process's profile
+// rate, collector and GOMAXPROCS for its window). Run via
 // `bazel test --config=pure //pkg/v1/observe/logger:logger_test`, covered by the
 // race-off alloc lane in tools/alloc-lane-targets.txt (rule 12).
 // fanoutRuns is the iteration count both arms share. It is large enough that a
@@ -70,46 +69,6 @@ const allocRuntimeWarmup int = 30000
 // allocSink defeats dead-code elimination in the allocation probes of this
 // package's race-off files.
 var allocSink any
-
-// mallocsOver totals the allocations f performs across runs, and exists because
-// testing.AllocsPerRun cannot see an amortised one. Its last line is
-// `float64(mallocs / uint64(runs))` — an INTEGER division, documented in the
-// stdlib as being there so a caller can write `== 1` instead of `< 2`. Any
-// defect allocating less than once per call therefore reports exactly 0.0: six
-// allocations across five hundred calls is "0". A slice that doubles is exactly
-// such a defect, and the sibling guard in
-// internal/service/observe/logger/writer/levelgate found one that way, with a mutation that
-// PASSED against AllocsPerRun.
-//
-// A total is not subject to that rounding. The bookkeeping mirrors
-// AllocsPerRun's otherwise — pin GOMAXPROCS so no other P allocates into the
-// count, warm up so lazily-initialised state is not attributed to the loop, and
-// read the counter either side. No runtime.GC(): an explicit collection returns
-// before its sweep finishes, so the residual work allocates INSIDE the window.
-func mallocsOver(runs int, f func()) uint64 {
-	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
-	//: collection is held off for the window, because this assertion is
-	//: DIFFERENTIAL and a collection is not. Every emit here draws its builder
-	//: from a sync.Pool, and a collection DRAINS that pool, so the next few
-	//: Build calls miss and cost about seven extra allocations — measured, in
-	//: roughly one window in ten. Landing in the width-N arm and not in the
-	//: width-1 baseline, that is a seven-allocation difference and a false
-	//: failure; landing in both, it cancels. Neither is a measurement.
-	//: The argument is evaluated now and the previous rate restored on return.
-	//: NOT runtime.GC(), which returns before its sweep finishes and so
-	//: allocates INSIDE the window it was meant to clear.
-	defer debug.SetGCPercent(debug.SetGCPercent(-1))
-	//: warm up so first-call initialisation is not counted as steady state.
-	f()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	for range runs {
-		f()
-	}
-	runtime.ReadMemStats(&after)
-	//: Mallocs is cumulative and monotonic, so the difference is the total.
-	return after.Mallocs - before.Mallocs
-}
 
 // warmRuntimeCaches emits through a Logger nothing else will touch, so neither
 // measured arm pays for the runtime's lazily-built caches.
@@ -164,11 +123,13 @@ func TestFanoutWidthAddsNoAllocation(t *testing.T) {
 		}
 		//: warm the pool so the measured runs hit the recycled-builder path.
 		logger.Build(lg, logger.LevelInfo).Str("warm", "up").Send(ctx, "warm")
-		return mallocsOver(fanoutRuns, func() {
+		got := mallocsOver(fanoutRuns, func() {
 			b := logger.Build(lg, logger.LevelInfo).Str("k1", "v1").Int("n1", 1)
 			allocSink = b
 			b.Send(ctx, "msg")
 		})
+		reportForeign(t, fmt.Sprintf("emits at width %d", width), got)
+		return got.own
 	}
 	//: before either arm, and never through a Logger an arm measures.
 	warmRuntimeCaches(t)

@@ -5,8 +5,6 @@ package trace_test
 import (
 	"net/http"
 	"net/http/httptest"
-	"runtime"
-	"runtime/debug"
 	"testing"
 
 	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
@@ -22,7 +20,7 @@ const allocRuns int = 500
 // allocRuntimeWarmup is how many requests warmRuntimeCaches spends on a
 // THROWAWAY handler before any window is measured. It is not about this package.
 //
-// The rationale is recorded in full in internal/service/observe/logger/writer/file's copy: the
+// The rationale is recorded in full in internal/service/observe/logger/writer/file: the
 // runtime builds its per-call-site interface-switch caches LAZILY, gated behind
 // `cheaprand()&1023 != 0`, so about one miss in 1024 pays for the build and
 // buildInterfaceSwitchCache allocates. The result is a handful of allocations
@@ -54,35 +52,6 @@ const (
 	// is what the overwhelming majority of its requests pay.
 	allocBudgetUnsampled int = 10
 )
-
-// mallocsOver reports the TOTAL number of heap allocations f performs across
-// runs calls, rather than the per-call average.
-//
-// testing.AllocsPerRun is deliberately not used, and the reason is recorded in
-// full in internal/service/observe/logger/writer/levelgate's copy of this helper: its last line
-// divides as INTEGERS, so any defect allocating less than once per call reports
-// exactly 0.0.
-func mallocsOver(runs int, f func()) uint64 {
-	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
-	//: collection is held off for the window. A collection is not free of
-	//: allocations from the measured goroutine's point of view; it drains
-	//: caches and forces the next calls to miss. The argument is evaluated now
-	//: and the previous rate restored on return.
-	defer debug.SetGCPercent(debug.SetGCPercent(-1))
-	//: warm up so first-call initialisation is not counted as steady state.
-	f()
-	var before, after runtime.MemStats
-	//: no runtime.GC() here, and that is deliberate: an explicit collection
-	//: returns before its sweep is finished, so the residual work allocates
-	//: INSIDE the window below. testing.AllocsPerRun does not call it either.
-	runtime.ReadMemStats(&before)
-	for range runs {
-		f()
-	}
-	runtime.ReadMemStats(&after)
-	//: Mallocs is cumulative and monotonic, so the difference is the total.
-	return after.Mallocs - before.Mallocs
-}
 
 // warmRuntimeCaches pays for the runtime's lazily-built interface-switch caches
 // on a handler no budget is measured through. See allocRuntimeWarmup.
@@ -185,13 +154,14 @@ func runAllocBudgetCase(t *testing.T, name string, sampler coretrace.Sampler, bu
 	handler := tracedAllocHandler(sampler)
 	writer := &allocWriter{header: make(http.Header, 4)}
 	request := httptest.NewRequest(http.MethodGet, "/v1/orders/42?page=2", nil)
-	total := mallocsOver(allocRuns, func() {
+	got := mallocsOver(allocRuns, func() {
 		handler.ServeHTTP(writer, request)
 	})
+	reportForeign(t, name, got)
 	//: the ceiling is per request, so the total is compared against runs × budget.
-	if total > uint64(allocRuns*budget) {
+	if got.own > uint64(allocRuns*budget) {
 		t.Errorf("%s performed %d allocations over %d requests (%.2f per request), budget %d",
-			name, total, allocRuns, float64(total)/float64(allocRuns), budget)
+			name, got.own, allocRuns, float64(got.own)/float64(allocRuns), budget)
 	}
 }
 
@@ -227,11 +197,12 @@ func TestRecordingAtCapacityAllocatesNothing(t *testing.T) {
 	if recorder.Len() != capacity {
 		t.Fatalf("the recorder holds %d spans, want %d — the window would measure appends", recorder.Len(), capacity)
 	}
-	total := mallocsOver(allocRuns, func() {
+	got := mallocsOver(allocRuns, func() {
 		sink(value)
 	})
-	if total != 0 {
-		t.Errorf("recording %d spans into a full recorder performed %d allocations, want 0", allocRuns, total)
+	reportForeign(t, "spans recorded into a full recorder", got)
+	if got.own != 0 {
+		t.Errorf("recording %d spans into a full recorder performed %d allocations, want 0", allocRuns, got.own)
 	}
 	//: and the refusals were counted, or the window measured a no-op.
 	if recorder.Dropped() < uint64(allocRuns) {

@@ -26,8 +26,6 @@ package file_test
 import (
 	"context"
 	"path/filepath"
-	"runtime"
-	"runtime/debug"
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
@@ -67,49 +65,6 @@ const allocRuns int = 500
 // same blindness the integer division produces and the reason this file counts
 // totals at all.
 const allocRuntimeWarmup int = 30000
-
-// mallocsOver reports the TOTAL number of heap allocations f performs across
-// runs calls, rather than the per-call average.
-//
-// testing.AllocsPerRun is deliberately not used, and the reason is recorded in
-// full in internal/service/observe/logger/writer/levelgate's copy of this helper: its last
-// line divides as INTEGERS, so any defect allocating less than once per call
-// reports exactly 0.0. A mutation that appended to a slice on every call was
-// measured passing against it. A total is not subject to that rounding.
-func mallocsOver(runs int, f func()) uint64 {
-	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
-	//: collection is held off for the window: a collection is not free of
-	//: allocations from the measured goroutine's point of view, since it drains
-	//: pools and forces the next calls to miss.
-	//:
-	//: It is NOT what fixed this guard's flake, and the record is kept because
-	//: the wrong hypothesis is worth as much as the right one. This test failed
-	//: 2 runs in 5 under Bazel's sandbox at "500 flushes performed 6
-	//: allocations" while passing 12 of 12 locally on tmpfs AND ext4; a
-	//: collection was the obvious suspect, holding it off changed nothing, and
-	//: the cause was the runtime's lazily-built interface-switch cache — see
-	//: allocRuntimeWarmup. The parade below is kept on its own merits.
-	//: The argument is evaluated now and the previous rate restored on return.
-	//: NOT runtime.GC(), which returns before its sweep finishes and therefore
-	//: allocates INSIDE the window it was meant to clear.
-	defer debug.SetGCPercent(debug.SetGCPercent(-1))
-	//: warm up so first-call initialisation is not counted as steady state.
-	f()
-	var before, after runtime.MemStats
-	//: no runtime.GC() here, and that is deliberate: an explicit collection
-	//: returns before its sweep is finished, so the residual work allocates
-	//: INSIDE the window below. A first draft of this helper called it and
-	//: reported exactly 1 stray allocation in 10 of 12 runs; the allocation
-	//: profile attributed it to the runtime.GC() line. testing.AllocsPerRun
-	//: does not call GC either, for the same reason.
-	runtime.ReadMemStats(&before)
-	for range runs {
-		f()
-	}
-	runtime.ReadMemStats(&after)
-	//: Mallocs is cumulative and monotonic, so the difference is the total.
-	return after.Mallocs - before.Mallocs
-}
 
 // allocNoopSink is the control transport: it accepts the bytes and does
 // nothing, so an emit through it costs the handler and the encoder alone.
@@ -170,7 +125,8 @@ func allocSink(t *testing.T, name string) corelogger.Sink {
 // the day a per-writer feature has to touch the bytes, here
 // `return levelgate.New(&copySink{inner: base}, c.MinLevel)` with a copySink
 // whose Write does `s.inner.Write(ctx, r, append([]byte(nil), p...))` — fails
-// both at `500 writes through the file writer performed 500 allocations, want 0`
+// both at `500 writes through the file writer performed 500 allocations on
+// their own stack (500 process-wide), want 0`
 // and at `500 emits through the file writer performed 1000 allocations against
 // 500 with no transport; the writer must add none`. The second line is the
 // interesting one: it is the same defect stated as what a consumer would
@@ -183,36 +139,44 @@ func TestFileWriterAddsNoAllocationToAnEmit(t *testing.T) {
 	rec := corelogger.RecordEvent{Level: level.Info}
 	line := []byte("2026-09-10T20:15:11.482Z INFO msg=\"request served\" status=200\n")
 
-	if got := mallocsOver(allocRuns, func() {
+	writes := mallocsOver(allocRuns, func() {
 		if _, err := sink.Write(ctx, rec, line); err != nil {
 			t.Fatalf("write: %v", err)
 		}
-	}); got != 0 {
-		t.Errorf("%d writes through the file writer performed %d allocations, want 0", allocRuns, got)
+	})
+	reportForeign(t, "writes", writes)
+	if writes.own != 0 {
+		t.Errorf("%d writes through the file writer performed %d allocations on their own stack (%d process-wide), want 0",
+			allocRuns, writes.own, writes.process)
 	}
 
 	//: fsync is expensive enough to hide an allocation behind; it must not.
-	if got := mallocsOver(allocRuns, func() {
+	flushes := mallocsOver(allocRuns, func() {
 		if err := sink.Flush(ctx); err != nil {
 			t.Fatalf("flush: %v", err)
 		}
-	}); got != 0 {
-		t.Errorf("%d flushes through the file writer performed %d allocations, want 0", allocRuns, got)
+	})
+	reportForeign(t, "flushes", flushes)
+	if flushes.own != 0 {
+		t.Errorf("%d flushes through the file writer performed %d allocations on their own stack (%d process-wide), want 0",
+			allocRuns, flushes.own, flushes.process)
 	}
 
 	//: the same emit twice: once with no transport, once with this writer.
 	bare := emitCost(t, allocNoopSink{})
 	through := emitCost(t, allocSink(t, "emit.log"))
-	if through != bare {
+	reportForeign(t, "emits with no transport", bare)
+	reportForeign(t, "emits through the file writer", through)
+	if through.own != bare.own {
 		t.Errorf("%d emits through the file writer performed %d allocations against %d with no transport; the writer must add none",
-			allocRuns, through, bare)
+			allocRuns, through.own, bare.own)
 	}
 }
 
 // emitCost totals the allocations of allocRuns full emits through sink: the
 // text encoder and the generic handler above it, which is the shape a consumer
 // runs.
-func emitCost(t *testing.T, sink corelogger.Sink) uint64 {
+func emitCost(t *testing.T, sink corelogger.Sink) windowCount {
 	t.Helper()
 	h, err := servicelogger.NewHandler(encoder.NewText(clock.System), sink, level.Info)
 	if err != nil {

@@ -64,6 +64,7 @@ alias(
 go_test(
     name = "token_test",
     srcs = [
+        "allocwindow_test.go",
         "api_gen_test.go",
         "claims_codec_external_test.go",
         "encoding_internal_test.go",

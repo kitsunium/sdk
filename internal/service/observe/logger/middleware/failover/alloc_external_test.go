@@ -4,8 +4,7 @@ package failover_test
 
 import (
 	"context"
-	"runtime"
-	"runtime/debug"
+	"fmt"
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
@@ -75,45 +74,11 @@ var allocSink int
 // than depth 1 while depth 2 stays at the baseline, which is the three-branch
 // escape threshold showing through.
 //
-// Carries //go:build !race (testing.AllocsPerRun reports +1 under -race) and
-// no t.Parallel (AllocsPerRun reads a process-global counter). It runs in
+// Carries //go:build !race (the race detector allocates on its own) and no
+// t.Parallel (mallocsOver sets the process's profile rate, collector and
+// GOMAXPROCS for its window). It runs in
 // exactly one lane — `make test-alloc`, via the entry this commit adds to
 // tools/alloc-lane-targets.txt (rule 12).
-// mallocsOver totals the allocations f performs across runs, because
-// testing.AllocsPerRun cannot see an amortised one: its last line is
-// `float64(mallocs / uint64(runs))`, an INTEGER division the stdlib documents
-// as being there so a caller can write `== 1` instead of `< 2`. Anything
-// allocating less than once per call reports exactly 0.0 — measured, an
-// `append` to a doubling slice over 2 000 calls reports "0". A total does not
-// round: the sibling guard in pkg/v1/observe/logger catches that same shape at 2 002
-// against 2 012.
-//
-// The bookkeeping mirrors AllocsPerRun's otherwise — pin GOMAXPROCS so no other
-// P allocates into the count, warm up so lazily-initialised state is not
-// attributed to the loop, read the counter either side. Deliberately no
-// runtime.GC(): a collection returns before its sweep finishes, so the residual
-// work allocates INSIDE the window.
-func mallocsOver(runs int, f func()) uint64 {
-	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
-	//: collection held off for the window, for the reason the sibling guard in
-	//: pkg/v1/observe/logger states at length: this assertion is DIFFERENTIAL, and a
-	//: collection landing in one arm and not the other is a difference that is
-	//: not a measurement. Nothing on this path is pooled, so the exposure is
-	//: smaller here than there — it is taken anyway, so the two guards behind
-	//: the same claim cannot drift into being measured differently.
-	defer debug.SetGCPercent(debug.SetGCPercent(-1))
-	//: warm up so first-call initialisation is not counted as steady state.
-	f()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	for range runs {
-		f()
-	}
-	runtime.ReadMemStats(&after)
-	//: Mallocs is cumulative and monotonic, so the difference is the total.
-	return after.Mallocs - before.Mallocs
-}
-
 // warmRuntimeCaches drives a chain nothing else will touch, so neither measured
 // arm pays for the runtime's lazily-built caches.
 func warmRuntimeCaches(t *testing.T, payload []byte) {
@@ -163,7 +128,7 @@ func TestChainDepthAddsNoAllocationOnTheHealthyPath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("New(depth=%d) err = %v", depth, err)
 		}
-		return mallocsOver(failoverRuns, func() {
+		got := mallocsOver(failoverRuns, func() {
 			n, werr := sink.Write(ctx, corelogger.RecordEvent{}, payload)
 			//: read both results so the call cannot be optimised away.
 			if werr != nil {
@@ -171,6 +136,8 @@ func TestChainDepthAddsNoAllocationOnTheHealthyPath(t *testing.T) {
 			}
 			allocSink = n
 		})
+		reportForeign(t, fmt.Sprintf("writes at depth %d", depth), got)
+		return got.own
 	}
 	//: fewestAllocs is the least writeAllocs reports over allocRounds rounds,
 	//: each on a chain of its own: a stray allocation the runtime makes once

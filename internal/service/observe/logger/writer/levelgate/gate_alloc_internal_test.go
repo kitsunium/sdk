@@ -23,8 +23,6 @@ package levelgate
 
 import (
 	"context"
-	"runtime"
-	"runtime/debug"
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
@@ -42,52 +40,6 @@ const allocRuns int = 500
 var allocPayload = []byte(
 	`2026-09-10T20:15:11.482Z DEBUG msg="cache lookup" key=session:41 hit=false` + "\n",
 )
-
-// mallocsOver reports the TOTAL number of heap allocations f performs across
-// runs calls, rather than the per-call average.
-//
-// testing.AllocsPerRun is deliberately not used here, and the reason is a
-// mutation that PASSED against it. Its last line is
-// `float64(mallocs / uint64(runs))` — an INTEGER division, documented in the
-// stdlib as being there so a caller can write `== 1` instead of `< 2`. Any
-// defect allocating less than once per call therefore reports exactly 0.0, and
-// `s.dropped = append(s.dropped, r.Level)` on the drop path is exactly such a
-// defect: appending to a growing slice allocates on a doubling step and not on
-// the calls in between. AllocsPerRun saw 500 drops, 11 allocations, and
-// reported "0".
-//
-// A total is not subject to that rounding: 11 is not 0. The bookkeeping mirrors
-// AllocsPerRun's otherwise — pin GOMAXPROCS so no other P allocates into the
-// count, warm up so lazily-initialised state is not attributed to the loop, and
-// read the counter either side.
-func mallocsOver(runs int, f func()) uint64 {
-	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
-	//: collection is held off for the window — taken for consistency with the two sibling writer guards: this
-	//: window is the cheapest of the three and the least exposed, which is
-	//: exactly why a divergence here would be found last.
-	//: A collection is not free of allocations from the measured goroutine's
-	//: point of view; it drains pools and forces the next calls to miss.
-	//: The argument is evaluated now and the previous rate restored on return.
-	//: NOT runtime.GC(), which returns before its sweep finishes and therefore
-	//: allocates INSIDE the window it was meant to clear.
-	defer debug.SetGCPercent(debug.SetGCPercent(-1))
-	//: warm up so first-call initialisation is not counted as steady state.
-	f()
-	var before, after runtime.MemStats
-	//: no runtime.GC() here, and that is deliberate: an explicit collection
-	//: returns before its sweep is finished, so the residual work allocates
-	//: INSIDE the window below. A first draft of this helper called it and
-	//: reported exactly 1 stray allocation in 10 of 12 runs; the allocation
-	//: profile attributed it to the runtime.GC() line. testing.AllocsPerRun
-	//: does not call GC either, for the same reason.
-	runtime.ReadMemStats(&before)
-	for range runs {
-		f()
-	}
-	runtime.ReadMemStats(&after)
-	//: Mallocs is cumulative and monotonic, so the difference is the total.
-	return after.Mallocs - before.Mallocs
-}
 
 // TestGateAllocatesNothingInEitherDirection is the guard behind this package's
 // reason to exist.
@@ -111,27 +63,32 @@ func mallocsOver(runs int, f func()) uint64 {
 // Six, not five hundred: the slice doubles, so the allocation happens on the
 // growth steps and not on the calls between them. That is the whole reason this
 // test counts a TOTAL rather than calling testing.AllocsPerRun, which reported
-// 0.0 for this very mutation and let the guard pass — see mallocsOver.
+// 0.0 for this very mutation and let the guard pass — see mallocsOver, in
+// allocwindow_test.go, which counts that total on the window's own stack.
 func TestGateAllocatesNothingInEitherDirection(t *testing.T) {
 	ctx := context.Background()
 	//: a real floor, so New installs the gate rather than handing inner back.
 	gate := New(noopSink{}, level.Error)
 
 	below := corelogger.RecordEvent{Level: level.Debug}
-	if got := mallocsOver(allocRuns, func() {
+	dropped := mallocsOver(allocRuns, func() {
 		if n, err := gate.Write(ctx, below, allocPayload); err != nil || n != len(allocPayload) {
 			t.Fatalf("dropping a record reported (%d, %v), want (%d, nil)", n, err, len(allocPayload))
 		}
-	}); got != 0 {
-		t.Errorf("%d dropped records performed %d allocations, want 0", allocRuns, got)
+	})
+	reportForeign(t, "dropped records", dropped)
+	if dropped.own != 0 {
+		t.Errorf("%d dropped records performed %d allocations, want 0", allocRuns, dropped.own)
 	}
 
 	above := corelogger.RecordEvent{Level: level.Error}
-	if got := mallocsOver(allocRuns, func() {
+	passed := mallocsOver(allocRuns, func() {
 		if n, err := gate.Write(ctx, above, allocPayload); err != nil || n != len(allocPayload) {
 			t.Fatalf("passing a record reported (%d, %v), want (%d, nil)", n, err, len(allocPayload))
 		}
-	}); got != 0 {
-		t.Errorf("%d records passed by the gate performed %d allocations, want 0", allocRuns, got)
+	})
+	reportForeign(t, "passed records", passed)
+	if passed.own != 0 {
+		t.Errorf("%d records passed by the gate performed %d allocations, want 0", allocRuns, passed.own)
 	}
 }

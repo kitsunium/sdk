@@ -4,9 +4,6 @@ package logger_test
 
 import (
 	"context"
-	"math"
-	"runtime"
-	"runtime/debug"
 	"testing"
 
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
@@ -19,71 +16,10 @@ import (
 // see at all.
 const traceRuns int = 2000
 
-// traceWindows is how many windows traceMallocsOver measures, keeping the
-// smallest: enough for the runtime's own allocations to miss one of them.
-const traceWindows int = 5
-
 // allocProbeAttrs is pre-built outside the measured closure so the variadic
 // slice is not re-allocated per call — the emit paths below then differ only
 // in whether a span is in scope.
 var allocProbeAttrs = []logger.Attr{logger.String("k", "v")}
-
-// traceMallocsOver reports the TOTAL heap allocations f performs across runs
-// calls, holding the garbage collector off for the duration of the window.
-//
-// It totals rather than averaging for the reason mallocsOver in
-// fanout_integration_test.go gives: testing.AllocsPerRun ends in
-// `float64(mallocs / uint64(runs))`, an INTEGER division, so every count from
-// exactly one allocation per call up to just under two reports 1.0 and anything
-// under one reports 0.0.
-//
-// It is a SECOND helper rather than a call to that one because of the GC, and
-// this file is the only place in the package where that matters. The assertions
-// below are absolute — exactly one allocation per emit, no more — while the
-// fan-out guard compares two totals measured the same way. A collection landing
-// inside a window breaks the absolute form and not the differential one: it
-// drains the sync.Pool the Builder comes from, so the next few Build calls miss
-// and allocate. Measured, with the whole package running so the heap is near
-// its trigger: 2 007 allocations over 2 000 emits on the one window in ten that
-// a collection ran through, and 2 000 exactly on the other nine — and the fail
-// floated between the in-span and the out-of-span arm from run to run, which is
-// what a flaky gate looks like before anyone has diagnosed it.
-//
-// Holding the collector off is NOT the runtime.GC() the sibling helpers refuse,
-// and the difference is where the work lands. runtime.GC() returns before its
-// sweep has finished, so the residual work allocates INSIDE the window — a
-// first draft of the sibling helper did exactly that and reported one stray
-// allocation in 10 of 12 runs. debug.SetGCPercent starts no collection: it
-// waits out any mark already in flight and then stops new ones, and it is taken
-// on entry, before the warm-up and long before the counter is read. The window
-// allocates about 100 KB, so nothing here depends on collecting it, and the
-// previous rate is restored on the way out.
-func traceMallocsOver(runs int, f func()) uint64 {
-	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
-	//: the argument is evaluated now and the result restored on return, so the
-	//: window runs with collection off and the process leaves as it arrived.
-	defer debug.SetGCPercent(debug.SetGCPercent(-1))
-	//: warm the recycler so the measured runs hit the pooled builder.
-	f()
-	//: Mallocs counts every goroutine's allocations, and the runtime or a timer
-	//: can allocate inside a window even at GOMAXPROCS 1 — on macOS and Windows
-	//: often enough to fail an exact count. Such noise only ever ADDS, so the
-	//: smallest of a few windows is still the exact cost of f: a regression
-	//: shows in every window, and in their minimum.
-	var best uint64 = math.MaxUint64
-	//: each window measures the same runs; the smallest is kept.
-	for range traceWindows {
-		var before, after runtime.MemStats
-		runtime.ReadMemStats(&before)
-		for range runs {
-			f()
-		}
-		runtime.ReadMemStats(&after)
-		//: Mallocs is cumulative and monotonic, so the difference is the total.
-		best = min(best, after.Mallocs-before.Mallocs)
-	}
-	return best
-}
 
 // TestT34TraceCorrelationAddsNoAllocation is the hard constraint of the trace
 // correlation work: the logger's steady-state cost is EXACTLY one heap
@@ -110,8 +46,14 @@ func traceMallocsOver(runs int, f func()) uint64 {
 // `traced != plain` was worse still: both sides round the same way, so an extra
 // allocation charged only to the in-span path stayed invisible until it reached
 // one per record. Against traceRuns the first assertion means what it says —
-// exactly one per emit, no more and no fewer. What that exactness costs is one
-// extra precaution, and it is stated where it is taken: see traceMallocsOver.
+// exactly one per emit, no more and no fewer. What that exactness costs is
+// stated where it is paid, in allocwindow_test.go's mallocsOver: the collector
+// is held off for the window, since a collection drains the sync.Pool the
+// Builder comes from (measured, 2 007 allocations over 2 000 emits on the one
+// window in ten a collection ran through), and only the window's own stack is
+// counted, since the runtime or a timer can allocate beside it even at
+// GOMAXPROCS 1 — on macOS and Windows often enough to fail an exact count,
+// which this file used to answer with the smallest of five windows.
 //
 // MUTATION-CHECKED. Giving pkg/v1/observe/logger a package-level
 // `seenTraces [][corelogger.TraceIDLen]byte` and appending the extracted
@@ -134,8 +76,8 @@ func traceMallocsOver(runs int, f func()) uint64 {
 //
 // Carries //go:build !race (the race detector allocates shadow state on every
 // memory access, so any malloc count under -race measures the detector) and no
-// t.Parallel (the malloc counter is process-global, so a concurrent sibling
-// would corrupt the measurement). It therefore runs in exactly one lane, the
+// t.Parallel (mallocsOver sets the process's profile rate, collector and
+// GOMAXPROCS for its window). It therefore runs in exactly one lane, the
 // race-off allocation lane, whose target list (tools/alloc-lane-targets.txt)
 // already covers //pkg/v1/observe/logger:logger_test — root CLAUDE.md rule 12.
 func TestT34TraceCorrelationAddsNoAllocation(t *testing.T) {
@@ -170,7 +112,9 @@ func TestT34TraceCorrelationAddsNoAllocation(t *testing.T) {
 	}
 	//: measure one path under one context; the helper warms the recycler.
 	measure := func(emit func(context.Context), ctx context.Context) uint64 {
-		return traceMallocsOver(traceRuns, func() { emit(ctx) })
+		got := mallocsOver(traceRuns, func() { emit(ctx) })
+		reportForeign(t, "emits", got)
+		return got.own
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
