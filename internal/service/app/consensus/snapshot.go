@@ -165,16 +165,27 @@ func (n *Node) cutPending() {
 // writeSnapshot encodes a captured snapshot into a fresh sink, discarding a
 // stale spool of the same id first, and commits it; on any failure the sink
 // is aborted and nothing is published. It always releases the capture and
-// clears the in-flight flag, so the next cut can run.
+// clears the in-flight flag, so the next cut can run. A failed write clears
+// the coalesced trigger with it, under the same lock: the next trigger tries
+// again (cutFailed), and only one that falls after the flag is cleared
+// survives.
 func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMetaValue, extra io.Writer) error {
 	defer snap.Release()
+	err := n.publishSnapshot(snap, meta, extra)
 	state := &n.snapState
-	done := func() {
-		state.mu.Lock()
-		state.inFlight = false
-		state.mu.Unlock()
+	state.mu.Lock()
+	state.inFlight = false
+	if err != nil {
+		state.pending = false
 	}
-	defer done()
+	state.mu.Unlock()
+	return err
+}
+
+// publishSnapshot is writeSnapshot's write: the sink, the encoded stream,
+// the commit, then retention and compaction (afterCut).
+func (n *Node) publishSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMetaValue, extra io.Writer) error {
+	state := &n.snapState
 	sink, spooled, err := n.cfg.Snapshots.Create(meta.ID, meta)
 	if err != nil {
 		return err

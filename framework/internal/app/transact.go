@@ -183,9 +183,10 @@ type txn struct {
 	release func()
 	// undo are its local writes, oldest first: what a rollback writes back.
 	undo []undoStep
-	// undid counts, per store, the writes its own rollbacks — a savepoint's
-	// — wrote back: none of them undoes a write another transaction read.
-	undid map[string]uint64
+	// undid counts, per store and slot of undoneCounts, the writes its own
+	// rollbacks — a savepoint's — wrote back: none of them undoes a write
+	// another transaction read.
+	undid map[undoneSlot]uint64
 	// held are the effects waiting for the commit, in the order they were
 	// made.
 	held []heldEffect
@@ -305,7 +306,7 @@ func (t *txn) rollback(ctx context.Context, u *unit) {
 			logger.Warn(ctx, a.log, "a rolled back write could not be undone", logger.String("store", step.store),
 				logger.String("error", describeText(err)))
 		}
-		t.counted(a, step.store)
+		t.counted(a, step.store, step.key)
 	}
 	for _, e := range dropped {
 		if e.drop != nil {
@@ -574,7 +575,10 @@ func retell(ctx context.Context, fn func()) {
 // undoStep writes back what one local write replaced.
 type undoStep struct {
 	// store names the store, for a log line.
-	store   string
+	store string
+	// key is the entity the write wrote, "" when the funnel did not say
+	// (undoKeyed): its write back then counts for every entity of the store.
+	key     string
 	restore func(ctx context.Context) error
 }
 

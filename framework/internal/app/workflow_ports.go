@@ -41,7 +41,8 @@ func (p workflowPort[E, S]) Key(d plug.WorkflowEntityValue) string {
 
 // Get reads the entity key; false when the store holds none. A read outside
 // any transaction — the engine's loop checking a guard — is remembered for
-// the replacement that may follow it (Replace).
+// the replacement that may follow it (Replace); one that finds nothing, or
+// fails, is not, since no replacement follows it.
 func (p workflowPort[E, S]) Get(ctx context.Context, key string) (plug.WorkflowEntityValue, bool, error) {
 	s := p.w.store
 	p.w.reads.remember(ctx, &s.storeCore, key)
@@ -53,6 +54,9 @@ func (p workflowPort[E, S]) Get(ctx context.Context, key string) (plug.WorkflowE
 		e = as[E](v)
 	} else {
 		e, err = s.read(ctx, key)
+	}
+	if err != nil {
+		p.w.reads.take(key)
 	}
 	if ke, ok := errors.AsType[*Error](err); ok && ke.Code == WireNotFound {
 		return p.w.entityValue(e), false, nil
@@ -126,8 +130,8 @@ func (s *storeCore) transitionWrite(ctx context.Context, v any, mode plug.WriteM
 		sp.end(err)
 		return false, err
 	}
-	ctx = s.outside(ctx)
 	key := s.keyOf(v)
+	ctx = undoKeyed(s.outside(ctx), key)
 	raw := s.writeTransition(ctx, eng, v, mode, state)
 	if err = s.said(raw, key, ""); err == nil {
 		s.notify(ctx, key, false)

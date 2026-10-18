@@ -437,14 +437,19 @@ has the map): before writing something generic here, look for it there.
 - **A loop's transition is never decided on a rolled back write.** The
   engine's loop reads an entity to check its guard outside any transaction,
   before the writer turn, and a local transaction's writes land before its
-  commit: `loopReads` remembers, per key, the store's count of writes a
-  rollback wrote back (`undoneCounts`, `txn.counted`) as the read began, and
-  the replacement that follows, once its transaction holds the turn, refuses
-  it as `Unavailable` when another transaction's rollback moved it — the loop
-  tries again on what the store holds. A savepoint of the transition's own
-  transaction does not count (`txn.undid`)
-  (`TestALoopTransitionNeverWritesBackARolledBackWrite`, the storetest case
-  `hooks-after-the-commit`).
+  commit: `loopReads` remembers, per key, the count of writes a rollback
+  wrote back of that entity (`undoneCounts`: per store, 64 slots of a key's
+  FNV-1a hash, slot 0 for a write whose funnel named no key — `undoKeyed`
+  marks it, `undoStep.key` keeps it, `txn.counted` counts it) as the read
+  began, and the replacement that follows, once its transaction holds the
+  turn, refuses it as `Unavailable` when another transaction's rollback of
+  that entity moved it — the loop tries again on what the store holds. A
+  savepoint of the transition's own transaction does not count (`txn.undid`);
+  a read is forgotten by its replacement, a read that finds nothing, the
+  entity's deletion (`forget`) and the workflow's stop
+  (`TestALoopTransitionNeverWritesBackARolledBackWrite`,
+  `TestALoopTransitionStandsOverAnotherEntitysRollback`,
+  `TestALoopsReadsAreForgotten`, the storetest case `hooks-after-the-commit`).
 - **A watch that hears its own stores never hears itself.** With
   `app.OwnStores()`, a watch is fed by its own module's stores too; its
   handler runs in a context marked with its watch (`handling`), and a funnel

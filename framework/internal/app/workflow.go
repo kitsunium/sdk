@@ -1033,8 +1033,10 @@ func (w *WorkflowService[E, S]) changed(key string) {
 	}
 }
 
-// forget tells the engine an entity was deleted, and streams the census.
+// forget tells the engine an entity was deleted, forgets the loop's read of
+// it, and streams the census.
 func (w *WorkflowService[E, S]) forget(key string) {
+	w.reads.take(key)
 	m, a := w.engine(), w.app()
 	if m == nil || a == nil {
 		return
@@ -1046,7 +1048,8 @@ func (w *WorkflowService[E, S]) forget(key string) {
 }
 
 // stop takes the workflow's own hooks off its store — another workflow over
-// the same store keeps its — and lets go of the engine.
+// the same store keeps its —, lets go of the engine, and forgets the loop's
+// reads.
 func (w *WorkflowService[E, S]) stop(_ context.Context, _ *App) error {
 	w.mu.Lock()
 	unwatch := w.unwatch
@@ -1055,6 +1058,7 @@ func (w *WorkflowService[E, S]) stop(_ context.Context, _ *App) error {
 	if unwatch != nil {
 		unwatch()
 	}
+	w.reads.clear()
 	return nil
 }
 

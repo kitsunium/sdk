@@ -320,7 +320,7 @@ func (s *storeCore) remove(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	ctx = s.outside(ctx)
+	ctx = undoKeyed(s.outside(ctx), key)
 	err = s.said(eng.Delete(ctx, key), key, "")
 	if err == nil {
 		s.notify(ctx, key, true)
@@ -466,8 +466,8 @@ func (s *storeCore) write(ctx context.Context, v any, mode plug.WriteMode) error
 	if err != nil {
 		return err
 	}
-	ctx = s.outside(ctx)
 	key := s.keyOf(v)
+	ctx = undoKeyed(s.outside(ctx), key)
 	d, err := s.docOf(v)
 	if err == nil {
 		err = eng.Write(ctx, d, mode)
@@ -504,7 +504,7 @@ func (s *storeCore) modify(ctx context.Context, key string, fn func(v any) (any,
 	if err != nil {
 		return nil, err
 	}
-	ctx = s.outside(ctx)
+	ctx = undoKeyed(s.outside(ctx), key)
 	d, err := eng.Update(ctx, key, s.changingDoc(fn))
 	var v any
 	if err == nil {

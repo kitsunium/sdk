@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -116,6 +117,98 @@ func TestACoalescedCutIsMade(t *testing.T) {
 			t.Fatalf("the node holds %d snapshots, the newest at %d, none at the applied index %d", len(metas), newest, last)
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// failingCommitSnapshots is a gated snapshot store whose Commit fails, not
+// as a failed sync: the node logs it and goes on.
+type failingCommitSnapshots struct{ gatedSnapshots }
+
+func (s failingCommitSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error) {
+	sink, off, err := s.gatedSnapshots.Create(id, meta)
+	if err != nil {
+		return nil, 0, err
+	}
+	return failingCommitSink{sink}, off, nil
+}
+
+// failingCommitSink is a spool whose Commit reports a corrupt snapshot.
+type failingCommitSink struct{ coreconsensus.SnapshotSink }
+
+func (failingCommitSink) Commit(coreconsensus.SnapshotMetaValue) error {
+	return snapshotCorrupt("refused by the test")
+}
+
+// A trigger coalesced during a cut whose write then fails is cleared with
+// the in-flight flag: the next trigger tries again, and the failure does not
+// leave a stale one that would ask for a cut nothing triggered since.
+func TestAFailedCutClearsTheCoalescedTrigger(t *testing.T) {
+	cid := coreconsensus.ClusterID{4, 5, 8}
+	log, net := NewMemoryLog(), NewMemoryNetwork()
+	id, inc, err := InitLog(log, cid, "slot-0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	members := []coreconsensus.MemberValue{{ID: id, Incarnation: inc, Slot: "slot-0", SPKI: MemorySPKI(id), Voter: true}}
+	snaps := failingCommitSnapshots{gatedSnapshots{NewMemorySnapshots(), make(chan struct{})}}
+	cfg := Config{
+		Cluster: cid, Machine: newKV(), Durability: DurabilityVolatile, Log: log,
+		Snapshots: snaps, Transport: NewMemoryTransport(net, id),
+		InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30, SnapshotEveryBytes: 1 << 20,
+		MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 1, SnapshotEvery: 10,
+		SnapshotTrailing: 1, JoinAuthorizer: allowJoin{},
+	}
+	if err := Bootstrap(context.Background(), &cfg, members); err != nil {
+		t.Fatal(err)
+	}
+	n, err := NewNode(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	release := func() { once.Do(func() { close(snaps.gate) }) }
+	t.Cleanup(func() {
+		if err := n.HardClose(); err != nil {
+			t.Error(err)
+		}
+	})
+	t.Cleanup(release)
+	var last uint64
+	for i := range 30 {
+		last = propose(t, n, string([]byte{'k', '=', byte('a' + i%26)})).Index
+	}
+	snapState := func() (inFlight, pending bool) {
+		n.snapState.mu.Lock()
+		defer n.snapState.mu.Unlock()
+		return n.snapState.inFlight, n.snapState.pending
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for n.Status().Applied < last {
+		if time.Now().After(deadline) {
+			t.Fatalf("applied %d < %d", n.Status().Applied, last)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if inFlight, pending := snapState(); !inFlight || !pending {
+		t.Fatalf("setup: in flight %v, pending %v, want a cut in flight and a trigger coalesced", inFlight, pending)
+	}
+	release()
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		inFlight, pending := snapState()
+		if !inFlight {
+			if pending {
+				t.Fatal("the failed cut left its coalesced trigger behind")
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the failing cut never ended")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, stopped := n.StopReason(); stopped {
+		t.Fatal("a commit that is not a failed sync stopped the node")
 	}
 }
 
