@@ -487,9 +487,8 @@ packages:
               a {{template}} naming something that does not exist. Left alone, all
               three are 500s on a live request. The engine therefore forces escaping at
               construction and turns them into this.
+            exit: CONFIG
             name: ViewMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/view: a Factory received a nil FS, a template that does not parse, or one html/template cannot contextually escape; the fields name the template and the private message carries the engine's own diagnostic"
             public: The view renderer cannot be built from the given configuration
             reason: VIEW_MISCONFIGURED
@@ -503,9 +502,8 @@ packages:
               0031's shape — the configuration nobody filled in produces a loud,
               typed refusal on every call rather than an inert renderer that returns
               empty pages.
+            http: 500
             name: TemplateNotFound
-            options:
-              - errs.WithHTTPStatus(httpInternal)
             private: "core/app/view: Render was called with a name absent from the parsed set; the fields carry the name asked for and the number of templates the renderer holds"
             public: The requested view does not exist
             reason: TEMPLATE_NOT_FOUND
@@ -519,10 +517,9 @@ packages:
               same failure would have flushed the status line, the headers and a
               plausible-looking prefix of the page before it was detectable — measured
               at 17 bytes for a template that fails on its second action.
+            exit: SOFTWARE
+            http: 500
             name: RenderFailed
-            options:
-              - errs.WithExitCode(exitSoftware)
-              - errs.WithHTTPStatus(httpInternal)
             private: "core/app/view: template execution failed after it began; the private message carries html/template's own diagnostic, which names the file path, the line, the column and a fragment of template source and must never be shown to a caller"
             public: The page could not be rendered
             reason: RENDER_FAILED
@@ -534,9 +531,8 @@ packages:
               enforced by the writer html/template is executing into, so the bytes are
               never accumulated in the first place and the process does not have to
               survive the allocation in order to reject it.
+            http: 500
             name: RenderTooLarge
-            options:
-              - errs.WithHTTPStatus(httpInternal)
             private: "core/app/view: rendering reached Config.MaxBytes and was stopped at the ceiling; the fields carry the limit and the template name"
             public: The page could not be rendered
             reason: RENDER_TOO_LARGE
@@ -552,10 +548,9 @@ packages:
               author reads and a developer greps — because "an unsafe value is
               somewhere in your model" is not something a developer can act on at
               three in the morning.
+            exit: SOFTWARE
+            http: 500
             name: UnsafeValue
-            options:
-              - errs.WithExitCode(exitSoftware)
-              - errs.WithHTTPStatus(httpInternal)
             private: "core/app/view: render data carries an html/template trust type that disables contextual escaping (CSS, HTMLAttr, JS, JSStr, URL or Srcset); the fields name the path and the type, and view.TrustHTML is the only trusted spelling the SDK offers"
             public: The page could not be rendered
             reason: UNSAFE_VALUE
@@ -566,9 +561,8 @@ packages:
               It carries the registered names in a Field so the usual cause — an engine
               package that was never imported, so its registration never ran — is
               answerable from one log line.
+            exit: CONFIG
             name: EngineUnknown
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/view: Open received an Engine no Factory has registered; the fields carry the requested name and the registered ones, and the usual cause is an unimported engine package"
             public: No view engine is registered under that name
             reason: ENGINE_UNKNOWN
@@ -576,9 +570,8 @@ packages:
             doc: |-
               EngineInvalid is the boot-time panic for a nil Factory or an empty
               [Engine] name.
+            exit: CONFIG
             name: EngineInvalid
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/view: Register received a nil Factory or one claiming the empty Engine name; the empty name is what an uninitialised variable holds and is refused at boot so it can never reach Lookup"
             public: The view engine registration is not usable
             reason: ENGINE_INVALID
@@ -591,9 +584,8 @@ packages:
               ones are a hard conflict, because last-write-wins in THIS registry can
               mean the engine that escapes was replaced by one that does not, at import
               time, with no call site to blame.
+            exit: CONFIG
             name: DuplicateEngine
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/view: a second, distinct Factory registered under an Engine name already taken; refused at boot rather than resolved, since one of the two would silently decide how every value in the program is escaped"
             public: Two view engines claim the same name
             reason: DUPLICATE_ENGINE
@@ -601,15 +593,14 @@ packages:
             doc: |-
               TemplateSourceFailed is returned by the constructor when the template FS
               could not be read.
+            exit: CONFIG
             name: TemplateSourceFailed
             note: |-
               The html/template engine's construction failures, raised by
               internal/service/app/view. They are declared here, with the port's, so that
               the domain's codes and sentinels are in one place (ADR 0160). Each carries
-              exitConfig: a tree that will not parse is refused forever, and the fix is an
+              EX_CONFIG: a tree that will not parse is refused forever, and the fix is an
               edit to a template, never a retry.
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/view: walking or reading Config.FS failed; the fields carry the path that failed and the underlying error, and the usual cause is an embed pattern that matched nothing"
             public: The view templates could not be read
             reason: TEMPLATE_SOURCE_FAILED
@@ -617,9 +608,8 @@ packages:
             doc: |-
               TemplateParseFailed is returned by the constructor for a file
               html/template refused to parse or could not build an escaping plan for.
+            exit: CONFIG
             name: TemplateParseFailed
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/app/view: html/template refused a template at parse time or could not resolve its contextual escaping context; the fields carry the template name and the engine's own diagnostic"
             public: A view template is not valid
             reason: TEMPLATE_PARSE_FAILED

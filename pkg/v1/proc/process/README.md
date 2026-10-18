@@ -372,8 +372,10 @@ type ExitResult struct {
 	UserTime   time.Duration
 	// SystemTime is the CPU time spent in kernel mode on the process's behalf.
 	SystemTime time.Duration
-	// MaxRSS is the peak resident set size in kilobytes, as reported by wait4's
-	// rusage; it is 0 when the platform does not supply it.
+	// MaxRSS is the peak resident set size in KiB on every platform, read from
+	// wait4's rusage: darwin and ios report bytes, which are converted to KiB
+	// rounding up; Linux and the BSDs report KiB, passed through. It is 0 when
+	// the platform does not supply it (illumos, Solaris and Windows).
 	MaxRSS     int64
 }
 ```

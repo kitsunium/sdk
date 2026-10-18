@@ -14,11 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/app"
+	"github.com/kitsunium/sdk/framework/app/storetest"
 	"github.com/kitsunium/sdk/framework/connectors/sqlite"
-	"github.com/kitsunium/sdk/framework/kit"
-	"github.com/kitsunium/sdk/framework/kit/storetest"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
@@ -53,14 +52,14 @@ func TestDescribeNamesTheFile(t *testing.T) {
 		"relative/archive.sqlite":                      "relative/archive.sqlite",
 	} {
 		got, err := sqlite.Engine().Describe(secret.FromString(raw))
-		if err != nil || got != (kit.DatabaseURL{Driver: "modernc.org/sqlite", Database: want}) {
+		if err != nil || got != (app.DatabaseURL{Driver: "modernc.org/sqlite", Database: want}) {
 			t.Errorf("%q: %+v %v", raw, got, err)
 		}
 	}
 	if _, err := sqlite.Engine().Describe(secret.FromString("file:?x=1")); err == nil {
 		t.Error("a URL without a file")
 	}
-	if sqlite.Engine().Dialect() != sql.DialectSQLite {
+	if sqlite.Engine().Dialect() != app.DialectSQLite {
 		t.Error(sqlite.Engine().Dialect())
 	}
 }
@@ -120,14 +119,14 @@ type entry struct {
 
 // ledger is a product with a SQLite database, in production, its data in
 // dir.
-func ledger(t *testing.T, dir string, opts ...kit.DatabaseOption) *kit.App {
+func ledger(t *testing.T, dir string, opts ...app.DatabaseOption) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
-	audit := kit.NewService("audit", "The audit trail.")
+	t.Setenv("LEDGER_SECRETS", "memory")
+	audit := app.NewService("audit", "The audit trail.")
 	audit.Store("trail", func(e entry) string { return e.ID })
-	return kit.NewApp("ledger", audit).With(
-		kit.Database("archive", sqlite.Engine(), opts...),
-		kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvProduction), kit.DataDir(dir), kit.Logs(io.Discard),
+	return app.NewApp("ledger", audit).With(
+		app.Database("archive", sqlite.Engine(), opts...),
+		app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.DataDir(dir), app.Logs(io.Discard),
 	)
 }
 
@@ -136,12 +135,12 @@ func ledger(t *testing.T, dir string, opts ...kit.DatabaseOption) *kit.App {
 func TestTheFileLandsBesideTheData(t *testing.T) {
 	needsFileStore(t)
 	dir := t.TempDir()
-	app := ledger(t, dir)
-	run(t, app)
+	a := ledger(t, dir)
+	run(t, a)
 	if _, err := os.Stat(filepath.Join(dir, "archive.sqlite")); err != nil {
 		t.Fatalf("the file beside the data: %v", err)
 	}
-	g := app.Graph()
+	g := a.Graph()
 	d := g.Runtime.Databases[0]
 	type seen struct {
 		state, engine, from, tls string
@@ -153,7 +152,7 @@ func TestTheFileLandsBesideTheData(t *testing.T) {
 	if c := containerOf(g, "container:database:archive"); c == nil || c.Technology != "SQLite · modernc.org/sqlite" {
 		t.Errorf("container %+v", c)
 	}
-	if s := status(t, app.URL(), "/_kit/health/ready"); s != http.StatusOK {
+	if s := status(t, a.URL(), "/_app/health/ready"); s != http.StatusOK {
 		t.Errorf("ready: %d", s)
 	}
 }
@@ -173,12 +172,12 @@ func TestTheURLNamesTheFile(t *testing.T) {
 	needsFileStore(t)
 	elsewhere := filepath.Join(t.TempDir(), "kept.sqlite")
 	t.Setenv("LEDGER_ARCHIVE_URL", elsewhere)
-	app := ledger(t, t.TempDir())
-	run(t, app)
+	a := ledger(t, t.TempDir())
+	run(t, a)
 	if _, err := os.Stat(elsewhere); err != nil {
 		t.Fatalf("the URL's file: %v", err)
 	}
-	if d := app.Graph().Runtime.Databases[0]; d.URLFrom != model.SettingEnv {
+	if d := a.Graph().Runtime.Databases[0]; d.URLFrom != model.SettingEnv {
 		t.Errorf("runtime %+v", d)
 	}
 }
@@ -190,13 +189,13 @@ type lifecycle interface {
 }
 
 // run starts app and stops it with the test.
-func run(t *testing.T, app lifecycle) {
+func run(t *testing.T, a lifecycle) {
 	t.Helper()
-	if err := app.Start(t.Context()); err != nil {
+	if err := a.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := app.Stop(context.Background()); err != nil {
+		if err := a.Stop(context.Background()); err != nil {
 			t.Logf("stop: %v", err)
 		}
 	})
@@ -224,11 +223,11 @@ func status(t *testing.T, base, path string) int {
 // 0140), and its stores live in it.
 func TestMigrationsAndStoresRunOnTheFile(t *testing.T) {
 	needsFileStore(t)
-	m := sql.Migration{Version: 1, Name: "create", Up: sql.Statements("CREATE TABLE x (id TEXT)"), Down: sql.Statements("DROP TABLE x")}
+	m := app.Migration{Version: 1, Name: "create", Up: app.Statements("CREATE TABLE x (id TEXT)"), Down: app.Statements("DROP TABLE x")}
 	dir := t.TempDir()
-	app := ledger(t, dir, kit.Migrations(m))
-	run(t, app)
-	g := app.Graph()
+	a := ledger(t, dir, app.Migrations(m))
+	run(t, a)
+	g := a.Graph()
 	d := g.Runtime.Databases[0]
 	var sets []string
 	for _, s := range d.Migrations {
@@ -237,7 +236,7 @@ func TestMigrationsAndStoresRunOnTheFile(t *testing.T) {
 			t.Errorf("set %+v", s)
 		}
 	}
-	if !slices.Equal(sets, []string{"kit", "product"}) {
+	if !slices.Equal(sets, []string{"app", "product"}) {
 		t.Errorf("the sets: %v", sets)
 	}
 	if st := g.Node("audit/store/trail").Store; st.Backend != "sqlite" || st.Table != "audit__trail" {
@@ -252,9 +251,9 @@ func TestMigrationsAndStoresRunOnTheFile(t *testing.T) {
 
 // The stores' conformance suite, on SQLite: no server, so it always runs.
 func TestStoresConform(t *testing.T) {
-	storetest.Run(t, storetest.BackendConfig{Name: "sqlite", Options: func(t *testing.T, _ string) []kit.AppOption {
+	storetest.Run(t, storetest.BackendConfig{Name: "sqlite", Options: func(t *testing.T, _ string) []app.AppOption {
 		needsFileStore(t)
-		return []kit.AppOption{kit.DataDir(t.TempDir()), kit.Database("database", sqlite.Engine())}
+		return []app.AppOption{app.DataDir(t.TempDir()), app.Database("database", sqlite.Engine())}
 	}})
 }
 
@@ -262,8 +261,8 @@ func TestStoresConform(t *testing.T) {
 // they rest.
 type patient struct {
 	ID    string `json:"id"`
-	Email string `json:"email" kit:"subject"`
-	Name  string `json:"name" kit:"personal"`
+	Email string `json:"email" app:"subject"`
+	Name  string `json:"name" app:"personal"`
 }
 
 // A store that seals rests on SQLite as it rests in files: its row holds
@@ -273,16 +272,16 @@ type patient struct {
 // as a backup kept it then reads as empty, never as an error.
 func TestASealedStoreRoundTripsAndErases(t *testing.T) {
 	needsFileStore(t)
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
-	t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")
+	t.Setenv("CLINIC_SECRETS", "memory")
+	t.Setenv("CLINIC_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("CLINIC_INDEX_KEY", "an index key of more than 16 bytes")
 	dir := t.TempDir()
-	clinic := kit.NewService("clinic", "Patients, sealed where they rest.")
-	patients := clinic.Store("patients", func(p patient) string { return p.ID }, kit.Purpose("Care for the patients"))
-	app := kit.NewApp("clinic", clinic).With(kit.Database("archive", sqlite.Engine()),
-		kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvDev), kit.Analyze(false), kit.DataDir(dir), kit.Logs(io.Discard))
-	run(t, app)
-	if st := app.Graph().Node("clinic/store/patients").Store; st.Backend != "sqlite" {
+	clinic := app.NewService("clinic", "Patients, sealed where they rest.")
+	patients := clinic.Store("patients", func(p patient) string { return p.ID }, app.Purpose("Care for the patients"))
+	a := app.NewApp("clinic", clinic).With(app.Database("archive", sqlite.Engine()),
+		app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.DataDir(dir), app.Logs(io.Discard))
+	run(t, a)
+	if st := a.Graph().Node("clinic/store/patients").Store; st.Backend != "sqlite" {
 		t.Fatalf("the store: %+v", st)
 	}
 	ctx := t.Context()
@@ -305,13 +304,13 @@ func TestASealedStoreRoundTripsAndErases(t *testing.T) {
 		t.Fatalf("the record: %+v %v", got, err)
 	}
 	erase := func(ctx context.Context) error { return patients.Erase(ctx, "p1", "asked by the person") }
-	if err := kit.Transact(ctx, func(ctx context.Context) error { return errors.Join(erase(ctx), errTakeBack) }); !errors.Is(err, errTakeBack) {
+	if err := app.Transact(ctx, func(ctx context.Context) error { return errors.Join(erase(ctx), errTakeBack) }); !errors.Is(err, errTakeBack) {
 		t.Fatalf("the erasure taken back: %v", err)
 	}
 	if got, err := patients.Get(ctx, "p1"); err != nil || got != ann {
 		t.Fatalf("after the erasure taken back: %+v %v", got, err)
 	}
-	if err := kit.Transact(ctx, erase); err != nil {
+	if err := app.Transact(ctx, erase); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE "clinic__patients" SET doc = ? WHERE doc_key = ?`, row, []byte("p1")); err != nil {
@@ -322,10 +321,10 @@ func TestASealedStoreRoundTripsAndErases(t *testing.T) {
 	}
 	stopped, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := app.Stop(stopped); err != nil {
+	if err := a.Stop(stopped); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.Start(ctx); err != nil {
+	if err := a.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := patients.Get(ctx, "p2"); err != nil || got != bob {

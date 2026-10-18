@@ -1,0 +1,52 @@
+{
+  "00000000000000000001": {
+    "seq": 1,
+    "at": "2026-10-18T03:16:15.774924971Z",
+    "op": "erase",
+    "store": "atelier/store/cases",
+    "record": "686c8348998801f85629c27f44e104ab",
+    "subject": "658685837f098a1c3c0ea0003f1799ee",
+    "by": "atelier/command/forget",
+    "reason": "sealed:v1:AQlqOjIwMjYtMTDZWg_PfpYjIwEBaSLkUGzUcG9gPa4gg_19qgKPwHhPNsa6Vn1m8l5ou0Bo240VCCzgHGrjR2xOgyOocKi-q2WeVPKvJWHk",
+    "hash": "c1f36e4f62ae9208c0613a33e77f5fa48f02d52b33e7379479cbdf9d01fa3b2f"
+  },
+  "00000000000000000002": {
+    "seq": 2,
+    "at": "2026-10-18T03:16:15.793639614Z",
+    "op": "shred",
+    "store": "kit.privacy/store/keys",
+    "subject": "658685837f098a1c3c0ea0003f1799ee",
+    "by": "atelier/command/forget",
+    "hash": "bf016ad6f0446783ff9f064cb7b2ba062d2d55906a77ab5ee1d879bbde0d67b6"
+  },
+  "00000000000000000003": {
+    "seq": 3,
+    "at": "2026-10-18T03:16:15.821418193Z",
+    "op": "hold",
+    "store": "atelier/store/cases",
+    "record": "18248c18411b7f737480a7cd080e19b5",
+    "subject": "f12925ccc9b280d9caa44bf91df04de2",
+    "by": "app",
+    "reason": "sealed:v1:AQlqOjIwMjYtMTDZWg_PfpYjIwEBp6htTee-hcE_Yp9jWW2kmkDi8ilWsR5whfJnFzduCqr84NQUbZr6q1zzUMlaJdccU14T69GSOCixxCe7",
+    "hash": "fdf0fdcd39142f2240aef11370372f323c88dc40e1cc81e193cb82636f0f1de9"
+  },
+  "00000000000000000004": {
+    "seq": 4,
+    "at": "2026-10-18T03:16:15.836704809Z",
+    "op": "hold",
+    "store": "atelier/store/tally",
+    "record": "dd6a42a4a72c3b7e7dbcca2ae7e90209",
+    "by": "app",
+    "reason": "sealed:v1:AQlqOjIwMjYtMTDZWg_PfpYjIwEBmxtmpeU8m7d9p6BhglIUX7pxwNe-XR0_i66d_-4SO7myxH1XG5V0sp_XB2Q",
+    "hash": "bb08b834a1b4831d4fc2994d7806625f7e821b7006f3e8e53cd7abe83186690e"
+  },
+  "00000000000000000005": {
+    "seq": 5,
+    "at": "2026-10-18T03:16:15.843655041Z",
+    "op": "export",
+    "store": "atelier/store/cases",
+    "subject": "a508b351bac68f4c0f9f815bdf919fe4",
+    "by": "atelier/command/export",
+    "hash": "52f1ad532793216e0471d4b5e743019da76d7d965d256caf2011b2d23f24fc6c"
+  }
+}

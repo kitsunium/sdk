@@ -134,10 +134,14 @@ packages:
         name: RecordSize
         type: int
         value: "64"
-      - doc: Protocol names the wire this package speaks, in the handshake.
+      - doc: |-
+          Protocol names the wire this package speaks, in the handshake. Since
+          ADR 0180 step 4 it is app-telemetry/v1, a name the product sends; the
+          wire is unchanged, and a collector accepts kit-telemetry/v1 as the
+          same for two minors.
         name: Protocol
         type: string
-        value: "\"kit-telemetry/v1\""
+        value: "\"app-telemetry/v1\""
       - blockDoc: The ring's bounds and default, in events.
         name: MinBuffer
         type: int
@@ -234,9 +238,8 @@ packages:
             doc: |-
               Misconfigured refuses an exporter that cannot be built as asked; the
               rule field says which rule failed.
+            exit: CONFIG
             name: Misconfigured
-            options:
-              - errs.WithExitCode(78)
             private: "framework/telemetry: no socket path, a buffer outside [64, 1<<20], or a node ID outside the grammar; the rule field says which"
             public: The telemetry exporter is misconfigured
             reason: MISCONFIGURED

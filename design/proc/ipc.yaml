@@ -155,17 +155,15 @@ packages:
       - var:
           - code: CodeMisconfigured
             doc: Misconfigured refuses a configuration no endpoint can be built from.
+            exit: CONFIG
             name: Misconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/proc/ipc: empty or relative path, path beyond sun_path, or a negative UID/GID; the rule field says which"
             public: The private socket is misconfigured
             reason: MISCONFIGURED
           - code: CodeDirectoryUnsafe
             doc: DirectoryUnsafe refuses a socket directory another account could reach.
+            exit: CONFIG
             name: DirectoryUnsafe
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/proc/ipc: the directory is a link, not a directory, not ours, or group/world writable; the rule field says which"
             public: The private socket's directory is not private
             reason: DIRECTORY_UNSAFE
@@ -198,9 +196,8 @@ packages:
             reason: DIAL_FAILED
           - code: CodeEndpointForeign
             doc: EndpointForeign refuses a socket file another account owns.
+            exit: CONFIG
             name: EndpointForeign
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/proc/ipc: the socket file's owner is not this process's user nor an allowed one; the uid field names it"
             public: The private socket belongs to another account
             reason: ENDPOINT_FOREIGN
@@ -212,9 +209,8 @@ packages:
             reason: CLOSED
           - code: CodePathUnsafe
             doc: PathUnsafe refuses a socket path another account could steer.
+            exit: CONFIG
             name: PathUnsafe
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "service/proc/ipc: a component above the socket's directory is a link planted where anybody can write, a directory another account owns there, or an entry anybody can replace; the path, dir, kind and container fields say which, target and uid where they apply"
             public: The private socket's path runs through a directory another account controls
             reason: PATH_UNSAFE

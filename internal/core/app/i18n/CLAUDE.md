@@ -40,7 +40,6 @@ the package comment is `doc.go`'s alone, written by kit from the design (ADR 016
 | `message_value.go` | `Key` + `ValidateKey` + `MessageValue` + `FormPatternValue` + `NewCompiledMessage` / `Format` / `HasForm` / `IsPlural` |
 | `pattern.go` | `PartValue` (one span: literal `Text` or placeholder `Name`) + `PatternValue` + `NewPattern` + `literal` / `expand` + `ValidPlaceholder`, the placeholder-name grammar |
 | `codes_gen.go` | `Code*` constants — ranges 0.2.30.* and 0.3.60.*; `InvalidTag` / `InvalidKey` / `InvalidPattern` / `ArgumentMissing` / `MessageNotFound` / `PluralFormMissing` / `InvalidCount` / `InvalidForm`, and the catalogue's `UnsupportedLanguage` / `CatalogInvalid` / `CatalogLoadFailed` / `TranslationIncomplete` / `NegotiationEmpty` (`errs.Define`) — written by kit gen from `design/app/i18n.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `exitConfig` |
 
 ## The frontier
 

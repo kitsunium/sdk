@@ -13,8 +13,8 @@ Package mysql is kit's MySQL and MariaDB engine (ADR 0004): the one module a kit
 ```
 import "github.com/kitsunium/sdk/framework/connectors/mysql"
 
-var App = kit.NewApp("vigie", intake.Service, desk.Service).With(
-	kit.Database("database", mysql.Engine()),
+var App = app.NewApp("vigie", intake.Service, desk.Service).With(
+	app.Database("database", mysql.Engine()),
 )
 ```
 
@@ -25,7 +25,7 @@ On MySQL a DDL statement commits by itself: a migration of two DDL statements wh
 ## Index
 
 - [Constants](<#constants>)
-- [func Engine\(\) kit.Engine](<#Engine>)
+- [func Engine\(\) app.Engine](<#Engine>)
 
 ## Constants
 
@@ -42,9 +42,9 @@ Code `0.4.17.1`
 ## func [Engine](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/mysql/mysql.go>)
 
 ```go
-func Engine() kit.Engine
+func Engine() app.Engine
 ```
 
-Engine is the MySQL engine, for kit.Database.
+Engine is the MySQL engine, for app.Database.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

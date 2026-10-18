@@ -5,9 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kitsunium/sdk/framework/app"
 	"github.com/kitsunium/sdk/framework/connectors/postgres"
-	"github.com/kitsunium/sdk/framework/kit"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
@@ -17,31 +16,31 @@ func TestDescribeSaysWhereNeverWho(t *testing.T) {
 	const sentinel = "s3ntinel-pg-4c1b"
 	for name, c := range map[string]struct {
 		url  string
-		want kit.DatabaseURL
+		want app.DatabaseURL
 	}{
 		"url": {
 			"postgres://owner:" + sentinel + "@db.internal:6543/vigie?sslmode=verify-full",
-			kit.DatabaseURL{Driver: "pgx", Address: "db.internal:6543", Database: "vigie", TLS: "verify-full", Networked: true},
+			app.DatabaseURL{Driver: "pgx", Address: "db.internal:6543", Database: "vigie", TLS: "verify-full", Networked: true},
 		},
 		"default port": {
 			"postgresql://owner:" + sentinel + "@db.internal/vigie?sslmode=require",
-			kit.DatabaseURL{Driver: "pgx", Address: "db.internal:5432", Database: "vigie", TLS: "require", Networked: true},
+			app.DatabaseURL{Driver: "pgx", Address: "db.internal:5432", Database: "vigie", TLS: "require", Networked: true},
 		},
 		"no tls written": {
 			"postgres://owner:" + sentinel + "@db.internal/vigie",
-			kit.DatabaseURL{Driver: "pgx", Address: "db.internal:5432", Database: "vigie", Networked: true},
+			app.DatabaseURL{Driver: "pgx", Address: "db.internal:5432", Database: "vigie", Networked: true},
 		},
 		"tls off": {
 			"postgres://owner:" + sentinel + "@10.0.0.7:5432/vigie?sslmode=disable",
-			kit.DatabaseURL{Driver: "pgx", Address: "10.0.0.7:5432", Database: "vigie", TLS: "disable", Plaintext: true, Networked: true},
+			app.DatabaseURL{Driver: "pgx", Address: "10.0.0.7:5432", Database: "vigie", TLS: "disable", Plaintext: true, Networked: true},
 		},
 		"key=value": {
 			"host=db.internal port=5433 dbname=vigie user=owner password=" + sentinel + " sslmode='verify-ca'",
-			kit.DatabaseURL{Driver: "pgx", Address: "db.internal:5433", Database: "vigie", TLS: "verify-ca", Networked: true},
+			app.DatabaseURL{Driver: "pgx", Address: "db.internal:5433", Database: "vigie", TLS: "verify-ca", Networked: true},
 		},
 		"socket": {
 			"host=/var/run/postgresql dbname=vigie user=owner",
-			kit.DatabaseURL{Driver: "pgx", Address: "/var/run/postgresql", Database: "vigie"},
+			app.DatabaseURL{Driver: "pgx", Address: "/var/run/postgresql", Database: "vigie"},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -64,7 +63,7 @@ func TestDescribeSaysWhereNeverWho(t *testing.T) {
 }
 
 func TestTheEngineSpeaksPostgres(t *testing.T) {
-	if postgres.Engine().Dialect() != sql.DialectPostgres {
+	if postgres.Engine().Dialect() != app.DialectPostgres {
 		t.Fatal(postgres.Engine().Dialect())
 	}
 	// A pool opens without a connection: the first one is made on use.

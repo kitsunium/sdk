@@ -75,6 +75,7 @@ go_test(
         "trash_persist_external_test.go",
         "version_external_test.go",
         "version_persist_external_test.go",
+        "weight_external_test.go",
     ],
     embed = [":docstore"],
     deps = [

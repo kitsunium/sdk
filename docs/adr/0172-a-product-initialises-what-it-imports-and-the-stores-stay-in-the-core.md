@@ -4,6 +4,7 @@
 - **Date**: 2026-10-12
 - **Deciders**: SDK maintainers (issue #273, the owner's request of 2026-10-12 to measure first and take the smallest change)
 - **Amends**: [ADR 0100](0100-a-program-reads-what-it-was-built-from-and-asks-git-only-about-a-working-tree.md) (the build and the runtime state of a process are two packages, not one)
+- **Amended by**: [ADR 0179](0179-a-store-is-a-non-generic-engine-under-a-typed-facade-and-a-subsystem-is-imported.md) (2026-10-16) — §4: the declared subsystems leave the core, each plugged in by an import over a non-generic store engine; §1's rule is kept and applied to them
 - **Related**: [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the framework above `pkg`), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the v0 licence), issue #272 (the server and the Studio left kit's graph), issue #273 (the proposal), issue #276 (the status line's start-up)
 
 ## Context

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kitsunium/sdk/framework/kit"
+	"github.com/kitsunium/sdk/framework/app"
 )
 
 // Records.Keys and the watches' catch-up (ADR 0178 C6) on a real SQLite
@@ -23,8 +23,8 @@ import (
 // watcher is a bureau whose watch lists the memos' keys when it hears the
 // memo "list", and keeps what it heard.
 type watcher struct {
-	app   *kit.App
-	memos *kit.Store[memo]
+	app   *app.App
+	memos *app.Store[memo]
 
 	mu      sync.Mutex
 	noticed []string
@@ -36,27 +36,41 @@ type watcher struct {
 // writes memos no watch hears —, its data in dir, on a SQLite file.
 func newWatcher(t *testing.T, dir string, watching bool) *watcher {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("BUREAU_SECRETS", "memory")
 	d := &watcher{}
-	svc := kit.NewService("bureau", "Memos, screened.")
+	svc := app.NewService("bureau", "Memos, screened.")
 	d.memos = svc.Store("memos", func(m memo) string { return m.ID })
 	if watching {
-		svc.Watch("screen", kit.Moderated, d.screen, kit.OwnStores())
+		svc.Watch("screen", app.Moderated, d.screen, app.OwnStores())
 	}
-	d.app = kit.NewApp("bureau", svc).With(append(bureauOptions(dir), onSQLite())...)
+	d.app = app.NewApp("bureau", svc).With(append(bureauOptions(dir), onSQLite())...)
 	return d
 }
 
 // screen keeps the key a notice names; told of "list", it lists the store's
-// keys through the records port.
-func (d *watcher) screen(ctx context.Context, w kit.Written) error {
-	d.mu.Lock()
-	d.noticed = append(d.noticed, w.Key)
-	d.mu.Unlock()
-	if w.Key != "list" {
-		return nil
+// keys through the records port first, and keeps the key once the listing is
+// done: settle returns when the key is kept, and the app stops after it, so a
+// key kept before its listing ended let the stop cancel the listing.
+func (d *watcher) screen(ctx context.Context, w app.Written) error {
+	if w.Key == "list" {
+		defer d.notice(w.Key)
+		return d.list(ctx, w)
 	}
-	recs, err := kit.RecordsOf(ctx, w.Store)
+	d.notice(w.Key)
+	return nil
+}
+
+// notice keeps the key a notice named.
+func (d *watcher) notice(key string) {
+	d.mu.Lock()
+	d.noticed = append(d.noticed, key)
+	d.mu.Unlock()
+}
+
+// list lists the store's keys through the records port, and keeps them or
+// the error that ended the listing.
+func (d *watcher) list(ctx context.Context, w app.Written) error {
+	recs, err := app.RecordsOf(ctx, w.Store)
 	if err != nil {
 		return err
 	}
@@ -101,13 +115,13 @@ func (d *watcher) settle(t *testing.T, id string) {
 }
 
 // startStop starts app, runs fn, and stops it.
-func startStop(t *testing.T, app *kit.App, fn func()) {
+func startStop(t *testing.T, a *app.App, fn func()) {
 	t.Helper()
-	if err := app.Start(t.Context()); err != nil {
+	if err := a.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	fn()
-	if err := app.Stop(context.Background()); err != nil {
+	if err := a.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 }

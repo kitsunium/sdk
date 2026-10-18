@@ -5,7 +5,6 @@ go 1.27.2
 require (
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/kitsunium/sdk v0.0.0-00010101000000-000000000000
-	github.com/kitsunium/sdk/pkg/v1/data v0.0.0-00010101000000-000000000000
 	github.com/kitsunium/sdk/pkg/v1/errs v0.0.0-00010101000000-000000000000
 	github.com/kitsunium/sdk/pkg/v1/security v0.0.0-00010101000000-000000000000
 )
@@ -17,6 +16,7 @@ require (
 	github.com/kitsunium/sdk/pkg/v1/clock v0.0.0-00010101000000-000000000000 // indirect
 	github.com/kitsunium/sdk/pkg/v1/concur v0.0.0-00010101000000-000000000000 // indirect
 	github.com/kitsunium/sdk/pkg/v1/crypto v0.0.0-00010101000000-000000000000 // indirect
+	github.com/kitsunium/sdk/pkg/v1/data v0.0.0-00010101000000-000000000000 // indirect
 	github.com/kitsunium/sdk/pkg/v1/net v0.0.0-00010101000000-000000000000 // indirect
 	github.com/kitsunium/sdk/pkg/v1/observe v0.0.0-00010101000000-000000000000 // indirect
 	github.com/kitsunium/sdk/pkg/v1/proc v0.0.0-00010101000000-000000000000 // indirect

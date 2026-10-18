@@ -76,13 +76,13 @@ vocabulary:
     # they are. The -er form the rule would impose is "DecompressBoundedder",
     # which is not a word in any reading. Same argument as core/app/mail.Transport.
     - github.com/kitsunium/sdk/internal/core/data/transform.BoundedDecompressor
-    # kit.LockWaiter (ADR 0178 C2) is the sibling of kit.Engine an engine
+    # app.LockWaiter (ADR 0178 C2) is the sibling of app.Engine an engine
     # implements when its connections wait for a lock — SQLite's busy
     # timeout. It already ends in -er and names the role ("an engine that
     # waits for a lock"); the method's name is fixed by the port it extends,
     # OpenWaiting beside Engine.Open, and the derivation the rule imposes,
     # "OpenWaitinger", is not a word. Same argument as BoundProver above.
-    - github.com/kitsunium/sdk/framework/internal/kit.LockWaiter
+    - github.com/kitsunium/sdk/framework/internal/app.LockWaiter
     - github.com/kitsunium/sdk/internal/core/net.ConnHandler
     - github.com/kitsunium/sdk/internal/core/net.PacketHandler
     # EntryFetcher and Tagger are ADR 0039 siblings of the frozen core/data/cache.Store
@@ -191,7 +191,7 @@ serialization_tags:
   - msgpack
   - cbor
   - bson
-  # framework/kit's request binding (ADR 0147): a field of an endpoint's
+  # framework/app's request binding (ADR 0147): a field of an endpoint's
   # request is read from the route's wildcard, the query, a header or a cookie
   # by these tags, exactly as encoding/json reads a member by `json`.
   - path
@@ -509,13 +509,56 @@ rules:
       # file alone, the bench's two signatures, nothing else of the package.
       - "**/internal/kernel/collections/heap/heap_bench_test.go"
       - "internal/kernel/collections/heap/heap_bench_test.go"
+      # framework/internal/app's store core (ADR 0179 §2): one engine for every
+      # entity type a product declares a store of. Go methods cannot take type
+      # parameters, and a store generic in its entity was compiled once per
+      # record shape — 0.41 MB of machine code per type, measured at step 2 —,
+      # which is what the ADR takes out. So the core carries the entity as the
+      # `any` holding the product's T (never a *T), and StoreService[T], the
+      # typed facade, asserts it back; the product's functions on T — its key,
+      # its indexes, a retention's instants, HeldUntil, Anonymise — are wrapped
+      # once at the declaration to take that `any`. The rule's suggestion, a
+      # specific interface, would make every entity type of every product
+      # implement one of kit's, which a store of plain structs must not need:
+      # `any` is the type the entity has here, as for the events bus above.
+      # Scoped to the files of the store's core that carry an entity.
+      - "**/framework/internal/app/history_read.go"
+      - "framework/internal/app/history_read.go"
+      - "**/framework/internal/app/history_write.go"
+      - "framework/internal/app/history_write.go"
+      - "**/framework/internal/app/index.go"
+      - "framework/internal/app/index.go"
+      - "**/framework/internal/app/passwords.go"
+      - "framework/internal/app/passwords.go"
+      - "**/framework/internal/app/privacy_erase.go"
+      - "framework/internal/app/privacy_erase.go"
+      - "**/framework/internal/app/privacy_keys.go"
+      - "framework/internal/app/privacy_keys.go"
+      - "**/framework/internal/app/retention.go"
+      - "framework/internal/app/retention.go"
+      - "**/framework/internal/app/retention_loop.go"
+      - "framework/internal/app/retention_loop.go"
+      - "**/framework/internal/app/retention_run.go"
+      - "framework/internal/app/retention_run.go"
+      - "**/framework/internal/app/revisions_restore.go"
+      - "framework/internal/app/revisions_restore.go"
+      - "**/framework/internal/app/seal_store.go"
+      - "framework/internal/app/seal_store.go"
+      - "**/framework/internal/app/store.go"
+      - "framework/internal/app/store.go"
+      - "**/framework/internal/app/store_core.go"
+      - "framework/internal/app/store_core.go"
+      - "**/framework/internal/app/trash.go"
+      - "framework/internal/app/trash.go"
+      - "**/framework/internal/app/workflow_ports.go"
+      - "framework/internal/app/workflow_ports.go"
     # Function-level, never a file. Since ktn-linter v1.45.7 (#726, #732) the
     # finding sits on the DECLARATION of a module-local interface that pins an
     # `any`, and the methods that must honour it are exempt (Go requires the
     # identical signature): Node.Propose and the test machines' Apply entries
     # that stood here are gone. The declarations the rule would report in
     # design_gen.go (StateMachine.Apply, Replicated.Propose) are generated and
-    # skipped. Three sites remain, none of them an implementation of a local
+    # skipped. Two sites remain, none of them an implementation of a local
     # interface:
     #   - Node.submit and Node.applied1 carry the value the caller's machine
     #     computed to the proposer's waiter unchanged (the StateMachine port
@@ -523,7 +566,7 @@ rules:
     #     sibling); they are plain helpers with no contract to inherit the
     #     exemption from.
     #   - settingDecl.fromCode is the interface method itself, now reported at
-    #     its declaration: it takes the value public kit.Set(name string,
+    #     its declaration: it takes the value public app.Set(name string,
     #     value any) stored for a setting whose type parameter T is known only
     #     to the implementation behind settingDecl, so it arrives without a
     #     static type and the method asserts it to T. `any` is the type the
@@ -533,8 +576,8 @@ rules:
       - "internal/service/app/consensus/ops.go:Node.submit"
       - "**/internal/service/app/consensus/apply.go:Node.applied1"
       - "internal/service/app/consensus/apply.go:Node.applied1"
-      - "**/framework/internal/kit/setting_interface.go:settingDecl.fromCode"
-      - "framework/internal/kit/setting_interface.go:settingDecl.fromCode"
+      - "**/framework/internal/app/setting_interface.go:settingDecl.fromCode"
+      - "framework/internal/app/setting_interface.go:settingDecl.fromCode"
 
   # KTN-API-MINIF (info) — "prefer the narrowest interface for this parameter".
   #
@@ -987,6 +1030,23 @@ rules:
     exclude:
       - "**/internal/service/net/server/**"
       - "internal/service/net/server/**"
+
+  # KTN-FUNC-MAXPARAM (phase 5) — "group the parameters in a struct".
+  #
+  # Function-level, never a file: errs.Static(code, reason, public, private,
+  # http, exit) takes six parameters because a struct would defeat what it is
+  # for. Its body is one composite literal so the call inlines and the linker
+  # initialises every sentinel built from constants (ADR 0176); an options
+  # struct or a variadic is exactly what Define carries and Static exists not
+  # to. The six are Define's four plus the two status overrides Define takes as
+  # options. Only this function; every other signature in the package stays
+  # bound by the rule. The rule ignored exclude_functions until
+  # kodflow/ktn-linter#734, fixed by #735 and shipped in v1.46.0 — the minimum
+  # this entry needs (Makefile KTN_LINTER_VERSION).
+  KTN-FUNC-MAXPARAM:
+    exclude_functions:
+      - "**/internal/kernel/errs/error.go:Static"
+      - "internal/kernel/errs/error.go:Static"
 
   # KTN-STRUCT-CTOR (phase 4) — Effective Go's own naming rule wins.
   #
@@ -1677,7 +1737,7 @@ rules:
       - "**/internal/core/app/health/**"
       - "internal/core/app/health/**"
       # TEMPORARY — kodflow/ktn-linter#694: BIGSTRUCT fires on aliases of external
-      # types in framework/internal/kit (false positive).
+      # types in framework/internal/app (false positive).
       # Temporaire, à retirer quand l'issue est corrigée. Scoped to the
       # framework directory only.
       - "framework/**"
@@ -1707,8 +1767,10 @@ rules:
   # UnmarshalText assigns and must take a pointer. time.Time, which they sit
   # beside, has exactly this method set. Scoped to the one file.
   #
-  # framework/internal/kit's sealedDoc (seal_store.go) is the same case as
-  # the two above: the SDK's document store encodes a sealing store's records
+  # framework/internal/app/storeengine's docRecord (document.go, ADR 0179 §2 —
+  # sealedDoc's shape generalised to every store, moved with the engines out
+  # of kit's core at step 3) is the same case as
+  # the two above: the SDK's document store encodes a store's records
   # BY VALUE — json.Marshal(v) in internal/service/data/docstore/write.go:123 —, so its
   # MarshalJSON — the record as it rests — must be a value method, while its
   # UnmarshalJSON keeps what it reads and must take a pointer. Scoped to the
@@ -1736,8 +1798,8 @@ rules:
       - "internal/core/security/secret/**"
       - "**/internal/service/data/codec/toml/localtime.go"
       - "internal/service/data/codec/toml/localtime.go"
-      - "**/framework/internal/kit/seal_store.go"
-      - "framework/internal/kit/seal_store.go"
+      - "**/framework/internal/app/storeengine/document.go"
+      - "framework/internal/app/storeengine/document.go"
       - "**/internal/service/data/codec/bson/types.go"
       - "internal/service/data/codec/bson/types.go"
       - "**/internal/service/data/codec/bson/objectid.go"
@@ -1758,6 +1820,8 @@ rules:
       - "internal/service/data/codec/bson/decimal.go"
       - "**/internal/service/data/codec/toml/localtime.go"
       - "internal/service/data/codec/toml/localtime.go"
+      - "**/framework/internal/app/storeengine/document.go"
+      - "framework/internal/app/storeengine/document.go"
 
   # KTN-TEST-PARALLEL (phase 8) — genuine false positive, fix pending upstream.
   #

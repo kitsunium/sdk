@@ -392,6 +392,24 @@ EOF
   [[ "$output" == *"internal/service/app/widget/errors.go declares an error code"* ]]
 }
 
+# (a), the static sibling (ADR 0176): a sentinel made with errs.Static declares
+# a code as much as one made with errs.Define.
+@test "core-symmetry: a service file calling errs.Static is refused" {
+  mksymroot
+  cat >internal/service/app/widget/errors.go <<'EOF'
+package widget
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+var Stalled = errs.Static(0x00_03_01_02, "STALLED", "stalled", "stalled", 0, 75)
+EOF
+
+  run "$SCRIPTS/check-core-symmetry.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"internal/service/app/widget/errors.go declares an error code"* ]]
+}
+
 # (a) through an import name: `errs\.Define` alone would match kerrs.Define by
 # accident and miss any other name, so the guard reads the import.
 @test "core-symmetry: a Define under another import name is refused" {

@@ -921,9 +921,8 @@ packages:
               it cannot honour: a bound out of range, a heartbeat not below a fifth of
               the minimum election timeout, a lease without a stated clock drift, a
               durability that disagrees with the state machine.
+            exit: CONFIG
             name: ConsensusMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/consensus: a configuration field is missing, out of range, or contradicts another; the fields name it"
             public: The consensus node cannot be built from the given configuration
             reason: CONSENSUS_MISCONFIGURED
@@ -931,9 +930,8 @@ packages:
             doc: |-
               NotLeader is returned when a proposal was certainly NOT appended. It is
               safe to retry; LeaderHint reads the known leader from its fields.
+            exit: TEMPFAIL
             name: NotLeader
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: the proposal was refused before append because this node does not lead and could not forward it"
             public: This node is not the leader; the proposal was not appended
             reason: NOT_LEADER
@@ -942,9 +940,8 @@ packages:
               OutcomeUnknown is returned when a proposal was appended, or possibly
               delivered, and its answer was lost. The entry may still commit: never
               retry blindly, read the state through Barrier first.
+            exit: TEMPFAIL
             name: OutcomeUnknown
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: the proposal was appended or possibly delivered, then the answer was lost to a leadership change, a context's end or a broken connection"
             public: The proposal may or may not have been committed
             reason: OUTCOME_UNKNOWN
@@ -952,9 +949,8 @@ packages:
             doc: |-
               LeadershipUnconfirmed is returned by Barrier when its round did not reach
               a majority in time.
+            exit: TEMPFAIL
             name: LeadershipUnconfirmed
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: a read barrier's heartbeat round did not reach a majority of the configuration in time"
             public: The leader could not confirm its leadership
             reason: LEADERSHIP_UNCONFIRMED
@@ -962,9 +958,8 @@ packages:
             doc: |-
               MembershipChangePending is returned while another membership change is
               still uncommitted: one change at a time.
+            exit: TEMPFAIL
             name: MembershipChangePending
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: a membership change was proposed while a previous one is uncommitted"
             public: Another membership change is still pending
             reason: MEMBERSHIP_CHANGE_PENDING
@@ -973,9 +968,8 @@ packages:
               MembershipInvalid is returned for a change refused on its merits: an
               unknown node, the last voter, a removal below MinVoters, a promotion
               without durable progress, a change without a reachable majority.
+            exit: DATAERR
             name: MembershipInvalid
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/consensus: the membership change names an unknown node, leaves too few voters, or would leave no reachable majority"
             public: The membership change is not allowed
             reason: MEMBERSHIP_INVALID
@@ -984,17 +978,15 @@ packages:
               TransferFailed is returned when a leadership transfer's target did not
               win within one election timeout. The old leader resumes, without its
               lease for the rest of the term.
+            exit: TEMPFAIL
             name: TransferFailed
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: the transfer target did not win an election within one election timeout"
             public: The leadership transfer did not complete
             reason: TRANSFER_FAILED
           - code: CodeEntryTooLarge
             doc: EntryTooLarge is returned for a command above MaxEntryBytes.
+            exit: DATAERR
             name: EntryTooLarge
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/consensus: the command exceeds MaxEntryBytes"
             public: The proposed entry is too large
             reason: ENTRY_TOO_LARGE
@@ -1002,9 +994,8 @@ packages:
             doc: |-
               Compacted is the answer for an index below the first retained one. It is
               an expected outcome the engine acts on, never a failure.
+            exit: TEMPFAIL
             name: Compacted
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: the index is below the first index the log retains"
             public: The requested log position has been compacted
             reason: COMPACTED
@@ -1012,9 +1003,8 @@ packages:
             doc: |-
               StateMachineFailed stops the node when Apply panics or cannot complete.
               The entry IS committed: this never means "not written".
+            exit: UNAVAILABLE
             name: StateMachineFailed
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "core/app/consensus: Apply panicked or could not complete; the entry is committed and the node stopped applying"
             public: The replicated state machine failed and the node stopped
             reason: STATE_MACHINE_FAILED
@@ -1022,9 +1012,8 @@ packages:
             doc: |-
               NodeStopped is returned by a call on a node that was closed or stopped
               itself.
+            exit: TEMPFAIL
             name: NodeStopped
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: the node was closed, or stopped itself; its StopReason says why"
             public: The consensus node is stopped
             reason: NODE_STOPPED
@@ -1032,9 +1021,8 @@ packages:
             doc: |-
               EntrySuperseded is returned when a COMMITTED entry at the proposal's
               index has another term: the proposal certainly did not commit.
+            exit: TEMPFAIL
             name: EntrySuperseded
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: the entry committed at the proposal's index carries another term"
             public: Another entry was committed at the proposal's position
             reason: ENTRY_SUPERSEDED
@@ -1042,9 +1030,8 @@ packages:
             doc: |-
               Overloaded is returned when a proposal is refused before append: pending
               bytes or apply lag over their bound. It is safe to retry.
+            exit: TEMPFAIL
             name: Overloaded
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: pending proposal bytes or apply lag are over their bound; nothing was appended"
             public: The cluster is overloaded; the proposal was not appended
             reason: OVERLOADED
@@ -1052,17 +1039,15 @@ packages:
             doc: |-
               VersionUnsupported stops the node on an entry kind, record, frame or
               snapshot version it does not know. Skipping one would be a fork.
+            exit: PROTOCOL
             name: VersionUnsupported
-            options:
-              - errs.WithExitCode(exitProtocol)
             private: "core/app/consensus: an entry kind, log record, frame or snapshot version is unknown to this node, which stops"
             public: A version this node does not support was met
             reason: VERSION_UNSUPPORTED
           - code: CodeNodeIDRetired
             doc: NodeIDRetired is returned when a removed NodeID is offered again.
+            exit: DATAERR
             name: NodeIDRetired
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/consensus: the NodeID is in the replicated retired set"
             public: The node ID has been retired and cannot be used again
             reason: NODE_ID_RETIRED
@@ -1070,9 +1055,8 @@ packages:
             doc: |-
               NoSpace is returned for an ordinary proposal while the replicated
               no-space alarm is raised.
+            exit: TEMPFAIL
             name: NoSpace
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: the replicated no-space alarm is raised; only the alarm, its clearing and administrative entries are admitted"
             public: Writes are refused until the no-space alarm is cleared
             reason: NO_SPACE
@@ -1080,9 +1064,8 @@ packages:
             doc: |-
               ResultTypeMismatch is returned by ProposeAs for an Apply result of
               another type. The entry IS committed; TokenOf reads its token.
+            exit: DATAERR
             name: ResultTypeMismatch
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/consensus: ProposeAs got an Apply result of another dynamic type; the entry is committed"
             public: The entry was committed but its result has an unexpected type
             reason: RESULT_TYPE_MISMATCH
@@ -1090,9 +1073,8 @@ packages:
             doc: |-
               PayloadVersionRefused is returned for a proposal whose payload version is
               above what some member announced; retryable after the upgrade.
+            exit: TEMPFAIL
             name: PayloadVersionRefused
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: the proposal's payload version exceeds the cluster's committed floor; nothing was appended"
             public: The payload version is not yet supported by every member
             reason: PAYLOAD_VERSION_REFUSED
@@ -1100,9 +1082,8 @@ packages:
             doc: |-
               LineageMismatch is returned for a position, outbox identity or fence
               from another LogIdentity lineage.
+            exit: DATAERR
             name: LineageMismatch
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/consensus: a token or precondition names another ClusterID or log epoch than this log's"
             public: The position belongs to another log lineage
             reason: LINEAGE_MISMATCH
@@ -1110,9 +1091,8 @@ packages:
             doc: |-
               AdminPreconditionFailed is returned when a clearing or raising
               operation names an alarm, version or contract that is not current.
+            exit: TEMPFAIL
             name: AdminPreconditionFailed
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: the precondition names an alarm, contract or version generation that is not the current one"
             public: The administrative operation's precondition no longer holds
             reason: ADMIN_PRECONDITION_FAILED
@@ -1120,9 +1100,8 @@ packages:
             doc: |-
               LogCorrupt is a CRC failure that is not a torn tail, or a gap in the
               effective log. It is never repaired.
+            exit: DATAERR
             name: LogCorrupt
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/consensus: a log record failed its checksum outside a torn tail, or the effective indexes have a gap"
             public: The consensus log is corrupt
             reason: LOG_CORRUPT
@@ -1130,9 +1109,8 @@ packages:
             doc: |-
               HardStateCorrupt is an unreadable hard-state record or checkpoint; it is
               never defaulted.
+            exit: DATAERR
             name: HardStateCorrupt
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/consensus: the hard-state record or the checkpoint holding it is unreadable"
             public: The consensus hard state is corrupt
             reason: HARD_STATE_CORRUPT
@@ -1140,9 +1118,8 @@ packages:
             doc: |-
               SnapshotCorrupt is a snapshot whose SHA-256 or size does not match its
               metadata.
+            exit: DATAERR
             name: SnapshotCorrupt
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/consensus: a snapshot's digest, chunk checksum or size does not match its metadata"
             public: The snapshot is corrupt
             reason: SNAPSHOT_CORRUPT
@@ -1150,17 +1127,15 @@ packages:
             doc: |-
               StorageFailed stops the node on a failed write, sync or read. It is
               never retried: a retried fsync can report success over lost pages.
+            exit: IOERR
             name: StorageFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "core/app/consensus: a write, fsync or read failed; the node stops and refuses to start again until the machine reboots"
             public: The consensus storage failed and the node stopped
             reason: STORAGE_FAILED
           - code: CodeDataDirLocked
             doc: DataDirLocked is returned when another process holds the data directory.
+            exit: TEMPFAIL
             name: DataDirLocked
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: the data directory lock is held by another process"
             public: The data directory is held by another process
             reason: DATA_DIR_LOCKED
@@ -1168,9 +1143,8 @@ packages:
             doc: |-
               DataDirMismatch is returned when the stamp names another cluster, node
               or incarnation, or an applied position cannot be trusted.
+            exit: CONFIG
             name: DataDirMismatch
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/consensus: the stamp or the applied position names another cluster, node, incarnation or lineage"
             public: The data directory belongs to another node or cluster
             reason: DATA_DIR_MISMATCH
@@ -1178,9 +1152,8 @@ packages:
             doc: |-
               PeerRejected is returned when a peer's certificate is not canonical,
               names another cluster or slot, or carries a key that is not pinned.
+            exit: TEMPFAIL
             name: PeerRejected
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: the peer certificate's URI SAN is not canonical, names another cluster or slot, or its key is not admitted"
             public: The peer was rejected
             reason: PEER_REJECTED
@@ -1188,9 +1161,8 @@ packages:
             doc: |-
               ClusterMismatch is returned when a peer's first frame names another
               cluster or group.
+            exit: CONFIG
             name: ClusterMismatch
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/consensus: the first frame names another cluster or group"
             public: The peer belongs to another cluster
             reason: CLUSTER_MISMATCH
@@ -1198,9 +1170,8 @@ packages:
             doc: |-
               FrameInvalid is a frame that does not parse or exceeds MaxFrameBytes;
               the connection closes.
+            exit: DATAERR
             name: FrameInvalid
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/consensus: a frame does not parse, or its length exceeds the frame cap"
             public: A malformed frame was received
             reason: FRAME_INVALID
@@ -1208,9 +1179,8 @@ packages:
             doc: |-
               SnapshotTooLarge is an announced snapshot above the local
               MaxSnapshotBytes, refused before anything is spooled.
+            exit: DATAERR
             name: SnapshotTooLarge
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/consensus: the announced snapshot size exceeds MaxSnapshotBytes"
             public: The snapshot is larger than this node accepts
             reason: SNAPSHOT_TOO_LARGE
@@ -1218,9 +1188,8 @@ packages:
             doc: |-
               BootstrapRefused is returned when a listed peer already holds a history,
               or the founding member lists differ.
+            exit: CONFIG
             name: BootstrapRefused
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/consensus: the data directory already holds log entries, or a bootstrap with another member list is pending"
             public: The cluster cannot be bootstrapped
             reason: BOOTSTRAP_REFUSED
@@ -1228,17 +1197,15 @@ packages:
             doc: |-
               TransportMisconfigured is returned when the transport cannot be built
               from its configuration.
+            exit: CONFIG
             name: TransportMisconfigured
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/consensus: an identity without roots, a listener without client-certificate verification, or a limit out of range"
             public: The consensus transport cannot be built from the given configuration
             reason: TRANSPORT_MISCONFIGURED
           - code: CodeRecoverRefused
             doc: RecoverRefused is returned when Recover's preconditions do not hold.
+            exit: CONFIG
             name: RecoverRefused
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/consensus: Recover needs a stopped, locked directory, a new ClusterID, the typed confirmation and a signed fence for every old voter"
             public: The recovery was refused
             reason: RECOVER_REFUSED
@@ -1246,9 +1213,8 @@ packages:
             doc: |-
               LogQuarantined is returned at start while the data directory carries a
               quarantine marker; only ClearQuarantine lifts it.
+            exit: DATAERR
             name: LogQuarantined
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/consensus: the data directory carries a quarantine marker from a LOG_CORRUPT; an operator must clear it"
             public: The consensus log is quarantined
             reason: LOG_QUARANTINED
@@ -1256,9 +1222,8 @@ packages:
             doc: |-
               RestoreRefused is returned when RestoreSnapshot's preconditions do not
               hold.
+            exit: CONFIG
             name: RestoreRefused
-            options:
-              - errs.WithExitCode(exitConfig)
             private: "core/app/consensus: RestoreSnapshot needs an empty directory, a non-zero expected digest that matches, and the typed confirmation"
             public: The snapshot restore was refused
             reason: RESTORE_REFUSED
@@ -1266,25 +1231,22 @@ packages:
             doc: |-
               DataDirInUse is returned by an offline operation on a directory a live
               node holds.
+            exit: TEMPFAIL
             name: DataDirInUse
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: Close, Recover or Inspect was called while a live Node holds the directory"
             public: The data directory is in use by a running node
             reason: DATA_DIR_IN_USE
           - code: CodeJoinRefused
             doc: JoinRefused is returned to a pre-admission JOIN that was refused.
+            exit: TEMPFAIL
             name: JoinRefused
-            options:
-              - errs.WithExitCode(exitTempFail)
             private: "core/app/consensus: the JOIN names a slot whose member is not fenced, exceeds its rate, or reuses a retired id"
             public: The join request was refused
             reason: JOIN_REFUSED
           - code: CodeStopMarkerPresent
             doc: StopMarkerPresent is returned by NewRaft when a stop marker applies.
+            exit: DATAERR
             name: StopMarkerPresent
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/app/consensus: a stop marker is present; STORAGE_FAILED clears at reboot, the others by an operator"
             public: The node refuses to start until its stop marker is cleared
             reason: STOP_MARKER_PRESENT

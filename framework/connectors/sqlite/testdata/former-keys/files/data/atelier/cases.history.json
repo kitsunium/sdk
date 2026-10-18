@@ -1,0 +1,17 @@
+{
+  "c-ann": {
+    "key": "c-ann",
+    "fields": {
+      "/note": [
+        {
+          "value": "sealed:v1:ASJyOjdhYTkwOTZmOTc0N2U1YzQwYzU0NTAyNjA1MTc5NDhjTz1C8_FrjlMBAfzDG_HJcoiaxXEdtWMpC__c6WLwZAfkiwJaHsIit8SFdKXkcaIrV0GbIdO58WV62lF_vDIJp28y99FJ-w",
+          "until": "2026-10-18T04:57:19.361793244Z"
+        },
+        {
+          "value": "sealed:v1:ASJyOjdhYTkwOTZmOTc0N2U1YzQwYzU0NTAyNjA1MTc5NDhjTz1C8_FrjlMBAcRFahKNatliX3zCIOlZQgZiRtLYBlWYoScS6T4D-uEAUEMrjnHUKDzPM0TZ6U1SkaEN6FK6VoxGr9vIdA",
+          "until": "2026-10-18T04:57:19.355820391Z"
+        }
+      ]
+    }
+  }
+}

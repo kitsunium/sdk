@@ -74,9 +74,7 @@ func (u *Service) probeReplacement(execPath string, kept bool) error {
 	if len(u.probe.args) == 0 {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), u.probe.timeout)
-	defer cancel()
-	err := u.probe.run(ctx, execPath, u.probe.args)
+	err := u.probeOnce(execPath)
 	if err == nil {
 		return nil
 	}
@@ -86,6 +84,14 @@ func (u *Service) probeReplacement(execPath string, kept bool) error {
 	}
 	return classify(ProbeFailed, err, errs.String("path", execPath), errs.Bool("rolled_back", rolledBack),
 		errs.String("timeout", u.probe.timeout.String()))
+}
+
+// probeOnce runs the declared probe against the binary at execPath, within
+// the declared timeout.
+func (u *Service) probeOnce(execPath string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), u.probe.timeout)
+	defer cancel()
+	return u.probe.run(ctx, execPath, u.probe.args)
 }
 
 // runProbe runs the binary at path with args, output discarded, within ctx.

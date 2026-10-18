@@ -19,7 +19,7 @@ project:
   # refuses the project under any other kit, by name, and `make regen`
   # (scripts/regen.sh) refuses to run one. No part of the design's digest.
   kit:
-    version: v0.1.0-rc.8
+    version: v0.1.0-rc.9
   surface: closed
   # Every doc comment is the design's (ADR 0167): kit gen writes each doc
   # slot of a designed declaration and each package's doc.go.
@@ -155,10 +155,14 @@ families:
 # The ranges below own the ranges (ADR 0035): kit writes them into
 # codeRangeOwners, and they are authored apart from the codes they audit.
 # //:audit_sources is what the errs audits read (check-audit-coverage.sh).
+# A sentinel's statuses are its exit: and http: fields; one without options:
+# is written with static, constants the linker initialises, and kit gen
+# checks what define would have checked when the program starts (ADR 0176).
 codes:
   placement: core-at-engine-path
   type: go:github.com/kitsunium/sdk/internal/kernel/errs.Code
   define: go:github.com/kitsunium/sdk/internal/kernel/errs.Define
+  static: go:github.com/kitsunium/sdk/internal/kernel/errs.Static
   owners: internal/kernel/errs/codes_gen_test.go#codeRangeOwners
   audit: BUILD.bazel#audit_sources
   # The ranges' table (ADR 0035, ADR 0164): each range MM.LL.PP and the
@@ -401,12 +405,12 @@ codes:
       owner: framework/model/internal/core
       note: "ADR 0147: layer 4 is the framework's"
     - range: 0.4.2
-      owner: framework/internal/kit
+      owner: framework/internal/app
     - range: 0.4.3
       owner: framework/telemetry
       note: ADR 0149
     - range: 0.4.4
-      owner: framework/kit/storetest
+      owner: framework/app/storetest
     - range: 0.4.16
       owner: framework/connectors/postgres
     - range: 0.4.17

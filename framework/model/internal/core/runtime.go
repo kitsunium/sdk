@@ -22,7 +22,7 @@ const (
 	// DatabaseUnset: no URL, in dev. Its stores stay in the data directory
 	// and nothing is opened.
 	DatabaseUnset = "unset"
-	// DatabaseMemory: the app keeps its data in memory (kit.InMemory):
+	// DatabaseMemory: the app keeps its data in memory (app.InMemory):
 	// nothing is opened, no URL is read.
 	DatabaseMemory = "memory"
 	// DatabaseOpen: the pool is open, its migrations ran, it answered its
@@ -40,26 +40,30 @@ const (
 	SettingOption  = "option"  // the product's code: an AppOption
 	SettingDefault = "default" // kit's default for the environment
 	SettingStore   = "store"   // the environment's secret store (a secret)
-	SettingKitDev  = "kitdev"  // kit dev set the variable, for this launch
+	SettingAppDev  = "appdev"  // kit dev set the variable, for this launch
 	SettingFile    = "file"    // a configuration file of the product (Detail)
 )
 
-// The settings kit reads, by the environment variable that sets each: kit's
-// configuration reads them, the connectors and the architecture name them.
+// The settings the framework reads, by the variable that sets each. The
+// framework's own are named under the product's prefix — its name
+// upper-cased, every other character an underscore —, so a constant holds
+// the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+// (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+// the tool's, set by it and read whole by the Studio subsystem alone.
 const (
-	VarEnv          = "KIT_ENV"
-	VarAddr         = "KIT_ADDR"
-	VarDataDir      = "KIT_DATA_DIR"
+	VarEnv          = "ENV"
+	VarAddr         = "ADDR"
+	VarDataDir      = "DATA_DIR"
 	VarStudio       = "KIT_STUDIO"
 	VarStudioRemote = "KIT_STUDIO_REMOTE"
 	VarAnalyze      = "KIT_ANALYZE"
-	VarTrustProxy   = "KIT_TRUST_PROXY"
-	VarAllowedHosts = "KIT_ALLOWED_HOSTS"
-	VarLogLevel     = "KIT_LOG_LEVEL"
-	VarSMTPURL      = "KIT_SMTP_URL"
+	VarTrustProxy   = "TRUST_PROXY"
+	VarAllowedHosts = "ALLOWED_HOSTS"
+	VarLogLevel     = "LOG_LEVEL"
+	VarSMTPURL      = "SMTP_URL"
 	// VarRetention sets what the stores' retention loops do: on, dry-run
 	// or off (ADR 0006).
-	VarRetention = "KIT_RETENTION"
+	VarRetention = "RETENTION"
 	// VarDevForced is how kit dev tells the product which of the variables
 	// above it set itself for this launch: their origin is kit dev.
 	VarDevForced = "KIT_DEV_FORCED"
@@ -105,9 +109,9 @@ const (
 	// ProvenanceLibrary loops are written by a library: net/http's accept
 	// loop, the SDK scheduler, the SDK queue consumer.
 	ProvenanceLibrary = "library"
-	// ProvenanceKit loops are written by kit for a declaration: a workflow's
+	// ProvenanceApp loops are written by the framework for a declaration: a workflow's
 	// sweep, a declared loop's wake cycle.
-	ProvenanceKit = "kit"
+	ProvenanceApp = "app"
 	// ProvenanceProduct loops are written by hand in the product: Service.Go.
 	ProvenanceProduct = "product"
 )
@@ -139,7 +143,7 @@ const (
 	OpHandle      = "handle"       // a queued command handled by its consumer, in the dispatcher's trace
 	OpConnect     = "connect"      // a connection a listener accepted, handled until it closes
 	OpCLI         = "cli"          // a short command-line command, run once
-	// OpTransaction is a unit of work (kit.Transact, a command's, a
+	// OpTransaction is a unit of work (app.Transact, a command's, a
 	// workflow's transition): its attrs say the database it belongs to —
 	// "database", and "backend" as a store says it —, its "outcome", the
 	// effects it held ("effects"), and "savepoint" for one nested in
@@ -177,12 +181,12 @@ type RuntimeMessage struct {
 	// daemon's own state machine, as it ran.
 	History []PhaseChangeEvent `json:"history,omitempty"`
 	// Process is the Go process, sampled when the graph was built; nil when
-	// the product imports no framework/kit/server, which plugs the sampler
+	// the product imports no framework/app/server, which plugs the sampler
 	// in (ADR 0172).
 	Process *ProcessSpec `json:"process,omitempty"`
 	// HTTP is the product's HTTP server.
 	HTTP *HTTPServer `json:"http,omitempty"`
-	// Mocks are the replacements a test gave the app (kit.Replace).
+	// Mocks are the replacements a test gave the app (app.Replace).
 	Mocks []MockMessage `json:"mocks,omitempty"`
 	// Dev describes the build `kit dev` made of this process, when it did.
 	Dev *DevBuildMessage `json:"dev,omitempty"`
@@ -198,7 +202,7 @@ type RuntimeMessage struct {
 	Databases []DatabaseMessage `json:"databases,omitempty"`
 }
 
-// DatabaseMessage is one database the app declares (kit.Database), as the running
+// DatabaseMessage is one database the app declares (app.Database), as the running
 // process found it. Its URL is never shown: where it was found, the engine,
 // the address and the TLS mode are.
 type DatabaseMessage struct {
@@ -250,12 +254,12 @@ type Pool struct {
 }
 
 // MigrationSetMessage is one set of migrations on a database — kit's own, the
-// product's (kit.Migrations), a module's — with its own version table, and
+// product's (app.Migrations), a module's — with its own version table, and
 // so its own lock.
 type MigrationSetMessage struct {
-	// Name is the set's origin: "kit", "product", or a module's name.
+	// Name is the set's origin: "app", "product", or a module's name.
 	Name string `json:"name"`
-	// Table is its version table: "kit_migrations", "schema_migrations".
+	// Table is its version table: "app_migrations", "schema_migrations".
 	Table string `json:"table"`
 	// Applied are the migrations the database records, and Pending those
 	// this build carries that it does not, oldest first.
@@ -277,7 +281,7 @@ type MigrationMessage struct {
 // SettingMessage is one configuration value kit read when the product started:
 // kit's own, or one a service of the product declares.
 type SettingMessage struct {
-	// Name is the environment variable that sets it: "KIT_ADDR",
+	// Name is the environment variable that sets it: "TODO_ADDR",
 	// "TODO_BASE_URL".
 	Name string `json:"name"`
 	// Value is what kit uses. A secret's is left out: Secret says so.
@@ -288,7 +292,7 @@ type SettingMessage struct {
 	Service string `json:"service,omitempty"`
 	// Key is a declared setting's name, its key in a configuration file:
 	// "base-url". A module's is qualified with the module's name,
-	// "moderation.tdb-url": kit.Set's key, and in a file "tdb-url" under
+	// "moderation.tdb-url": app.Set's key, and in a file "tdb-url" under
 	// "moderation:" (ADR 0008).
 	Key string `json:"key,omitempty"`
 	// Type is what a declared setting holds: text, bool, int, number,
@@ -300,13 +304,13 @@ type SettingMessage struct {
 	// Secret: the value is withheld.
 	Secret bool `json:"secret,omitempty"`
 	// Option is the AppOption that sets it in code, when there is one:
-	// "kit.Listen". Code wins over the environment.
+	// "app.Listen". Code wins over the environment.
 	Option string `json:"option,omitempty"`
 	// Flag is the kit dev flag that sets it in dev, when there is one:
 	// "-addr".
 	Flag string `json:"flag,omitempty"`
 	// Database is the database the setting configures, when kit declares it
-	// for one (kit.Database): its URL, its pool, its timeouts.
+	// for one (app.Database): its URL, its pool, its timeouts.
 	Database string `json:"database,omitempty"`
 }
 
@@ -456,7 +460,7 @@ type LoopMessage struct {
 	Provenance string `json:"provenance,omitempty"`
 	// Library names the code that loops, for a library or kit loop:
 	// "net/http", "sdk/v1/app/scheduler", "sdk/v1/data/queue",
-	// "sdk/v1/app/mail/spool", "sdk/v1/app/statemachine", "kit".
+	// "sdk/v1/app/mail/spool", "sdk/v1/app/statemachine", "app".
 	Library string `json:"library,omitempty"`
 	// State is one of the Loop state constants.
 	State string `json:"state,omitempty"`
@@ -556,7 +560,7 @@ type SpanMessage struct {
 
 // Payload is the request and the response of a span, as JSON, in dev only.
 // Every member whose name says it is a secret — password, token, secret,
-// authorization, cookie… — or whose Go field is tagged kit:"secret" is
+// authorization, cookie… — or whose Go field is tagged app:"secret" is
 // replaced by "[redacted]", and each side is cut at 8 KiB.
 type Payload struct {
 	// Request is the decoded request, or the message delivered.
@@ -664,7 +668,7 @@ type StepEvent struct {
 	Caller string `json:"caller,omitempty"`
 }
 
-// LogRecordMessage is one log record written by product code through kit.Log, kept
+// LogRecordMessage is one log record written by product code through app.Log, kept
 // in dev so the Studio can show a request's logs beside its spans.
 type LogRecordMessage struct {
 	// Seq orders records; it only increases.

@@ -323,7 +323,7 @@ func mergeEdges(edges, extra []EdgeMessage, known map[string]bool, chosen func(E
 			continue
 		}
 		// A binding the base did not choose — an implementation this app does
-		// not mount, a kit.Bind another app gives —, or a store the base does
+		// not mount, an app.Bind another app gives —, or a store the base does
 		// not hear with a watch.
 		if !chosen(e) {
 			e.Observed = nil

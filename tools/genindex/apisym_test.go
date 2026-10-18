@@ -23,6 +23,9 @@ type DefineOption func(*Error)
 
 // Define makes a sentinel.
 func Define(code Code, reason, public, private string, opts ...DefineOption) *Error { return nil }
+
+// Static makes a sentinel from constants alone.
+func Static(code Code, reason, public, private string, http, exit int) *Error { return nil }
 `
 
 // symbolByID finds a record by id, failing the test when it is absent.
@@ -36,9 +39,9 @@ func symbolByID(t *testing.T, syms []apiSymbol, id string) apiSymbol {
 }
 
 // Test_readSymbols_codes pins the codes: an errs.Code constant carries its
-// dotted quad; a variable initialised with errs.Define — under any import
-// name, parenthesised or not — carries the sentinel's code, reason and public
-// text; a variable initialised with a sentinel inherits its code through any
+// dotted quad; a variable initialised with errs.Define or errs.Static (ADR
+// 0176) — under any import name, parenthesised or not — carries the
+// sentinel's code, reason and public text; a variable initialised with a sentinel inherits its code through any
 // chain of re-exports, within a package or across packages, and names it in
 // init; an unexported sentinel is no record.
 func Test_readSymbols_codes(t *testing.T) {
@@ -62,6 +65,8 @@ var (
 	// A is a sentinel.
 	A = errs.Define(CodeA, "A_FAILED", "a failed", "private")
 	hidden = errs.Define(CodeB, "HIDDEN", "hidden", "private")
+	// S is a static sentinel.
+	S = errs.Static(CodeB, "S_FAILED", "s failed", "private", 400, 65)
 )
 `}},
 		{Path: "example.com/facade", Files: map[string]string{"facade.go": `package facade
@@ -102,6 +107,7 @@ var (
 		{id: "go:example.com/core.CodeB", want: &apiCode{Value: "0.3.51.10"}},
 		{id: "go:example.com/core.A", want: a},
 		{id: "go:example.com/core.B", want: a, init: "go:example.com/core.A"},
+		{id: "go:example.com/core.S", want: &apiCode{Value: "0.3.51.10", Reason: "S_FAILED", Public: "s failed"}},
 		{id: "go:example.com/facade.CodeA", want: &apiCode{Value: "0.2.21.1"}, init: "go:example.com/core.CodeA"},
 		{id: "go:example.com/facade.A", want: a, init: "go:example.com/core.A"},
 		{id: "go:example.com/facade.C", want: a, init: "go:example.com/core.B"},

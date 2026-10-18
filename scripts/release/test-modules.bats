@@ -50,13 +50,13 @@ setup() {
   g config maintenance.auto false
   g config user.email "ci@example.invalid"
   g config user.name "ci"
-  mkdir -p framework/kit internal/kernel/x pkg/v1/data pkg/v1/net third-party/aws
+  mkdir -p framework/app internal/kernel/x pkg/v1/data pkg/v1/net third-party/aws
   printf 'module github.com/kitsunium/sdk\n\ngo 1.27\n' >go.mod
   gomod internal
   gomod pkg/v1/data internal
   gomod pkg/v1/net internal
   gomod third-party/aws .
-  echo "package kit" >framework/kit/kit.go
+  echo "package app" >framework/app/app.go
   echo "package x" >internal/kernel/x/x.go
   echo "package data" >pkg/v1/data/data.go
   echo "package net" >pkg/v1/net/net.go
@@ -306,7 +306,7 @@ SHIM
   need_toolchain
   released
   g --git-dir="$BATS_TEST_TMPDIR/origin.git" tag pin/v0.19.8 "$(g rev-parse 'v0.19.7^{commit}')"
-  change framework/kit/kit.go "fix(kit): one"
+  change framework/app/app.go "fix(kit): one"
   run bash -c "'$CB' | '$CT' 2>/dev/null"
   [ "$status" -eq 0 ]
   [ "$output" = "v0.19.8" ]

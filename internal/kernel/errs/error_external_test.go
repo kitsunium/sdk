@@ -962,3 +962,49 @@ func TestNewRuntimeFieldsCopied(t *testing.T) {
 		})
 	}
 }
+
+// TestStaticMatchesDefine pins Static as Define's sibling (ADR 0176): for the
+// same constants the two build an error with the same code, texts and statuses,
+// and a zero status keeps meaning "the default" (500 / 70).
+func TestStaticMatchesDefine(t *testing.T) {
+	t.Parallel()
+	const code errs.Code = 0x00_03_7f_01
+	type tc struct {
+		name       string
+		http, exit int
+	}
+	tests := []tc{
+		{"defaults", 0, 0},
+		{"both overridden", 401, 78},
+		{"http only", 404, 0},
+		{"exit only", 0, 64},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var opts []errs.DefineOption
+		if c.http != 0 {
+			opts = append(opts, errs.WithHTTPStatus(c.http))
+		}
+		if c.exit != 0 {
+			opts = append(opts, errs.WithExitCode(c.exit))
+		}
+		want := errs.Define(code, "STATIC_PROBE", "public text", "private text", opts...)
+		got := errs.Static(code, "STATIC_PROBE", "public text", "private text", c.http, c.exit)
+		if got.Error() != want.Error() || got.Private() != want.Private() {
+			t.Errorf("Static = %q / %q, Define = %q / %q", got.Error(), got.Private(), want.Error(), want.Private())
+		}
+		if errs.HTTPStatusOf(got) != errs.HTTPStatusOf(want) || errs.ExitCodeOf(got) != errs.ExitCodeOf(want) {
+			t.Errorf("Static statuses = %d/%d, Define = %d/%d",
+				errs.HTTPStatusOf(got), errs.ExitCodeOf(got), errs.HTTPStatusOf(want), errs.ExitCodeOf(want))
+		}
+		if !errors.Is(got, want) {
+			t.Errorf("errors.Is(Static, Define) = false for the same code and reason")
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}

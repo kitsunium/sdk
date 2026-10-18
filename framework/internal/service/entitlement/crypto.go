@@ -32,7 +32,7 @@ func verifiedBy(key, message, signature []byte) bool {
 // into a value: both callers COMPARE what this returns, and a comparison
 // against a fallback nobody computed is the defect a digest exists to prevent.
 // It panics, which is how the framework already says "the SDK registers it"
-// (framework/internal/kit's journal chain).
+// (framework/internal/app's journal chain).
 func digestOf(algorithm hash.Algorithm, data []byte) []byte {
 	sum, sumErr := hash.Sum(algorithm, data)
 	//: Unreachable: see the doc comment.

@@ -50,6 +50,13 @@ jobs:
     # have it.
     env:
       GH_TOKEN: ${{ github.token }}
+      # A margin, not the means: scripts/build-site.mjs builds the releases a
+      # batch at a time, so a build's heap is bounded by a batch (1.3 GB
+      # measured over 43 releases), not by the history — one build of every
+      # release died at Node's default 4 GB (docs/site/CLAUDE.md §Build
+      # pipeline). check-links.mjs reads the whole dist/ (1.4 GB at 10,544
+      # pages). 8 GB of the runner's 16.
+      NODE_OPTIONS: --max-old-space-size=8192
     defaults:
       run:
         working-directory: docs/site

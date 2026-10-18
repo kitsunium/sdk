@@ -1,0 +1,55 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "mailengine",
+    srcs = [
+        "clock.go",
+        "doc.go",
+        "mailengine.go",
+        "mailengine_compliance.go",
+        "spool.go",
+        "transport.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/internal/app/mailengine",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+    deps = [
+        "//framework/internal/app/plug",
+        "//framework/internal/app/queueengine",
+        "//framework/internal/app/storeengine",
+        "//pkg/v1/app/mail",
+        "//pkg/v1/app/mail/spool",
+        "//pkg/v1/app/resilience",
+        "//pkg/v1/clock",
+        "//pkg/v1/data/sql",
+        "//pkg/v1/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":mailengine",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+)
+
+go_test(
+    name = "mailengine_test",
+    srcs = [
+        "api_gen_test.go",
+        "mailengine_internal_test.go",
+    ],
+    embed = [":mailengine"],
+    deps = [
+        "//framework/internal/app/plug",
+        "//pkg/v1/app/mail",
+        "//pkg/v1/app/mail/spool",
+        "//pkg/v1/errs",
+    ],
+)

@@ -23,7 +23,7 @@ until ADR 0158; the quarantine is the one ADR 0022/0034 (the HCL codec) and ADR
 0012 (the AWS writers) drew, now one module wide.
 
 Its production code imports `framework/entitlement` — the public package, the way
-the database engines import `framework/kit` — plus `internal/kernel/errs` for its
+the database engines import `framework/app` — plus `internal/kernel/errs` for its
 one sentinel and `x/crypto/ssh`. Its suite also reaches the engine's unexported
 surface (`framework/internal/service/entitlement`), which Go's `internal/` rule
 admits because this module's path is under `framework/`.
@@ -45,7 +45,6 @@ has recorded for this package since ADR 0078.
 | `key.go` / `key_unix.go` / `key_windows.go` | load, fingerprint, prove possession, permission checks |
 | `enroll.go` | `NewSubjectID`, `GenerateKeyPair`, `IssueURL` |
 | `codes_gen.go` | `CodeEnrolmentFailed` and its sentinel — written by kit gen from `design/framework/connectors/ssh.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `exitCantCreate` |
 | `go.mod` | the module: the root `github.com/kitsunium/sdk` (the framework), `internal` (`internal/kernel/errs`) and the `pkg/v1` families its build reaches (ADR 0171), and `golang.org/x/crypto` |
 | `wrap.go` | `refuse` / `classify` / `classifyForeign` / `annotate` |
 

@@ -16,9 +16,14 @@
 #   release-notes.sh classify <tag-list>   one "<kind> <tag>" line per tag
 #   release-notes.sh count <tag-list>      "<kind>=<n>" for every kind
 #   release-notes.sh notes <tag-list>      the release notes, Markdown
+#   release-notes.sh start-tag <manifest>  the tag the generated notes start
+#                                          from: the `previous` of the module
+#                                          whose tag is the manifest's
+#                                          `release`; empty when it was never
+#                                          tagged before
 #
-# Exit 1 on a tag no family accepts, or on an empty or unreadable list; 64 on
-# bad usage.
+# Exit 1 on a tag no family accepts, on an empty or unreadable list, or on a
+# manifest whose `release` is no module of it; 64 on bad usage.
 
 set -euo pipefail
 
@@ -116,16 +121,50 @@ notes() {
   fi
 }
 
+# start_tag <manifest> — where GitHub's generated notes start. Left to itself,
+# `gh release create --generate-notes` picks no previous release: every tag
+# names a release commit cut-tags.sh made OFF main, so the last release's tag is
+# never an ancestor of the new one (the compare API answers `diverged`), and
+# the notes listed every pull request since the start of the history with a
+# "Full Changelog" link to `commits/<tag>` (v0.18.0 to v0.28.0). The manifest
+# already knows the module's own last tag: its `previous`.
+start_tag() {
+  local file="$1" found
+  if [ ! -r "$file" ]; then
+    echo "release-notes: $file is missing or unreadable" >&2
+    return 1
+  fi
+  if ! found="$(jq -r '.release as $r | [.modules[] | select(.tag == $r)] | if length == 1 then "ok " + (.[0].previous // "") else "none" end' "$file")"; then
+    echo "release-notes: $file is no release manifest" >&2
+    return 1
+  fi
+  if [ "${found%% *}" != "ok" ]; then
+    echo "release-notes: the release of $file is not exactly one of its modules" >&2
+    return 1
+  fi
+  found="${found#ok}"
+  found="${found# }"
+  if [ -n "$found" ]; then
+    if ! tag_kind "$found" >/dev/null; then
+      echo "release-notes: '$found' is no tag a release cuts — refusing to start the notes from it" >&2
+      return 1
+    fi
+    printf '%s\n' "$found"
+  fi
+}
+
+usage="usage: $0 classify|count|notes <tag-list> | start-tag <manifest>"
 if [ "$#" -ne 2 ]; then
-  echo "usage: $0 classify|count|notes <tag-list>" >&2
+  echo "$usage" >&2
   exit 64
 fi
 case "$1" in
   classify) classify "$2" ;;
   count) count "$2" ;;
   notes) notes "$2" ;;
+  start-tag) start_tag "$2" ;;
   *)
-    echo "usage: $0 classify|count|notes <tag-list>" >&2
+    echo "$usage" >&2
     exit 64
     ;;
 esac

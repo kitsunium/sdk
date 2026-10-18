@@ -57,14 +57,21 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 
 // maybeSnapshot cuts a snapshot after SnapshotEvery applied entries, on the
 // apply goroutine; the write runs off it unless the machine cannot cut
-// cheaply (D7).
+// cheaply (D7). A trigger during a cut in flight is coalesced, not dropped:
+// the cut is made once that one is written (cutPending), or a node that
+// applies nothing more would keep the tail uncut and its log uncompacted.
 func (n *Node) maybeSnapshot() {
 	n.am.Lock()
 	idx, term := n.applied, n.appliedTerm
 	n.am.Unlock()
 	ss := &n.snapState
 	ss.mu.Lock()
-	if ss.inFlight || idx < ss.last+n.cfg.SnapshotEvery {
+	if idx < ss.last+n.cfg.SnapshotEvery {
+		ss.mu.Unlock()
+		return
+	}
+	if ss.inFlight {
+		ss.pending = true
 		ss.mu.Unlock()
 		return
 	}
@@ -72,7 +79,7 @@ func (n *Node) maybeSnapshot() {
 	ss.mu.Unlock()
 	if err := n.cut(idx, term, nil); err != nil {
 		ss.mu.Lock()
-		ss.inFlight = false
+		ss.inFlight, ss.pending = false, false
 		ss.mu.Unlock()
 		n.cutFailed(err)
 	}
@@ -134,24 +141,51 @@ func (n *Node) cut(idx, term uint64, w io.Writer) error {
 		defer n.wg.Done()
 		if err := n.writeSnapshot(snap, meta, nil); err != nil {
 			n.cutFailed(err)
+			return
 		}
+		n.cutPending()
 	}()
 	return nil
+}
+
+// cutPending asks the apply goroutine for the cut a trigger coalesced while
+// the one just written was in flight (D7). A failed cut asks for none: the
+// next trigger tries again, as cutFailed says.
+func (n *Node) cutPending() {
+	ss := &n.snapState
+	ss.mu.Lock()
+	pending := ss.pending
+	ss.pending = false
+	ss.mu.Unlock()
+	if pending && !n.stopped.Load() {
+		n.aq.push(applyItem{cut: true})
+	}
 }
 
 // writeSnapshot encodes a captured snapshot into a fresh sink, discarding a
 // stale spool of the same id first, and commits it; on any failure the sink
 // is aborted and nothing is published. It always releases the capture and
-// clears the in-flight flag, so the next cut can run.
+// clears the in-flight flag, so the next cut can run. A failed write clears
+// the coalesced trigger with it, under the same lock: the next trigger tries
+// again (cutFailed), and only one that falls after the flag is cleared
+// survives.
 func (n *Node) writeSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMetaValue, extra io.Writer) error {
 	defer snap.Release()
+	err := n.publishSnapshot(snap, meta, extra)
 	state := &n.snapState
-	done := func() {
-		state.mu.Lock()
-		state.inFlight = false
-		state.mu.Unlock()
+	state.mu.Lock()
+	state.inFlight = false
+	if err != nil {
+		state.pending = false
 	}
-	defer done()
+	state.mu.Unlock()
+	return err
+}
+
+// publishSnapshot is writeSnapshot's write: the sink, the encoded stream,
+// the commit, then retention and compaction (afterCut).
+func (n *Node) publishSnapshot(snap coreconsensus.Snapshot, meta coreconsensus.SnapshotMetaValue, extra io.Writer) error {
+	state := &n.snapState
 	sink, spooled, err := n.cfg.Snapshots.Create(meta.ID, meta)
 	if err != nil {
 		return err

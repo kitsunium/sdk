@@ -11,13 +11,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kitsunium/sdk/framework/kit"
+	"github.com/kitsunium/sdk/framework/app"
+	_ "github.com/kitsunium/sdk/framework/app/mail"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/mail"
 )
 
 // A mailer's outbox on the database that keeps its service (ADR 0178 C7
-// item 7), on a real SQLite file: a mail sent in kit.Transact is written in
+// item 7), on a real SQLite file: a mail sent in app.Transact is written in
 // the transaction, sealed under kit's data-key — the table holds no address,
 // no subject, no body —, and delivered once it commits; rolled back, it
 // never was. A mail the outbox refuses fails the transaction. Without a
@@ -30,13 +31,13 @@ type notice struct {
 
 // postOffice is a product whose one service keeps notices and mails them.
 type postOffice struct {
-	app     *kit.App
-	notices *kit.Store[notice]
-	mailer  *kit.Mailer
+	app     *app.App
+	notices *app.Store[notice]
+	mailer  *app.Mailer
 }
 
 // outboxTable is the post office's outbox, as kit names it.
-const outboxTable = "kit_queue__post__notify__outbox"
+const outboxTable = "app_queue__post__notify__outbox"
 
 // The mail's words, which must never rest in clear in the outbox's table.
 const (
@@ -47,16 +48,16 @@ const (
 
 // newPostOffice declares the post office afresh, its data in dir, on a
 // SQLite database unless the options say otherwise.
-func newPostOffice(t *testing.T, dir string, opts ...kit.AppOption) *postOffice {
+func newPostOffice(t *testing.T, dir string, opts ...app.AppOption) *postOffice {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
-	t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")
-	svc := kit.NewService("post", "Notices, mailed.")
+	t.Setenv("POST_SECRETS", "memory")
+	t.Setenv("POST_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("POST_INDEX_KEY", "an index key of more than 16 bytes")
+	svc := app.NewService("post", "Notices, mailed.")
 	p := &postOffice{}
 	p.notices = svc.Store("notices", func(n notice) string { return n.ID })
-	p.mailer = svc.Mailer("notify", kit.From("Post", "post@example.com"), kit.MailAttempts(1))
-	p.app = kit.NewApp("post", svc).With(append(bureauOptions(dir), opts...)...)
+	p.mailer = svc.Mailer("notify", app.From("Post", "post@example.com"), app.MailAttempts(1))
+	p.app = app.NewApp("post", svc).With(append(bureauOptions(dir), opts...)...)
 	return p
 }
 
@@ -121,14 +122,14 @@ func payloads(t *testing.T, db *stdsql.DB) [][]byte {
 // dead, for the table to be read.
 func TestAMailCommittedIsSealedInTheOutbox(t *testing.T) {
 	needsFileStore(t)
-	t.Setenv("KIT_SMTP_URL", "smtp://127.0.0.1:1?tls=none")
+	t.Setenv("POST_SMTP_URL", "smtp://127.0.0.1:1?tls=none")
 	dir := t.TempDir()
 	p := newPostOffice(t, dir, onSQLite())
 	run(t, p.app)
 	if got := p.app.Graph().Node("post/mailer/notify").Mailer.Outbox; got != "sql" {
 		t.Fatalf("the outbox is %q; want sql", got)
 	}
-	if err := kit.Transact(t.Context(), func(ctx context.Context) error {
+	if err := app.Transact(t.Context(), func(ctx context.Context) error {
 		_, err := p.send(ctx, "kept")
 		return err
 	}); err != nil {
@@ -174,7 +175,7 @@ func TestAMailFollowsItsTransactionOnTheDatabase(t *testing.T) {
 	run(t, p.app)
 	ctx := t.Context()
 	db := open(t, filepath.Join(dir, "main.sqlite"))
-	if err := kit.Transact(ctx, func(ctx context.Context) error {
+	if err := app.Transact(ctx, func(ctx context.Context) error {
 		_, err := p.send(ctx, "gone")
 		return errors.Join(err, errUndo)
 	}); !errors.Is(err, errUndo) {
@@ -183,7 +184,7 @@ func TestAMailFollowsItsTransactionOnTheDatabase(t *testing.T) {
 	if n := len(payloads(t, db)); n != 0 {
 		t.Fatalf("a rolled back transaction left %d mails in the outbox", n)
 	}
-	if err := kit.Transact(ctx, func(ctx context.Context) error {
+	if err := app.Transact(ctx, func(ctx context.Context) error {
 		_, err := p.send(ctx, "kept")
 		return err
 	}); err != nil {
@@ -208,14 +209,14 @@ func TestARefusedMailFailsTheTransaction(t *testing.T) {
 	ctx := t.Context()
 	huge := letter("huge")
 	huge.Text = strings.Repeat("x", 32<<20)
-	err := kit.Transact(ctx, func(ctx context.Context) error {
+	err := app.Transact(ctx, func(ctx context.Context) error {
 		if err := p.notices.Insert(ctx, notice{ID: "before"}); err != nil {
 			return err
 		}
 		_, err := p.mailer.Send(ctx, huge)
 		return err
 	})
-	if ke, ok := errors.AsType[*kit.Error](err); !ok || ke.Code != kit.WireInvalid {
+	if ke, ok := errors.AsType[*app.Error](err); !ok || ke.Code != app.WireInvalid {
 		t.Fatalf("a transaction whose outbox refused its mail: %v; want the refusal, invalid", err)
 	}
 	if _, err := p.notices.Get(ctx, "before"); err == nil {
@@ -233,7 +234,7 @@ func TestAMailWithoutADatabaseLeavesAfterTheCommit(t *testing.T) {
 	if got := p.app.Graph().Node("post/mailer/notify").Mailer.Outbox; got != "file" {
 		t.Fatalf("the outbox is %q; want file", got)
 	}
-	if err := kit.Transact(t.Context(), func(ctx context.Context) error {
+	if err := app.Transact(t.Context(), func(ctx context.Context) error {
 		_, err := p.send(ctx, "kept")
 		return err
 	}); err != nil {

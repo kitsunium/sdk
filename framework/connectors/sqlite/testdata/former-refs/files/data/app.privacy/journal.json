@@ -1,0 +1,172 @@
+{
+  "00000000000000000001": {
+    "seq": 1,
+    "at": "2026-10-18T04:57:19.407153439Z",
+    "op": "erase",
+    "store": "atelier/store/cases",
+    "record": "3bec49fd4e83b37ef0714024f9e6af66",
+    "subject": "e389b7d0090eaefef5bbdea970f53f22",
+    "by": "atelier/command/forget",
+    "reason": "sealed:v1:AQlqOjIwMjYtMTB7mkRBf988kwEBcX3y60WCrjyxYGG82WC58bTWQB_cFj3vsuGOO4Cv7ZB4cZMck6HRr7j00J4aLDra5qIMPEtku8d9mqH1",
+    "hash": "ecf34ae71c628c92fa4a6544e6b87cfef2f75297ae5cfb2c1536d496a6ccc834"
+  },
+  "00000000000000000002": {
+    "seq": 2,
+    "at": "2026-10-18T04:57:19.426451565Z",
+    "op": "shred",
+    "store": "app.privacy/store/keys",
+    "subject": "e389b7d0090eaefef5bbdea970f53f22",
+    "by": "atelier/command/forget",
+    "hash": "cc19c2ce8cb843ebea83dbb230d63c8265f54871a9da7cac48d691ba09d3540f"
+  },
+  "00000000000000000003": {
+    "seq": 3,
+    "at": "2026-10-18T04:57:19.451879364Z",
+    "op": "hold",
+    "store": "atelier/store/cases",
+    "record": "7aa9096f9747e5c40c5450260517948c",
+    "subject": "7419215b5c72282cb567c3115afaa636",
+    "by": "app",
+    "reason": "sealed:v1:AQlqOjIwMjYtMTB7mkRBf988kwEBl4DEVEOMXlC94ksHbw_S0m-erGGUjxMW_IbUzoIQq9_cinMtF8MfUq58uVjsTVLMZGc3ZjgFhKkqVRul",
+    "hash": "ed64a5b6dcea3c015a60a907aa890ea67ee1a623cc22db4336ee2fa4e10df563"
+  },
+  "00000000000000000004": {
+    "seq": 4,
+    "at": "2026-10-18T04:57:19.463894079Z",
+    "op": "hold",
+    "store": "atelier/store/tally",
+    "record": "ad2335c4d8cf5d6d475134ed52112b52",
+    "by": "app",
+    "reason": "sealed:v1:AQlqOjIwMjYtMTB7mkRBf988kwEBpUBjkJ4B2mFdFJI1tLQDZWlqoQaEnXVlNapObrrhr3JuvpUzbu8D6g4W7WiZtQE9aZ2S_RblQbcwmvVk",
+    "hash": "89f516cbea6bd26d7eb226dfc693ae3bfa935991a816f90c03243f0762f0675f"
+  },
+  "00000000000000000005": {
+    "seq": 5,
+    "at": "2026-10-18T04:57:19.467022839Z",
+    "op": "export",
+    "store": "atelier/store/cases",
+    "subject": "7419215b5c72282cb567c3115afaa636",
+    "by": "atelier/command/export",
+    "hash": "7427d30e2d027df70676946aebd6f4665ef25ce8e093e5b0c92f33e92b290f87"
+  },
+  "00000000000000000006": {
+    "seq": 6,
+    "at": "2026-10-18T09:19:10.782495066Z",
+    "op": "erase",
+    "store": "atelier/store/cases",
+    "record": "fec7bfd534a529492acd2559b447a7fc",
+    "subject": "f75ca75a046523a4373d0894d1919ac0",
+    "by": "atelier/command/forget",
+    "reason": "sealed:v1:AQlqOjIwMjYtMTB7mkRBf988kwEBGYLpkv2ni3Kaablp6WDI68ETbjcIeQ-By6dH9GlKQexrGreo_e7arluIxHAexUwOHmTAjEzlpnFu7EXy",
+    "hash": "d382da542d17d9925603771c84207ee7d0dc5d07d2b52fdefa10b18bca51b9a0"
+  },
+  "00000000000000000007": {
+    "seq": 7,
+    "at": "2026-10-18T09:19:10.80550134Z",
+    "op": "shred",
+    "store": "app.privacy/store/keys",
+    "subject": "f75ca75a046523a4373d0894d1919ac0",
+    "by": "atelier/command/forget",
+    "hash": "9e0d00f9deaeaa103a3fb160b9a7b2fa9133dc98a34948af22f06207030a15b4"
+  },
+  "00000000000000000008": {
+    "seq": 8,
+    "at": "2026-10-18T09:19:10.836833483Z",
+    "op": "hold",
+    "store": "atelier/store/cases",
+    "record": "3e4bbbbca90c2d253c5d144373481e9d",
+    "subject": "4c19d88c2c1a6141f7ec887d3beb6ffa",
+    "by": "app",
+    "reason": "sealed:v1:AQlqOjIwMjYtMTB7mkRBf988kwEB_9RfI8BKGwdwxUuYP786FCqWeDGDMqgKqSsXXkPAIixcXlphq_3-koCN3_m4TbSSxaoRYqumHcd2VVAB",
+    "hash": "afb543ed442c002172a33bffa32c5fd2c3f498bc82eeefc745152872504b7d89"
+  },
+  "00000000000000000009": {
+    "seq": 9,
+    "at": "2026-10-18T09:19:10.844577982Z",
+    "op": "export",
+    "store": "atelier/store/cases",
+    "subject": "4c19d88c2c1a6141f7ec887d3beb6ffa",
+    "by": "atelier/command/export",
+    "hash": "b184f1937c64d002b91eb2ec733cfc83e97c7ccb410ecfac7fa036dca4a9c5d8"
+  },
+  "00000000000000000010": {
+    "seq": 10,
+    "at": "2026-10-18T09:19:10.896678976Z",
+    "op": "export",
+    "store": "atelier/store/cases",
+    "subject": "7419215b5c72282cb567c3115afaa636",
+    "by": "atelier/command/export",
+    "hash": "6d6b4d9eb5c34d9c4453843a13f1bbe245e6d0dab1e625445b2baf6029f49616"
+  },
+  "00000000000000000011": {
+    "seq": 11,
+    "at": "2026-10-18T10:45:36.750823141Z",
+    "op": "continue",
+    "by": "app",
+    "follows": "6d6b4d9eb5c34d9c4453843a13f1bbe245e6d0dab1e625445b2baf6029f49616",
+    "refs": "app/v1",
+    "hash": "e051acea204a6af4953b1f8478573dccdc104797d05c725bc92e07a6646266a4"
+  },
+  "00000000000000000012": {
+    "seq": 12,
+    "at": "2026-10-18T10:45:36.750823141Z",
+    "op": "hold",
+    "store": "atelier/store/cases",
+    "record": "37963fac6e75884897a85b34e5167eb5",
+    "subject": "fae0980d4c0c46100e967076bf0e3b32",
+    "by": "app",
+    "refs": "app/v1",
+    "reason": "sealed:v1:AQlqOjIwMjYtMTB7mkRBf988kwEBDh4JRDsWvV68jPXbXbx8tCf55BN8v5GhL4Wn9WxujpHb4mjRrK7QnlXS_zYJQu1IVLlzxtyWdaBBc803",
+    "hash": "31a65563b71ead19c0dfd2a772dbb0bcbb1ac6cdb3ef280fa5d25b7efae27666"
+  },
+  "00000000000000000013": {
+    "seq": 13,
+    "at": "2026-10-18T10:45:36.802036487Z",
+    "op": "export",
+    "store": "atelier/store/cases",
+    "subject": "9041e88b5e718ecf33397963b00edbdb",
+    "by": "atelier/command/export",
+    "refs": "app/v1",
+    "hash": "7dda068b5cca16fa500bfacad85c4e027fd2191345f0c6582057cd285f206275"
+  },
+  "00000000000000000014": {
+    "seq": 14,
+    "at": "2026-10-18T10:45:36.806680596Z",
+    "op": "export",
+    "store": "atelier/store/cases",
+    "subject": "ab999e8b5775f7894ec783b3093c06dd",
+    "by": "atelier/command/export",
+    "refs": "app/v1",
+    "hash": "d16679050f9fae7fb76570f5e9805958e165058c3cd5252e3362e7e4e906f603"
+  },
+  "00000000000000000015": {
+    "seq": 15,
+    "at": "2026-10-18T10:45:36.810741382Z",
+    "op": "export",
+    "store": "atelier/store/cases",
+    "subject": "8776d9d470d788cd59b100c1fd6de981",
+    "by": "atelier/command/export",
+    "refs": "app/v1",
+    "hash": "ee00e2de2b50d5834074d02430b12a6d74123e8148fc97c13785b61fa40a9518"
+  },
+  "00000000000000000016": {
+    "seq": 16,
+    "at": "2026-10-18T10:45:36.816405221Z",
+    "op": "export",
+    "store": "atelier/store/cases",
+    "subject": "a4447c566dd25ef3396d13f0588d0c9a",
+    "by": "atelier/command/export",
+    "refs": "app/v1",
+    "hash": "ec85ee951d624a47f597af872712bac82603fc3b2eaa04c48eaf991907e1bbfa"
+  },
+  "00000000000000000017": {
+    "seq": 17,
+    "at": "2026-10-18T10:45:36.82054899Z",
+    "op": "export",
+    "store": "atelier/store/cases",
+    "subject": "fae0980d4c0c46100e967076bf0e3b32",
+    "by": "atelier/command/export",
+    "refs": "app/v1",
+    "hash": "2496ab78db26aaa13bfe2594c880a12402f4e5118c4a1f56997c044d394c8f39"
+  }
+}

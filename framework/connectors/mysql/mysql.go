@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	driver "github.com/go-sql-driver/mysql"
-	"github.com/kitsunium/sdk/framework/kit"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
+	"github.com/kitsunium/sdk/framework/app"
+	_ "github.com/kitsunium/sdk/framework/app/store" // the stores a database keeps (ADR 0179 §4)
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
@@ -27,27 +27,27 @@ const (
 var errMalformed = errs.New(CodeURLMalformed, "URL_MALFORMED", "mysql: the URL is not one go-sql-driver/mysql reads",
 	"mysql connector: the driver refused the URL; the URL is never quoted, the driver's text would name its user and host")
 
-// engine is the connector kit.Database drives; it holds nothing.
+// engine is the connector app.Database drives; it holds nothing.
 type engine struct{}
 
 // quiet is a driver logger that says nothing.
 type quiet struct{}
 
-// Engine is the MySQL engine, for kit.Database.
-func Engine() kit.Engine { return engine{} }
+// Engine is the MySQL engine, for app.Database.
+func Engine() app.Engine { return engine{} }
 
 // Dialect is the SQL the database speaks.
-func (engine) Dialect() sql.Dialect { return sql.DialectMySQL }
+func (engine) Dialect() app.Dialect { return app.DialectMySQL }
 
 // Describe says where the URL points — host:port, or the socket; the
 // database; the tls as the URL writes it — and never who connects or with
 // what password.
-func (engine) Describe(u secret.Value) (kit.DatabaseURL, error) {
+func (engine) Describe(u secret.Value) (app.DatabaseURL, error) {
 	cfg, err := config(u.RevealString())
 	if err != nil {
-		return kit.DatabaseURL{}, errMalformed
+		return app.DatabaseURL{}, errMalformed
 	}
-	return kit.DatabaseURL{
+	return app.DatabaseURL{
 		Driver: driverName, Address: cfg.Addr, Database: cfg.DBName, TLS: cfg.TLSConfig,
 		Plaintext: cfg.TLSConfig == "false", Networked: cfg.Net == "tcp" || cfg.Net == "tcp4" || cfg.Net == "tcp6",
 	}, nil

@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "queueprobe_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/kitsunium/sdk/framework/app/testdata/queueprobe",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/app/queue",
+        "//framework/internal/app",
+    ],
+)
+
+go_binary(
+    name = "queueprobe",
+    embed = [":queueprobe_lib"],
+    visibility = ["//visibility:public"],
+)

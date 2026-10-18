@@ -11,8 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/kitsunium/sdk/framework/kit"
-	"github.com/kitsunium/sdk/pkg/v1/data/sql"
+	"github.com/kitsunium/sdk/framework/app"
+	_ "github.com/kitsunium/sdk/framework/app/store" // the stores a database keeps (ADR 0179 §4)
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
@@ -33,29 +33,29 @@ var (
 	keyValueSSLMode = regexp.MustCompile(`(?:^|\s)sslmode\s*=\s*('(?:[^'\\]|\\.)*'|\S+)`)
 )
 
-// engine is the connector kit.Database drives; it holds nothing.
+// engine is the connector app.Database drives; it holds nothing.
 type engine struct{}
 
-// Engine is the PostgreSQL engine, for kit.Database.
-func Engine() kit.Engine { return engine{} }
+// Engine is the PostgreSQL engine, for app.Database.
+func Engine() app.Engine { return engine{} }
 
 // Dialect is the SQL the database speaks.
-func (engine) Dialect() sql.Dialect { return sql.DialectPostgres }
+func (engine) Dialect() app.Dialect { return app.DialectPostgres }
 
 // Describe says where the URL points — host:port, or the socket's
 // directory; the database; the sslmode as the URL writes it — and never who
 // connects or with what password.
-func (engine) Describe(u secret.Value) (kit.DatabaseURL, error) {
+func (engine) Describe(u secret.Value) (app.DatabaseURL, error) {
 	raw := u.RevealString()
 	cfg, err := pgx.ParseConfig(raw)
 	if err != nil {
-		return kit.DatabaseURL{}, errMalformed
+		return app.DatabaseURL{}, errMalformed
 	}
 	mode, err := sslmode(raw)
 	if err != nil {
-		return kit.DatabaseURL{}, errMalformed
+		return app.DatabaseURL{}, errMalformed
 	}
-	d := kit.DatabaseURL{Driver: driver, Database: cfg.Database, TLS: mode, Plaintext: mode == "disable"}
+	d := app.DatabaseURL{Driver: driver, Database: cfg.Database, TLS: mode, Plaintext: mode == "disable"}
 	if strings.HasPrefix(cfg.Host, "/") {
 		// A Unix socket: no network to cross, no TLS to write.
 		d.Address = cfg.Host

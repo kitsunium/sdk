@@ -24,7 +24,6 @@ here since ADR 0160. A code keeps its value when its declaration moves.
 | `report.go` | `ReportValue []ViolationValue` + `OK` / `First` / `Paths` / `Err` |
 | `path.go` | `RootPath`, `JoinField`, `JoinIndex` — the path grammar |
 | `codes_gen.go` | `Code*` constants — ranges 0.2.15.* and 0.3.47.* (the five violation codes carry no sentinel: a violation is not an error); `ValidationFailed` / `ConstraintMisconfigured`, and the tag compiler's `InvalidRule` / `UnsupportedTarget` (`errs.Define`) — written by kit gen from `design/app/validation.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `exitConfig`, `httpUnprocessable` |
 
 ## Conventions
 

@@ -533,9 +533,8 @@ packages:
             doc: |-
               UnsupportedPlatform is returned by a primitive invoked on an operating
               system that cannot provide it; the no-op stub returns it, never a panic.
+            exit: UNAVAILABLE
             name: UnsupportedPlatform
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "core/proc: primitive unavailable on the current GOOS; the stub returns this instead of acting"
             public: This operation is not supported on this platform
             reason: UNSUPPORTED_PLATFORM
@@ -543,9 +542,8 @@ packages:
             doc: |-
               InvalidSpec is returned by Start when the Spec is malformed — an empty Path
               or a contradictory attribute combination.
+            exit: USAGE
             name: InvalidSpec
-            options:
-              - errs.WithExitCode(exitUsage)
             private: "service/proc/exec.Start: Spec is malformed (empty Path or contradictory attributes)"
             public: Process specification is invalid
             reason: INVALID_SPEC
@@ -553,9 +551,8 @@ packages:
             doc: |-
               UnknownUser is returned when a Spec names a User that does not resolve to a
               uid on the host.
+            exit: NOUSER
             name: UnknownUser
-            options:
-              - errs.WithExitCode(exitNoUser)
             private: "service/proc/exec.Start: Spec.User did not resolve to a uid via os/user"
             public: The requested user does not exist
             reason: UNKNOWN_USER
@@ -563,9 +560,8 @@ packages:
             doc: |-
               UnknownGroup is returned when a Spec names a Group or supplementary group
               that does not resolve to a gid on the host.
+            exit: NOUSER
             name: UnknownGroup
-            options:
-              - errs.WithExitCode(exitNoUser)
             private: "service/proc/exec.Start: Spec.Group/Groups did not resolve to a gid via os/user"
             public: The requested group does not exist
             reason: UNKNOWN_GROUP
@@ -573,9 +569,8 @@ packages:
             doc: |-
               SpawnFailed is returned when fork/exec fails — a missing binary, a
               permission denial, or a kernel resource fault.
+            exit: OSERR
             name: SpawnFailed
-            options:
-              - errs.WithExitCode(exitOSErr)
             private: "service/proc/exec.Start: fork/exec failed"
             public: Could not start the process
             reason: SPAWN_FAILED
@@ -583,9 +578,8 @@ packages:
             doc: |-
               WaitFailed is returned when wait4 fails reaping the leader — a host fault,
               not a normal non-zero exit (reported via ExitValue instead).
+            exit: OSERR
             name: WaitFailed
-            options:
-              - errs.WithExitCode(exitOSErr)
             private: "service/proc/exec.Wait: wait4 returned an unexpected error"
             public: Could not wait for the process to exit
             reason: WAIT_FAILED
@@ -593,9 +587,8 @@ packages:
             doc: |-
               SignalFailed is returned when kill(2) fails delivering a signal to a
               process or process group.
+            exit: OSERR
             name: SignalFailed
-            options:
-              - errs.WithExitCode(exitOSErr)
             private: "service/proc: kill(2) failed for the target pid or process group"
             public: Could not deliver the signal
             reason: SIGNAL_FAILED
@@ -603,9 +596,8 @@ packages:
             doc: |-
               StopFailed is returned when a graceful stop cannot terminate the process
               group even after escalating to SIGKILL.
+            exit: OSERR
             name: StopFailed
-            options:
-              - errs.WithExitCode(exitOSErr)
             private: "service/proc/exec.Stop: process group survived signal escalation to SIGKILL"
             public: Could not stop the process
             reason: STOP_FAILED
@@ -613,9 +605,8 @@ packages:
             doc: |-
               UnknownSignal is returned by Parse when the name or number is not in the
               platform signal table.
+            exit: USAGE
             name: UnknownSignal
-            options:
-              - errs.WithExitCode(exitUsage)
             private: "core/proc.Parse: input is not a signal known on this platform"
             public: Unknown signal name or number
             reason: UNKNOWN_SIGNAL
@@ -623,9 +614,8 @@ packages:
             doc: |-
               RelayFailed is returned by Relay when a received signal cannot be forwarded
               to its target process or group.
+            exit: OSERR
             name: RelayFailed
-            options:
-              - errs.WithExitCode(exitOSErr)
             private: "service/proc/signal.Relay: forwarding the signal to the target failed"
             public: Could not relay the signal to the target
             reason: RELAY_FAILED
@@ -633,9 +623,8 @@ packages:
             doc: |-
               SubreaperFailed is returned when prctl(PR_SET_CHILD_SUBREAPER) fails arming
               subreaper semantics for a non-PID1 supervisor.
+            exit: OSERR
             name: SubreaperFailed
-            options:
-              - errs.WithExitCode(exitOSErr)
             private: "service/proc/reaper.SetChildSubreaper: prctl(PR_SET_CHILD_SUBREAPER) failed"
             public: Could not enable child-subreaper mode
             reason: SUBREAPER_FAILED
@@ -643,9 +632,8 @@ packages:
             doc: |-
               ReapFailed is returned when a reap sweep hits a wait4 error other than the
               benign "no children" condition.
+            exit: OSERR
             name: ReapFailed
-            options:
-              - errs.WithExitCode(exitOSErr)
             private: "service/proc/reaper.ReapOnce: wait4 failed with an error other than ECHILD"
             public: Could not reap child processes
             reason: REAP_FAILED
@@ -653,9 +641,8 @@ packages:
             doc: |-
               UnknownResource is returned by Apply when a Resource has no RLIMIT_*
               mapping on the platform.
+            exit: USAGE
             name: UnknownResource
-            options:
-              - errs.WithExitCode(exitUsage)
             private: "service/proc/rlimit.Apply: Resource has no RLIMIT_* mapping on this platform"
             public: Unknown or unsupported resource limit
             reason: UNKNOWN_RESOURCE
@@ -663,9 +650,8 @@ packages:
             doc: |-
               RlimitFailed is returned when setrlimit(2) fails applying a per-process
               resource limit.
+            exit: OSERR
             name: RlimitFailed
-            options:
-              - errs.WithExitCode(exitOSErr)
             private: "service/proc/rlimit.Apply: setrlimit(2) failed"
             public: Could not apply the resource limit
             reason: RLIMIT_FAILED
@@ -673,9 +659,8 @@ packages:
             doc: |-
               CgroupUnavailable is returned when a cgroup operation runs where cgroup v2
               is not mounted or not delegated to the caller.
+            exit: UNAVAILABLE
             name: CgroupUnavailable
-            options:
-              - errs.WithExitCode(exitUnavailable)
             private: "service/proc/cgroup: the unified cgroup v2 hierarchy is absent or not writable by the caller"
             public: cgroup v2 is not available or not delegated
             reason: CGROUP_UNAVAILABLE
@@ -683,9 +668,8 @@ packages:
             doc: |-
               CgroupCreateFailed is returned when a control-group directory cannot be
               created under the cgroup v2 hierarchy.
+            exit: OSERR
             name: CgroupCreateFailed
-            options:
-              - errs.WithExitCode(exitOSErr)
             private: "service/proc/cgroup.Create: mkdir under the cgroup v2 hierarchy failed"
             public: Could not create the control group
             reason: CGROUP_CREATE_FAILED
@@ -693,9 +677,8 @@ packages:
             doc: |-
               CgroupWriteFailed is returned when a controller file cannot be written
               (memory.max, cpu.max, pids.max, io.max, cgroup.procs).
+            exit: OSERR
             name: CgroupWriteFailed
-            options:
-              - errs.WithExitCode(exitOSErr)
             private: "service/proc/cgroup: writing a controller file failed (controller disabled or value rejected)"
             public: Could not write the cgroup controller file
             reason: CGROUP_WRITE_FAILED
@@ -703,9 +686,8 @@ packages:
             doc: |-
               CgroupDeleteFailed is returned when a control-group directory cannot be
               removed.
+            exit: OSERR
             name: CgroupDeleteFailed
-            options:
-              - errs.WithExitCode(exitOSErr)
             private: "service/proc/cgroup.Delete: rmdir of the control group failed (still populated?)"
             public: Could not delete the control group
             reason: CGROUP_DELETE_FAILED
@@ -713,9 +695,8 @@ packages:
             doc: |-
               NotifyFailed is returned when an sd_notify datagram cannot be sent to
               $NOTIFY_SOCKET — distinct from the no-op when the variable is unset.
+            exit: OSERR
             name: NotifyFailed
-            options:
-              - errs.WithExitCode(exitOSErr)
             private: "service/proc/systemd/notify: writing to $NOTIFY_SOCKET failed"
             public: Could not send the sd_notify datagram
             reason: NOTIFY_FAILED
@@ -723,9 +704,8 @@ packages:
             doc: |-
               ListenFailed is returned when the supervisor-side sd_notify datagram socket
               cannot be created or bound.
+            exit: OSERR
             name: ListenFailed
-            options:
-              - errs.WithExitCode(exitOSErr)
             private: "service/proc/systemd/notify.Listen: creating or binding the AF_UNIX datagram socket failed"
             public: Could not create the sd_notify listener socket
             reason: LISTEN_FAILED
@@ -733,9 +713,8 @@ packages:
             doc: |-
               InvalidNotification is returned when a received sd_notify datagram cannot
               be parsed into NAME=value fields.
+            exit: DATAERR
             name: InvalidNotification
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "service/proc/systemd/notify.Recv: datagram did not parse into NAME=value fields"
             public: Received sd_notify datagram is malformed
             reason: INVALID_NOTIFICATION
@@ -743,9 +722,8 @@ packages:
             doc: |-
               CredentialMismatch is returned when a received datagram's kernel-verified
               sender credentials do not match the expected supervised process.
+            exit: NOPERM
             name: CredentialMismatch
-            options:
-              - errs.WithExitCode(exitNoPerm)
             private: "service/proc/systemd/notify.Recv: SO_PASSCRED sender pid is not the expected supervised process"
             public: Datagram sender credentials did not match
             reason: CREDENTIAL_MISMATCH
@@ -754,9 +732,8 @@ packages:
               StdioCaptureFailed is returned from Wait when a StdioCapture copier could
               not deliver the child's stdout/stderr to the caller's writer (the writer
               itself errored), even though the process exited cleanly.
+            exit: IOERR
             name: StdioCaptureFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "service/proc/exec: a StdioCapture copier failed writing the child's stdout/stderr to the caller's sink"
             public: Could not deliver the captured output to the writer
             reason: STDIO_CAPTURE_FAILED
@@ -796,8 +773,10 @@ packages:
               name: SystemTime
               type: time.Duration
             - doc: |-
-                MaxRSS is the peak resident set size in kilobytes, as reported by wait4's
-                rusage; it is 0 when the platform does not supply it.
+                MaxRSS is the peak resident set size in KiB on every platform, read from
+                wait4's rusage: darwin and ios report bytes, which are converted to KiB
+                rounding up; Linux and the BSDs report KiB, passed through. It is 0 when
+                the platform does not supply it (illumos, Solaris and Windows).
               name: MaxRSS
               type: int64
       - doc: |-
@@ -1625,6 +1604,11 @@ packages:
       runnable by its extension, and variable names are case-insensitive ("Path"
       is the usual spelling there).
 
+      Package exec — the peak-RSS unit: peakKiB turns a raw ru_maxrss into the KiB
+      the port documents, passing a kilobyte figure through and converting darwin's
+      bytes rounding up. It is platform-neutral so its arithmetic is tested on every
+      GOOS.
+
       Package exec — peak-RSS read on a 32-bit GOARCH, where Rusage.Maxrss is int32
       and is widened to the int64 the port expects (see maxrss_rss64_unix.go for the
       64-bit counterpart).
@@ -1632,6 +1616,14 @@ packages:
       Package exec — peak-RSS read on a 64-bit GOARCH, where Rusage.Maxrss is
       already int64 and needs no widening cast (see maxrss_rss32_unix.go for the
       32-bit counterpart).
+
+      Package exec — darwin's ru_maxrss unit: its getrusage(2) and wait4(2) report
+      bytes, so 1024 of them make one KiB. The darwin constraint also holds for
+      GOOS=ios.
+
+      Package exec — the ru_maxrss unit of every other Unix: Linux and the BSDs
+      report kilobytes, so the figure passes through; illumos and Solaris define it
+      in pages and leave it 0.
 
       Package exec — Unix procfs writer: a tiny os.WriteFile shim used to set
       /proc/<pid>/oom_score_adj, isolated so the platform-specific path handling

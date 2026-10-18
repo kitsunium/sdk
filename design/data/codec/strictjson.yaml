@@ -92,10 +92,9 @@ packages:
             doc: |-
               DocumentTooLarge refuses a document longer than the caller's bound,
               whatever the bytes beyond it would have said.
+            exit: DATAERR
+            http: 413
             name: DocumentTooLarge
-            options:
-              - errs.WithHTTPStatus(httpContentTooLarge)
-              - errs.WithExitCode(exitDataErr)
             private: "service/data/codec/strictjson: more bytes arrived than the bound allows; the limit field is the bound"
             public: The JSON document is larger than the limit
             reason: DOCUMENT_TOO_LARGE
@@ -104,10 +103,9 @@ packages:
               DocumentEmpty reports a document of zero bytes. It is its own code so a
               caller for whom a body is optional can tell "no body" from "a broken
               one" without reading the input again.
+            exit: DATAERR
+            http: 400
             name: DocumentEmpty
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
-              - errs.WithExitCode(exitDataErr)
             private: "service/data/codec/strictjson: the reader ended before the first byte"
             public: The JSON document is empty
             reason: DOCUMENT_EMPTY
@@ -115,10 +113,9 @@ packages:
             doc: |-
               DocumentMalformed refuses a document that is not exactly one
               well-formed JSON value.
+            exit: DATAERR
+            http: 400
             name: DocumentMalformed
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
-              - errs.WithExitCode(exitDataErr)
             private: "service/data/codec/strictjson: a syntax error, a truncation, trailing data, a duplicate name or invalid UTF-8; the offset field locates it"
             public: The JSON document is not well-formed
             reason: DOCUMENT_MALFORMED
@@ -126,19 +123,17 @@ packages:
             doc: |-
               MemberUnknown refuses an object member the target does not declare,
               including one that differs from a declared name only by case.
+            exit: DATAERR
+            http: 400
             name: MemberUnknown
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
-              - errs.WithExitCode(exitDataErr)
             private: "service/data/codec/strictjson: an object member matches no field of the target; PointerOf locates it"
             public: The JSON document has a member the target does not accept
             reason: MEMBER_UNKNOWN
           - code: CodeValueMismatched
             doc: ValueMismatched refuses a well-formed value the target cannot hold.
+            exit: DATAERR
+            http: 400
             name: ValueMismatched
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
-              - errs.WithExitCode(exitDataErr)
             private: "service/data/codec/strictjson: a value does not fit the field it maps to; PointerOf locates it"
             public: The JSON document has a value of the wrong type or out of range
             reason: VALUE_MISMATCHED
@@ -146,10 +141,9 @@ packages:
             doc: |-
               MediaTypeUnsupported refuses a request body that does not declare itself
               JSON.
+            exit: DATAERR
+            http: 415
             name: MediaTypeUnsupported
-            options:
-              - errs.WithHTTPStatus(httpUnsupportedMediaType)
-              - errs.WithExitCode(exitDataErr)
             private: "service/data/codec/strictjson: the Content-Type is absent, unparsable, or names another media type"
             public: The request body must be application/json or a +json media type
             reason: MEDIA_TYPE_UNSUPPORTED
@@ -157,10 +151,9 @@ packages:
             doc: |-
               DocumentUnreadable wraps a reader that failed before the document
               ended. The reader's own error stays in the chain.
+            exit: IOERR
+            http: 400
             name: DocumentUnreadable
-            options:
-              - errs.WithHTTPStatus(httpBadRequest)
-              - errs.WithExitCode(exitIOErr)
             private: "service/data/codec/strictjson: the reader returned an error other than end-of-input"
             public: The JSON document could not be read
             reason: DOCUMENT_UNREADABLE
@@ -169,9 +162,8 @@ packages:
               DecodeMisconfigured refuses a call the decoder can never honour: a
               non-positive bound — whose two readings, "unbounded" and "nothing", are
               opposites (ADR 0031) — or a target that is not a non-nil pointer.
+            exit: SOFTWARE
             name: DecodeMisconfigured
-            options:
-              - errs.WithExitCode(exitSoftware)
             private: "service/data/codec/strictjson: the field names the argument: a non-positive bound or a target that is not a non-nil pointer"
             public: The JSON decoder was called with an argument it cannot use
             reason: DECODE_MISCONFIGURED

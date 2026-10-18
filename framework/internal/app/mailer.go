@@ -1,0 +1,1010 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"maps"
+	"path/filepath"
+	"runtime/debug"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/kitsunium/sdk/framework/internal/app/plug"
+	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/mail"
+	"github.com/kitsunium/sdk/pkg/v1/errs"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
+)
+
+// Limits of a mailer.
+const (
+	// mailboxSize is how many mails a mailer remembers for the Studio.
+	mailboxSize int = 200
+	// maxMailBytes bounds one queued mail, attachments included, as the
+	// spool writes it.
+	maxMailBytes = 32 << 20
+	// maxRawMail bounds the composed message kept for the Studio.
+	maxRawMail = 256 << 10
+	// mailSendTimeout bounds one hand-over to the transport; the spool's
+	// lease is twice it, so a slow relay never causes a duplicate.
+	mailSendTimeout time.Duration = time.Minute
+	// A failed attempt waits mailBackoffFirst, doubling up to mailBackoffMax.
+	mailBackoffFirst time.Duration = time.Second
+	mailBackoffMax   time.Duration = 5 * time.Minute
+	// maxDeadLetters is how many dead letters of earlier runs a mailer counts
+	// at its start.
+	maxDeadLetters int = 1000
+)
+
+// What the spool keeps of a Send beside the mail: the trace the delivery
+// continues, and the node that sent it.
+const (
+	metaTrace = "trace"
+	metaNode  = "node"
+)
+
+// smtpSecret is the mail connector's secret: the SMTP URL.
+const smtpSecret = "smtp-url"
+
+// defaultMailAttempts is how often the outbox tries a mail before it
+// dead-letters it, unless the mailer says otherwise.
+const defaultMailAttempts int = 6
+
+// Outbound mail: Send validates and queues. The outbox is the SDK's mail
+// spool, which the mail subsystem opens (framework/app/mail, mail_plug.go,
+// ADR 0179 step 6) — on the database that keeps the mailer's service, sealed
+// (mailer_outbox.go, ADR 0178), else on disk when the app has a data
+// directory, else in memory — which keeps the message
+// until it hands it to the transport, retries a failure with a backoff, drops
+// a redelivery of a mail already sent, and dead-letters a message after its
+// last attempt. kit wraps the transport: each attempt is a span continuing
+// the trace of the Send, a run of the outbox's loop, and where the Studio's
+// simulation fails it. The mailbox the Studio reads is kept from what the
+// spool reports.
+//
+// Credentials never leave the mailer. The SMTP URL is the mail connector's
+// secret, smtp-url: <PRODUCT>_SMTP_URL, or the file <PRODUCT>_SMTP_URL_FILE names, or
+// app-smtp-url in the environment's store (secretstore.go). It is parsed where
+// the transport is built and nowhere else; the graph, the Studio and the logs
+// see the relay's host and port, the TLS mode and the sender — never the user
+// or the password, and never the URL.
+
+// Mailer is outbound mail: a durable outbox and the transport that empties
+// it. [Mailer.Send] only queues — it returns once the message is safely in
+// the outbox — and the mailer's own loop hands each message to the transport,
+// retrying a failure and dead-lettering a message after its last attempt.
+//
+// The transport is the SDK's mail package: SMTP when the mail connector's
+// secret smtp-url is set — <PRODUCT>_SMTP_URL, smtp://user:password@host:587?tls=
+// starttls|implicit|none — and otherwise the capture transport, which keeps
+// every message for the Studio's mailbox and for tests ([Mailer.Captured])
+// and delivers nothing. Outside dev, the capture transport is reported as a
+// warning. The URL is read again before every delivery: replacing it where
+// it lives — a new version in the store, a new file behind
+// <PRODUCT>_SMTP_URL_FILE — takes effect at the next mail. The outbox and the
+// transports are the SDK's, which the mail subsystem plugs in
+// (framework/app/mail, ADR 0179 step 6).
+type Mailer struct {
+	nodeBase
+	opts mailerOptions
+
+	// What the running app resolved, guarded by mu.
+	mu        sync.Mutex
+	transport plug.MailSink
+	capture   plug.MailCaptureSource // the capture transport; nil with SMTP
+	// relay is what the SMTP transport was built from; problem, the last
+	// problem found with the URL since, logged once.
+	relay   smtpRelay
+	problem string
+	spool   plug.MailSpool
+	// outboxDB is the database the outbox lives on (mailer_outbox.go), nil
+	// for the spool's own file or memory queue: a mail sent in a
+	// transaction on it is written in that transaction.
+	outboxDB *databaseRun
+	cancel   context.CancelFunc
+	done     chan struct{}
+	loop     *loopState
+	ring     mailRing
+	// composed holds what the capture transport composed for a mail, from
+	// the attempt that sent it to the spool's report that it was sent.
+	composed map[string][]byte
+}
+
+// MailerConfigurer configures a mailer.
+type MailerConfigurer interface {
+	mailerConfigure(o *mailerOptions)
+}
+
+type mailerOptions struct {
+	from        mail.Address
+	maxAttempts int
+}
+
+type mailerOption func(o *mailerOptions)
+
+// mailSender keys the node that sent a mail in the context handed to the
+// spool.
+type mailSender struct{}
+
+// mailMeta keys, in the context a mail is written in within its
+// transaction, what annotate read where Send was called: the transaction's
+// context carries neither the trace nor the node of the Send.
+type mailMeta struct{}
+
+// mailbox is what the Studio's mailbox reads from a mailer. The capture
+// transport keeps whole messages; SMTP keeps summaries only.
+type mailbox interface {
+	mails(limit int) []model.MailSummary
+	mail(id string) (model.MailMessage, bool)
+}
+
+// mailRing is what a mailer remembers of its mails, guarded by Mailer.mu.
+type mailRing struct {
+	// full is set when bodies are kept: the capture transport.
+	full bool
+	// order lists the remembered mails, oldest first; mails holds them.
+	order []string
+	mails map[string]*model.MailMessage
+	// pending holds the mails queued or retrying, whether the ring still
+	// remembers them or not.
+	pending map[string]bool
+	// sent counts the mails the transport accepted since the start; dead, the
+	// dead letters: those of earlier runs, when deadKnown — the spool could
+	// read them at the start —, then each mail given up on since.
+	sent, dead int
+	deadKnown  bool
+}
+
+// smtpRelay is what an SMTP transport was built from: the URL — a secret,
+// compared, never shown — and the relay it names.
+type smtpRelay struct {
+	url         secret.Value
+	server, tls string
+}
+
+// outboxTransport is the transport the spool hands each attempt to: kit's
+// view of the attempt — a span continuing the trace of the Send, a run of the
+// outbox's loop, the Studio's simulation — around the mailer's transport as
+// the SMTP URL is now.
+type outboxTransport struct {
+	m *Mailer
+	a *App
+}
+
+// mailerConfigure sets the option on what it configures.
+func (f mailerOption) mailerConfigure(o *mailerOptions) { f(o) }
+
+// From sets the sender of every message that names none.
+//
+// IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+// only hands it to the declaration it configures.
+func From(name, addr string) MailerConfigurer {
+	return mailerOption(func(o *mailerOptions) { o.from = mail.Address{Name: name, Addr: addr} })
+}
+
+// MailAttempts is how many deliveries a message gets before it is
+// dead-lettered. The default is 6, backing off from one second.
+//
+// IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+// only hands it to the declaration it configures.
+func MailAttempts(n int) MailerConfigurer {
+	return mailerOption(func(o *mailerOptions) { o.maxAttempts = n })
+}
+
+// Mailer declares outbound mail.
+//
+//go:noinline
+func (s *Service) Mailer(name string, opts ...MailerConfigurer) *Mailer {
+	m := NewMailer()
+	for _, o := range opts {
+		o.mailerConfigure(&m.opts)
+	}
+	m.kind, m.name, m.decl = model.KindMailer, name, callerPos()
+	s.add(m, true)
+	if m.opts.maxAttempts < 1 {
+		s.problem(m.decl, m.id, "mailer.attempts", "name", name)
+	}
+	return m
+}
+
+// Send validates msg with the SDK's mail rules — a header carrying a line
+// break, an unusable address, an empty body are refused here, not at
+// delivery — and puts it in the outbox. It returns the message's outbox ID.
+// Inside a transaction ([Transact], a command's) the mail waits for the
+// commit — a rollback drops it —, and the ID returned at once is the one
+// the mail keeps. When the outbox lives on the transaction's database —
+// the one that keeps the mailer's service, by a store's rules — the mail
+// is written in the transaction, sealed, just before it commits: it
+// exists if and only if the transaction commits, the mailbox hears of it
+// after the commit, and an outbox that refuses it fails the transaction.
+// Elsewhere it is put in the outbox after the commit.
+//
+// A message without a sender gets the mailer's ([From]); without a date, the
+// app's time; without a Message-ID, one made of its outbox ID, which every
+// attempt keeps, so a receiver can tell a retried delivery from a new mail.
+func (m *Mailer) Send(ctx context.Context, msg mail.Message) (string, error) {
+	a := m.app()
+	if a == nil {
+		return "", notRunning(&m.nodeBase)
+	}
+	caller := currentNode(ctx)
+	ctx, sp := a.begin(ctx, &spanStart{node: m.id, from: caller, edge: model.EdgeSends, op: model.OpSend, name: "Send"})
+	id, err := m.enqueue(context.WithValue(ctx, mailSender{}, caller), msg)
+	if id != "" {
+		sp.attr("mail", id)
+	}
+	sp.end(err)
+	return id, err
+}
+
+// enqueue hands msg to the spool, which stamps it and says it was queued
+// (observe) before it returns — or, for a mail written in a transaction on
+// the outbox's database, once that commits. A mail the SDK refuses is
+// refused here, by the same verdict the spool would give, so that a mistake
+// of the caller is an [Invalid] error and nothing else is.
+//
+// Inside a transaction the mail is held (hold) under an ID minted now. When
+// the outbox lives on a database, the held mail names it: on a transaction
+// of that database, txn.join writes it in the transaction just before the
+// commit — joined, with the context of the transaction's scope, which the
+// SQL broker and the spool's Deferrer read the transaction from, and what
+// annotate read at the Send —, and a refusal there is the transaction's
+// outcome. Anywhere else it is released after the commit, as a mail to an
+// outbox on disk is.
+func (m *Mailer) enqueue(ctx context.Context, msg mail.Message) (string, error) {
+	if msg.From.IsZero() {
+		msg.From = m.opts.from
+	}
+	if err := validateMail(msg); err != nil {
+		return "", Invalid(errs.PublicOf(err)).Wrap(err)
+	}
+	m.mu.Lock()
+	spool, db := m.spool, m.outboxDB
+	m.mu.Unlock()
+	if spool == nil {
+		return "", Unavailable(fmt.Sprintf("mailer %q is not running", m.name))
+	}
+	if unitOf(ctx) != nil {
+		// Minted now, kept by the mail once the transaction commits.
+		id := NewID("mail")
+		release := func(rctx context.Context) error {
+			return m.sendHeld(context.WithoutCancel(rctx), id, msg)
+		}
+		var joined func(context.Context) error
+		if db != nil {
+			meta := annotate(ctx)
+			joined = func(tctx context.Context) error {
+				return m.sendHeld(context.WithValue(tctx, mailMeta{}, meta), id, msg)
+			}
+		}
+		if hold(ctx, heldEffect{node: m.id, release: release, joined: joined, queue: db}) {
+			markSpan(ctx, m.id, "held", "commit")
+			return id, nil
+		}
+	}
+	id, err := spool.Send(ctx, plug.MailValue{Value: msg})
+	if err != nil {
+		return "", m.spooled(err)
+	}
+	return id, nil
+}
+
+// sendHeld puts a mail a transaction held in the outbox under its ID, with
+// ctx: after the commit, or — joined — in the transaction ctx carries.
+func (m *Mailer) sendHeld(ctx context.Context, id string, msg mail.Message) error {
+	m.mu.Lock()
+	spool := m.spool
+	m.mu.Unlock()
+	if spool == nil {
+		return Unavailable(fmt.Sprintf("mailer %q is not running", m.name))
+	}
+	return m.spooled(spool.SendWithID(ctx, id, plug.MailValue{Value: msg}))
+}
+
+// spooled is the spool's refusal of a mail in kit's words: a mail the
+// outbox cannot hold is the caller's to change, the rest kit's failure.
+func (m *Mailer) spooled(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case mailRefused(err, plug.MailRefusalClosed):
+		return Unavailable(fmt.Sprintf("mailer %q is not running", m.name))
+	case errs.HasReason(err, "MESSAGE_TOO_LARGE"):
+		return Invalid(fmt.Sprintf("the mail is larger than the outbox accepts (%s)", humanBytes(maxMailBytes))).Wrap(err)
+	case mailRefused(err, plug.MailRefusalUnencodable):
+		return failure(CodeMailEncode, "MAIL_ENCODE", "the mail cannot be encoded for the outbox", err, errs.String("mailer", m.id))
+	}
+	return failure(CodeMailQueue, "MAIL_QUEUE", "the mail could not be put in the outbox", err, errs.String("mailer", m.id))
+}
+
+// annotate is what the spool keeps of a Send for its deliveries: the trace
+// to continue and the node that sent the mail — what was read at the Send,
+// for a mail written in its transaction (mailMeta).
+func annotate(ctx context.Context) map[string]string {
+	if kept, ok := ctx.Value(mailMeta{}).(map[string]string); ok {
+		return maps.Clone(kept)
+	}
+	meta := map[string]string{}
+	if header, _ := trace.FormatTraceParent(trace.SpanContextFromContext(ctx)); header != "" {
+		meta[metaTrace] = header
+	}
+	if caller, _ := ctx.Value(mailSender{}).(string); caller != "" {
+		meta[metaNode] = caller
+	}
+	return meta
+}
+
+// Captured returns the messages the capture transport kept, oldest first:
+// what a test reads a verification link from. It is empty with SMTP. A mail
+// appears once the outbox has delivered it — shortly after Send.
+func (m *Mailer) Captured() []model.MailMessage {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.ring.full {
+		return nil
+	}
+	out := make([]model.MailMessage, 0, len(m.ring.order))
+	for _, id := range m.ring.order {
+		if rec := m.ring.mails[id]; rec.Status == model.MailSent {
+			out = append(out, cloneMail(rec))
+		}
+	}
+	return out
+}
+
+// describe fills the graph node out with what the Mailer declares, and returns
+// its edges.
+func (m *Mailer) describe(a *App, out *model.Node) []model.Edge {
+	info := &model.MailerInfo{Transport: model.TransportCapture, MaxAttempts: m.opts.maxAttempts, Outbox: "memory"}
+	if !m.opts.from.IsZero() {
+		info.From = renderAddress(m.opts.from)
+	}
+	if a != nil {
+		info.Outbox = queueWhere(a, &m.nodeBase)
+		m.describeTransport(a, info)
+		if a.running() {
+			m.describeCounts(info)
+		}
+	}
+	out.Mailer = info
+	return nil
+}
+
+// describeTransport says where the mailer's mail goes: the transport in use
+// while it runs, else the one the SMTP URL as it is now would build.
+func (m *Mailer) describeTransport(a *App, info *model.MailerInfo) {
+	m.mu.Lock()
+	running, capture, relay := m.transport != nil, m.capture, m.relay
+	m.mu.Unlock()
+	switch {
+	case running && capture == nil:
+		// The transport in use, not the URL as it is now.
+		info.Transport, info.Server, info.TLS = model.TransportSMTP, relay.server, relay.tls
+	case running:
+	default:
+		v, _, err := a.kitSecret(context.Background(), smtpSecret)
+		if err != nil {
+			return
+		}
+		info.Transport = model.TransportSMTP
+		if cfg, problem := parseSMTPURL(v.Value.RevealString()); problem.empty() {
+			info.Server, info.TLS = cfg.Server, cfg.TLS
+		}
+	}
+}
+
+// describeCounts says what the running mailer's outbox holds and sent.
+func (m *Mailer) describeCounts(info *model.MailerInfo) {
+	m.mu.Lock()
+	queued, sent, dead, deadKnown := len(m.ring.pending), m.ring.sent, m.ring.dead, m.ring.deadKnown
+	m.mu.Unlock()
+	info.Queued, info.Sent = &queued, &sent
+	if deadKnown {
+		info.DeadLetters = &dead
+	}
+}
+
+// mails returns up to limit summaries, newest first.
+func (m *Mailer) mails(limit int) []model.MailSummary {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]model.MailSummary, 0, min(max(limit, 0), len(m.ring.order)))
+	for i := len(m.ring.order) - 1; i >= 0 && len(out) < limit; i-- {
+		out = append(out, *summaryOf(m.ring.mails[m.ring.order[i]]))
+	}
+	return out
+}
+
+// mail returns one mail: whole with the capture transport, its summary with
+// SMTP.
+func (m *Mailer) mail(id string) (model.MailMessage, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rec, ok := m.ring.mails[id]
+	if !ok {
+		return model.MailMessage{}, false
+	}
+	return cloneMail(rec), true
+}
+
+// reset empties the mailbox; full says whether it keeps whole mails.
+func (r *mailRing) reset(full bool) {
+	*r = mailRing{full: full, mails: map[string]*model.MailMessage{}, pending: map[string]bool{}}
+}
+
+// add remembers a mail, forgetting the oldest beyond mailboxSize.
+func (r *mailRing) add(rec model.MailMessage) *model.MailMessage {
+	if cur, ok := r.mails[rec.ID]; ok {
+		return cur
+	}
+	stored := rec
+	r.mails[rec.ID] = &stored
+	r.order = append(r.order, rec.ID)
+	for len(r.order) > mailboxSize {
+		delete(r.mails, r.order[0])
+		r.order = r.order[1:]
+	}
+	return &stored
+}
+
+// start opens the outbox — the SDK's mail spool, which the mail subsystem
+// opens, over the transport the environment asks for — and runs it. The
+// spool delivers one mail at a time; a mail it already delivered is never
+// sent again, and every attempt carries the same Message-ID, its ID at the
+// sender's domain: a redelivery after a crash is the one duplicate left, and
+// a receiver can recognise it.
+//
+// Goroutine lifecycle: one goroutine runs the outbox until stop cancels its
+// context; it closes done, which stop waits for.
+func (m *Mailer) start(ctx context.Context, a *App) error {
+	d := plug.Mail.Load()
+	if d == nil || d.Open == nil {
+		return mailsMissing()
+	}
+	transport, capture, relay, err := m.openTransport(ctx, a)
+	if err != nil {
+		return err
+	}
+	cfg := plug.MailSpoolConfig{
+		Transport:    outboxTransport{m: m, a: a}.deliver,
+		Clock:        pluggedClock{Timed: a.clock},
+		Observe:      func(e *plug.MailEventValue) { m.observe(a, e) },
+		Annotate:     annotate,
+		NewID:        func() (string, error) { return NewID("mail"), nil },
+		From:         plug.MailValue{Value: m.opts.from},
+		BackoffBase:  mailBackoffFirst,
+		BackoffMax:   mailBackoffMax,
+		MaxAttempts:  m.opts.maxAttempts,
+		SendTimeout:  mailSendTimeout,
+		PollInterval: pollInterval,
+	}
+	db, broker, err := m.openOutbox(ctx, a)
+	switch {
+	case err != nil:
+		return failure(CodeMailQueue, "OUTBOX_OPEN", "a mailer's outbox cannot be opened", err, errs.String("mailer", m.id))
+	case broker != nil:
+		// On the database that keeps the mailer's service, sealed: the
+		// broker's policy bounds a mail. The spool takes the queue
+		// subsystem's broker there and the database's transaction manager
+		// the store subsystem opened (ADR 0179 Q4), on which it announces a
+		// mail after the commit.
+		cfg.Outbox, cfg.Database = broker, db.database()
+	default:
+		cfg.MaxMessageBytes = maxMailBytes
+		if a.dataDir != "" {
+			cfg.Dir = filepath.Join(a.dataDir, m.svc.name, underOutbox, m.name)
+		}
+	}
+	spool, err := d.Open(&cfg)
+	if err != nil {
+		return failure(CodeMailQueue, "OUTBOX_OPEN", "a mailer's outbox cannot be opened", err, errs.String("mailer", m.id))
+	}
+	dead, deadErr := spool.DeadLetters(ctx, maxDeadLetters)
+	loop := a.kitLoop(m.id+" outbox", m.id, model.LoopConsumer, consumerHow, loopOrigin{model.ProvenanceLibrary, "sdk/v1/app/mail/spool"})
+	ctx, cancel := context.WithCancel(context.WithoutCancel(a.baseCtx))
+	done := make(chan struct{})
+	m.mu.Lock()
+	m.transport, m.capture, m.spool, m.cancel, m.done, m.loop = transport, capture, spool, cancel, done, loop
+	m.relay, m.problem, m.composed, m.outboxDB = relay, "", map[string][]byte{}, db
+	m.ring.reset(capture != nil)
+	m.ring.dead, m.ring.deadKnown = dead, deadErr == nil
+	m.mu.Unlock()
+	go func() {
+		defer close(done)
+		if err := spool.Run(ctx); err != nil && ctx.Err() == nil {
+			a.problem(m.id, say("mailer.outbox-stopped", "mailer", m.id, "detail", errs.PublicOf(err)))
+			loop.died(a, err)
+		}
+	}()
+	return nil
+}
+
+// stop ends the outbox's loop and closes its spool, waiting until ctx ends.
+func (m *Mailer) stop(ctx context.Context, a *App) error {
+	m.mu.Lock()
+	cancel, done, spool, loop := m.cancel, m.done, m.spool, m.loop
+	m.mu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	m.mu.Lock()
+	m.transport, m.spool, m.cancel, m.outboxDB = nil, nil, nil, nil
+	m.mu.Unlock()
+	// A broker on a database stays the mailer's after the spool closes; the
+	// SQL broker holds nothing to release.
+	err := spool.Close()
+	loop.setState(a, model.LoopStopped)
+	return err
+}
+
+// openTransport builds the transport the environment asks for: SMTP when
+// the SMTP URL is set, the capture transport otherwise. It runs once the
+// start found the mail subsystem.
+func (m *Mailer) openTransport(ctx context.Context, a *App) (transport plug.MailSink, full plug.MailCaptureSource, relay smtpRelay, err error) {
+	v, _, err := a.kitSecret(ctx, smtpSecret)
+	switch {
+	case errors.Is(err, secret.NotFound):
+		// One delivery kept: transmit reads it at once, and the mailbox
+		// keeps what the Studio shows.
+		c := plug.Mail.Load().Capture()
+		full, _ = c.(plug.MailCaptureSource)
+		return c, full, smtpRelay{}, nil
+	case errors.Is(err, secret.EnvRefused):
+		return nil, nil, smtpRelay{}, explain(CodeMailConfig, "MAIL_CONFIG", "set <PRODUCT>_SMTP_URL or <PRODUCT>_SMTP_URL_FILE, not both", err, errs.String("mailer", m.id))
+	case err != nil:
+		return nil, nil, smtpRelay{}, explain(CodeMailConfig, "MAIL_CONFIG", "the SMTP URL cannot be read: <PRODUCT>_SMTP_URL_FILE, or app-smtp-url in the secret store", err, errs.String("mailer", m.id))
+	}
+	t, relay, problem, err := smtpTransport(v.Value)
+	relay.url = v.Value
+	if !problem.empty() {
+		return nil, nil, smtpRelay{}, failure(CodeMailConfig, "MAIL_CONFIG", "<PRODUCT>_SMTP_URL is not a usable SMTP URL", err,
+			errs.String("mailer", m.id), errs.String("problem", problem.String()))
+	}
+	return t, nil, relay, nil
+}
+
+// smtpTransport builds the SMTP transport url names and the relay it
+// reaches — whose url the caller keeps —, or says what is wrong with url.
+// Building it dials nothing.
+func smtpTransport(url revealStringer) (transport plug.MailSink, relay smtpRelay, problem phrase, err error) {
+	cfg, problem := parseSMTPURL(url.RevealString())
+	if !problem.empty() {
+		return nil, smtpRelay{}, problem, nil
+	}
+	t, err := plug.Mail.Load().NewSMTP(&cfg)
+	if err != nil {
+		return nil, smtpRelay{}, say("smtp.transport", "detail", errs.PublicOf(err)), err
+	}
+	return t, smtpRelay{server: cfg.Server, tls: cfg.TLS}, phrase{}, nil
+}
+
+// smtpProblem is what is wrong with url as an SMTP URL: empty when it
+// builds a transport.
+func smtpProblem(url revealStringer) phrase {
+	cfg, problem := parseSMTPURL(url.RevealString())
+	if !problem.empty() {
+		return problem
+	}
+	if _, err := plug.Mail.Load().NewSMTP(&cfg); err != nil {
+		return say("smtp.transport", "detail", errs.PublicOf(err))
+	}
+	return phrase{}
+}
+
+// current is the SMTP transport for the URL as it is now: rebuilt when the
+// URL changed since the transport was built. A URL that went missing or no
+// longer builds a transport leaves the one in use, and is logged once.
+func (m *Mailer) current(ctx context.Context, a *App, transport plug.MailSink, relay smtpRelay) plug.MailSink {
+	v, _, err := a.kitSecret(ctx, smtpSecret)
+	if err == nil && v.Value.Equal(relay.url) {
+		return transport
+	}
+	var problem phrase
+	var rebuilt plug.MailSink
+	var next smtpRelay
+	switch {
+	case errors.Is(err, secret.NotFound):
+		problem = say("smtp.gone")
+	case err != nil:
+		problem = say("smtp.unreadable", "detail", errs.PublicOf(err))
+	default:
+		rebuilt, next, problem, err = smtpTransport(v.Value)
+		next.url = v.Value
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !problem.empty() {
+		if problem.String() != m.problem {
+			m.problem = problem.String()
+			fields := []logger.Attr{logger.String("node", m.id)}
+			if err != nil {
+				fields = append(fields, logger.String("error", errs.PublicOf(err)))
+			}
+			logger.Warn(ctx, a.log, "the SMTP URL "+problem.String()+"; the mailer keeps the relay it had", fields...)
+		}
+		return transport
+	}
+	if m.transport == transport {
+		m.transport, m.relay, m.problem = rebuilt, next, ""
+		logger.Info(ctx, a.log, "the SMTP URL changed; the mailer uses it from this mail on", logger.String("node", m.id),
+			logger.String("relay", next.server))
+		return rebuilt
+	}
+	return m.transport
+}
+
+// deliver makes one delivery attempt of msg, a mail.Message, as the spool
+// numbers it. A failure is logged here, inside the attempt's span; the spool
+// retries it, or dead-letters it after the last.
+func (t outboxTransport) deliver(ctx context.Context, msg plug.MailValue, attempt plug.MailAttemptValue) (err error) {
+	m, a := t.m, t.a
+	if header := attempt.Meta[metaTrace]; header != "" {
+		if sc, perr := trace.ParseTraceParent(header); perr == nil {
+			ctx = trace.ContextWithSpanContext(ctx, sc)
+		}
+	}
+	m.mu.Lock()
+	loop := m.loop
+	m.mu.Unlock()
+	started := a.clock.Now()
+	loop.begin(a, "")
+	ctx, sp := a.begin(ctx, &spanStart{node: m.id, op: model.OpDeliverMail, name: "Deliver"})
+	sp.attr("attempt", strconv.Itoa(attempt.Attempt))
+	sp.attr("mail", attempt.ID)
+	defer func() {
+		if p := recover(); p != nil {
+			logger.Error(ctx, a.log, "a mail delivery panicked", logger.String("node", m.id), logger.Any("panic", p), logger.String("stack", string(debug.Stack())))
+			err = failure(CodeMailPanic, "MAIL_PANICKED", "a mail delivery panicked", nil, errs.String("mailer", m.id))
+		}
+		if err != nil {
+			m.failed(ctx, a, attempt, err)
+		}
+		sp.end(err)
+		loop.idle(a, time.Time{})
+		loop.ran(a, started, a.clock.Now(), err)
+	}()
+	sent, _ := msg.Value.(mail.Message)
+	raw, err := m.transmit(ctx, a, &sent)
+	if err == nil && raw != nil {
+		m.mu.Lock()
+		m.composed[attempt.ID] = raw
+		m.mu.Unlock()
+	}
+	return err
+}
+
+// failed logs a failed attempt: a warning while attempts remain, an error on
+// the last one, after which the spool gives the mail up.
+func (m *Mailer) failed(ctx context.Context, a *App, attempt plug.MailAttemptValue, err error) {
+	fields := []logger.Attr{logger.String("node", m.id), logger.String("mail", attempt.ID), logger.Int("attempt", attempt.Attempt), logger.String("error", err.Error())}
+	if attempt.Attempt >= m.opts.maxAttempts {
+		logger.Error(ctx, a.log, "a mail was abandoned after its last attempt", fields...)
+		return
+	}
+	logger.Warn(ctx, a.log, "a mail delivery failed; it will be retried", fields...)
+}
+
+// transmit hands one message to the transport. With the capture transport,
+// it returns the composed message.
+func (m *Mailer) transmit(ctx context.Context, a *App, msg *mail.Message) ([]byte, error) {
+	m.mu.Lock()
+	transport, capture, relay := m.transport, m.capture, m.relay
+	m.mu.Unlock()
+	if transport == nil {
+		return nil, Unavailable(fmt.Sprintf("mailer %q is not running", m.name))
+	}
+	if capture == nil {
+		transport = m.current(ctx, a, transport, relay)
+	}
+	if err := transport.Send(ctx, plug.MailValue{Value: *msg}); err != nil {
+		return nil, err
+	}
+	if capture == nil {
+		return nil, nil
+	}
+	return capture.Composed(), nil
+}
+
+// observe keeps the mailbox in step with what the spool reports — each
+// mail's status and the counts — and streams the mail's new status. The
+// spool reports a mail an earlier run queued too: the mailbox learns it then.
+func (m *Mailer) observe(a *App, e *plug.MailEventValue) {
+	if e.Kind == plug.MailEventDuplicate {
+		// A redelivery of a mail already sent, dropped: nothing changed.
+		return
+	}
+	m.mu.Lock()
+	rec, known := m.ring.mails[e.ID]
+	if !known {
+		// Queued now, by an earlier run of the process, or forgotten by the
+		// ring.
+		rec = m.ring.add(m.messageOf(e, m.ring.full))
+	}
+	switch e.Kind {
+	case plug.MailEventQueued:
+		m.ring.pending[e.ID] = true
+	case plug.MailEventSent:
+		rec.Attempts, rec.Status, rec.Error, rec.SentAt = e.Attempt, model.MailSent, "", new(e.At.UTC())
+		if raw, ok := m.composed[e.ID]; ok {
+			rec.Raw = rawText(raw)
+			delete(m.composed, e.ID)
+		}
+		delete(m.ring.pending, e.ID)
+		m.ring.sent++
+	case plug.MailEventRetrying:
+		rec.Attempts, rec.Status, rec.Error = e.Attempt, model.MailRetrying, publicText(e.Err)
+		m.ring.pending[e.ID] = true
+	case plug.MailEventDeadLettered:
+		rec.Attempts, rec.Status, rec.Error = e.Attempt, model.MailDead, publicText(e.Err)
+		delete(m.ring.pending, e.ID)
+		m.ring.dead++
+	default:
+		// Every other event changes nothing the mailbox shows.
+	}
+	summary := summaryOf(rec)
+	m.mu.Unlock()
+	a.hub.publish(model.Event{Type: model.EventMail, Mail: summary})
+}
+
+// messageOf is the mailbox's record of a mail the spool reports; full keeps
+// the bodies and headers.
+func (m *Mailer) messageOf(e *plug.MailEventValue, full bool) model.MailMessage {
+	msg, _ := e.Message.Value.(mail.Message)
+	traceID, _ := traceIDOf(e.Meta[metaTrace])
+	out := model.MailMessage{
+		ID: e.ID, Mailer: m.id, From: renderAddress(msg.From), To: renderAddresses(msg.To),
+		Subject: msg.Subject, Status: model.MailQueued, QueuedAt: e.QueuedAt, TraceID: traceID, Node: e.Meta[metaNode],
+	}
+	if full {
+		out.Text, out.HTML, out.Headers = msg.Text, msg.HTML, headersOf(&msg)
+	}
+	return out
+}
+
+// publicText is what the mailbox says about a failed attempt: a kit error's
+// message, or the SDK's Public text — wire-safe by the SDK's contract, and
+// the only part of an SDK error kit shows — never err.Error().
+func publicText(err error) string {
+	if ke, ok := errors.AsType[*Error](err); ok {
+		return ke.Message
+	}
+	if p := errs.PublicOf(err); p != "" {
+		return p
+	}
+	_, body := describe(err)
+	return body.Message
+}
+
+// summaryOf is a copy of rec's summary that shares nothing with it.
+func summaryOf(rec *model.MailMessage) *model.MailSummary {
+	s := rec.MailSummary
+	s.To = slices.Clone(s.To)
+	if s.SentAt != nil {
+		at := *s.SentAt
+		s.SentAt = &at
+	}
+	return &s
+}
+
+// cloneMail is a copy of rec that shares nothing with it.
+func cloneMail(rec *model.MailMessage) model.MailMessage {
+	c := *rec
+	c.MailSummary = *summaryOf(rec)
+	if rec.Headers != nil {
+		c.Headers = maps.Clone(rec.Headers)
+	}
+	return c
+}
+
+// renderAddress spells a as a mail header does: "Name <addr>".
+func renderAddress(a mail.Address) string {
+	if a.Name == "" {
+		return a.Addr
+	}
+	return a.Name + " <" + a.Addr + ">"
+}
+
+// renderAddresses spells every address of list.
+func renderAddresses(list []mail.Address) []string {
+	out := make([]string, len(list))
+	for i, a := range list {
+		out[i] = renderAddress(a)
+	}
+	return out
+}
+
+// headersOf renders what a mail says besides its sender, recipients, subject
+// and bodies. Bcc is not among them: it reaches the envelope and no header.
+func headersOf(msg *mail.Message) map[string]string {
+	h := map[string]string{}
+	if !msg.Date.IsZero() {
+		h["Date"] = msg.Date.Format(time.RFC1123Z)
+	}
+	if msg.MessageID != "" {
+		h["Message-ID"] = "<" + strings.Trim(msg.MessageID, "<>") + ">"
+	}
+	setAddresses(h, "Cc", msg.Cc)
+	setAddresses(h, "Reply-To", msg.ReplyTo)
+	for _, f := range msg.Headers {
+		if prev, ok := h[f.Name]; ok {
+			h[f.Name] = prev + ", " + f.Value
+		} else {
+			h[f.Name] = f.Value
+		}
+	}
+	if len(msg.Attachments) > 0 {
+		h["X-Attachments"] = attachmentsText(msg.Attachments)
+	}
+	return h
+}
+
+// setAddresses sets the header name to the addresses of list, when there are
+// any.
+func setAddresses(h map[string]string, name string, list []mail.Address) {
+	if len(list) > 0 {
+		h[name] = strings.Join(renderAddresses(list), ", ")
+	}
+}
+
+// attachmentsText names every attachment with its size.
+func attachmentsText(atts []mail.Attachment) string {
+	names := make([]string, len(atts))
+	for i, att := range atts {
+		names[i] = fmt.Sprintf("%s (%s)", att.Filename, humanBytes(int64(len(att.Content))))
+	}
+	return strings.Join(names, ", ")
+}
+
+// rawText is the composed message as the Studio shows it, cut at maxRawMail.
+func rawText(raw []byte) string {
+	if len(raw) <= maxRawMail {
+		return string(raw)
+	}
+	return string(raw[:maxRawMail]) + "\r\n[… cut by the framework at " + humanBytes(maxRawMail) + "]"
+}
+
+// traceIDOf is the trace ID of a traceparent header, "" when it has none.
+func traceIDOf(header string) (string, bool) {
+	if header == "" {
+		return "", false
+	}
+	sc, err := trace.ParseTraceParent(header)
+	if err != nil {
+		return "", false
+	}
+	return sc.TraceID.String(), true
+}
+
+// parseSMTPURL reads smtp://user:password@host:port?tls=starttls|implicit|none
+// (smtps:// for implicit TLS) with the SDK's mail.ParseURL, through the mail
+// subsystem, which refuses what its SMTP transport would. The relay's
+// configuration holds the password: it is read where the transport is built,
+// handed to the subsystem's NewSMTP, and never kept or printed. The problem
+// is the clause the SDK named, which never quotes the URL.
+func parseSMTPURL(raw string) (plug.MailRelayValue, phrase) {
+	d := plug.Mail.Load()
+	if d == nil || d.ParseSMTP == nil {
+		return plug.MailRelayValue{}, say("smtp.refused", "detail", errs.PublicOf(mailsMissing()))
+	}
+	cfg, err := d.ParseSMTP(raw)
+	if err == nil {
+		return cfg, phrase{}
+	}
+	clause := ""
+	for _, f := range errs.FieldsOf(err) {
+		if f.Key() == "problem" {
+			clause = f.StringValue()
+		}
+	}
+	switch {
+	case mailRefused(err, plug.MailRefusalInvalidURL) && clause != "":
+		return plug.MailRelayValue{}, say("smtp.unusable", "clause", clause)
+	case clause != "":
+		return plug.MailRelayValue{}, say("smtp.refused-because", "detail", errs.PublicOf(err), "clause", clause)
+	}
+	return plug.MailRelayValue{}, say("smtp.refused", "detail", errs.PublicOf(err))
+}
+
+// mailerProblems judges the mailers against the environment: capture outside
+// dev delivers nothing — a warning; an SMTP URL that cannot be used, or a
+// sender the SDK refuses, refuses to start. Building the transport dials
+// nothing. Without the mail subsystem it judges nothing: the start refuses
+// every mailer for want of it (subsystem.go).
+func (a *App) mailerProblems() []model.Diagnostic {
+	if !a.hasMailer() || !mailsLinked() {
+		return nil
+	}
+	set, problem := a.smtpState()
+	var out []model.Diagnostic
+	for _, m := range a.mailers() {
+		if said := m.senderProblem(); !said.empty() {
+			out = append(out, diagnosticOf("error", m.id, a.source(&m.decl), said))
+		}
+		switch {
+		case !set && a.cfg.env != EnvDev:
+			out = append(out, diagnosticOf("warning", m.id, a.source(&m.decl), say("mailer.capture", "mailer", m.id, "prefix", appPrefix(a.name))))
+		case !problem.empty():
+			out = append(out, diagnosticOf("error", m.id, a.source(&m.decl), say("mailer.smtp", "mailer", m.id, "problem", problem, "prefix", appPrefix(a.name))))
+		}
+	}
+	return out
+}
+
+// senderProblem is what the SDK refuses the mailer's sender ([From]) for,
+// through the mail subsystem: empty when it names none. It is judged at the
+// start, where the subsystem is known to be there or refused, not at the
+// declaration, which a package's init may run before the subsystem's.
+func (m *Mailer) senderProblem() phrase {
+	from := m.opts.from
+	if from.IsZero() && from.Name == "" {
+		return phrase{}
+	}
+	probe := mail.Message{From: from, To: []mail.Address{{Addr: "probe@example.com"}}, Text: "probe"}
+	if err := validateMail(probe); err != nil {
+		return say("mailer.sender", "name", m.name, "sender", clip(from.Addr), "detail", errs.PublicOf(err))
+	}
+	return phrase{}
+}
+
+// smtpState says whether the SMTP URL is set, and what is wrong with it.
+func (a *App) smtpState() (set bool, problem phrase) {
+	v, _, err := a.kitSecret(context.Background(), smtpSecret)
+	switch {
+	case err == nil:
+		return true, smtpProblem(v.Value)
+	case !errors.Is(err, secret.NotFound):
+		return true, say("smtp.unreadable", "detail", errs.PublicOf(err))
+	default:
+		return false, phrase{}
+	}
+}
+
+// mailers are the app's mailers, in its services' order.
+func (a *App) mailers() []*Mailer {
+	var out []*Mailer
+	for _, svc := range a.services {
+		if svc == nil {
+			continue
+		}
+		nodes, _ := svc.snapshot()
+		for _, n := range nodes {
+			if m, ok := n.(*Mailer); ok {
+				out = append(out, m)
+			}
+		}
+	}
+	return out
+}
+
+// hasMailer reports whether the app declares a mailer.
+func (a *App) hasMailer() bool {
+	for _, svc := range a.services {
+		if svc == nil {
+			continue
+		}
+		nodes, _ := svc.snapshot()
+		for _, n := range nodes {
+			if n.base().kind == model.KindMailer {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// NewMailer is a mailer no service declares yet, with the default attempts:
+// [Service.Mailer] makes one and declares it, which is how a product gets
+// one.
+func NewMailer() *Mailer { return &Mailer{opts: mailerOptions{maxAttempts: defaultMailAttempts}} }

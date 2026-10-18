@@ -13,7 +13,7 @@ const (
 	BlockGo     = "go"      // a go statement: runs beside the caller
 	BlockDefer  = "defer"   // a defer statement: runs when the function returns
 	BlockFunc   = "func"    // a function literal: runs when it is called
-	// BlockTransaction is the function a kit.Transact runs: its steps run in
+	// BlockTransaction is the function an app.Transact runs: its steps run in
 	// one transaction, and the effects they make leave at its commit.
 	BlockTransaction = "transaction"
 )

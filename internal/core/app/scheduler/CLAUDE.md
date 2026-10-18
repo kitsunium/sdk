@@ -29,7 +29,6 @@ whose header digests `make api-check` verifies. It moved there from
 | `scheduler_entry.go` | `EntryValue` — `Name` / `Schedule` / `Job` / `AllowOverlap` |
 | `scheduler_result.go` | `ResultValue` — `Name` / `Scheduled` / `Started` / `Finished` / `Missed` / `Skipped` / `Err` |
 | `codes_gen.go` | `Code*` constants — ranges 0.2.12.* and 0.3.43.*; `InvalidEntry` / `DuplicateJob` / `SchedulerRunning` / `JobPanicked`, and the parser's `InvalidExpression` / `UnsupportedSyntax` / `UnreachableSchedule` / `InvalidLocation` / `InvalidInterval` (`errs.Define`) — written by kit gen from `design/app/scheduler.yaml` (ADR 0164) |
-| `errors.go` | hand-written beside them: `exitConfig` |
 
 ## Conventions
 

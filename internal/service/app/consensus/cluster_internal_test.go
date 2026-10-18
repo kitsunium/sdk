@@ -675,48 +675,147 @@ func TestClusterTransferSubmittedOnAFollower(t *testing.T) {
 	}
 }
 
+// leaderHealth polls the verdict of whichever node leads now until ok holds
+// on it, and fails the test after five seconds. The verdict asked is a
+// leader's — only a leader reports peers and a failure tolerance — and the
+// leadership may move meanwhile: CheckQuorum steps a leader down after one
+// minimum election timeout (100 ms here) without a majority's answer, and
+// with one voter of three isolated a single answer is left, so one stall of
+// a slow runner (Windows, -race) re-elects. Reading the verdict on a node
+// fixed beforehand then reads a follower's: no peers, tolerance -1.
+func leaderHealth(t *testing.T, c *cluster, what string, ok func(l *testNode, h HealthValue) bool) *testNode {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		l := c.leader(5 * time.Second)
+		h := l.node.Health()
+		if h.Status.Role == coreconsensus.RoleLeader && ok(l, h) {
+			return l
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: leader %d: %+v", what, l.id, h)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// otherThan returns a node of c that is not n.
+func (c *cluster) otherThan(n *testNode) *testNode {
+	for _, tn := range c.nodes {
+		if tn != n {
+			return tn
+		}
+	}
+	c.t.Fatal("no other node")
+	return nil
+}
+
+// isolatedPeerLags reports whether h, a leader's verdict, counts the
+// isolated node f unreachable and behind, with no failure left to tolerate.
+func isolatedPeerLags(f *testNode, h HealthValue) bool {
+	for _, p := range h.Peers {
+		if p.ID == f.id {
+			return h.FailureTolerance == 0 && p.Flags.Has(PeerUnreachable) && p.Lag > 0
+		}
+	}
+	return false
+}
+
 func TestHealthReportsFailureToleranceAndPeers(t *testing.T) {
 	c := newCluster(t, 3, 0)
-	l := c.leader(5 * time.Second)
-	tok := propose(t, l.node, "a=1")
+	tok := proposeOnLeader(t, c, "a=1")
 	c.waitApplied(tok.Index, 5*time.Second)
-	waitFor := func(what string, ok func() bool) {
-		t.Helper()
-		deadline := time.Now().Add(5 * time.Second)
-		for !ok() {
-			if time.Now().After(deadline) {
-				t.Fatalf("%s: %+v", what, l.node.Health())
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	waitFor("tolerance 1 with three voters", func() bool {
-		h := l.node.Health()
+	threeVoters := func(_ *testNode, h HealthValue) bool {
 		return h.FailureTolerance == 1 && h.Flags.Has(HealthQuorumReachable) && len(h.Peers) == 2 &&
 			!h.Peers[0].Flags.Has(PeerUnreachable) && !h.Peers[1].Flags.Has(PeerUnreachable) && h.Peers[0].Lag == 0
-	})
+	}
+	// A follower's verdict is judged against the leadership it follows: when
+	// the leader read has kept its term and f follows it in that term, the
+	// verdict must be a follower's at once; a leadership that moved between
+	// the two reads is looked for again, within the same bound.
+	deadline := time.Now().Add(5 * time.Second)
 	var f *testNode
-	for _, tn := range c.nodes {
-		if tn != l {
-			f = tn
+	for {
+		l := leaderHealth(t, c, "tolerance 1 with three voters", threeVoters)
+		f = c.otherThan(l)
+		h := f.node.Health()
+		ls := l.node.Status()
+		if ls.Role == coreconsensus.RoleLeader && h.Status.Role == coreconsensus.RoleFollower &&
+			h.Status.Term == ls.Term && h.Status.Leader == l.id {
+			if h.FailureTolerance != -1 || h.Peers != nil || !h.Flags.Has(HealthHasLeader) || !h.Flags.Has(HealthReady) {
+				t.Fatalf("follower health %+v", h)
+			}
 			break
 		}
-	}
-	if h := f.node.Health(); h.FailureTolerance != -1 || h.Peers != nil || !h.Flags.Has(HealthHasLeader) || !h.Flags.Has(HealthReady) {
-		t.Fatalf("follower health %+v", h)
+		if time.Now().After(deadline) {
+			t.Fatalf("no stable leadership to judge a follower against: leader %d %+v, follower %+v", l.id, ls, h)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	c.net.Isolate(f.id, true)
-	propose(t, l.node, "b=2")
-	waitFor("the isolated peer is unreachable and lags", func() bool {
-		h := l.node.Health()
-		for _, p := range h.Peers {
-			if p.ID == f.id {
-				return h.FailureTolerance == 0 && p.Flags.Has(PeerUnreachable) && p.Lag > 0
+	defer c.net.Isolate(f.id, false)
+	proposeOnLeader(t, c, "b=2")
+	leaderHealth(t, c, "the isolated peer is unreachable and lags", func(l *testNode, h HealthValue) bool {
+		if l == f {
+			t.Fatalf("the isolated node %d leads: %+v", f.id, h)
+		}
+		return isolatedPeerLags(f, h)
+	})
+}
+
+// The verdict follows the leadership: a leader elected while a voter is
+// isolated reports that voter unreachable and lagging from its first turns,
+// and the leader it replaced reports a follower's verdict. The transfer
+// stands in for the CheckQuorum step-down a slow runner produces, which the
+// verdict read on the old leader mistook for a wrong health (the Windows
+// flake of TestHealthReportsFailureToleranceAndPeers).
+func TestHealthFollowsALeadershipChange(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	l := c.settledLeader(5 * time.Second)
+	f := c.otherThan(l)
+	c.net.Isolate(f.id, true)
+	defer c.net.Isolate(f.id, false)
+	deadline := time.Now().Add(10 * time.Second)
+	var old *testNode
+	for {
+		old = c.leader(5 * time.Second)
+		var to *testNode
+		for _, tn := range c.nodes {
+			if tn != old && tn != f {
+				to = tn
 			}
 		}
-		return false
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := old.node.TransferLeadership(ctx, "op:test", to.id)
+		cancel()
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, coreconsensus.TransferFailed) && !errors.Is(err, coreconsensus.NotLeader) {
+			t.Fatalf("transfer to %d: %v", to.id, err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no transfer completed, last: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	nl := leaderHealth(t, c, "the new leader counts the isolated peer", func(l *testNode, h HealthValue) bool {
+		return l != old && l != f && isolatedPeerLags(f, h)
 	})
-	c.net.Isolate(f.id, false)
+	settle := time.Now().Add(5 * time.Second)
+	for {
+		h := old.node.Health()
+		if h.Status.Role == coreconsensus.RoleFollower && h.Status.Leader == nl.id {
+			if h.FailureTolerance != -1 || h.Peers != nil {
+				t.Fatalf("the replaced leader still reports a leader's verdict: %+v", h)
+			}
+			return
+		}
+		if time.Now().After(settle) {
+			t.Fatalf("the replaced leader never followed %d: %+v", nl.id, h)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // R7-18: every snapshot of a node fails its checksum. It starts with no
@@ -957,23 +1056,27 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 			break
 		}
 	}
+	// Isolated before it stops: the memory network keeps what is sent to a
+	// stopped node and delivers it at the restart, so the appends the leader
+	// went on sending caught the node up past the live logs' start whenever
+	// they were compacted no further, and no install was ever needed (#374,
+	// linux/386). The crash is armed before the leader can reach the
+	// restarted node: armed after, an install that published in between left
+	// nothing to crash and the wait below timed out (#304, macOS).
+	c.net.Isolate(lag.id, true)
 	c.kill(lag)
 	var tok coreconsensus.TokenValue
 	for i := range 200 {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 	}
 	compactedPast(t, c, 10)
-	// The crash is armed before the leader can reach the restarted node:
-	// armed after, an install that published in between left nothing to
-	// crash and the wait below timed out (#304, macOS).
-	c.net.Isolate(lag.id, true)
 	c.start(lag)
 	lag.node.crashAfterPublish.Store(true)
 	c.net.Isolate(lag.id, false)
 	deadline := time.Now().Add(10 * time.Second)
 	for !lag.node.stopped.Load() {
 		if time.Now().After(deadline) {
-			t.Fatal("no install reached publication")
+			t.Fatalf("no install reached publication: the node applied %d", lag.node.Status().Applied)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -1006,6 +1109,10 @@ func TestAnInstallKeepsTheTwoNewestSnapshots(t *testing.T) {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 	}
 	c.waitApplied(tok.Index, 10*time.Second)
+	// The second cut may be one a trigger coalesced while the first was
+	// written, made once it was: it used to be dropped, and a follower that
+	// had applied all hundred entries behind its first cut never cut again
+	// (#375, windows and macOS; TestACoalescedCutIsMade).
 	deadline := time.Now().Add(10 * time.Second)
 	for len(must(lag.snaps.List())(t)) < 2 {
 		if time.Now().After(deadline) {
@@ -1014,12 +1121,17 @@ func TestAnInstallKeepsTheTwoNewestSnapshots(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	held := tok.Index
+	// Isolated while stopped, so that what the leader sends meanwhile is not
+	// kept for its restart: past the live logs' start, only an install can
+	// catch it up (see TestInstallResumesAfterACrashAtPublication).
+	c.net.Isolate(lag.id, true)
 	c.kill(lag)
 	for i := 100; i < 300; i++ {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 	}
 	compactedPast(t, c, held+1)
 	c.start(lag)
+	c.net.Isolate(lag.id, false)
 	c.waitApplied(tok.Index, 10*time.Second)
 	// The applied index moves with the restore, a moment before the install
 	// prunes: the count is waited for, on a bound.

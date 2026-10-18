@@ -3,14 +3,14 @@
 
 The module `github.com/kitsunium/sdk/framework/connectors/sqlite`: the one a
 product's `main` imports to keep a database in a SQLite file
-(`kit.Database(name, sqlite.Engine())`), and the only code of the product
+(`app.Database(name, sqlite.Engine())`), and the only code of the product
 that links a SQLite driver — modernc.org/sqlite, which needs no cgo, so the
 product stays one static binary (CI builds the module with `CGO_ENABLED=0`).
 `connectors/CLAUDE.md` holds the rules every engine follows.
 
 | File | Holds |
 |---|---|
-| `sqlite.go` | `Engine()`: `Dialect` (the SDK's `sql.DialectSQLite`); `Describe` — the file, and no address, user or password —; `Open` — the file, made if need be; `current` is never asked, a file has no credentials to rotate —; `OpenWaiting` — `kit.LockWaiter`, the busy timeout kit gives —; `dsn` and `split`, which read a path or a `file:` URI and add the `defaults` the URL does not write under either spelling: `_journal_mode=WAL`, `_busy_timeout=5000` (or kit's wait), `_txlock=immediate` |
+| `sqlite.go` | `Engine()`: `Dialect` (`app.DialectSQLite`, kit's own type — ADR 0179 Q5); the blank import of `framework/app/store`, the stores a database keeps (ADR 0179 §4); `Describe` — the file, and no address, user or password —; `Open` — the file, made if need be; `current` is never asked, a file has no credentials to rotate —; `OpenWaiting` — `app.LockWaiter`, the busy timeout kit gives —; `dsn` and `split`, which read a path or a `file:` URI and add the `defaults` the URL does not write under either spelling: `_journal_mode=WAL`, `_busy_timeout=5000` (or kit's wait), `_txlock=immediate` |
 | `driver.go` / `driver_none.go` | the blank import of modernc.org/sqlite, on every GOOS it has a port to; on dragonfly, illumos and solaris (its libc excludes them) `driverLinked` is false and `Open` refuses with `proc.UnsupportedPlatform`, so the module still builds there (the cross-build lane) |
 
 Rules:
@@ -22,7 +22,7 @@ Rules:
   write lock taken when a transaction begins. A parameter the URL writes
   wins — under either spelling the driver reads (`_busy_timeout` or
   `_timeout`, `_journal_mode` or `_journal`).
-- The busy timeout is kit's (ADR 0178 C2): the engine is a `kit.LockWaiter`,
+- The busy timeout is kit's (ADR 0178 C2): the engine is a `app.LockWaiter`,
   and kit opens it with `OpenWaiting` and `B = T − max(250ms, T/10)`, `T`
   being `<name>-timeout` — 4.5 s for the default 5 s —, so a lost race on the
   write lock comes back as SQLite's refusal before the call's deadline
@@ -37,18 +37,21 @@ Rules:
 - `Records.Keys` and the watches' catch-up (ADR 0178 C6): `catchup_test.go`
   lists the keys a watch hears through the SDK's document store over SQL,
   hears after a stop that was not clean the memo whose notice was lost, and
-  after a clean stop nothing again.
+  after a clean stop nothing again; `replay_test.go` runs `watch replay`
+  through `Main` with the product stopped — the memos no watch heard queued
+  in the watch's table and heard at the next start, a name that is no watch
+  refused with 1.
 - Migrations run — kit's own set, which makes the tables of the stores the
   database keeps, then the modules' and the product's — under the database
   file's own write lock, one transaction per run (the SDK's ADR 0140). A
   migration cannot run what SQLite refuses inside a transaction: `VACUUM`,
   `PRAGMA journal_mode`.
-- `kit.Keeps(kit.Privacy)` on the file keeps kit's holds and journal there,
+- `app.Keeps(app.Privacy)` on the file keeps kit's holds and journal there,
   and kit's data keys in the data directory: a key is written apart from
   every transaction, and the file's one writer may be held by the
   transaction of the write that needs it — it waited the busy timeout, then
   failed (kit's `placementOf`, the platform's ADR 0004 step 2 as built). A store the keys
-  seal lives beside kit.Privacy on the file.
+  seal lives beside app.Privacy on the file.
 - `go.mod` requires the root module, `github.com/kitsunium/sdk` — kit and the
   framework's packages —, `internal` and the `pkg/v1` families its build
   reaches (ADR 0171), each replaced with its directory of this tree; a release
@@ -60,7 +63,7 @@ Rules:
 `go test -race ./...` here — no server, so every test runs
 (`filestore_test.go`'s `needsFileStore` skips an app with a data directory
 on Windows and Plan 9, where `vfs.NewOS` refuses; `subsystems_test.go`
-imports `framework/kit/server`, since the suite's apps are servers).
+imports `framework/app/server`, since the suite's apps are servers).
 `sqlite_internal_test.go` holds the URL's parameters winning over the
 defaults; `sqlite_test.go` describes paths and URIs, has two pools write at
 once, runs a product in production — its file beside the data, or where the
@@ -68,10 +71,85 @@ URL says —, its migrations and its store in the file, a store that seals —
 its row holds boxes, reads back after a restart, and an erasure's committed
 transaction destroys the key a backup's row was sealed under, one taken
 back destroys nothing —, and the stores' conformance suite
-(`kit/storetest`). `keys_test.go` puts `kit.Keeps(kit.Privacy)` on the file:
+(`app/storetest`). `keys_test.go` puts `app.Keeps(app.Privacy)` on the file:
 the keys in the data directory, and each data key made without waiting for
 the file's writer — a hold of a sealed record and a write of it, in their
-own transactions; inside `kit.Transact` on the file a case written and
+own transactions; inside `app.Transact` on the file a case written and
 held, a hold of kit's own, a sealed letter published and a sealed reminder
 dispatched, delivered and opened after the commit. With the keys on the
 file, each waited the 5 s busy timeout, then failed `SEAL_WRITE`.
+`former_test.go` declares the product `testdata/former` was written by — a
+release before ADR 0180 step 5, on SQLite (`former/sqlite`: `kit_*` tables, a
+`kit.privacy` directory) and in the data directory alone (`former/files`),
+with what it read then (`dump.json`, `journal.txt`, `holds.txt`); never
+regenerate it with this release, whose names are the present ones.
+`former_move_test.go` moves it and reads it back: every row and every file
+byte for byte, the journal's chain and the holds as the former release
+printed them, the cases, versions, former values, trash and a person's data
+opened, the kept letter delivered, nothing moved by a second start; a
+present name taken refuses the start and nothing moves; a renaming the
+database refuses half-way rolls the move back and the next start resumes;
+and the move is undone by renaming back — the procedure ADR 0180 gives —,
+which restores the fixture byte for byte.
+`former_keys_test.go` declares the product `testdata/former-keys` was
+written by — the release before ADR 0180 step 5b, its secrets in the file
+store beside the data (kept in the fixture as `data/_secrets`, a name git
+tracks, renamed `.secrets` by `keyedCopy`): `kit-data-key` rotated once,
+`kit-index-key`, `kit-smtp-url`, every data key wrapped under
+`kit-data-key`, a letter and a notice about nobody still queued, the notice
+sealed under `kit-data-key` itself with the label `kit/v1 sealed at rest` —,
+with what it read then (`dump.json`, `journal.txt`, `holds.txt`, `names.json`,
+on SQLite and in the data directory alone); never regenerate it with this
+release. `former_keys_move_test.go` holds the re-seal: the index key and the
+SMTP URL copied, `app-data-key` made and every data key re-wrapped under it,
+the journal, holds, cases, versions, former values, trash, a person's data,
+the erased person and both kept messages read as the former release read
+them, the former secrets byte for byte untouched, a second start changing
+nothing, and everything read with the former secrets gone; an index key
+under both names refused (`CodeRenameTarget`); a copy refused half-way
+(`CodeRenameFailed`) resumed by the next start; `app-data-key` rotated and
+pruned once moved; and `privacy rewrap -back`, the way back, leaving every
+data key under `kit-data-key`. `former_keys_erase_test.go`: a person erased
+after the move, their boxes restored from a backup taken just before the
+erasure, opens under neither data-key, nor each alone, nor after `privacy
+rewrap -back`.
+`testdata/former-journal` was written on 2026-10-18 by the release before
+ADR 0180 step 5c — `testdata/former-keys` migrated by it, then eve's case
+written twice and held, fay's written and fay erased, eve exported, a letter
+to eve kept in the queue, ann exported: a privacy journal of ten entries
+whose references are made under the `kit/v1` labels and whose reasons are
+sealed bound to `kit.privacy/store/journal` —, on SQLite and in the data
+directory alone, with what it read (`dump.json`, `journal.txt`, `holds.txt`,
+`names.json`); never regenerate it with this release. `former_journal_test.go`
+holds the close: the commands read the journal and the holds as the former
+release did and close nothing; the product reads everything as it read it;
+the first entry it journals is preceded by a `continue` entry naming the
+tenth's hash, the ten former entries stay byte for byte, every later entry is
+under `app/v1` — a reference this test computes with the standard library
+alone, the former ones checked by the same formula —; `privacy journal
+-verify` holds across the two and says where the former closed, and breaks
+where a former entry or the link is changed; a second start closes nothing;
+a close the disk refuses changes nothing and the next entry completes it;
+and an erasure stays one across the close — cy and fay erased before, dan
+after, ann's held case kept —, no data key filed under an `app/v1`
+reference by the close (the holds' references are the present ones once
+step 5c-2's pass filed them again, `relabeled`).
+`testdata/former-refs` was written on 2026-10-18 by the release before ADR
+0180 step 5c-2 — `testdata/former-journal` migrated by it, then ivy's case
+whose subject became jay (ivy's former note and version under ivy's key),
+kim's held then written again (under its own key), leo's in the trash, a
+letter to kim kept —: every data key named under the `kit/v1` labels, the
+holds filed under `kit/v1` record references and bound to
+`kit.privacy/store/holds`, with what it read (`dump.json` — `dumpRefs`, every
+case's versions and former notes, the trash and every person's export —,
+`journal.txt`, `holds.txt`, `names.json`); never regenerate it with this
+release. `former_refs_test.go` holds the re-seal: the commands read the
+holds and the journal as before; the start reads everything as that release
+did, the kept letters and notice delivered, and leaves no box under a key a
+former release named but ivy's former note and version and the versions of
+bob's and leo's trashed cases (`leftUnder`), the holds listed under their
+present references (`relabeled`), a second start the same; an erasure after
+it — dan, ivy, leo; kim held — reads as one now and from a backup taken
+before or after the pass restored beside the keys, their two data keys
+destroyed and no key made again (`boxRefs` reads every box at rest, files
+and tables).

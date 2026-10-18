@@ -253,9 +253,8 @@ packages:
             doc: |-
               CompressionFailed wraps a failure from a compressor's underlying writer
               (e.g. compress/gzip or compress/flate) while encoding the payload.
+            exit: DATAERR
             name: CompressionFailed
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/data/transform.Compress: the underlying compressor returned an error"
             public: Compression failed
             reason: COMPRESSION_FAILED
@@ -263,9 +262,8 @@ packages:
             doc: |-
               DecompressionFailed wraps a failure from a decompressor's underlying
               reader while decoding the payload — malformed or truncated input.
+            exit: DATAERR
             name: DecompressionFailed
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/data/transform.Decompress: the underlying decompressor returned an error"
             public: Decompression failed
             reason: DECOMPRESSION_FAILED
@@ -274,9 +272,8 @@ packages:
               CompressedFrameInvalid is returned for a malformed compressed frame or a
               tripped decompression-bomb guard. The pkg/v1/data/codec frame layer (a later
               commit) is its emitter; defined here so the 0.2.5.* block lands in one place.
+            exit: DATAERR
             name: CompressedFrameInvalid
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/data/transform: compressed-frame header is malformed or the decompression-bomb guard tripped"
             public: Compressed frame is malformed or exceeds the safety bound
             reason: COMPRESSED_FRAME_INVALID
@@ -289,9 +286,8 @@ packages:
               so the trailer is never reached and the bytes past it are never read.
               Claiming well-formedness here would be claiming the result of work this
               error exists to avoid doing.
+            exit: DATAERR
             name: DecompressedTooLarge
-            options:
-              - errs.WithExitCode(exitDataErr)
             private: "core/data/transform.DecompressBounded: plaintext exceeded the caller-supplied max"
             public: Decompressed payload exceeds the caller's ceiling
             reason: DECOMPRESSED_TOO_LARGE

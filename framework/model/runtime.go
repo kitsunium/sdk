@@ -21,7 +21,7 @@ const (
 	// DatabaseUnset: no URL, in dev. Its stores stay in the data directory
 	// and nothing is opened.
 	DatabaseUnset string = core.DatabaseUnset
-	// DatabaseMemory: the app keeps its data in memory (kit.InMemory):
+	// DatabaseMemory: the app keeps its data in memory (app.InMemory):
 	// nothing is opened, no URL is read.
 	DatabaseMemory string = core.DatabaseMemory
 	// DatabaseOpen: the pool is open, its migrations ran, it answered its
@@ -39,12 +39,16 @@ const (
 	SettingOption  string = core.SettingOption  // the product's code: an AppOption
 	SettingDefault string = core.SettingDefault // kit's default for the environment
 	SettingStore   string = core.SettingStore   // the environment's secret store (a secret)
-	SettingKitDev  string = core.SettingKitDev  // kit dev set the variable, for this launch
+	SettingAppDev  string = core.SettingAppDev  // kit dev set the variable, for this launch
 	SettingFile    string = core.SettingFile    // a configuration file of the product (Detail)
 )
 
-// The settings kit reads, by the environment variable that sets each: kit's
-// configuration reads them, the connectors and the architecture name them.
+// The settings the framework reads, by the variable that sets each. The
+// framework's own are named under the product's prefix — its name
+// upper-cased, every other character an underscore —, so a constant holds
+// the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+// (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+// the tool's, set by it and read whole by the Studio subsystem alone.
 const (
 	VarEnv          string = core.VarEnv
 	VarAddr         string = core.VarAddr
@@ -104,9 +108,9 @@ const (
 	// ProvenanceLibrary loops are written by a library: net/http's accept
 	// loop, the SDK scheduler, the SDK queue consumer.
 	ProvenanceLibrary string = core.ProvenanceLibrary
-	// ProvenanceKit loops are written by kit for a declaration: a workflow's
+	// ProvenanceApp loops are written by the framework for a declaration: a workflow's
 	// sweep, a declared loop's wake cycle.
-	ProvenanceKit string = core.ProvenanceKit
+	ProvenanceApp string = core.ProvenanceApp
 	// ProvenanceProduct loops are written by hand in the product: Service.Go.
 	ProvenanceProduct string = core.ProvenanceProduct
 )
@@ -138,7 +142,7 @@ const (
 	OpHandle      string = core.OpHandle      // a queued command handled by its consumer, in the dispatcher's trace
 	OpConnect     string = core.OpConnect     // a connection a listener accepted, handled until it closes
 	OpCLI         string = core.OpCLI         // a short command-line command, run once
-	// OpTransaction is a unit of work (kit.Transact, a command's, a
+	// OpTransaction is a unit of work (app.Transact, a command's, a
 	// workflow's transition): its attrs say the database it belongs to —
 	// "database", and "backend" as a store says it —, its "outcome", the
 	// effects it held ("effects"), and "savepoint" for one nested in
@@ -168,7 +172,7 @@ type (
 )
 
 type (
-	// Database is one database the app declares (kit.Database), as the running
+	// Database is one database the app declares (app.Database), as the running
 	// process found it. Its URL is never shown: where it was found, the engine,
 	// the address and the TLS mode are.
 	Database = core.DatabaseMessage
@@ -183,7 +187,7 @@ type (
 
 type (
 	// MigrationSet is one set of migrations on a database — kit's own, the
-	// product's (kit.Migrations), a module's — with its own version table, and
+	// product's (app.Migrations), a module's — with its own version table, and
 	// so its own lock.
 	MigrationSet = core.MigrationSetMessage
 )
@@ -258,7 +262,7 @@ type (
 type (
 	// Payload is the request and the response of a span, as JSON, in dev only.
 	// Every member whose name says it is a secret — password, token, secret,
-	// authorization, cookie… — or whose Go field is tagged kit:"secret" is
+	// authorization, cookie… — or whose Go field is tagged app:"secret" is
 	// replaced by "[redacted]", and each side is cut at 8 KiB.
 	Payload = core.Payload
 )
@@ -303,7 +307,7 @@ type (
 )
 
 type (
-	// LogRecord is one log record written by product code through kit.Log, kept
+	// LogRecord is one log record written by product code through app.Log, kept
 	// in dev so the Studio can show a request's logs beside its spans.
 	LogRecord = core.LogRecordMessage
 )

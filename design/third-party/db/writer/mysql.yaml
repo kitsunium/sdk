@@ -66,17 +66,15 @@ packages:
             doc: |-
               ClientInitFailed wraps a failure to build the sql handle: nil/invalid
               credentials or a sql.Open failure.
+            exit: IOERR
             name: ClientInitFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "third-party/db/writer/mysql: credentials missing/unresolvable or sql.Open failed"
             public: MySQL writer could not initialise its client
             reason: CLIENT_INIT_FAILED
           - code: CodeMySQLInsertFailed
             doc: InsertFailed wraps a failed batch INSERT.
+            exit: IOERR
             name: InsertFailed
-            options:
-              - errs.WithExitCode(exitIOErr)
             private: "third-party/db/writer/mysql: the multi-row INSERT returned an error"
             public: MySQL writer failed to insert a log batch
             reason: INSERT_FAILED

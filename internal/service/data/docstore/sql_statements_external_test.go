@@ -247,6 +247,28 @@ func TestSQLTheTrashStatements(t *testing.T) {
 	}
 }
 
+// TestSQLTheVersionWeightStatement pins, per dialect, the one statement
+// VersionWeight sends: an aggregate over the versions table — the former
+// rows, which hold a document, the trash rows numbered 0, and the length of
+// every document a row holds; a current version's row holds NULL and counts
+// in none of them. The documents are binary columns on every engine, so
+// LENGTH counts bytes.
+func TestSQLTheVersionWeightStatement(t *testing.T) {
+	t.Parallel()
+	aggregate := "SELECT COUNT(CASE WHEN num > 0 AND doc IS NOT NULL THEN 1 END), COUNT(CASE WHEN num = 0 THEN 1 END), " +
+		"COALESCE(SUM(LENGTH(doc)), 0) FROM "
+	for dialect, table := range map[coresql.Dialect]string{
+		coresql.DialectPostgres: `"members__accounts___vs"`,
+		coresql.DialectMySQL:    "`members__accounts___vs`",
+		coresql.DialectSQLite:   `"members__accounts___vs"`,
+	} {
+		rendered := docstore.RenderSQLForTest(dialect, accountsTable)
+		if got, want := statementFor(t, rendered, "versionWeight"), aggregate+table; got != want {
+			t.Errorf("%s versionWeight =\n%s\nwant\n%s", dialect, got, want)
+		}
+	}
+}
+
 // TestSQLVersionsMigrationCreatesTheVersionsTable pins the versions table's
 // DDL per dialect — a binary key, the number, the instant, the metadata and
 // the document, keyed by document and number — doing nothing when the table

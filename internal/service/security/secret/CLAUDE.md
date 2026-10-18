@@ -137,6 +137,40 @@ declarations moved.
   key lost with a pruned version, altered, or no keyring box pins nothing, or
   the root would never prune again — checks the context at every key, and
   fails closed.
+- **A root renamed** (`SubjectKeysConfig.Former`, ADR 0180 step 5b): a
+  keyring binds its secret's NAME into every box and wrapped key, so a root
+  secret renamed is a new keyring that opens nothing the old one wrapped.
+  `Former` is that old keyring: `unwrap` tries it after the root (never on a
+  `STORE_UNAVAILABLE`), nothing is ever wrapped under it, and `Rewrap` reads
+  it once (`formerView`; a former name with no version is none) and moves
+  every key only it opens to the root's newest version — counted in
+  `Rewrapped` and in `FromFormer`. A key under a version newer than the pass
+  read is still current, but only once neither the root's view nor the
+  former's opened it. `OldestRoot` ignores a key under `Former`: it pins none
+  of the root's versions. Nothing here rotates, prunes or deletes the former
+  secret; retiring it is the caller's, once a pass finds nothing under it.
+  A root given as its own `Former` is refused (`INVALID_CONFIG`).
+- **`OldestRoot` stays a scan, measured** (#274 Q1, the owner's delegation of
+  2026-10-15; ADR 0178, decisions of 15 October). No index of the oldest
+  version is kept: an index cannot know which keys still OPEN without opening
+  them, which is the one thing `OldestRoot` answers, and the scan runs once per
+  rotation of the root — kit's `data-key` every 30 days, from the rotator's
+  `keepFor`. `BenchmarkSubjectKeysOldestRootPopulation` measures it, the keys
+  over two root versions as during a re-wrap, memory store, median of five on
+  a shared 8-core AMD EPYC 7351P (linux/amd64, go1.27.2, load 5 to 8):
+
+  | subjects | ms/pass | ns/key | B/op | allocs/op |
+  |---|---|---|---|---|
+  | 1 000 | 3.1 | 3 104 | 1.6 MB | 7 065 |
+  | 10 000 | 41 | 4 110 | 16.7 MB | 70 072 |
+  | 100 000 | 389 | 3 893 | 169.7 MB | 700 083 |
+
+  Linear: about 4 µs a key here (0.8 µs on the M1 Pro of `BENCH.md`), so a
+  million subjects cost about 4 s and 1.7 GB of short-lived allocation once a
+  month. The fallback, if a measurement on a real product ever justifies it,
+  is kit's and not this package's: remember the version the last `Rewrap`
+  left every key under and scan only when that `Rewrap` left keys behind —
+  never an index here.
 
 ## The store directory's rule, beside the other four
 
@@ -182,8 +216,8 @@ neighbour's:
 | `InvalidConfig` … `KeyFileInvalid`, `KeyDestroyed`, `SubjectKeyUnreadable` (`0.3.68.1`–`0.3.68.10`) | the engines' refusals: declared in `core/security/secret` beside the port's verdicts (ADR 0160) — its Surface table says what each one means — and raised here, bare or through `wrapAs` with log-only fields |
 | `KeyFile(path) (crypto.Key, error)` | the machine-local key |
 | `NewSubjectKeys(SubjectKeysConfig) (*SubjectKeys, error)` | `Seal(ctx, subject, plaintext, bind...)` / `Open(ctx, box, bind...)` / `Destroy` / `Rewrap` / `OldestRoot` |
-| `SubjectKeysConfig` | `Root`, `Store`, `CacheSize`, `CacheTTL`, `Clock` |
-| `RewrapValue` | `Root`, `Current`, `Rewrapped`, `Skipped`, `Unreadable` |
+| `SubjectKeysConfig` | `Root`, `Former`, `Store`, `CacheSize`, `CacheTTL`, `Clock` |
+| `RewrapValue` | `Root`, `Current`, `Rewrapped`, `FromFormer`, `Skipped`, `Unreadable` |
 | `SubjectOf(box) (string, error)` | the subject a box names, without opening it |
 | `NewMemorySubjectKeyStore() core/security/secret.SubjectKeyStore` | the reference store; cannot fail |
 | `RotatorConfig.InUse` | `func(ctx) (oldest int, err error)` — wire `SubjectKeys.OldestRoot` |
@@ -194,14 +228,19 @@ neighbour's:
 sealed file (the file stores join wherever a probe `NewFile` does not answer
 `UnsupportedPlatform`). The environment tests call `t.Setenv` and therefore do
 not run in parallel. The subject keys are covered by `subjectkeys_`,
-`subjectrewrap_`, `subjectfaults_` and `subjectmemory_external_test.go` (two
+`subjectrewrap_`, `subjectformer_`, `subjectfaults_` and `subjectmemory_external_test.go` (two
 engines over one store stand for two processes; a scripted store injects
-failures and an erasure in the middle of a re-wrap), by
+failures and an erasure in the middle of a re-wrap; a root renamed opens
+what its former name wrapped only through `Former`, and a move from it
+stopped half-way resumes), by
 `subjectcache_internal_test.go` (every way a key leaves the cache wipes it) and
 by `subjectkeys_internal_test.go` (a value wrapped under the root that is not
 one key long is unreadable: never used as a key, never moved, pinning no
 version).
-`subjectkeys_bench_test.go` feeds `BENCH.md`.
+`subjectkeys_bench_test.go` feeds `BENCH.md`; its
+`BenchmarkSubjectKeysOldestRootPopulation`, added after `BENCH.md` was last
+generated, has its figures under "Decisions worth not relitigating" until the
+next regeneration.
 
 ## Do NOT
 

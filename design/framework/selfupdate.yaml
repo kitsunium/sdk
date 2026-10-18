@@ -819,9 +819,8 @@ packages:
               published after rc.3 is withdrawn — so resolving the empty tag would
               mean this package choosing which unreleased build to install over the
               running binary.
+            exit: USAGE
             name: CandidateTagRequired
-            options:
-              - errs.WithExitCode(exitUsage)
             private: "service/selfupdate: DownloadCandidate received an empty tag; errors.ErrUnsupported is kept as the cause, so anything that matched it before this sentinel existed still matches"
             public: a release candidate is installed by naming its tag, and no tag was named
             reason: CANDIDATE_TAG_REQUIRED
@@ -872,9 +871,8 @@ packages:
               sentinel, and it is why it is not merged with ReplacementFailed: the
               two differ in exactly the fact an operator needs, which is whether the
               binary they are about to run is the old one or something in between.
+            exit: CANTCREAT
             name: StagingFailed
-            options:
-              - errs.WithExitCode(exitCantCreate)
             private: "service/selfupdate: creating, writing, closing or chmod-ing the staging file failed; the fields name the step"
             public: the update could not be staged, and the running binary was left untouched
             reason: STAGING_FAILED
@@ -886,9 +884,8 @@ packages:
               The rename is atomic, so this means the old binary is still in place —
               but unlike StagingFailed it is the step that would have changed it, and
               the remedy is about the install directory rather than about disk space.
+            exit: CANTCREAT
             name: ReplacementFailed
-            options:
-              - errs.WithExitCode(exitCantCreate)
             private: "service/selfupdate: the rename of the staged file over the running executable failed; the fields name the step"
             public: the running binary could not be replaced
             reason: REPLACEMENT_FAILED
@@ -901,9 +898,8 @@ packages:
               is the remedy: that one is repaired by exporting one variable, and this
               one is not repaired by exporting anything. Merging them would send
               somebody who already set the variable to set it again.
+            exit: CANTCREAT
             name: ElevationFailed
-            options:
-              - errs.WithExitCode(exitCantCreate)
             private: "service/selfupdate: `sudo -n mv` exited non-zero; the fields carry sudo's own output, which names the real blocker far better than the exec error does"
             public: the elevated replacement was authorised and the system refused it
             reason: ELEVATION_FAILED
@@ -913,9 +909,8 @@ packages:
               did not answer the product's probe in time. The previous binary is put
               back from <binary>.prev when it was kept; rolled_back says whether it
               was.
+            exit: CANTCREAT
             name: ProbeFailed
-            options:
-              - errs.WithExitCode(exitCantCreate)
             private: "service/selfupdate: the probe of the replaced binary failed or timed out; rolled_back says whether <binary>.prev was put back"
             public: the new binary did not answer its probe and was not kept
             reason: PROBE_FAILED
@@ -1146,6 +1141,33 @@ packages:
             out:
               - type: "*Service"
             recv: pointer
+          - doc: |-
+              WithCompanions makes an upgrade also replace each named file the release
+              archive carries beside the product binary — a second executable shipped in
+              the same archive — from that SAME archive, after the one signature and
+              checksum check that covers it: nothing is downloaded twice. A companion is
+              replaced where it is installed, beside the running binary, its symlinks
+              resolved; one that is not installed there is not created. A companion that
+              resolves to the binary itself, or to a file another name already reached,
+              is that file and is replaced once.
+
+              Every file is staged in its own directory before any is renamed, and each
+              installed one is kept by a hard link as <file>.prev. A rename, or the probe
+              WithProbe declared, that fails puts back every file already replaced, so
+              the product and its companions are never left at two versions; the kept
+              files are dropped once all stand, unless a probe keeps them as it keeps the
+              binary's. A companion the archive lacks refuses the upgrade
+              (BinaryNotInArchive) with nothing replaced. The replacement of a set
+              is never elevated: a directory the user cannot write, or a file system that
+              cannot link, refuses it (StagingFailed) with nothing replaced.
+            in:
+              - name: names
+                type: string
+            name: WithCompanions
+            out:
+              - type: "*Service"
+            recv: pointer
+            variadic: true
           - doc: |-
               WithVendorKey pins the ed25519 public half every release must be signed
               with, and returns the Service so construction reads as one expression —
@@ -1444,6 +1466,16 @@ packages:
       previous binary as <binary>.prev and runs the new one with the product's
       probe arguments; a probe that fails puts the previous one back
       (CodeProbeFailed).
+
+      # Companions: a second executable from the same archive
+
+      A product that ships more than one executable in its release archive — a
+      thin client beside a daemon — declares the others with
+      Service.WithCompanions. Each one installed beside the running binary is
+      replaced from the archive that was already authenticated, as one set with
+      the binary: every file staged, every previous one kept, then renamed, and a
+      rename or a probe that fails puts back the files already replaced. One that
+      is not installed is not created.
 
       # Two limits a caller must know before relying on this
 

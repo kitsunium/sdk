@@ -9,7 +9,6 @@ go_library(
         "config.go",
         "design_gen.go",
         "doc.go",
-        "errors.go",
         "factory.go",
         "registry.go",
         "trusted.go",

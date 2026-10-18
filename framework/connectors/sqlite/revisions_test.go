@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/app"
 	"github.com/kitsunium/sdk/framework/connectors/sqlite"
-	"github.com/kitsunium/sdk/framework/kit"
 )
 
 // A record's revisions on a SQLite file (ADR 0007 §3, §4): the versions are
@@ -25,8 +25,8 @@ import (
 // editor is a person's page: their name sealed where it rests.
 type editor struct {
 	ID    string `json:"id"`
-	Email string `json:"email" kit:"subject"`
-	Name  string `json:"name" kit:"personal"`
+	Email string `json:"email" app:"subject"`
+	Name  string `json:"name" app:"personal"`
 	Bio   string `json:"bio,omitempty"`
 }
 
@@ -35,19 +35,19 @@ var errUndone = errors.New("the transaction is undone")
 
 func TestRevisionsOnTheFile(t *testing.T) {
 	needsFileStore(t)
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
-	t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")
+	t.Setenv("WIKI_SECRETS", "memory")
+	t.Setenv("WIKI_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("WIKI_INDEX_KEY", "an index key of more than 16 bytes")
 	dir := t.TempDir()
-	svc := kit.NewService("wiki", "Editors' pages that keep their revisions, sealed; kit.Privacy on SQLite.")
-	editors := svc.Store("editors", func(e editor) string { return e.ID }, kit.Revisions(2), kit.Purpose("Show the editors' pages"))
-	app := kit.NewApp("wiki", svc).With(kit.Database("main", sqlite.Engine(), kit.Keeps(kit.Privacy, editors)),
-		kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvProduction), kit.DataDir(dir), kit.Logs(io.Discard))
-	run(t, app)
-	if st := app.Graph().Node("wiki/store/editors").Store; st.Backend != "sqlite" || st.History == nil || st.History.Revisions != 2 {
+	svc := app.NewService("wiki", "Editors' pages that keep their revisions, sealed; app.Privacy on SQLite.")
+	editors := svc.Store("editors", func(e editor) string { return e.ID }, app.Revisions(2), app.Purpose("Show the editors' pages"))
+	a := app.NewApp("wiki", svc).With(app.Database("main", sqlite.Engine(), app.Keeps(app.Privacy, editors)),
+		app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.DataDir(dir), app.Logs(io.Discard))
+	run(t, a)
+	if st := a.Graph().Node("wiki/store/editors").Store; st.Backend != "sqlite" || st.History == nil || st.History.Revisions != 2 {
 		t.Fatalf("the store: %+v", st)
 	}
-	ctx := kit.WithUser(t.Context(), "u1", struct{}{})
+	ctx := app.WithUser(t.Context(), "u1", struct{}{})
 	names := func(key string) []string {
 		t.Helper()
 		revs, err := editors.Revisions(ctx, key)
@@ -81,13 +81,14 @@ func TestRevisionsOnTheFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	formers := 0
+	formers, weighs := 0, int64(0)
 	for rows.Next() {
 		var doc []byte
 		if err := rows.Scan(&doc); err != nil {
 			t.Fatal(err)
 		}
 		formers++
+		weighs += int64(len(doc))
 		if !bytes.Contains(doc, []byte(`"sealed:v1:`)) || bytes.Contains(doc, []byte("Annabel")) || bytes.Contains(doc, []byte("ann@wiki.test")) {
 			t.Errorf("a version rests in clear: %s", doc)
 		}
@@ -95,10 +96,16 @@ func TestRevisionsOnTheFile(t *testing.T) {
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil || formers != 2 {
 		t.Errorf("the former versions' rows: %d %v", formers, err)
 	}
+	// The model says what they weigh, sealed as they rest, from one
+	// aggregate statement on the file (ADR 0007 §5).
+	if h := a.Graph().Node("wiki/store/editors").Store.History; h.Versions == nil || *h.Versions != 2 ||
+		h.Trashed == nil || *h.Trashed != 0 || h.VersionBytes == nil || *h.VersionBytes != weighs {
+		t.Errorf("the versions weigh %v, %v, %v; want 2 former versions of %d bytes", h.Versions, h.Trashed, h.VersionBytes, weighs)
+	}
 
 	// A rollback leaves the versions as they were: they are rows of the
 	// transaction.
-	err = kit.Transact(ctx, func(ctx context.Context) error {
+	err = app.Transact(ctx, func(ctx context.Context) error {
 		if _, err := editors.Update(ctx, "e1", func(e *editor) error { e.Name = "never"; return nil }); err != nil {
 			return err
 		}
@@ -152,10 +159,10 @@ func TestRevisionsOnTheFile(t *testing.T) {
 	rename("e2", "Robert Hale")
 	stopped, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := app.Stop(stopped); err != nil {
+	if err := a.Stop(stopped); err != nil {
 		t.Fatal(err)
 	}
-	if err := app.Start(t.Context()); err != nil {
+	if err := a.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if got := names("e2"); !slices.Equal(got, []string{"2:Robert Hale", "1:Robert Vale"}) {

@@ -15,7 +15,7 @@ import (
 // named like the module is "<module>" —, so its nodes are
 // "<module>.<service>/<kind>/<name>" and carry [NodeEntity.Module].
 type ModuleMessage struct {
-	// Name is the name kit.NewModule gives it.
+	// Name is the name app.NewModule gives it.
 	Name string `json:"name"`
 	// Doc is its description in the product's default language; Docs the
 	// same in other languages, by tag, as a node's.
@@ -27,18 +27,24 @@ type ModuleMessage struct {
 	Build *ModuleVersionMessage `json:"build,omitempty"`
 	// Services are its services' IDs, in the order it lists them.
 	Services []string `json:"services"`
-	// Requires are the modules it requires (kit.Requires), by name.
+	// Requires are the modules it requires (app.Requires), by name.
 	Requires []string `json:"requires,omitempty"`
 	// RequiredBy are the mounted modules that require it, by name, sorted.
 	RequiredBy []string `json:"requiredBy,omitempty"`
 	// Prefix is where its routes are served: "/<name>/" unless the mount
-	// says otherwise (kit.Prefix); "/" shares the product's route space.
+	// says otherwise (app.Prefix); "/" shares the product's route space.
 	Prefix string `json:"prefix"`
-	// Source is where kit.NewModule declares it.
+	// Source is where app.NewModule declares it.
 	Source *SourceMessage `json:"source,omitempty"`
-	// Mount is where the app mounts it — App.With or kit.Mount —; absent
-	// when only another module's kit.Requires mounted it, at its defaults.
+	// Mount is where the app mounts it — App.With or app.Mount —; absent
+	// when only another module's app.Requires mounted it, at its defaults.
 	Mount *SourceMessage `json:"mount,omitempty"`
+	// Only are the environments its mounts hold in (app.Only), sorted:
+	// present when every mount the app gives it names its environments,
+	// absent when one holds in every environment, or when only another
+	// module's app.Requires mounted it. Added at Version 5: a reader
+	// that does not know it reads the graph as before.
+	Only []string `json:"only,omitempty"`
 }
 
 // FileMessage is one file a graph points at: its path, relative to its root — the
@@ -97,6 +103,7 @@ func normalizeModules(modules []ModuleMessage) {
 	slices.SortFunc(modules, func(a, b ModuleMessage) int { return cmp.Compare(a.Name, b.Name) })
 	for i := range modules {
 		slices.Sort(modules[i].RequiredBy)
+		slices.Sort(modules[i].Only)
 		if modules[i].Services == nil {
 			modules[i].Services = []string{}
 		}

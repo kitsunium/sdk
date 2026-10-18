@@ -149,12 +149,14 @@ Package core is the Product Graph under the names the role rule asks for: every 
 - [type StoreHistoryMessage](<#StoreHistoryMessage>)
 - [type StorePrivacyMessage](<#StorePrivacyMessage>)
 - [type StoreSpec](<#StoreSpec>)
+- [type StoreTrashMessage](<#StoreTrashMessage>)
 - [type SubscriptionSpec](<#SubscriptionSpec>)
 - [type SystemMessage](<#SystemMessage>)
 - [type TopicSpec](<#TopicSpec>)
 - [type TraceMessage](<#TraceMessage>)
 - [type TransitionEvent](<#TransitionEvent>)
 - [type TransitionSpec](<#TransitionSpec>)
+- [type TrashedRecordMessage](<#TrashedRecordMessage>)
 - [type WakeSourceMessage](<#WakeSourceMessage>)
 - [type WorkflowSpec](<#WorkflowSpec>)
 
@@ -165,14 +167,14 @@ Package core is the Product Graph under the names the role rule asks for: every 
 const AccessAnyUser = "any-user"
 ```
 
-AccessAnyUser is kit.AnyUser(): any signed-in user may run it — the operation asks for one.
+AccessAnyUser is app.AnyUser(): any signed-in user may run it — the operation asks for one.
 
 <a name="AccessAnyone"></a>
 ```go
 const AccessAnyone = "anyone"
 ```
 
-AccessAnyone is kit.Anyone(): whoever reaches the route may run the operation.
+AccessAnyone is app.Anyone(): whoever reaches the route may run the operation.
 
 <a name="AuthOptional"></a>
 ```go
@@ -256,7 +258,7 @@ The kinds of [CodeBlockMessage](#CodeBlockMessage).
 const BlockTransaction = "transaction"
 ```
 
-BlockTransaction is the function a kit.Transact runs: its steps run in one transaction, and the effects they make leave at its commit.
+BlockTransaction is the function an app.Transact runs: its steps run in one transaction, and the effects they make leave at its commit.
 
 <a name="BootComponents"></a>
 ```go
@@ -405,7 +407,7 @@ ConnectorData is where it keeps its data: stores, databases.
 const ConnectorDatabase = "database"
 ```
 
-ConnectorDatabase is brought by a store a database keeps (ADR 0004): kit.Database declares the database, an engine module reaches it.
+ConnectorDatabase is brought by a store a database keeps (ADR 0004): app.Database declares the database, an engine module reaches it.
 
 <a name="ConnectorHTTP"></a>
 ```go
@@ -454,7 +456,7 @@ ConnectorTransport is how the product is reached: HTTP.
 const ContainerDatabase = "database"
 ```
 
-ContainerDatabase is a database the app declares (kit.Database): "container:database:\<name>", drawn as a cylinder.
+ContainerDatabase is a database the app declares (app.Database): "container:database:\<name>", drawn as a cylinder.
 
 <a name="ContainerMemory"></a>
 ```go
@@ -510,7 +512,7 @@ DatabaseFailed: the start could not open it, migrate it or reach it.
 const DatabaseMemory = "memory"
 ```
 
-DatabaseMemory: the app keeps its data in memory (kit.InMemory): nothing is opened, no URL is read.
+DatabaseMemory: the app keeps its data in memory (app.InMemory): nothing is opened, no URL is read.
 
 <a name="DatabaseOpen"></a>
 ```go
@@ -763,6 +765,13 @@ const GapSubject = "subject"
 ```
 
 The gaps a register lists for a store that keeps personal data.
+
+<a name="JournalContinue"></a>
+```go
+const JournalContinue = "continue"
+```
+
+The operations of the privacy journal.
 
 <a name="JournalDelete"></a>
 ```go
@@ -1168,14 +1177,14 @@ MeasureSealed: its classified members are sealed at rest, AES-256-GCM under per-
 const MockReplace = "replace"
 ```
 
-MockReplace is the one mode a [MockMessage](#MockMessage) has: a test's kit.Replace, a typed function run in place of an operation's handler — or of what a port calls — while the rest of its pipeline still runs. The Studio sets none (D13): it shows the application, it does not act on it, so the respond, fail and delay modes of the platform's kit have no representation here.
+MockReplace is the one mode a [MockMessage](#MockMessage) has: a test's app.Replace, a typed function run in place of an operation's handler — or of what a port calls — while the rest of its pipeline still runs. The Studio sets none (D13): it shows the application, it does not act on it, so the respond, fail and delay modes of the platform's kit have no representation here.
 
 <a name="ModeQueued"></a>
 ```go
 const ModeQueued = "queued"
 ```
 
-ModeQueued is sent to the background (kit.Queued): Dispatch returns once the command's own queue accepted it, and a consumer handles it, retried and dead-lettered.
+ModeQueued is sent to the background (app.Queued): Dispatch returns once the command's own queue accepted it, and a consumer handles it, retried and dead-lettered.
 
 <a name="ModeSync"></a>
 ```go
@@ -1322,7 +1331,7 @@ Span operations.
 const OpTransaction = "transaction"
 ```
 
-OpTransaction is a unit of work (kit.Transact, a command's, a workflow's transition): its attrs say the database it belongs to — "database", and "backend" as a store says it —, its "outcome", the effects it held ("effects"), and "savepoint" for one nested in another.
+OpTransaction is a unit of work (app.Transact, a command's, a workflow's transition): its attrs say the database it belongs to — "database", and "backend" as a store says it —, its "outcome", the effects it held ("effects"), and "savepoint" for one nested in another.
 
 <a name="OpTransition"></a>
 ```go
@@ -1387,12 +1396,12 @@ const PhaseStopped = "stopped"
 
 Process phases, in the order a process goes through them.
 
-<a name="PortOwnerKit"></a>
+<a name="PortOwnerApp"></a>
 ```go
-const PortOwnerKit = "kit"
+const PortOwnerApp = "app"
 ```
 
-PortOwnerKit is kit's own listener: the health probes, the Studio in dev, and the product's HTTP when it declares any.
+PortOwnerApp is the framework's own listener: the health probes, the Studio in dev, and the product's HTTP when it declares any.
 
 <a name="ProfileCLI"></a>
 ```go
@@ -1429,12 +1438,12 @@ const ProfileServer = "server"
 
 ProfileServer serves HTTP until it is stopped: the platform's kit product, and the only profile that opens a TCP listener.
 
-<a name="ProvenanceKit"></a>
+<a name="ProvenanceApp"></a>
 ```go
-const ProvenanceKit = "kit"
+const ProvenanceApp = "app"
 ```
 
-ProvenanceKit loops are written by kit for a declaration: a workflow's sweep, a declared loop's wake cycle.
+ProvenanceApp loops are written by the framework for a declaration: a workflow's sweep, a declared loop's wake cycle.
 
 <a name="ProvenanceLibrary"></a>
 ```go
@@ -1518,14 +1527,14 @@ SecretFromEnv is the environment: the variable, or the file its \_FILE form name
 const SecretFromFile = "file"
 ```
 
-SecretFromFile is kit's encrypted file store: KIT\_SECRETS=file:\<dir>, or .kit/secrets/dev in dev.
+SecretFromFile is the framework's encrypted file store: \<PRODUCT>\_SECRETS=file:\<dir>, or the data directory's .secrets in dev.
 
 <a name="SecretFromMemory"></a>
 ```go
 const SecretFromMemory = "memory"
 ```
 
-SecretFromMemory is a store in the process's memory: a test, or KIT\_SECRETS=memory. A generated secret is made again at every start.
+SecretFromMemory is a store in the process's memory: a test, or \<PRODUCT>\_SECRETS=memory. A generated secret is made again at every start.
 
 <a name="SecretFromStore"></a>
 ```go
@@ -1611,6 +1620,13 @@ const ServesStudio = "studio"
 
 What a port serves.
 
+<a name="SettingAppDev"></a>
+```go
+const SettingAppDev = "appdev"
+```
+
+Where a setting's value comes from.
+
 <a name="SettingDefault"></a>
 ```go
 const SettingDefault = "default"
@@ -1628,13 +1644,6 @@ Where a setting's value comes from.
 <a name="SettingFile"></a>
 ```go
 const SettingFile = "file"
-```
-
-Where a setting's value comes from.
-
-<a name="SettingKitDev"></a>
-```go
-const SettingKitDev = "kitdev"
 ```
 
 Where a setting's value comes from.
@@ -1711,31 +1720,31 @@ TriggerTimer is a transition fired after a duration in a state, or at an instant
 
 <a name="VarAddr"></a>
 ```go
-const VarAddr = "KIT_ADDR"
+const VarAddr = "ADDR"
 ```
 
-The settings kit reads, by the environment variable that sets each: kit's configuration reads them, the connectors and the architecture name them.
+The settings the framework reads, by the variable that sets each. The framework's own are named under the product's prefix — its name upper-cased, every other character an underscore —, so a constant holds the name after it: VarDataDir is TODO\_DATA\_DIR for the product "todo" (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are the tool's, set by it and read whole by the Studio subsystem alone.
 
 <a name="VarAllowedHosts"></a>
 ```go
-const VarAllowedHosts = "KIT_ALLOWED_HOSTS"
+const VarAllowedHosts = "ALLOWED_HOSTS"
 ```
 
-The settings kit reads, by the environment variable that sets each: kit's configuration reads them, the connectors and the architecture name them.
+The settings the framework reads, by the variable that sets each. The framework's own are named under the product's prefix — its name upper-cased, every other character an underscore —, so a constant holds the name after it: VarDataDir is TODO\_DATA\_DIR for the product "todo" (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are the tool's, set by it and read whole by the Studio subsystem alone.
 
 <a name="VarAnalyze"></a>
 ```go
 const VarAnalyze = "KIT_ANALYZE"
 ```
 
-The settings kit reads, by the environment variable that sets each: kit's configuration reads them, the connectors and the architecture name them.
+The settings the framework reads, by the variable that sets each. The framework's own are named under the product's prefix — its name upper-cased, every other character an underscore —, so a constant holds the name after it: VarDataDir is TODO\_DATA\_DIR for the product "todo" (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are the tool's, set by it and read whole by the Studio subsystem alone.
 
 <a name="VarDataDir"></a>
 ```go
-const VarDataDir = "KIT_DATA_DIR"
+const VarDataDir = "DATA_DIR"
 ```
 
-The settings kit reads, by the environment variable that sets each: kit's configuration reads them, the connectors and the architecture name them.
+The settings the framework reads, by the variable that sets each. The framework's own are named under the product's prefix — its name upper-cased, every other character an underscore —, so a constant holds the name after it: VarDataDir is TODO\_DATA\_DIR for the product "todo" (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are the tool's, set by it and read whole by the Studio subsystem alone.
 
 <a name="VarDevForced"></a>
 ```go
@@ -1746,56 +1755,56 @@ VarDevForced is how kit dev tells the product which of the variables above it se
 
 <a name="VarEnv"></a>
 ```go
-const VarEnv = "KIT_ENV"
+const VarEnv = "ENV"
 ```
 
-The settings kit reads, by the environment variable that sets each: kit's configuration reads them, the connectors and the architecture name them.
+The settings the framework reads, by the variable that sets each. The framework's own are named under the product's prefix — its name upper-cased, every other character an underscore —, so a constant holds the name after it: VarDataDir is TODO\_DATA\_DIR for the product "todo" (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are the tool's, set by it and read whole by the Studio subsystem alone.
 
 <a name="VarLogLevel"></a>
 ```go
-const VarLogLevel = "KIT_LOG_LEVEL"
+const VarLogLevel = "LOG_LEVEL"
 ```
 
-The settings kit reads, by the environment variable that sets each: kit's configuration reads them, the connectors and the architecture name them.
+The settings the framework reads, by the variable that sets each. The framework's own are named under the product's prefix — its name upper-cased, every other character an underscore —, so a constant holds the name after it: VarDataDir is TODO\_DATA\_DIR for the product "todo" (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are the tool's, set by it and read whole by the Studio subsystem alone.
 
 <a name="VarRetention"></a>
 ```go
-const VarRetention = "KIT_RETENTION"
+const VarRetention = "RETENTION"
 ```
 
 VarRetention sets what the stores' retention loops do: on, dry-run or off (ADR 0006).
 
 <a name="VarSMTPURL"></a>
 ```go
-const VarSMTPURL = "KIT_SMTP_URL"
+const VarSMTPURL = "SMTP_URL"
 ```
 
-The settings kit reads, by the environment variable that sets each: kit's configuration reads them, the connectors and the architecture name them.
+The settings the framework reads, by the variable that sets each. The framework's own are named under the product's prefix — its name upper-cased, every other character an underscore —, so a constant holds the name after it: VarDataDir is TODO\_DATA\_DIR for the product "todo" (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are the tool's, set by it and read whole by the Studio subsystem alone.
 
 <a name="VarStudio"></a>
 ```go
 const VarStudio = "KIT_STUDIO"
 ```
 
-The settings kit reads, by the environment variable that sets each: kit's configuration reads them, the connectors and the architecture name them.
+The settings the framework reads, by the variable that sets each. The framework's own are named under the product's prefix — its name upper-cased, every other character an underscore —, so a constant holds the name after it: VarDataDir is TODO\_DATA\_DIR for the product "todo" (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are the tool's, set by it and read whole by the Studio subsystem alone.
 
 <a name="VarStudioRemote"></a>
 ```go
 const VarStudioRemote = "KIT_STUDIO_REMOTE"
 ```
 
-The settings kit reads, by the environment variable that sets each: kit's configuration reads them, the connectors and the architecture name them.
+The settings the framework reads, by the variable that sets each. The framework's own are named under the product's prefix — its name upper-cased, every other character an underscore —, so a constant holds the name after it: VarDataDir is TODO\_DATA\_DIR for the product "todo" (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are the tool's, set by it and read whole by the Studio subsystem alone.
 
 <a name="VarTrustProxy"></a>
 ```go
-const VarTrustProxy = "KIT_TRUST_PROXY"
+const VarTrustProxy = "TRUST_PROXY"
 ```
 
-The settings kit reads, by the environment variable that sets each: kit's configuration reads them, the connectors and the architecture name them.
+The settings the framework reads, by the variable that sets each. The framework's own are named under the product's prefix — its name upper-cased, every other character an underscore —, so a constant holds the name after it: VarDataDir is TODO\_DATA\_DIR for the product "todo" (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are the tool's, set by it and read whole by the Studio subsystem alone.
 
 <a name="Version"></a>
 ```go
-const Version int = 5
+const Version int = 6
 ```
 
 Version is the schema version of every document in this package.
@@ -1808,19 +1817,21 @@ Version 4 is the one bump the decisions of issue #17 share. It adds the port kin
 
 Version 5 is the first the SDK's framework publishes (ADR 0147). It adds what a product is made of beyond its services: the binary ([KindBinary](#KindBinary)) and its process roles ([KindRole](#KindRole)), the short CLI command ([KindCLI](#KindCLI)), the listener that is not HTTP ([KindListener](#KindListener)), the library shared between components ([KindLibrary](#KindLibrary)) and the presentation ([KindPresentation](#KindPresentation)); the edge between two roles of a product, which carries a versioned contract ([EdgeContracts](#EdgeContracts), \[EdgeMessage.Contract]); and the grammar every ID follows, written once ([IDValue](#IDValue), [ParseID](#ParseID)). It removes what the Studio no longer does (D13): the respond, fail and delay mock modes, the control event and its payload — a [MockMessage](#MockMessage) is a test's replacement only.
 
+Version 6 renames the runtime framework (ADR 0180): its packages are framework/app and framework/internal/app, so a source position the document gives in the framework's code names those paths, and the constants of the framework's own provenance, port owner and setting origin are [ProvenanceApp](#ProvenanceApp), [PortOwnerApp](#PortOwnerApp) and [SettingAppDev](#SettingAppDev); since ADR 0180's step 4 their values are "app" and "appdev", the build's and the graph's version of the framework are their field "app", and the variable a framework setting names carries the product's prefix.
+
 <a name="ViaBind"></a>
 ```go
 const ViaBind = "bind"
 ```
 
-ViaBind is the app's kit.Bind.
+ViaBind is the app's app.Bind.
 
 <a name="ViaFallback"></a>
 ```go
 const ViaFallback = "fallback"
 ```
 
-ViaFallback is the port's own kit.Fallback.
+ViaFallback is the port's own app.Fallback.
 
 <a name="ViaImplement"></a>
 ```go
@@ -1834,7 +1845,7 @@ ViaImplement is the one Service.Implement among the mounted services.
 const ViaReplace = "replace"
 ```
 
-ViaReplace is a test's kit.Replace: a function answers in place of whatever the port would call, and nothing is bound.
+ViaReplace is a test's app.Replace: a function answers in place of whatever the port would call, and nothing is bound.
 
 <a name="WakeChange"></a>
 ```go
@@ -2143,7 +2154,7 @@ AppMessage identifies the product and the machine that described it. It names th
 
 ```go
 type AppMessage struct {
-	// Name is the product name given to kit.NewApp.
+	// Name is the product name given to app.NewApp.
 	Name      string        `json:"name"`
 	// Module is the Go module path of the product.
 	Module    string        `json:"module,omitempty"`
@@ -2153,14 +2164,14 @@ type AppMessage struct {
 	Root      string        `json:"root,omitempty"`
 	// Env is "dev" or "production".
 	Env       string        `json:"env,omitempty"`
-	// Kit is the kit version that produced the graph.
-	Kit       string        `json:"kit,omitempty"`
+	// App is the version of the framework that produced the graph.
+	App       string        `json:"app,omitempty"`
 	// Go is the Go version the product was built with.
 	Go        string        `json:"go,omitempty"`
 	// StartedAt is when the process started, for a runtime graph.
 	StartedAt *time.Time    `json:"startedAt,omitempty"`
-	// Build says what the binary was built from: the product, kit and the
-	// SDK kit depends on.
+	// Build says what the binary was built from: the product, the framework
+	// and the SDK the framework depends on.
 	Build     *BuildMessage `json:"build,omitempty"`
 }
 ```
@@ -2199,7 +2210,7 @@ type AuthSpec struct {
 	// cookie:"…" or header:"…".
 	Credentials *SchemaMessage `json:"credentials,omitempty"`
 	// Data is the type of what the handler says about the caller, which
-	// endpoints read with kit.AuthData.
+	// endpoints read with app.AuthData.
 	Data        *SchemaMessage `json:"data,omitempty"`
 	// Endpoints counts the endpoints that ask for authentication.
 	Endpoints   int            `json:"endpoints"`
@@ -2253,10 +2264,10 @@ BuildMessage is what a binary was built from, at its three levels. Its three lev
 type BuildMessage struct {
 	// Product is the product's own module.
 	Product ModuleVersionMessage `json:"product"`
-	// Kit is the framework: since ADR 0162 the SDK module,
+	// App is the framework: since ADR 0162 the SDK module,
 	// github.com/kitsunium/sdk, which holds it.
-	Kit     ModuleVersionMessage `json:"kit"`
-	// SDK is the SDK the framework is built on — the same module as Kit
+	App     ModuleVersionMessage `json:"app"`
+	// SDK is the SDK the framework is built on — the same module as App
 	// since ADR 0162, so the two say the same version.
 	SDK     ModuleVersionMessage `json:"sdk"`
 }
@@ -2579,13 +2590,13 @@ type ContainerMessage struct {
 	Nodes      []string       `json:"nodes,omitempty"`
 	// Ports are what the process listens on, and whose each port is.
 	Ports      []PortMessage  `json:"ports,omitempty"`
-	// Settings are the settings that configure it: KIT_DATA_DIR for the
+	// Settings are the settings that configure it: TODO_DATA_DIR for the
 	// data directory; a database's URL and tuning variables for a database.
 	Settings   []string       `json:"settings,omitempty"`
 	// Engine is a database's engine: "postgres", "mysql", "sqlite".
 	Engine     string         `json:"engine,omitempty"`
 	// Source is where the code declares the container, when it does: the
-	// app for the process, a frontend for its SPA, kit.Database for a
+	// app for the process, a frontend for its SPA, app.Database for a
 	// database. [GraphMessage.Files] allows it.
 	Source     *SourceMessage `json:"source,omitempty"`
 }
@@ -2594,7 +2605,7 @@ type ContainerMessage struct {
 <a name="DatabaseMessage"></a>
 ## type [DatabaseMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
 
-DatabaseMessage is one database the app declares (kit.Database), as the running process found it. Its URL is never shown: where it was found, the engine, the address and the TLS mode are.
+DatabaseMessage is one database the app declares (app.Database), as the running process found it. Its URL is never shown: where it was found, the engine, the address and the TLS mode are.
 
 ```go
 type DatabaseMessage struct {
@@ -2661,7 +2672,8 @@ type DiagnosticMessage struct {
 	// Message says what is wrong and how to fix it, in English.
 	Message  string            `json:"message"`
 	// Texts is the message in each language kit speaks, by language: "en",
-	// "fr". The Studio shows its reader's.
+	// and "fr" when the program imports framework/app/studio. The Studio
+	// shows its reader's.
 	Texts    map[string]string `json:"texts,omitempty"`
 	// Node is the node concerned, when there is one.
 	Node     string            `json:"node,omitempty"`
@@ -2718,8 +2730,8 @@ EditMessage is one change between two versions of a record, in RFC 6902's words:
 type EditMessage struct {
 	Op   string          `json:"op"`
 	Path string          `json:"path"`
-	From json.RawMessage `json:"from,omitempty" kit:"personal"`
-	To   json.RawMessage `json:"to,omitempty" kit:"personal"`
+	From json.RawMessage `json:"from,omitempty" app:"personal"`
+	To   json.RawMessage `json:"to,omitempty" app:"personal"`
 }
 ```
 
@@ -2766,7 +2778,7 @@ type EndpointSpec struct {
 <a name="ErasureMessage"></a>
 ## type [ErasureMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
 
-ErasureMessage is what kit.Erase did, store by store. Stores lists, store by store, what the erasure did there.
+ErasureMessage is what app.Erase did, store by store. Stores lists, store by store, what the erasure did there.
 
 ```go
 type ErasureMessage struct {
@@ -2850,7 +2862,7 @@ type FieldMessage struct {
 	Rules     string         `json:"rules,omitempty"`
 	// Doc is the field's comment, when the analyzer found one.
 	Doc       string         `json:"doc,omitempty"`
-	// Class is what the field holds, as its kit tag says (ADR 0006): one of
+	// Class is what the field holds, as its app tag says (ADR 0006): one of
 	// the Class constants, or empty when the field is unclassified. A
 	// subject field is personal unless it is special.
 	Class     string         `json:"class,omitempty"`
@@ -2910,10 +2922,10 @@ FormerMessage is one former value of a field that keeps its history: what it was
 type FormerMessage struct {
 	// Value is the field's value then, as JSON; absent for a secret field,
 	// whose former values are never given.
-	Value json.RawMessage `json:"value,omitempty" kit:"personal"`
+	Value json.RawMessage `json:"value,omitempty" app:"personal"`
 	// Until is when it was replaced, on the app's clock.
 	Until time.Time       `json:"until"`
-	// By is the user who replaced it — kit.UserID —, empty for a write
+	// By is the user who replaced it — app.UserID —, empty for a write
 	// with no user: a job's, a loop's, kit's own.
 	By    string          `json:"by,omitempty"`
 }
@@ -3242,10 +3254,16 @@ JournalCheckMessage is what verifying the journal's chain found. A broken chain 
 ```go
 type JournalCheckMessage struct {
 	// Entries is how many entries the journal holds.
-	Entries  int   `json:"entries"`
+	Entries  int     `json:"entries"`
 	// BrokenAt is the sequence number where the chain breaks: an entry
-	// changed, or one removed before it. Zero when the chain holds.
-	BrokenAt int64 `json:"brokenAt,omitempty"`
+	// changed, or one removed before it, or a JournalContinue entry
+	// that does not name the hash of the entry before it. Zero when the
+	// chain holds.
+	BrokenAt int64   `json:"brokenAt,omitempty"`
+	// Closed are the last entries of the journals the journal closed,
+	// each followed by the JournalContinue entry that names its hash:
+	// the chain holds across them, journal after journal.
+	Closed   []int64 `json:"closed,omitempty"`
 }
 ```
 
@@ -3263,7 +3281,7 @@ type JournalEntryEvent struct {
 	// Op is one of the Journal constants.
 	Op      string    `json:"op"`
 	// DryRun marks what the retention would have done under
-	// KIT_RETENTION=dry-run: nothing changed.
+	// <PRODUCT>_RETENTION=dry-run: nothing changed.
 	DryRun  bool      `json:"dryRun,omitempty"`
 	// Store is the store's node ID.
 	Store   string    `json:"store,omitempty"`
@@ -3273,8 +3291,13 @@ type JournalEntryEvent struct {
 	// By is who: a user's ID, the node that called, "retention", "cli" or
 	// "studio".
 	By      string    `json:"by"`
+	// Follows is set on a JournalContinue entry alone: the hash of the
+	// last entry of the journal it continues, which closed there. Its
+	// own chain starts again from it (ADR 0180 step 5c).
+	Follows string    `json:"follows,omitempty"`
 	// Hash is the entry's link in the chain: SHA-256 of the previous
-	// entry's hash and this entry.
+	// entry's hash and this entry — of nothing and this entry for a
+	// JournalContinue entry, which opens a chain.
 	Hash    string    `json:"hash"`
 }
 ```
@@ -3337,7 +3360,7 @@ type ListenerSpec struct {
 <a name="LogRecordMessage"></a>
 ## type [LogRecordMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
 
-LogRecordMessage is one log record written by product code through kit.Log, kept in dev so the Studio can show a request's logs beside its spans.
+LogRecordMessage is one log record written by product code through app.Log, kept in dev so the Studio can show a request's logs beside its spans.
 
 ```go
 type LogRecordMessage struct {
@@ -3376,7 +3399,7 @@ type LoopMessage struct {
 	Provenance string     `json:"provenance,omitempty"`
 	// Library names the code that loops, for a library or kit loop:
 	// "net/http", "sdk/v1/app/scheduler", "sdk/v1/data/queue",
-	// "sdk/v1/app/mail/spool", "sdk/v1/app/statemachine", "kit".
+	// "sdk/v1/app/mail/spool", "sdk/v1/app/statemachine", "app".
 	Library    string     `json:"library,omitempty"`
 	// State is one of the Loop state constants.
 	State      string     `json:"state,omitempty"`
@@ -3584,13 +3607,13 @@ type MigrationMessage struct {
 <a name="MigrationSetMessage"></a>
 ## type [MigrationSetMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
 
-MigrationSetMessage is one set of migrations on a database — kit's own, the product's (kit.Migrations), a module's — with its own version table, and so its own lock.
+MigrationSetMessage is one set of migrations on a database — kit's own, the product's (app.Migrations), a module's — with its own version table, and so its own lock.
 
 ```go
 type MigrationSetMessage struct {
-	// Name is the set's origin: "kit", "product", or a module's name.
+	// Name is the set's origin: "app", "product", or a module's name.
 	Name    string             `json:"name"`
-	// Table is its version table: "kit_migrations", "schema_migrations".
+	// Table is its version table: "app_migrations", "schema_migrations".
 	Table   string             `json:"table"`
 	// Applied are the migrations the database records, and Pending those
 	// this build carries that it does not, oldest first.
@@ -3624,7 +3647,7 @@ ModuleMessage is a module the app mounts: a Go module's services, released and m
 
 ```go
 type ModuleMessage struct {
-	// Name is the name kit.NewModule gives it.
+	// Name is the name app.NewModule gives it.
 	Name       string                `json:"name"`
 	// Doc is its description in the product's default language; Docs the
 	// same in other languages, by tag, as a node's.
@@ -3636,18 +3659,24 @@ type ModuleMessage struct {
 	Build      *ModuleVersionMessage `json:"build,omitempty"`
 	// Services are its services' IDs, in the order it lists them.
 	Services   []string              `json:"services"`
-	// Requires are the modules it requires (kit.Requires), by name.
+	// Requires are the modules it requires (app.Requires), by name.
 	Requires   []string              `json:"requires,omitempty"`
 	// RequiredBy are the mounted modules that require it, by name, sorted.
 	RequiredBy []string              `json:"requiredBy,omitempty"`
 	// Prefix is where its routes are served: "/<name>/" unless the mount
-	// says otherwise (kit.Prefix); "/" shares the product's route space.
+	// says otherwise (app.Prefix); "/" shares the product's route space.
 	Prefix     string                `json:"prefix"`
-	// Source is where kit.NewModule declares it.
+	// Source is where app.NewModule declares it.
 	Source     *SourceMessage        `json:"source,omitempty"`
-	// Mount is where the app mounts it — App.With or kit.Mount —; absent
-	// when only another module's kit.Requires mounted it, at its defaults.
+	// Mount is where the app mounts it — App.With or app.Mount —; absent
+	// when only another module's app.Requires mounted it, at its defaults.
 	Mount      *SourceMessage        `json:"mount,omitempty"`
+	// Only are the environments its mounts hold in (app.Only), sorted:
+	// present when every mount the app gives it names its environments,
+	// absent when one holds in every environment, or when only another
+	// module's app.Requires mounted it. Added at Version 5: a reader
+	// that does not know it reads the graph as before.
+	Only       []string              `json:"only,omitempty"`
 }
 ```
 
@@ -3775,7 +3804,7 @@ type PasswordPolicyMessage struct {
 	// NotReused is how many former passwords it refuses; zero when it
 	// refuses none.
 	NotReused int            `json:"notReused,omitempty"`
-	// NotCommon says it refuses the most common passwords (kit.NotCommon),
+	// NotCommon says it refuses the most common passwords (app.NotCommon),
 	// as every policy does.
 	NotCommon bool           `json:"notCommon,omitempty"`
 	// Source is where the policy is declared.
@@ -3786,7 +3815,7 @@ type PasswordPolicyMessage struct {
 <a name="Payload"></a>
 ## type [Payload](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/runtime.go>)
 
-Payload is the request and the response of a span, as JSON, in dev only. Every member whose name says it is a secret — password, token, secret, authorization, cookie… — or whose Go field is tagged kit:"secret" is replaced by "\[redacted]", and each side is cut at 8 KiB.
+Payload is the request and the response of a span, as JSON, in dev only. Every member whose name says it is a secret — password, token, secret, authorization, cookie… — or whose Go field is tagged app:"secret" is replaced by "\[redacted]", and each side is cut at 8 KiB.
 
 ```go
 type Payload struct {
@@ -3832,7 +3861,7 @@ type PersonMessage struct {
 <a name="PersonalDataMessage"></a>
 ## type [PersonalDataMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
 
-PersonalDataMessage is a person's data as kit.Export gives it (GDPR art. 15 and 20): their records, store by store, with what art. 15(1) asks beside them.
+PersonalDataMessage is a person's data as app.Export gives it (GDPR art. 15 and 20): their records, store by store, with what art. 15(1) asks beside them.
 
 ```go
 type PersonalDataMessage struct {
@@ -3891,7 +3920,7 @@ type PortMessage struct {
 	// Address is the listen address: "127.0.0.1:4000", ":4000". Present in
 	// dev only, like every location.
 	Address  string   `json:"address,omitempty"`
-	// Owner is [PortOwnerKit], or the ID of the connector that opened it.
+	// Owner is [PortOwnerApp], or the ID of the connector that opened it.
 	Owner    string   `json:"owner"`
 	// Serves says what it answers: the Serves constants.
 	Serves   []string `json:"serves"`
@@ -3912,7 +3941,7 @@ type PortSpec struct {
 	// Response is the type it answers.
 	Response *SchemaMessage `json:"response,omitempty"`
 	// Fallback is the node ID of the operation the port declares for when
-	// the app binds nothing else (kit.Fallback).
+	// the app binds nothing else (app.Fallback).
 	Fallback string         `json:"fallback,omitempty"`
 	// Bound is the node ID of the operation the port calls, as the start
 	// chose it — on a static graph, as the analysis reads the same rule;
@@ -3943,7 +3972,7 @@ PrivacyMessage is what a running app says of the personal data it keeps. It is t
 
 ```go
 type PrivacyMessage struct {
-	// Retention is KIT_RETENTION: one of the Retention constants.
+	// Retention is <PRODUCT>_RETENTION: one of the Retention constants.
 	Retention string              `json:"retention"`
 	// Register is the record of processing, as far as the code knows it.
 	Register  RegisterMessage     `json:"register"`
@@ -4088,7 +4117,7 @@ type RecordFormerMessage struct {
 <a name="RecordHistoryMessage"></a>
 ## type [RecordHistoryMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
 
-RecordHistoryMessage is what kit remembers of one record, as the Studio's data view shows it (GET /\_kit/api/former): each field's former values, newest first, by the field's JSON pointer — a secret field's without their values, a personal or special one's redacted.
+RecordHistoryMessage is what kit remembers of one record, as the Studio's data view shows it (GET /\_app/api/former): each field's former values, newest first, by the field's JSON pointer — a secret field's without their values, a personal or special one's redacted.
 
 ```go
 type RecordHistoryMessage struct {
@@ -4106,7 +4135,7 @@ type RecordVersionMessage struct {
 	Number  uint64          `json:"number"`
 	// At is when the write that made it ran, on the app's clock.
 	At      time.Time       `json:"at,omitzero"`
-	// By is the user who made it — kit.UserID —, empty for a write with no
+	// By is the user who made it — app.UserID —, empty for a write with no
 	// user.
 	By      string          `json:"by,omitempty"`
 	// Command is the node ID of the command that made it, empty outside
@@ -4114,14 +4143,14 @@ type RecordVersionMessage struct {
 	Command string          `json:"command,omitempty"`
 	// Value is the record as it was: in an export, its secret members left
 	// out; in the Studio, as the data browser shows a record.
-	Value   json.RawMessage `json:"value,omitempty" kit:"personal"`
+	Value   json.RawMessage `json:"value,omitempty" app:"personal"`
 }
 ```
 
 <a name="RecordVersionsMessage"></a>
 ## type [RecordVersionsMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
 
-RecordVersionsMessage is a record's versions as the Studio's data view shows them (GET /\_kit/api/revisions): newest first, each as the data browser shows a record — a member sealed at rest sealed, a personal, special or secret one redacted —, and, when two were asked for, what changed from one to the other, a value given only where the data browser would show it.
+RecordVersionsMessage is a record's versions as the Studio's data view shows them (GET /\_app/api/revisions): newest first, each as the data browser shows a record — a member sealed at rest sealed, a personal, special or secret one redacted —, and, when two were asked for, what changed from one to the other, a value given only where the data browser would show it.
 
 ```go
 type RecordVersionsMessage struct {
@@ -4182,7 +4211,7 @@ type RegisterStoreMessage struct {
 	Delete     string                `json:"delete,omitempty"`
 	HeldUntil  string                `json:"heldUntil,omitempty"`
 	// ByProduct is point (f) when the product keeps the store's retention
-	// itself (kit.RetentionByProduct), in its own words: no retention gap,
+	// itself (app.RetentionByProduct), in its own words: no retention gap,
 	// and no subject gap either.
 	ByProduct  *ProductRetentionSpec `json:"byProduct,omitempty"`
 	// Security is point (g): the measures kit takes.
@@ -4255,12 +4284,12 @@ type RuntimeMessage struct {
 	// daemon's own state machine, as it ran.
 	History    []PhaseChangeEvent `json:"history,omitempty"`
 	// Process is the Go process, sampled when the graph was built; nil when
-	// the product imports no framework/kit/server, which plugs the sampler
+	// the product imports no framework/app/server, which plugs the sampler
 	// in (ADR 0172).
 	Process    *ProcessSpec       `json:"process,omitempty"`
 	// HTTP is the product's HTTP server.
 	HTTP       *HTTPServer        `json:"http,omitempty"`
-	// Mocks are the replacements a test gave the app (kit.Replace).
+	// Mocks are the replacements a test gave the app (app.Replace).
 	Mocks      []MockMessage      `json:"mocks,omitempty"`
 	// Dev describes the build `kit dev` made of this process, when it did.
 	Dev        *DevBuildMessage   `json:"dev,omitempty"`
@@ -4328,7 +4357,7 @@ type SecretSpec struct {
 	// Keep is how many versions a rotation leaves, the new one included.
 	Keep         int        `json:"keep,omitempty"`
 	// Optional: a provided secret the product can do without
-	// (kit.Optional) — found nowhere, it is absent, and the start goes on.
+	// (app.Optional) — found nowhere, it is absent, and the start goes on.
 	Optional     bool       `json:"optional,omitempty"`
 	// From is where the running app found it: one of the SecretFrom
 	// constants, on a runtime graph. Empty when it is found nowhere — for an
@@ -4378,7 +4407,7 @@ SettingMessage is one configuration value kit read when the product started: kit
 
 ```go
 type SettingMessage struct {
-	// Name is the environment variable that sets it: "KIT_ADDR",
+	// Name is the environment variable that sets it: "TODO_ADDR",
 	// "TODO_BASE_URL".
 	Name     string `json:"name"`
 	// Value is what kit uses. A secret's is left out: Secret says so.
@@ -4389,7 +4418,7 @@ type SettingMessage struct {
 	Service  string `json:"service,omitempty"`
 	// Key is a declared setting's name, its key in a configuration file:
 	// "base-url". A module's is qualified with the module's name,
-	// "moderation.tdb-url": kit.Set's key, and in a file "tdb-url" under
+	// "moderation.tdb-url": app.Set's key, and in a file "tdb-url" under
 	// "moderation:" (ADR 0008).
 	Key      string `json:"key,omitempty"`
 	// Type is what a declared setting holds: text, bool, int, number,
@@ -4401,13 +4430,13 @@ type SettingMessage struct {
 	// Secret: the value is withheld.
 	Secret   bool   `json:"secret,omitempty"`
 	// Option is the AppOption that sets it in code, when there is one:
-	// "kit.Listen". Code wins over the environment.
+	// "app.Listen". Code wins over the environment.
 	Option   string `json:"option,omitempty"`
 	// Flag is the kit dev flag that sets it in dev, when there is one:
 	// "-addr".
 	Flag     string `json:"flag,omitempty"`
 	// Database is the database the setting configures, when kit declares it
-	// for one (kit.Database): its URL, its pool, its timeouts.
+	// for one (app.Database): its URL, its pool, its timeouts.
 	Database string `json:"database,omitempty"`
 }
 ```
@@ -4567,7 +4596,7 @@ type StepEvent struct {
 <a name="StoreDataMessage"></a>
 ## type [StoreDataMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/privacy.go>)
 
-StoreDataMessage is one store's records about a person. It is one part of what kit.Export gives a person about themselves.
+StoreDataMessage is one store's records about a person. It is one part of what app.Export gives a person about themselves.
 
 ```go
 type StoreDataMessage struct {
@@ -4582,13 +4611,13 @@ type StoreDataMessage struct {
 	Recipients []string                  `json:"recipients,omitempty"`
 	// Records are the records, their secret members left out. They hold the
 	// person's data, which the Studio and the logs never show.
-	Records    []json.RawMessage         `json:"records" kit:"personal"`
+	Records    []json.RawMessage         `json:"records" app:"personal"`
 	// Former are the former values of the records' fields that keep them
 	// (ADR 0007), record by record; a secret field's are left out.
-	Former     []RecordFormerMessage     `json:"former,omitempty" kit:"personal"`
+	Former     []RecordFormerMessage     `json:"former,omitempty" app:"personal"`
 	// Versions are the versions of the records a store with revisions keeps
 	// (ADR 0007 §3), record by record, their secret members left out.
-	Versions   []ExportedVersionsMessage `json:"versions,omitempty" kit:"personal"`
+	Versions   []ExportedVersionsMessage `json:"versions,omitempty" app:"personal"`
 }
 ```
 
@@ -4602,34 +4631,42 @@ type StoreErasureMessage struct {
 	// Store is the store's node ID.
 	Store   string   `json:"store"`
 	// Erased are the records whose personal data was cleared.
-	Erased  []string `json:"erased,omitempty" kit:"personal"`
+	Erased  []string `json:"erased,omitempty" app:"personal"`
 	// Deleted are the records removed.
-	Deleted []string `json:"deleted,omitempty" kit:"personal"`
+	Deleted []string `json:"deleted,omitempty" app:"personal"`
 	// Held are the records a hold keeps, untouched.
-	Held    []string `json:"held,omitempty" kit:"personal"`
+	Held    []string `json:"held,omitempty" app:"personal"`
 }
 ```
 
 <a name="StoreHistoryMessage"></a>
 ## type [StoreHistoryMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
 
-StoreHistoryMessage is what a store remembers of its records. Fields names the fields it keeps former values of; Kept and Bytes weigh them.
+StoreHistoryMessage is what a store remembers of its records. Fields names the fields it keeps former values of; Kept and Bytes weigh them, and Versions, Trashed and VersionBytes weigh its records' versions.
 
 ```go
 type StoreHistoryMessage struct {
 	// Revisions is how many former versions each record keeps
-	// (kit.Revisions, ADR 0007 §3); zero when it keeps none.
-	Revisions int                     `json:"revisions,omitempty"`
+	// (app.Revisions, ADR 0007 §3); zero when it keeps none.
+	Revisions    int                     `json:"revisions,omitempty"`
 	// Fields are the JSON pointers of the fields that keep their former
 	// values: tagged history=N — the schema's Field.History says how many —
 	// or read by a password policy that refuses former passwords.
-	Fields    []string                `json:"fields,omitempty"`
+	Fields       []string                `json:"fields,omitempty"`
 	// Passwords are the store's password policies.
-	Passwords []PasswordPolicyMessage `json:"passwords,omitempty"`
+	Passwords    []PasswordPolicyMessage `json:"passwords,omitempty"`
 	// Kept is how many former values the store keeps, and Bytes what its
 	// histories weigh, on a runtime graph.
-	Kept      *int                    `json:"kept,omitempty"`
-	Bytes     *int64                  `json:"bytes,omitempty"`
+	Kept         *int                    `json:"kept,omitempty"`
+	Bytes        *int64                  `json:"bytes,omitempty"`
+	// Versions is how many former versions the store's records keep,
+	// Trashed how many records are in its trash, and VersionBytes what both
+	// weigh — the JSON they hold —, on a runtime graph of a store that keeps
+	// revisions (ADR 0007 §5), as the SDK's document store counts them. A
+	// record's current version is the record, and counts in none of them.
+	Versions     *int                    `json:"versions,omitempty"`
+	Trashed      *int                    `json:"trashed,omitempty"`
+	VersionBytes *int64                  `json:"versionBytes,omitempty"`
 }
 ```
 
@@ -4643,24 +4680,24 @@ type StorePrivacyMessage struct {
 	// Subject is the JSON pointer of the field that says whom each record is
 	// about: "/email". Empty when the entity has no subject field.
 	Subject         string                `json:"subject,omitempty"`
-	// Purpose is why the store keeps its records, as kit.Purpose says it.
+	// Purpose is why the store keeps its records, as app.Purpose says it.
 	Purpose         string                `json:"purpose,omitempty"`
 	// Erase says when kit clears a record's personal data; Delete when it
 	// removes the record.
 	Erase           *RetentionSpec        `json:"erase,omitempty"`
 	Delete          *RetentionSpec        `json:"delete,omitempty"`
 	// ByProduct is set when the product keeps the store's retention itself
-	// (kit.RetentionByProduct): kit runs none — Erase and Delete are then
+	// (app.RetentionByProduct): kit runs none — Erase and Delete are then
 	// absent — and asks for neither a retention nor a subject.
 	ByProduct       *ProductRetentionSpec `json:"byProduct,omitempty"`
 	// HeldUntil holds each record until an instant it carries: the law's
-	// own retention (kit.HeldUntil).
+	// own retention (app.HeldUntil).
 	HeldUntil       *HeldUntilSpec        `json:"heldUntil,omitempty"`
 	// Anonymise locates the function that says what an erased record keeps,
-	// generalised (kit.Anonymise).
+	// generalised (app.Anonymise).
 	Anonymise       *SourceMessage        `json:"anonymise,omitempty"`
 	// DeleteOnErasure: a person's erasure deletes the record instead of
-	// clearing it (kit.DeleteOnErasure).
+	// clearing it (app.DeleteOnErasure).
 	DeleteOnErasure bool                  `json:"deleteOnErasure,omitempty"`
 	// Held is how many records a hold keeps, on a runtime graph.
 	Held            *int                  `json:"held,omitempty"`
@@ -4691,7 +4728,7 @@ type StoreSpec struct {
 	// directory.
 	Location  string               `json:"location,omitempty"`
 	// Database names the database that keeps the store, as the app declares
-	// it (kit.Database, kit.Keeps) — present even while the store's data
+	// it (app.Database, app.Keeps) — present even while the store's data
 	// stays in the data directory, in dev without the database's URL. Its
 	// container is "container:database:<name>".
 	Database  string               `json:"database,omitempty"`
@@ -4713,9 +4750,24 @@ type StoreSpec struct {
 	// fields that keep their former values, its password policies. Absent
 	// when it remembers nothing and has no policy.
 	History   *StoreHistoryMessage `json:"history,omitempty"`
-	// ReadModel is set on a store derived from others (kit.ReadModel):
+	// ReadModel is set on a store derived from others (app.ReadModel):
 	// written by projections — subscriptions —, read by queries.
 	ReadModel bool                 `json:"readModel,omitempty"`
+}
+```
+
+<a name="StoreTrashMessage"></a>
+## type [StoreTrashMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
+
+StoreTrashMessage is a page of a store's trash as the Studio lists it (GET /\_app/api/trash?store=&offset=&limit=): Total records in the trash, in key order, Records those from the page's offset, Next the offset of the page after — absent on the last. A page is bounded, 200 records unless the Studio asks from 1 to 1000; an offset counts records, never quotes a key.
+
+```go
+type StoreTrashMessage struct {
+	// Store is the store's node ID.
+	Store   string                 `json:"store"`
+	Total   int                    `json:"total"`
+	Records []TrashedRecordMessage `json:"records"`
+	Next    int                    `json:"next,omitempty"`
 }
 ```
 
@@ -4732,7 +4784,7 @@ type SubscriptionSpec struct {
 	// "moderated", ADR 0006's marks. Empty for a subscription.
 	Mark          string   `json:"mark,omitempty"`
 	// OwnStores: the watch hears its own module's stores too — the
-	// product's own, for a watch of the product's (kit.OwnStores) —, never
+	// product's own, for a watch of the product's (app.OwnStores) —, never
 	// the writes its own handler makes.
 	OwnStores     bool     `json:"ownStores,omitempty"`
 	// Stores are the node IDs of the stores that feed a watch, sorted: those
@@ -4866,6 +4918,26 @@ type TransitionSpec struct {
 	Source  *SourceMessage `json:"source,omitempty"`
 	// Callers are the node IDs found to fire this event.
 	Callers []string       `json:"callers,omitempty"`
+}
+```
+
+<a name="TrashedRecordMessage"></a>
+## type [TrashedRecordMessage](<https://github.com/kitsunium/sdk/blob/main/framework/model/internal/core/history.go>)
+
+TrashedRecordMessage is one record in a store's trash as the Studio lists it (GET /\_app/api/trash, ADR 0178 C4): its key, when the product deleted it and when kit purges it, on the app's clock — never its value. A key that reads a personal, special or secret member — the subject included — is not given, as the data browser never shows that member: Hidden says so.
+
+```go
+type TrashedRecordMessage struct {
+	// Key is the record's key; empty when Hidden.
+	Key     string    `json:"key,omitempty"`
+	// Hidden says the key reads a personal, special or secret member, or
+	// the record no longer opens to tell: the Studio is not given it.
+	Hidden  bool      `json:"hidden,omitempty"`
+	// At is when the product deleted it.
+	At      time.Time `json:"at"`
+	// PurgeAt is when kit purges it: its trash's length after At, or its
+	// retention's instant when that comes first.
+	PurgeAt time.Time `json:"purgeAt"`
 }
 ```
 

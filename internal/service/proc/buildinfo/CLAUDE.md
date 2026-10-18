@@ -11,7 +11,7 @@ values.
 It was `internal/service/proc/self`'s `build.go` until ADR 0172 split it out:
 `self` imports `runtime/metrics`, and Go runs the initialisation of every
 package a binary imports — so a program asking only what it was built from
-(the framework's `kit`, in every product) paid for the runtime's metric table
+(the framework's `app`, `kit` then, in every product) paid for the runtime's metric table
 at every start. This package imports the standard library and
 `internal/kernel/semver` only.
 

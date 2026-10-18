@@ -120,6 +120,7 @@ The split between them is whether this package DECIDED the failure or was TOLD a
   - [func \(\*Service\) ListCandidates\(\) \(candidates \[\]CandidateValue, listErr error\)](<#Service.ListCandidates>)
   - [func \(\*Service\) Upgrade\(\) \(info UpdateValue, upgradeErr error\)](<#Service.Upgrade>)
   - [func \(\*Service\) WithAutomaticConsent\(\) \*Service](<#Service.WithAutomaticConsent>)
+  - [func \(\*Service\) WithCompanions\(names ...string\) \*Service](<#Service.WithCompanions>)
   - [func \(\*Service\) WithProbe\(args \[\]string, timeout time.Duration\) \*Service](<#Service.WithProbe>)
   - [func \(\*Service\) WithSignatureDomain\(domain string\) \*Service](<#Service.WithSignatureDomain>)
   - [func \(\*Service\) WithVendorKey\(key \[\]byte\) \*Service](<#Service.WithVendorKey>)
@@ -570,6 +571,17 @@ func (*Service) WithAutomaticConsent() *Service
 ```
 
 WithAutomaticConsent declares that the PRODUCT consents to unrequested upgrades — a status line that updates itself silently, its decision D11 —, so no environment variable has to grant it. An operator still refuses with \<PREFIX>\_AUTO\_UPGRADE=0: an explicit answer always wins. It grants nothing else: escalation keeps its own, separate opt-in.
+
+<a name="Service.WithCompanions"></a>
+### func \(Service\) [WithCompanions](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/companions.go>)
+
+```go
+func (*Service) WithCompanions(names ...string) *Service
+```
+
+WithCompanions makes an upgrade also replace each named file the release archive carries beside the product binary — a second executable shipped in the same archive — from that SAME archive, after the one signature and checksum check that covers it: nothing is downloaded twice. A companion is replaced where it is installed, beside the running binary, its symlinks resolved; one that is not installed there is not created. A companion that resolves to the binary itself, or to a file another name already reached, is that file and is replaced once.
+
+Every file is staged in its own directory before any is renamed, and each installed one is kept by a hard link as \<file>.prev. A rename, or the probe WithProbe declared, that fails puts back every file already replaced, so the product and its companions are never left at two versions; the kept files are dropped once all stand, unless a probe keeps them as it keeps the binary's. A companion the archive lacks refuses the upgrade (BinaryNotInArchive) with nothing replaced. The replacement of a set is never elevated: a directory the user cannot write, or a file system that cannot link, refuses it (StagingFailed) with nothing replaced.
 
 <a name="Service.WithProbe"></a>
 ### func \(Service\) [WithProbe](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/probe.go>)

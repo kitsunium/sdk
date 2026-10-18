@@ -10,7 +10,7 @@ import (
 type (
 	// StoreHistory is what a store remembers of its records.
 	// Fields names the fields it keeps former values of; Kept and Bytes weigh
-	// them.
+	// them, and Versions, Trashed and VersionBytes weigh its records' versions.
 	StoreHistory = core.StoreHistoryMessage
 )
 
@@ -28,7 +28,7 @@ type (
 
 type (
 	// RecordHistory is what kit remembers of one record, as the Studio's data
-	// view shows it (GET /_kit/api/former): each field's former values, newest
+	// view shows it (GET /_app/api/former): each field's former values, newest
 	// first, by the field's JSON pointer — a secret field's without their
 	// values, a personal or special one's redacted.
 	RecordHistory = core.RecordHistoryMessage
@@ -49,8 +49,21 @@ type (
 
 type (
 	// RecordVersions is a record's versions as the Studio's data view shows
-	// them (GET /_kit/api/revisions), and what changed between two.
+	// them (GET /_app/api/revisions), and what changed between two.
 	RecordVersions = core.RecordVersionsMessage
+)
+
+type (
+	// TrashedRecord is one record in a store's trash as the Studio lists it
+	// (GET /_app/api/trash): its key, when the product deleted it and when kit
+	// purges it — never its value.
+	TrashedRecord = core.TrashedRecordMessage
+)
+
+type (
+	// StoreTrash is a page of a store's trash as the Studio lists it (GET
+	// /_app/api/trash), in key order.
+	StoreTrash = core.StoreTrashMessage
 )
 
 type (

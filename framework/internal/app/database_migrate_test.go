@@ -1,0 +1,184 @@
+package app_test
+
+import (
+	"bytes"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/kitsunium/sdk/framework/internal/app"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
+	"github.com/kitsunium/sdk/pkg/v1/errs"
+)
+
+// A database's migrations: at start, manually, and through the product's
+// migrate command.
+
+// manualLedger is the ledger on db, migrating manually, a new app at each
+// call: a service runs in one app at a time.
+func manualLedger(t *testing.T, db *app.FakeDB) func() *app.App {
+	t.Helper()
+	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
+	t.Setenv("LEDGER_DATABASE_MIGRATE", "manual")
+	var logs syncBuffer
+	return func() *app.App {
+		return ledgerApp(t, newLedger(), &logs, app.Database("database", db.Engine(), app.Migrations(migrations...)))
+	}
+}
+
+// migrateCommand runs the migrate command of a new app, and returns its
+// status and what it printed.
+func migrateCommand(t *testing.T, newApp func() *app.App, args ...string) (int, string, string) {
+	t.Helper()
+	var out, errOut bytes.Buffer
+	code := newApp().MigrateCommand(t.Context(), args, &out, &errOut)
+	return code, out.String(), errOut.String()
+}
+
+// With <name>-migrate: manual, pending migrations refuse the start, naming
+// the command that runs them.
+func TestManualMigrationsRefuseTheStart(t *testing.T) {
+	needsFileStore(t)
+	db := app.NewFakeDB(sql.DialectPostgres)
+	err := manualLedger(t, db)().Start(t.Context())
+	if !errs.HasCode(err, app.CodeDatabaseMigrate) || !strings.Contains(err.Error(), "ledger migrate up") {
+		t.Fatalf("a manual database with pending migrations started: %v", err)
+	}
+	if len(db.Versions("schema_migrations")) != 0 {
+		t.Fatal("a manual database migrated at start")
+	}
+}
+
+// `migrate status` says where each set is, and `migrate up` runs what is
+// pending, once.
+func TestMigrateStatusAndUp(t *testing.T) {
+	needsFileStore(t)
+	newApp := manualLedger(t, app.NewFakeDB(sql.DialectPostgres))
+	code, out, errOut := migrateCommand(t, newApp, "status")
+	// kit's own set first — its registry, the two stores' tables —, then
+	// the product's.
+	if code != 0 || strings.Count(out, "pending") != 5 || strings.Count(out, "app_migrations") != 3 || !strings.Contains(out, "schema_migrations") {
+		t.Fatalf("status: %d\n%s%s", code, out, errOut)
+	}
+	if code, out, errOut = migrateCommand(t, newApp, "up"); code != 0 || !strings.Contains(out, `database/app: applied 1 "docstore app_tables"`) ||
+		!strings.Contains(out, `database/product: applied 20260901120000 "create entries", 20260902120000 "create trail"`) {
+		t.Fatalf("up: %d\n%s%s", code, out, errOut)
+	}
+	if code, out, _ = migrateCommand(t, newApp, "up"); code != 0 || !strings.Contains(out, "database/app: up to date") ||
+		!strings.Contains(out, "database/product: up to date") {
+		t.Fatalf("up again: %d\n%s", code, out)
+	}
+	if code, out, _ = migrateCommand(t, newApp, "status"); code != 0 || strings.Count(out, "applied") != 5 {
+		t.Fatalf("status after up: %d\n%s", code, out)
+	}
+	run(t, newApp())
+}
+
+// kit's own set is not migrated down: its migrations drop the stores'
+// tables, and every entity in them.
+func TestKitsOwnSetIsNotMigratedDown(t *testing.T) {
+	newApp := manualLedger(t, app.NewFakeDB(sql.DialectPostgres))
+	if code, _, errOut := migrateCommand(t, newApp, "down", "app", "1"); code != 2 || !strings.Contains(errOut, "the framework's own set is not migrated down") {
+		t.Errorf("down of the framework's set: %d %s", code, errOut)
+	}
+}
+
+// `migrate down SET VERSION` reverses the set's migrations above the
+// version, newest first.
+func TestMigrateDown(t *testing.T) {
+	needsFileStore(t)
+	db := app.NewFakeDB(sql.DialectPostgres)
+	newApp := manualLedger(t, db)
+	if code, _, errOut := migrateCommand(t, newApp, "up"); code != 0 {
+		t.Fatalf("up: %d %s", code, errOut)
+	}
+	run(t, newApp())
+	code, out, errOut := migrateCommand(t, newApp, "down", "product", "20260901120000")
+	if code != 0 || !strings.Contains(out, `reversed 20260902120000 "create trail"`) {
+		t.Fatalf("down: %d\n%s%s", code, out, errOut)
+	}
+	if got := db.Versions("schema_migrations"); !slices.Equal(got, []int64{20260901120000}) {
+		t.Errorf("after down: %v", got)
+	}
+}
+
+// The command refuses what it cannot do: an unknown set, an unknown
+// subcommand.
+func TestTheMigrateCommandRefusesItsMistakes(t *testing.T) {
+	newApp := manualLedger(t, app.NewFakeDB(sql.DialectPostgres))
+	if code, _, errOut := migrateCommand(t, newApp, "down", "nothing", "1"); code != 2 || !strings.Contains(errOut, "the sets are database/product") {
+		t.Errorf("down of an unknown set: %d %s", code, errOut)
+	}
+	if code, _, errOut := migrateCommand(t, newApp, "down", "product", "yesterday"); code != 2 || !strings.Contains(errOut, "is not a version") {
+		t.Errorf("down to no version: %d %s", code, errOut)
+	}
+	if code, _, _ := migrateCommand(t, newApp, "sideways"); code != 2 {
+		t.Errorf("an unknown command: %d", code)
+	}
+}
+
+// A migration that fails stops the start, naming its version in kit's
+// words, never the driver's.
+func TestAFailedMigrationStopsTheStart(t *testing.T) {
+	needsFileStore(t)
+	db := app.NewFakeDB(sql.DialectPostgres)
+	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
+	var logs syncBuffer
+	broken := append(slices.Clone(migrations), app.MigrationValue{Version: 20260903120000, Name: "broken", Up: app.Statements("FAIL here"), Down: app.Irreversible})
+	err := ledgerApp(t, newLedger(), &logs, app.Database("database", db.Engine(), app.Migrations(broken...))).Start(t.Context())
+	if !errs.HasCode(err, app.CodeDatabaseMigrate) || !strings.Contains(err.Error(), "20260903120000") || strings.Contains(err.Error(), "syntax") {
+		t.Fatalf("start: %v", err)
+	}
+	if got := db.Versions("schema_migrations"); !slices.Equal(got, []int64{20260901120000, 20260902120000}) {
+		t.Errorf("schema_migrations holds %v", got)
+	}
+}
+
+// A migration whose Down is app.Irreversible is not reversed: `migrate
+// down` below its version refuses, naming it, and the set keeps every
+// version it had; down to its own version reverses nothing and succeeds; the
+// step itself refuses with CodeMigrationIrreversible (ADR 0179 step 10,
+// kit's own migration).
+func TestAnIrreversibleMigrationIsNotReversed(t *testing.T) {
+	needsFileStore(t)
+	all := []int64{20260901120000, 20260902120000, 20260903120000}
+	type tc struct {
+		name, to string
+		refused  bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		db := app.NewFakeDB(sql.DialectPostgres)
+		t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
+		t.Setenv("LEDGER_DATABASE_MIGRATE", "manual")
+		sealed := append(slices.Clone(migrations), app.MigrationValue{Version: 20260903120000, Name: "seal", Up: app.Statements("CREATE TABLE seal (id TEXT)"), Down: app.Irreversible})
+		var logs syncBuffer
+		newApp := func() *app.App {
+			return ledgerApp(t, newLedger(), &logs, app.Database("database", db.Engine(), app.Migrations(sealed...)))
+		}
+		if code, _, errOut := migrateCommand(t, newApp, "up"); code != 0 {
+			t.Fatalf("up: %d %s", code, errOut)
+		}
+		code, out, errOut := migrateCommand(t, newApp, "down", "product", c.to)
+		switch {
+		case c.refused && (code == 0 || strings.Contains(out, "reversed")):
+			t.Fatalf("down past an irreversible migration: %d\n%s%s", code, out, errOut)
+		case c.refused && !strings.Contains(errOut, "20260903120000"):
+			t.Errorf("the refusal does not name the irreversible migration: %s", errOut)
+		case !c.refused && code != 0:
+			t.Fatalf("down to the irreversible migration's own version: %d\n%s%s", code, out, errOut)
+		}
+		if got := db.Versions("schema_migrations"); !slices.Equal(got, all) {
+			t.Errorf("after down to %s: %v", c.to, got)
+		}
+	}
+	for _, c := range []tc{
+		{"below its version", "20260901120000", true},
+		{"to its own version", "20260903120000", false},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+	if err := app.Irreversible(t.Context(), nil); !errs.HasCode(err, app.CodeMigrationIrreversible) {
+		t.Errorf("app.Irreversible: %v", err)
+	}
+}
