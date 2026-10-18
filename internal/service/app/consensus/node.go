@@ -143,7 +143,10 @@ type snapState struct {
 	mu       sync.Mutex
 	last     uint64
 	inFlight bool
-	spools   map[string]coreconsensus.SnapshotSink
+	// pending is a trigger that fell during a cut in flight, coalesced into
+	// the cut made once that one is written (D7).
+	pending bool
+	spools  map[string]coreconsensus.SnapshotSink
 }
 
 type applyResult struct {

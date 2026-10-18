@@ -29,6 +29,96 @@ func (syncFailingSink) Commit(coreconsensus.SnapshotMetaValue) error {
 	return storageFailed("sync snapshot", errImpossible)
 }
 
+// gatedSnapshots is a snapshot store whose Create waits for gate: a cut stays
+// in flight until the test lets it be written.
+type gatedSnapshots struct {
+	*MemorySnapshots
+	gate chan struct{}
+}
+
+func (s gatedSnapshots) Create(id string, meta coreconsensus.SnapshotMetaValue) (coreconsensus.SnapshotSink, int64, error) {
+	<-s.gate
+	return s.MemorySnapshots.Create(id, meta)
+}
+
+// TestACoalescedCutIsMade pins D7's "a trigger during one is coalesced": the
+// entries applied while a cut is in flight cross SnapshotEvery again, and the
+// cut they trigger is made once the first is written, without one more entry
+// applied. It used to be dropped: a node that applied nothing more kept the
+// tail uncut, and TestAnInstallKeepsTheTwoNewestSnapshots waited in vain for
+// a follower's second snapshot (#375).
+func TestACoalescedCutIsMade(t *testing.T) {
+	cid := coreconsensus.ClusterID{4, 5, 7}
+	log, net := NewMemoryLog(), NewMemoryNetwork()
+	id, inc, err := InitLog(log, cid, "slot-0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	members := []coreconsensus.MemberValue{{ID: id, Incarnation: inc, Slot: "slot-0", SPKI: MemorySPKI(id), Voter: true}}
+	snaps := gatedSnapshots{NewMemorySnapshots(), make(chan struct{})}
+	cfg := Config{
+		Cluster: cid, Machine: newKV(), Durability: DurabilityVolatile, Log: log,
+		Snapshots: snaps, Transport: NewMemoryTransport(net, id),
+		InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30, SnapshotEveryBytes: 1 << 20,
+		MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 1, SnapshotEvery: 10,
+		SnapshotTrailing: 1, JoinAuthorizer: allowJoin{},
+	}
+	if err := Bootstrap(context.Background(), &cfg, members); err != nil {
+		t.Fatal(err)
+	}
+	n, err := NewNode(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			close(snaps.gate)
+		}
+	}
+	// Registered after the node's, so it runs first: a cut still waiting
+	// would hold HardClose.
+	t.Cleanup(func() {
+		if err := n.HardClose(); err != nil {
+			t.Error(err)
+		}
+	})
+	t.Cleanup(release)
+	var last uint64
+	for i := range 30 {
+		last = propose(t, n, string([]byte{'k', '=', byte('a' + i%26)})).Index
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for n.Status().Applied < last {
+		if time.Now().After(deadline) {
+			t.Fatalf("applied %d < %d", n.Status().Applied, last)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// Every entry is applied behind the cut in flight; from now on nothing
+	// is proposed.
+	release()
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		metas, err := snaps.List()
+		if err != nil {
+			t.Fatal(err)
+		}
+		newest := uint64(0)
+		if len(metas) > 0 {
+			newest = metas[0].Position.Index
+		}
+		if newest == last {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the node holds %d snapshots, the newest at %d, none at the applied index %d", len(metas), newest, last)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // TestACutWhoseSyncFailsStopsTheNode pins D4 on the snapshot path: a failed
 // fsync is never retried, and that holds for a snapshot's spool as for the
 // log, since both live on the one disk whose page cache may now lie. The cut
