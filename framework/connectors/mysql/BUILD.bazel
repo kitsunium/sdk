@@ -37,6 +37,7 @@ go_test(
         "api_gen_test.go",
         "app_test.go",
         "database_test.go",
+        "former_test.go",
         "mysql_test.go",
         "server_test.go",
         "subsystems_test.go",

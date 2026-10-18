@@ -161,7 +161,7 @@ func (e *sealedEngine) opened(ctx context.Context, key string, d plug.DocumentVa
 // whose class changed reads what it held.
 func (e *sealedEngine) openDoc(ctx context.Context, key string, raw []byte) ([]byte, error) {
 	doc, _, err := boxWalk(raw, e.s.plan().rules, "", false, func(at memberAt, value []byte) ([]byte, bool, error) {
-		plain, err := e.z.open(ctx, value, e.s.id, key, at.pointer)
+		plain, err := e.z.open(ctx, value, sealedAs(e.s.id), key, at.pointer)
 		switch {
 		case errors.Is(err, errErased):
 			return nil, true, nil
@@ -241,7 +241,7 @@ func (e *sealedEngine) refOf(ctx context.Context, key string, v any) (string, er
 	}
 	id := e.s.subjectOf(v)
 	if id == "" || e.held(ctx, key, v) {
-		return keys.ownRef(e.s.id, key), nil
+		return keys.ownRef(sealedAs(e.s.id), key), nil
 	}
 	return keys.personRef(id), nil
 }
@@ -287,7 +287,7 @@ func (e *sealedEngine) seal(ctx context.Context, raw []byte, key, ref string, cl
 		case isNull(value), !at.inList && clear[at.pointer], erasing && zeroJSON(value, at.f.typ):
 			return value, false, nil
 		}
-		box, err := e.z.seal(ctx, ref, value, e.s.id, key, at.pointer)
+		box, err := e.z.seal(ctx, ref, value, sealedAs(e.s.id), key, at.pointer)
 		return box, false, err
 	})
 	return out, err

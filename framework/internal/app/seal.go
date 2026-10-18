@@ -46,7 +46,7 @@ import (
 // — a box "sealed:v1:root:" — when it has no subject at all. Every data key
 // is 32 random bytes, wrapped under kit's generated secret data-key — a
 // keyring rotated every 30 days, 3 versions kept, pinned by <PRODUCT>_DATA_KEY —
-// and filed in kit's own store, kit.privacy/store/keys. data-key's
+// and filed in kit's own store, app.privacy/store/keys. data-key's
 // rotation re-wraps the data keys, never a box, and never prunes a version
 // a key still needs (secret.RotatorConfig.InUse).
 //
@@ -307,7 +307,7 @@ func (z *sealer) destroy(ctx context.Context, ref string) (bool, error) {
 
 // kit's own store of data keys -------------------------------------------------
 
-// wrappedKey is one data key as kit keeps it, in kit.privacy/store/keys:
+// wrappedKey is one data key as kit keeps it, in app.privacy/store/keys:
 // its reference, and the key wrapped under data-key, which nothing but
 // data-key opens.
 type wrappedKey struct {

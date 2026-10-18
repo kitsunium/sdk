@@ -46,10 +46,10 @@ func TestKitsOwnStoresArePlacedByName(t *testing.T) {
 		run(t, a)
 		g := a.Graph()
 		got := map[string]string{}
-		for _, id := range []string{"people/store/members", "kit.privacy/store/keys", "kit.privacy/store/holds", "kit.privacy/store/journal"} {
+		for _, id := range []string{"people/store/members", "app.privacy/store/keys", "app.privacy/store/holds", "app.privacy/store/journal"} {
 			got[id] = g.Node(id).Store.Database
 		}
-		exp := map[string]string{"people/store/members": "database", "kit.privacy/store/keys": want, "kit.privacy/store/holds": want, "kit.privacy/store/journal": want}
+		exp := map[string]string{"people/store/members": "database", "app.privacy/store/keys": want, "app.privacy/store/holds": want, "app.privacy/store/journal": want}
 		if !maps.Equal(got, exp) {
 			t.Errorf("Keeps(app.Privacy) %v: %v, want %v", keeps, got, exp)
 		}
@@ -67,13 +67,13 @@ func TestACopyOfAnAppMountsItsOwnPrivacy(t *testing.T) {
 	must(t, cp.Start(t.Context()))
 	mounted := 0
 	for _, n := range cp.Graph().Nodes {
-		if n.ID == "kit.privacy" {
+		if n.ID == "app.privacy" {
 			mounted++
 		}
 	}
 	must(t, cp.Stop(ctx))
 	if mounted != 1 {
-		t.Errorf("the copy mounts kit.privacy %d times", mounted)
+		t.Errorf("the copy mounts app.privacy %d times", mounted)
 	}
 	// The original runs again, for its cleanup to stop it.
 	must(t, a.Start(t.Context()))

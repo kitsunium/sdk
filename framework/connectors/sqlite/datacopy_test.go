@@ -153,18 +153,18 @@ func TestDataCopyIntoSQLite(t *testing.T) {
 	if n := count("registry__dossiers"); n != 2 {
 		t.Errorf("the dossiers' table holds %d rows, want 2", n)
 	}
-	if n := count("kit_queue__registry__filed"); n != 3 {
+	if n := count("app_queue__registry__filed"); n != 3 {
 		t.Errorf("the subscription's table holds %d messages, want 3", n)
 	}
 	var box []byte
-	if err := db.QueryRowContext(t.Context(), `SELECT payload FROM "kit_queue__registry__notify__outbox"`).Scan(&box); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT payload FROM "app_queue__registry__notify__outbox"`).Scan(&box); err != nil {
 		t.Fatalf("the outbox's table: %v", err)
 	}
 	if bytes.Contains(box, []byte("holder@registry.test")) {
 		t.Errorf("the mail rests in clear in the outbox's table: %s", box)
 	}
 	var deliveries int
-	if err := db.QueryRowContext(t.Context(), `SELECT deliveries FROM "kit_queue__registry__filed" WHERE payload = ?`, []byte(`"retried"`)).Scan(&deliveries); err != nil || deliveries != 3 {
+	if err := db.QueryRowContext(t.Context(), `SELECT deliveries FROM "app_queue__registry__filed" WHERE payload = ?`, []byte(`"retried"`)).Scan(&deliveries); err != nil || deliveries != 3 {
 		t.Errorf("the retried message's count on the table = %d, %v; want 3", deliveries, err)
 	}
 	for _, q := range []string{filepath.Join("registry", "queues", "filed"), filepath.Join("registry", "outbox", "notify")} {

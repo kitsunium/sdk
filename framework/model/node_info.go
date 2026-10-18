@@ -102,8 +102,8 @@ const (
 	// SecretFromEnv is the environment: the variable, or the file its _FILE
 	// form names.
 	SecretFromEnv string = core.SecretFromEnv
-	// SecretFromFile is kit's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,
-	// or .kit/secrets/dev in dev.
+	// SecretFromFile is the framework's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,
+	// or the data directory's .secrets in dev.
 	SecretFromFile string = core.SecretFromFile
 	// SecretFromMemory is a store in the process's memory: a test, or
 	// <PRODUCT>_SECRETS=memory. A generated secret is made again at every start.

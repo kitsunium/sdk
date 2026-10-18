@@ -292,6 +292,16 @@ const (
 	// the one that replaces it, and carries this code.
 	CodeRenamed errs.Code = iapp.CodeRenamed
 
+	// CodeRenameTarget refuses a start that meets data a former release kept
+	// under the tool's name while its present name is taken too (ADR 0180
+	// step 5): nothing is moved, and both names are said.
+	CodeRenameTarget errs.Code = iapp.CodeRenameTarget
+
+	// CodeRenameFailed refuses a start whose move of a name at rest did not
+	// complete (ADR 0180 step 5): what was not moved stays readable under its
+	// former name, and the next start resumes the move.
+	CodeRenameFailed errs.Code = iapp.CodeRenameFailed
+
 	// The signals the framework ends one of its own steps with and catches itself — a
 	// caller never receives one —, typed when the SDK made rule 2 a gate.
 	CodeSealErased errs.Code = iapp.CodeSealErased

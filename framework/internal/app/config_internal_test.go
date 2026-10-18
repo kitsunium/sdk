@@ -121,7 +121,7 @@ func TestTheLastOfInMemoryAndDataDirWins(t *testing.T) {
 		for _, opt := range c.opts {
 			opt.appConfigure(&o)
 		}
-		if dir, _ := resolveDataDir(&o, getenv, true); dir != c.want {
+		if dir, _, _ := resolveDataDir(&o, getenv, true); dir != c.want {
 			t.Errorf("%s: the data directory is %q; want %q", c.name, dir, c.want)
 		}
 	}

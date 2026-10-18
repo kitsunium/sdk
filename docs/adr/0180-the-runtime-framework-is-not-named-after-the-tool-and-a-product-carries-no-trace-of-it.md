@@ -311,7 +311,7 @@ nothing.
 | 2 | platform | `kit dev` injects the hook by overlay; the generator stops writing `dev_gen.go`; `kit check` refuses a product's import of the Studio subsystem; the todo deletes `kitdev.go`, moderation its import |
 | 3 | SDK | The rename of §1, a design edit first (ADR 0163, 0167, 0168): `design/framework/app.yaml`, `kit gen`, `make api`, `make docs-readme`; the facade's and implementation's paths; `model` `Version` 6; the scripts, `BUILD.bazel`, `//:audit_sources`, `tools/alloc-lane-targets.txt` and `codes.ranges` owners re-pointed; the three database connectors follow; the texts of §2 reworded — done (2026-10-18, §Step 3, done) |
 | 4 | SDK | The runtime names of §3: the prefix, the routes, the tag key, the graph values, the telemetry name; the refusals of an old name at the start (§3, Q12) — done (2026-10-18, §Step 4, done) |
-| 5 | SDK | The names at rest (Q5, Q6): the tables, the migration set, the secret prefix, the dev data directory — renamed by a framework migration —, the domain-separation labels re-sealed under new ones, the old ones removed in a later minor (Q6) |
+| 5 | SDK | The names at rest (Q5, Q6): the tables, the migration set, the secret prefix, the dev data directory — renamed by a framework migration —, the domain-separation labels re-sealed under new ones, the old ones removed in a later minor (Q6) — split in two: 5a done (2026-10-18, §Step 5a, done): the tables, the migration set, the dev data directory and the privacy service moved; 5b to come: the secret prefix and the labels, re-sealed |
 | 6 | SDK | `TestAProductCarriesNoTraceOfTheTool`, with an empty allow-list; it can land earlier with an allow-list shrinking step by step, as ADR 0179's `stillInCore` did |
 | 7 | platform | Its ADR for §5: the header, the digest line, the skeletons, the seed variable, the design's `apiVersion`, the lock, the version pin; the analyzer and `subsystem.Table` on the new paths; `internal/modelts` regenerated for `Version` 6; the Studio's client on the new prefix; the reference regenerated, and its guard |
 | 8 | products | todo, moderation, statusline: the import path and `kit.` → `app.` (a rewrite of the import path and the package qualifier, then the 14 shadowing files by hand), the struct tags (moderation's 174), the variables in Dockerfiles, compose files and CI, `.gitignore` |
@@ -583,6 +583,133 @@ doclinks`, `gofumpt -l` and `make lint-ktn-check`. The refusals were seen red
 before green: with the two checks stubbed out, the tests of the variables and
 of the tags fail where they should.
 
+### Step 5a, done (2026-10-18)
+
+Step 5 is two changes, because two of its names are not names at rest
+alone. A table, the migration set, a directory are found by their name and
+hold bytes that do not mention it: moving them is a rename, and renamed
+back, the data is the former release's again. The secret prefix and the
+labels are bound into what is sealed: the SDK's keyring binds the secret's
+name into every box and every wrapped data key
+(`internal/service/security/secret`, `Keyring.binding`: the name, then the
+version), so `kit-data-key` renamed is every data key re-wrapped and every
+box under it re-sealed — Q6's re-seal, not Q5's rename —, and the store
+offers no rename that keeps a version's number, which the binding names
+too. 5a moves what moves; 5b (to come) re-seals what is sealed, with the
+secret prefix. 5a re-seals nothing, which is what keeps it undoable.
+
+| Was | Is |
+|---|---|
+| the framework's version table `kit_migrations`, its set named `kit` | `app_migrations`, the set named `app`; the history taken whole — every version, name and instant |
+| its registry `kit_tables` (and `kit_tables___ix`) | `app_tables`, each record re-keyed under its table's present name |
+| a consumer's queue `kit_queue__<service>__<name>` (a command's `__command`, a mailer's outbox `__outbox`) | `app_queue__…` |
+| the privacy service's stores on a database `kit_privacy__<store>` (with `___ix`, `___vs`) | `app_privacy__…`; on PostgreSQL the indexes and constraints named after a table follow it |
+| dev's default data directory `.kit/data` | `.app/data`; `.kit` goes only when nothing is left in it — the tool's own state stays |
+| the framework's own service `kit.privacy`, its directory `<data>/kit.privacy/` | `app.privacy`, `<data>/app.privacy/` |
+
+The ADR named the categories, not the names; each takes the framework's name
+(Q1), as step 4's `/_app/` and `app:"…"` did: `app_migrations`, `app_tables`,
+`app_queue__`, `app_privacy__`, the set `app`, `.app/data`, `app.privacy`.
+The module names `app` and `kit` are both reserved: `app` because its
+version table would be `app_migrations`, `kit` because what a former
+release kept may still be met under it — a database not yet started, a
+rolled-back one — and because the privacy service's sealed values stay
+bound to `kit.privacy` until 5b; it is released with the labels.
+
+**The move, in the data directory** (`framework/internal/app/renamed_rest.go`).
+When the app resolves — the start and every command, before anything reads
+the directory —, dev's `.kit/data` (only when no directory is named: a
+`<PRODUCT>_DATA_DIR` or an `app.DataDir` is the operator's) and the data
+directory's `kit.privacy` are moved by rename(2), never copied: every byte
+is the one the former release wrote. Both moves are judged before either
+runs; when the second fails once the first ran, the first is renamed back.
+
+**The move, on a database** (`storeengine/rename.go`, through
+`plug.StoreDriverConfig.FormerTables`/`RenameTables`). The core names every
+table it keeps both ways (`renamePlan`; a `kitTable`'s `former`); the store
+subsystem reads the catalogue (`pg_tables`, `information_schema.tables`,
+`sqlite_master`) and moves what is still under a former name, a document
+store's `___ix` and `___vs` with their table. The move is a migration of
+`kit_migrations` (version `math.MaxInt64`, above every generation the
+framework gives): the SDK's migrator holds that table's lock — the one a
+former release takes, so the two never run together (ADR 0055 §D7, ADR 0140
+on SQLite) — and records the move in the transaction that makes it. In it:
+every version `kit_migrations` records is copied into `app_migrations`
+(which the SDK's migrator made, with its own DDL), the tables are renamed —
+on MySQL in one `RENAME TABLE`, which it runs whole or not at all —,
+PostgreSQL's indexes named after a table are renamed with it (an index
+renamed renames its constraint), and the history's names of the tables'
+migrations are the present ones (`docstore kit_tables` → `docstore
+app_tables`). Once recorded, `kit_migrations` is dropped; a drop that fails
+is done by the next start. Then the core re-keys the registry's records
+(`tableRegistry.rekey`). No row of a moved table is read or written by the
+move. Every step is idempotent — a table already moved is not moved again,
+a version already copied is not copied twice —, so a run MySQL's implicit
+commits stopped completes when it runs again; on PostgreSQL and SQLite a
+failed step rolls the whole move back. A table the build no longer declares
+keeps its name: it is the product's to drop.
+
+**Never replacing** (`CodeRenameTarget`, `0.4.2.86`, reason
+`RENAME_TARGET_TAKEN`, public "data a former release kept is also under its
+present name: nothing was moved"). When a former name and its present one
+both exist — a directory, a table, one of its derived tables —, the start is
+refused, both named, and nothing moves: on a database the refusal is judged
+on the pool before anything is made, and again under the lock. Which one
+holds the product's data is the operator's to say.
+
+**A move that did not complete** (`CodeRenameFailed`, `0.4.2.87`, reason
+`RENAME_FAILED`, public "data a former release kept could not be moved to
+its present name: it stays where it was"): a rename the system refused, a
+statement the database did not run. What was not moved stays under its
+former name, readable, and the next start resumes. A database that migrates
+manually (`<name>-migrate: manual`) refuses to start while a table is under
+its former name (`DATABASE_MIGRATIONS_PENDING`, naming `<product> migrate
+up`); `migrate status` lists them, `migrate up` moves them.
+
+**What does not move in 5a, and why.** The secret prefix `kit-`
+(`kit-data-key`, `kit-index-key`, `kit-smtp-url`): the keyring binds the
+name, above. The labels `kit/v1 sealed at rest`, `kit/v1 subject
+reference`, `kit/v1 record reference`, `kit/v1 database index key`,
+`kit:subject`, `kit:fingerprint`. And what the privacy service's own stores
+are bound to: a sealed value is bound to its store's node id, so the
+journal's and the holds' boxes keep binding `kit.privacy/store/…`
+(`sealedAs`), and a record's own data key keeps its reference under that id;
+a journal entry a former release wrote names `kit.privacy/store/keys`, and
+its chain forbids rewriting it (`ownService` reads both). Re-sealing these
+is 5b; until then the binary still holds those strings, which step 6's
+allow-list names.
+
+**Held by** — on a former release's data, not on this release's renamed by
+hand: `framework/connectors/sqlite/testdata/former`, written on 2026-10-18
+by the release before this step (a product with sealed personal fields, a
+subject, revisions, former values, the trash, an erased person, a held case,
+a held tally, the privacy journal, a letter delivered and one still queued;
+on SQLite with the privacy service on the file, and in the data directory
+alone), with what that release read of it. `former_move_test.go`: `migrate
+up` moves it and every row of every table and every file of the data
+directory is the former one, byte for byte, but the registry's keys and the
+history's names; `privacy journal -verify` and `privacy holds` print what
+the former release printed; the product reads the same cases, versions,
+former values, trash and a person's data opened, the erased person erased,
+the kept letter delivered; a second start moves nothing and no name of the
+database contains `kit`; a present name taken refuses the start and changes
+nothing; a renaming the database refuses half-way leaves every table where
+it was and the next start moves them; and renaming back restores the
+fixture byte for byte. The PostgreSQL and MySQL suites (`former_test.go`,
+servers in Docker) make the former layout by renaming back what this release
+wrote, then hold the same: every row as it was, no table, index or
+constraint naming `kit`, the refusal, and the half-way failure resumed.
+`renamed_rest_test.go` holds dev's directory. Seen red before green: with
+`sealedAs` taken out, the journal and the holds no longer open; with the
+move taken out, every test of it fails; on PostgreSQL without the index
+renames, the constraints still name `kit`.
+
+**Verified.** `GOWORK=off go test -race ./...` in the root module and in the
+four connector modules (`postgres` and `mysql` also against servers in
+Docker), `kit gen -check`, genindex `-check-api -markers -digests`, the
+guards of `scripts/pre-commit/`, `make guard`, `make doclinks`, `gofumpt -l`
+and `make lint-ktn-check`.
+
 ### Impact
 
 - **The SDK.** Under `framework/`, 694 Go files mention the word (7 012
@@ -690,6 +817,42 @@ licence: a minor of the root module and of each connector module
   sets `KIT_ENV` is refused by a product on this release (step 7).
 - *A telemetry collector* reads the handshake `app-telemetry/v1`, the wire
   unchanged.
+
+**Step 5a, landed (2026-10-18).** The names at rest, under the same v0
+licence: a minor of the root module and of each connector module
+(`release:minor`).
+
+- *The first start of a product that ran a release before this one* moves,
+  once, before anything is read: in dev `.kit/data` to `.app/data`; in the
+  data directory `kit.privacy` to `app.privacy`; on each database the
+  framework keeps tables on, `kit_migrations`, `kit_tables`, `kit_queue__…`
+  and `kit_privacy__…` to `app_…`, its log saying what moved. Nothing is
+  copied and nothing re-sealed. A database that migrates manually refuses
+  to start until `<product> migrate up` has moved them.
+- *Stop every process of the former release first*, as for any migration:
+  a former release started after the move finds no table under its names,
+  makes empty ones, and the next start of this release is then refused
+  (`CodeRenameTarget`) rather than replacing either.
+- *A refusal* names both places; keep the one that holds the product's data
+  and move the other aside — nothing is ever overwritten.
+- *`.gitignore`*: a product that ignored `.kit/` ignores `.app/` too.
+- *Going back* to the release before, before its first start (and before the
+  minor that removes the old labels, which 5b brings): since 5a re-seals
+  nothing, renaming back is the whole of it. Stop the product, then
+  - in the data directory: `mv <data>/app.privacy <data>/kit.privacy`; in
+    dev, `mv .app/data .kit/data`;
+  - on each database: rename every `app_privacy__*`, `app_queue__*`,
+    `app_tables*` table back to `kit_…` and `app_migrations` to
+    `kit_migrations` — on PostgreSQL the indexes named `app_…` too —, then
+    in `kit_tables` replace `app_privacy__`/`app_queue__` by `kit_privacy__`/
+    `kit_queue__` in `doc_key` and `doc`, and in `kit_migrations` replace
+    `app_privacy__`, `app_queue__` and `app_tables` in `name`. The
+    statements, for each engine, are `renameTablesBack`,
+    `renameRegistryBack` and `renameHistoryBack` in
+    `framework/connectors/{postgres,mysql}/former_test.go`, and
+    `renameBack` for SQLite in `framework/connectors/sqlite/former_move_test.go`,
+    which shows the result is the former release's database byte for byte.
+  Then start the former release. The next start of this one moves again.
 
 ## Alternatives considered
 
@@ -799,6 +962,7 @@ clear, and accepting both keeps the old names longer.
 | Accepted | the owner's decision, 2026-10-17 | Q1 answered `framework/app`, the recommendation of Q2 to Q12 retained as written; each question replaced by its *Decision* line; the status, the header (*Accepted*, *Amends*), the placeholder name replaced by `app`, and the passages that depended on an open question (§1's table, §4's hook, §5, migration step 0 and 5, the cost, §Breaking changes, §Deferred) updated. No other text changed |
 | Accepted, step 1 done | 2026-10-17 | The migration table marks step 1 done; §Step 1, done records the Studio's routes, guard and handlers in `studiokit` behind `plug.Studio` (`StudioDriverConfig`: `Env`, `Settings`, `Forced`, `DevBuild`, `Mount`), reading the app through `plug.StudioHost`, which the core implements and only `EnableStudio` reaches; the event stream and the profiler `studiokit`'s own, their hooks gone; the tool's nine variables read by `studiokit` alone; the probes, the reserved `/_kit/`, the captured mail's header (shared with `Mailer.Captured`) and the dev announcement kept in the core for step 4; the initgraph test's `studioCode` and `toolVariables`; and the measure — the smallest product 2.1 kB of code and 4.0 kB of file less, none of the tool's names, and §Context's "compiled into every production binary" corrected: the handlers were already unlinked without the Studio. No decision changed |
 | Accepted, step 4 done | 2026-10-18 | The migration table marks step 4 done; §Step 4, done records the runtime names — the operator's variables under the product's prefix and reserved in its namespace, `/_app/health/*` and `/_app/api/*`, `app:"…"`, the graph's `"app"` values and its `app` fields, the checks, loops, owner column and actor named `app`, `app_node`/`app_loop`, `X-Attachments`, `app-telemetry/v1`, `model.VarEnv` and its siblings holding the name after the prefix —, what keeps the tool's name (its nine variables, §3) and what waits for step 5 (the names at rest, and `kit.privacy`, whose stores rest under its name), the refusals of Q12 (`CodeRenamed` 0.4.2.85, `DiagnosticsError.Renamed`: a variable, a tag; a former probe path answering, logged as deprecated); §Breaking changes says what an operator and a product change. No decision changed |
+| Accepted, step 5a done | 2026-10-18 | The migration table splits step 5 and marks 5a done; §Step 5a, done records the names at rest moved, never copied and never replacing — `kit_migrations` (its history taken by `app_migrations`, the set `app`), `kit_tables`, `kit_queue__…`, `kit_privacy__…` (with their derived tables and PostgreSQL's indexes) to `app_…` by a migration of `kit_migrations` under its lock, `.kit/data` to `.app/data`, `kit.privacy` to `app.privacy` with its directory —, the refusals (`CodeRenameTarget` 0.4.2.86, `CodeRenameFailed` 0.4.2.87), why the secret prefix and the labels are 5b's (the keyring binds the secret's name; a sealed value binds its store's node id), the module name `kit` kept reserved, and what holds it, a former release's data in `connectors/sqlite/testdata/former`; §Breaking changes says what the first start does and how to go back. No decision changed |
 | Accepted, step 3 done | 2026-10-18 | The migration table marks step 3 done; §Step 3, done records the rename — `framework/app`, `apptest`, `framework/internal/app` and its engines `storeengine`, `queueengine`, `workflowengine`, `mailengine`, `jobengine`, `serverengine`, `studioengine`, `design/framework/app.yaml`, the codes at their values under re-pointed owners, `model.Version` 6 with `ProvenanceApp`, `PortOwnerApp` and `SettingAppDev` —, the texts of §2 and what they leave to steps 4 and 5; §Breaking changes gives a product's migration, a rewrite of the import path and the qualifier then the shadowing files; §4 records what the platform found at step 2, `kit dev` building with a `go.mod` outside the tree (`-modfile`). No decision changed |
 
 ## Deferred

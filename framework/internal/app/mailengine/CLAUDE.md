@@ -36,7 +36,7 @@ held as `any`, which this package asserts back.
 ## Rules
 
 - It imports `plug`, `storeengine` and `queueengine` (the SDK's handles of a database the store subsystem opened and of a queue the queue subsystem opened, typed — ADR 0179 Q4: the mailers depend on the queues and the stores) and the SDK, never kit's core: the core imports no `*kit` package (ADR 0179 §3), and kit's own suites plug it in through `framework/app/mail` (`framework/internal/app/subsystems_test.go`).
-- The bytes at rest are unchanged: the same spool directories (`<data>/<service>/outbox/<mailer>`), the same sealed tables (`kit_queue__<service>__<mailer>__outbox`); the sealing is kit's, in the queue subsystem's broker.
+- The bytes at rest are unchanged: the same spool directories (`<data>/<service>/outbox/<mailer>`), the same sealed tables (`app_queue__<service>__<mailer>__outbox`, `kit_queue__…` before ADR 0180 step 5, which the core moves); the sealing is kit's, in the queue subsystem's broker.
 - A refusal of the SDK reaches the core as the SDK's error, which the core wraps in its own codes (`CodeMailQueue`, `CodeMailEncode`, `CodeMailConfig`, `CodeMailPanic`) where its open and send paths wrap it; the core never matches a mail sentinel itself — it asks `plug.MailDriverConfig`'s `Refused`.
 
 ## Verify

@@ -1015,6 +1015,24 @@ The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is th
 
 Code `0.4.2.77`
 
+<a name="CodeRenameFailed"></a>
+```go
+const CodeRenameFailed errs.Code = 262743
+```
+
+CodeRenameFailed refuses a start whose move of a name at rest to its present name did not complete (ADR 0180 step 5): a directory the system would not rename, a statement the database did not run. What was not moved stays under its former name, readable as it was, and the next start resumes the move.
+
+Code `0.4.2.87`
+
+<a name="CodeRenameTarget"></a>
+```go
+const CodeRenameTarget errs.Code = 262742
+```
+
+CodeRenameTarget refuses a start that meets what a former release kept under the tool's name — a table, the privacy service's directory, the dev data directory — while its present name is taken too (ADR 0180 step 5): the framework never replaces one with the other, so nothing is moved and both are named. What rests under the former name stays as it was, readable by the release that wrote it.
+
+Code `0.4.2.86`
+
 <a name="CodeRenamed"></a>
 ```go
 const CodeRenamed errs.Code = 262741
@@ -1550,7 +1568,7 @@ PerUID is the current user: one process per user of the machine (its UID on Unix
 var Privacy *Service
 ```
 
-Privacy is the framework's own service: the data keys, the legal holds and the privacy journal of an app that keeps personal data or seals what it keeps. The framework mounts a copy of it — named kit.privacy, a name no service of a product can take — in every app whose stores keep personal data or declare a retention, or that keeps sealed values at rest, before the product's services. Its stores stay in the data directory unless the product places them (ADR 0004): app.Keeps(app.Privacy). On a SQLite database its data keys stay in the data directory all the same — a key is written apart from every transaction, and the file's one writer may be held by the transaction of the write that needs it —; its holds and its journal go there. A product never mounts it itself.
+Privacy is the framework's own service: the data keys, the legal holds and the privacy journal of an app that keeps personal data or seals what it keeps. The framework mounts a copy of it — named app.privacy, a name no service of a product can take — in every app whose stores keep personal data or declare a retention, or that keeps sealed values at rest, before the product's services. Its stores stay in the data directory unless the product places them (ADR 0004): app.Keeps(app.Privacy). On a SQLite database its data keys stay in the data directory all the same — a key is written apart from every transaction, and the file's one writer may be held by the transaction of the write that needs it —; its holds and its journal go there. A product never mounts it itself.
 
 <a name="After"></a>
 ## func [After](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/request.go>)
@@ -4634,7 +4652,7 @@ type StoreConfigurer interface {
 
 StoreService is a typed, keyed collection of entities. Every read returns a copy and every write stores one: an entity is kept as its JSON encoding, so what a handler holds can never alias what the store holds, and the memory and file backends behave identically.
 
-With a data directory (\<PRODUCT>\_DATA\_DIR; ".kit/data" in dev) the store persists every write before returning, atomically — a crash never leaves a torn file — and a write costs one entity, whatever the store holds. Without one, it lives in memory. A store a database keeps ([Database](#Database), [Keeps](#Keeps)) lives in a table of it, and every call is a round trip. A store is a port (ADR 0004): what it runs on is its engine (store\_engine.go) — the SDK's document store, in memory, in files or over SQL —; the framework makes it a node of the graph, observes every call, and speaks for its refusals. Its writes join the transaction their context carries ([Transact](#Transact)).
+With a data directory (\<PRODUCT>\_DATA\_DIR; ".app/data" in dev) the store persists every write before returning, atomically — a crash never leaves a torn file — and a write costs one entity, whatever the store holds. Without one, it lives in memory. A store a database keeps ([Database](#Database), [Keeps](#Keeps)) lives in a table of it, and every call is a round trip. A store is a port (ADR 0004): what it runs on is its engine (store\_engine.go) — the SDK's document store, in memory, in files or over SQL —; the framework makes it a node of the graph, observes every call, and speaks for its refusals. Its writes join the transaction their context carries ([Transact](#Transact)).
 
 ```go
 type StoreService[T any] struct{}

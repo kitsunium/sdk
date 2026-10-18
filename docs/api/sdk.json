@@ -1288,6 +1288,38 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.CodeRenameFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "CodeRenameFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262743",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app.CodeRenameFailed",
+      "code": {
+        "value": "0.4.2.87"
+      },
+      "doc": "CodeRenameFailed refuses a start whose move of a name at rest did not\ncomplete (ADR 0180 step 5): what was not moved stays readable under its\nformer name, and the next start resumes the move.\n",
+      "file": "framework/app/errors.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/app.CodeRenameTarget",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "CodeRenameTarget",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262742",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app.CodeRenameTarget",
+      "code": {
+        "value": "0.4.2.86"
+      },
+      "doc": "CodeRenameTarget refuses a start that meets data a former release kept\nunder the tool's name while its present name is taken too (ADR 0180\nstep 5): nothing is moved, and both names are said.\n",
+      "file": "framework/app/errors.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.CodeRenamed",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -3208,7 +3240,7 @@
       "spelled": "*Service",
       "canonical": "*github.com/kitsunium/sdk/framework/app.Service",
       "init": "go:github.com/kitsunium/sdk/framework/internal/app.Privacy",
-      "doc": "Privacy is the framework's own service: the legal holds and the privacy journal of\nan app that keeps personal data. The framework mounts a copy of it — named\nkit.privacy, a name no service of a product can take — in every app whose\nstores keep personal data or declare a retention, before the product's\nservices. Its stores stay in the data directory unless the product places\nthem (ADR 0004). A product never mounts it itself.\n",
+      "doc": "Privacy is the framework's own service: the legal holds and the privacy journal of\nan app that keeps personal data. The framework mounts a copy of it — named\napp.privacy, a name no service of a product can take — in every app whose\nstores keep personal data or declare a retention, before the product's\nservices. Its stores stay in the data directory unless the product places\nthem (ADR 0004). A product never mounts it itself.\n",
       "file": "framework/app/privacy.go",
       "layer": "framework"
     },
@@ -3676,7 +3708,7 @@
       "spelled": "[T any] iapp.StoreService[T]",
       "canonical": "[T any] github.com/kitsunium/sdk/framework/internal/app.StoreService[T]",
       "owner": "go:github.com/kitsunium/sdk/framework/internal/app.StoreService",
-      "doc": "Store is a typed, keyed collection of entities. Every read returns a copy\nand every write stores one: an entity is kept as its JSON encoding, so what\na handler holds can never alias what the store holds, and the memory and\nfile backends behave identically.\n\nWith a data directory (<PRODUCT>_DATA_DIR; \".kit/data\" in dev) the store persists\nevery write before returning, atomically — a crash never leaves a torn\nfile — and a write costs one entity, whatever the store holds. Without one,\nit lives in memory. A store is a port (ADR 0004): what it runs on is its\nengine (store_engine.go), today the SDK's document store (docstore); the framework\nmakes it a node of the graph, observes every call, and speaks for its\nrefusals.\n",
+      "doc": "Store is a typed, keyed collection of entities. Every read returns a copy\nand every write stores one: an entity is kept as its JSON encoding, so what\na handler holds can never alias what the store holds, and the memory and\nfile backends behave identically.\n\nWith a data directory (<PRODUCT>_DATA_DIR; \".app/data\" in dev) the store persists\nevery write before returning, atomically — a crash never leaves a torn\nfile — and a write costs one entity, whatever the store holds. Without one,\nit lives in memory. A store is a port (ADR 0004): what it runs on is its\nengine (store_engine.go), today the SDK's document store (docstore); the framework\nmakes it a node of the graph, observes every call, and speaks for its\nrefusals.\n",
       "file": "framework/app/store.go",
       "layer": "framework"
     },
@@ -6433,6 +6465,36 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.CodeRenameFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "CodeRenameFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262743",
+      "code": {
+        "value": "0.4.2.87"
+      },
+      "doc": "CodeRenameFailed refuses a start whose move of a name at rest to its\npresent name did not complete (ADR 0180 step 5): a directory the\nsystem would not rename, a statement the database did not run. What\nwas not moved stays under its former name, readable as it was, and\nthe next start resumes the move.\n",
+      "file": "framework/internal/app/codes_gen.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.CodeRenameTarget",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "CodeRenameTarget",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262742",
+      "code": {
+        "value": "0.4.2.86"
+      },
+      "doc": "CodeRenameTarget refuses a start that meets what a former release\nkept under the tool's name — a table, the privacy service's\ndirectory, the dev data directory — while its present name is taken\ntoo (ADR 0180 step 5): the framework never replaces one with the\nother, so nothing is moved and both are named. What rests under the\nformer name stays as it was, readable by the release that wrote it.\n",
+      "file": "framework/internal/app/codes_gen.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.CodeRenamed",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -8938,7 +9000,7 @@
       "name": "Privacy",
       "spelled": "*Service",
       "canonical": "*github.com/kitsunium/sdk/framework/internal/app.Service",
-      "doc": "Privacy is the framework's own service: the data keys, the legal holds and the\nprivacy journal of an app that keeps personal data or seals what it\nkeeps. The framework mounts a copy of it — named kit.privacy, a name no service of a\nproduct can take — in every app whose stores keep personal data or declare\na retention, or that keeps sealed values at rest, before the product's\nservices. Its stores stay in the data directory unless the product places\nthem (ADR 0004): app.Keeps(app.Privacy). On a SQLite database its data\nkeys stay in the data directory all the same — a key is written apart\nfrom every transaction, and the file's one writer may be held by the\ntransaction of the write that needs it —; its holds and its journal go\nthere. A product never mounts it itself.\n",
+      "doc": "Privacy is the framework's own service: the data keys, the legal holds and the\nprivacy journal of an app that keeps personal data or seals what it\nkeeps. The framework mounts a copy of it — named app.privacy, a name no service of a\nproduct can take — in every app whose stores keep personal data or declare\na retention, or that keeps sealed values at rest, before the product's\nservices. Its stores stay in the data directory unless the product places\nthem (ADR 0004): app.Keeps(app.Privacy). On a SQLite database its data\nkeys stay in the data directory all the same — a key is written apart\nfrom every transaction, and the file's one writer may be held by the\ntransaction of the write that needs it —; its holds and its journal go\nthere. A product never mounts it itself.\n",
       "file": "framework/internal/app/privacy.go",
       "layer": "framework"
     },
@@ -9924,7 +9986,7 @@
       "name": "StoreService",
       "spelled": "[T any] struct{}",
       "canonical": "[T any] struct{}",
-      "doc": "StoreService is a typed, keyed collection of entities. Every read returns a copy\nand every write stores one: an entity is kept as its JSON encoding, so what\na handler holds can never alias what the store holds, and the memory and\nfile backends behave identically.\n\nWith a data directory (<PRODUCT>_DATA_DIR; \".kit/data\" in dev) the store persists\nevery write before returning, atomically — a crash never leaves a torn\nfile — and a write costs one entity, whatever the store holds. Without one,\nit lives in memory. A store a database keeps ([Database], [Keeps]) lives\nin a table of it, and every call is a round trip. A store is a port (ADR\n0004): what it runs on is its engine (store_engine.go) — the SDK's\ndocument store, in memory, in files or over SQL —; the framework makes it a node of\nthe graph, observes every call, and speaks for its refusals. Its writes\njoin the transaction their context carries ([Transact]).\n",
+      "doc": "StoreService is a typed, keyed collection of entities. Every read returns a copy\nand every write stores one: an entity is kept as its JSON encoding, so what\na handler holds can never alias what the store holds, and the memory and\nfile backends behave identically.\n\nWith a data directory (<PRODUCT>_DATA_DIR; \".app/data\" in dev) the store persists\nevery write before returning, atomically — a crash never leaves a torn\nfile — and a write costs one entity, whatever the store holds. Without one,\nit lives in memory. A store a database keeps ([Database], [Keeps]) lives\nin a table of it, and every call is a round trip. A store is a port (ADR\n0004): what it runs on is its engine (store_engine.go) — the SDK's\ndocument store, in memory, in files or over SQL —; the framework makes it a node of\nthe graph, observes every call, and speaks for its refusals. Its writes\njoin the transaction their context carries ([Transact]).\n",
       "file": "framework/internal/app/store.go",
       "layer": "framework"
     },
@@ -13023,6 +13085,18 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.RefusalRenameTarget",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "RefusalRenameTarget",
+      "spelled": "Refusal",
+      "canonical": "github.com/kitsunium/sdk/framework/internal/app/plug.Refusal",
+      "value": "23",
+      "doc": "RefusalRenameTarget is a table whose present name is taken while its\nformer one still holds the framework's data (ADR 0180 step 5); its\n\"tables\" field names them, and nothing was moved.\n",
+      "file": "framework/internal/app/plug/store_refusal.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.RefusalStatement",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
@@ -13176,6 +13250,72 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.RenameSpec",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "RenameSpec",
+      "spelled": "struct{FormerVersions string; Versions string; Name string; Tables []RenameValue; Labels []RenameValue; Version uint64}",
+      "canonical": "struct{FormerVersions string; Versions string; Name string; Tables []github.com/kitsunium/sdk/framework/internal/app/plug.RenameValue; Labels []github.com/kitsunium/sdk/framework/internal/app/plug.RenameValue; Version uint64}",
+      "fields": [
+        {
+          "name": "FormerVersions",
+          "type": "string",
+          "doc": "FormerVersions is the version table the framework's set had: the move\nholds its migration lock, is recorded there, and drops it once the\nhistory is the present table's.\n"
+        },
+        {
+          "name": "Versions",
+          "type": "string",
+          "doc": "Versions is the version table the framework's set has now.\n"
+        },
+        {
+          "name": "Name",
+          "type": "string",
+          "doc": "Name labels the move in FormerVersions, at Version.\n"
+        },
+        {
+          "name": "Tables",
+          "type": "[]RenameValue",
+          "doc": "Tables are the tables moved, each from its former name to its present\none.\n"
+        },
+        {
+          "name": "Labels",
+          "type": "[]RenameValue",
+          "doc": "Labels are the names of the tables' migrations in the history, each\nfrom what the former release recorded to what this one says.\n"
+        },
+        {
+          "name": "Version",
+          "type": "uint64",
+          "doc": "Version is the move's version in FormerVersions: above every version\nthe framework gives.\n"
+        }
+      ],
+      "doc": "RenameSpec is the framework's tables on a database moved to their present\nnames (ADR 0180 step 5): each table — with the tables the document store\nderives from it, <table>___ix and <table>___vs —, the history of the\nformer version table taken by the present one, and the names that\nhistory gives the tables' migrations.\n",
+      "file": "framework/internal/app/plug/store.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.RenameValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
+      "name": "RenameValue",
+      "spelled": "struct{From string; To string}",
+      "canonical": "struct{From string; To string}",
+      "fields": [
+        {
+          "name": "From",
+          "type": "string",
+          "doc": "From is the former name.\n"
+        },
+        {
+          "name": "To",
+          "type": "string",
+          "doc": "To is the present one.\n"
+        }
+      ],
+      "doc": "RenameValue is one name replaced by another: a table's, or a migration's\nname in a version table.\n",
+      "file": "framework/internal/app/plug/store.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app/plug.SampleProcess",
       "kind": "var",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
@@ -13318,8 +13458,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app/plug",
       "name": "StoreDriverConfig",
-      "spelled": "struct{Open func(cfg StoreConfig) (StoreEngine, error); Database func(cfg DatabaseConfig) (Database, error); TableMigration func(dialect string, t TableSpec, version uint64) (MigrationValue, error)}",
-      "canonical": "struct{Open func(cfg github.com/kitsunium/sdk/framework/internal/app/plug.StoreConfig) (github.com/kitsunium/sdk/framework/internal/app/plug.StoreEngine, error); Database func(cfg github.com/kitsunium/sdk/framework/internal/app/plug.DatabaseConfig) (github.com/kitsunium/sdk/framework/internal/app/plug.Database, error); TableMigration func(dialect string, t github.com/kitsunium/sdk/framework/internal/app/plug.TableSpec, version uint64) (github.com/kitsunium/sdk/framework/internal/app/plug.MigrationValue, error)}",
+      "spelled": "struct{Open func(cfg StoreConfig) (StoreEngine, error); Database func(cfg DatabaseConfig) (Database, error); TableMigration func(dialect string, t TableSpec, version uint64) (MigrationValue, error); FormerTables func(ctx context.Context, db Database, plan RenameSpec) ([]string, error); RenameTables func(ctx context.Context, db Database, plan RenameSpec) ([]string, error)}",
+      "canonical": "struct{Open func(cfg github.com/kitsunium/sdk/framework/internal/app/plug.StoreConfig) (github.com/kitsunium/sdk/framework/internal/app/plug.StoreEngine, error); Database func(cfg github.com/kitsunium/sdk/framework/internal/app/plug.DatabaseConfig) (github.com/kitsunium/sdk/framework/internal/app/plug.Database, error); TableMigration func(dialect string, t github.com/kitsunium/sdk/framework/internal/app/plug.TableSpec, version uint64) (github.com/kitsunium/sdk/framework/internal/app/plug.MigrationValue, error); FormerTables func(ctx context.Context, db github.com/kitsunium/sdk/framework/internal/app/plug.Database, plan github.com/kitsunium/sdk/framework/internal/app/plug.RenameSpec) ([]string, error); RenameTables func(ctx context.Context, db github.com/kitsunium/sdk/framework/internal/app/plug.Database, plan github.com/kitsunium/sdk/framework/internal/app/plug.RenameSpec) ([]string, error)}",
       "fields": [
         {
           "name": "Open",
@@ -13335,6 +13475,16 @@
           "name": "TableMigration",
           "type": "func(dialect string, t TableSpec, version uint64) (MigrationValue, error)",
           "doc": "TableMigration is the migration that makes the table t on a database\nof the dialect named, at version.\n"
+        },
+        {
+          "name": "FormerTables",
+          "type": "func(ctx context.Context, db Database, plan RenameSpec) ([]string, error)",
+          "doc": "FormerTables are the tables of plan still under a former name on db —\nits former version table among them —, read from the database's\ncatalogue, sorted: what RenameTables would move; none once moved.\n"
+        },
+        {
+          "name": "RenameTables",
+          "type": "func(ctx context.Context, db Database, plan RenameSpec) ([]string, error)",
+          "doc": "RenameTables moves the tables of plan to their present names on db\n(ADR 0180 step 5), under the migration lock of plan's former version\ntable and in the transaction that records the move there, and returns\nthe tables it moved; none when nothing was left under a former name.\nA table whose present name is taken too is a [RefusalRenameTarget],\nand nothing moves.\n"
         }
       ],
       "doc": "StoreDriverConfig is what framework/app/store plugs into kit: how a\nstore's engine opens, how the framework opens its scope on a database, and the\nmigration that makes one of the framework's tables.\n",
@@ -22833,7 +22983,7 @@
       "canonical": "string",
       "value": "\"file\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.SecretFromFile",
-      "doc": "SecretFromFile is kit's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,\nor .kit/secrets/dev in dev.\n",
+      "doc": "SecretFromFile is the framework's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,\nor the data directory's .secrets in dev.\n",
       "file": "framework/model/node_info.go",
       "layer": "framework"
     },
@@ -28579,13 +28729,13 @@
           "name": "Name",
           "type": "string",
           "tag": "json:\"name\"",
-          "doc": "Name is the set's origin: \"kit\", \"product\", or a module's name.\n"
+          "doc": "Name is the set's origin: \"app\", \"product\", or a module's name.\n"
         },
         {
           "name": "Table",
           "type": "string",
           "tag": "json:\"table\"",
-          "doc": "Table is its version table: \"kit_migrations\", \"schema_migrations\".\n"
+          "doc": "Table is its version table: \"app_migrations\", \"schema_migrations\".\n"
         },
         {
           "name": "Applied",
@@ -30771,7 +30921,7 @@
       "spelled": "untyped string",
       "canonical": "untyped string",
       "value": "\"file\"",
-      "doc": "SecretFromFile is kit's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,\nor .kit/secrets/dev in dev.\n",
+      "doc": "SecretFromFile is the framework's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,\nor the data directory's .secrets in dev.\n",
       "file": "framework/model/internal/core/node_info.go",
       "layer": "framework"
     },

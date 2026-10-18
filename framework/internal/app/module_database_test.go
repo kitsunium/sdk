@@ -87,7 +87,7 @@ func TestAModulesMigrationsRunOnItsDatabase(t *testing.T) {
 		sets = append(sets, s.Name+" "+s.Table)
 	}
 	// kit's own first: the module's store lives on the archive.
-	if !slices.Equal(sets, []string{"kit kit_migrations", "notebook notebook_migrations"}) {
+	if !slices.Equal(sets, []string{"app app_migrations", "notebook notebook_migrations"}) {
 		t.Errorf("the archive's sets: %v", sets)
 	}
 }

@@ -153,7 +153,7 @@ func TestDataCopyMovesTheDataDirectoryIntoTheDatabase(t *testing.T) {
 	if journal := db.Documents("archive__flow__workflow"); !strings.Contains(journal["n2"], `"closed"`) {
 		t.Fatalf("the workflow's journal on the database = %v, want n2 closed", journal)
 	}
-	if msgs := db.Messages("kit_queue__archive__read"); len(msgs) != 4 {
+	if msgs := db.Messages("app_queue__archive__read"); len(msgs) != 4 {
 		t.Fatalf("the queue's table holds %d messages, want 4: %q", len(msgs), msgs)
 	}
 	if _, err := os.Stat(readQueue(dir)); !os.IsNotExist(err) {

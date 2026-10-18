@@ -3113,6 +3113,14 @@ codes:
     const: CodeRenamed
     hex: "0x00_04_02_55"
     package: framework/internal/app
+  - code: "0.4.2.86"
+    const: CodeRenameTarget
+    hex: "0x00_04_02_56"
+    package: framework/internal/app
+  - code: "0.4.2.87"
+    const: CodeRenameFailed
+    hex: "0x00_04_02_57"
+    package: framework/internal/app
   - code: "0.4.3.1"
     const: CodeMisconfigured
     hex: "0x00_04_03_01"

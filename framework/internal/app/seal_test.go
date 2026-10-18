@@ -499,7 +499,7 @@ func TestDataKeyRotationRewrapsTheKeys(t *testing.T) {
 	for _, h := range []Holding{{ID: "h1", Owner: "ann", Note: "ann's holding"}, {ID: "h2", Note: "nobody's holding"}} {
 		must(t, holdings.Insert(ctx, h))
 	}
-	dataKey := func() *model.SecretInfo { return a.Graph().Node("kit.privacy/secret/data-key").Secret }
+	dataKey := func() *model.SecretInfo { return a.Graph().Node("app.privacy/secret/data-key").Secret }
 	for n := 1; n <= 4; n++ {
 		armed(t, clk, 1)
 		clk.Advance(30*24*time.Hour + time.Second)

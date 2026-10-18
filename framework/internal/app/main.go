@@ -22,7 +22,7 @@ Environment:
   %[1]s_ADDR, PORT
       where to listen (dev: 127.0.0.1:4000, production: :4000)
   %[1]s_DATA_DIR
-      where stores and queues persist (dev: .kit/data)
+      where stores and queues persist (dev: .app/data)
   %[1]s_SMTP_URL
       where mailers deliver: smtp://user:password@host:587?tls=starttls,
       or %[1]s_SMTP_URL_FILE naming a file that holds it

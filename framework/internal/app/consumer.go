@@ -46,8 +46,8 @@ const (
 )
 
 // queueTableService is what a queue's table is named under, in place of a
-// service: kit_queue__<service>__<consumer>.
-const queueTableService string = "kit_queue"
+// service: app_queue__<service>__<consumer>.
+const queueTableService string = frameworkName + "_queue"
 
 var (
 	// consumerHow is how a consumer loop is said to wake, in the Studio.
@@ -65,11 +65,23 @@ type queueOwner interface {
 }
 
 // queueTable is the table of the queue of the consumer b, kept under under,
-// on the database that keeps it (ADR 0178 C1): kit_queue__<service>__<name>,
+// on the database that keeps it (ADR 0178 C1): app_queue__<service>__<name>,
 // a queued command's ending __command and a mailer's outbox __outbox, so
 // that a subscription, a command and a mailer of one name keep three queues
 // as their directories do.
 func queueTable(b *nodeBase, under string) string {
+	return tableName(queueTableService, b.svc.name, queueSuffix(b, under))
+}
+
+// formerQueueTable is the name a former release gave that table:
+// kit_queue__<service>__<name>, before ADR 0180 step 5.
+func formerQueueTable(b *nodeBase, under string) string {
+	return tableName(formerQueueService, b.svc.name, queueSuffix(b, under))
+}
+
+// queueSuffix is what a queue's table name ends with after its service's:
+// the consumer's name, and what it is kept under.
+func queueSuffix(b *nodeBase, under string) string {
 	suffix := "__" + b.name
 	switch under {
 	case underCommands:
@@ -79,7 +91,7 @@ func queueTable(b *nodeBase, under string) string {
 	default:
 		// A subscription's or a watch's: the consumer's name alone.
 	}
-	return tableName(queueTableService, b.svc.name, suffix)
+	return suffix
 }
 
 // consumerPolicy is the policy of every consumer's queue: a message is leased

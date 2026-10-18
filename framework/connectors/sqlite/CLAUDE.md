@@ -78,3 +78,16 @@ own transactions; inside `app.Transact` on the file a case written and
 held, a hold of kit's own, a sealed letter published and a sealed reminder
 dispatched, delivered and opened after the commit. With the keys on the
 file, each waited the 5 s busy timeout, then failed `SEAL_WRITE`.
+`former_test.go` declares the product `testdata/former` was written by — a
+release before ADR 0180 step 5, on SQLite (`former/sqlite`: `kit_*` tables, a
+`kit.privacy` directory) and in the data directory alone (`former/files`),
+with what it read then (`dump.json`, `journal.txt`, `holds.txt`); never
+regenerate it with this release, whose names are the present ones.
+`former_move_test.go` moves it and reads it back: every row and every file
+byte for byte, the journal's chain and the holds as the former release
+printed them, the cases, versions, former values, trash and a person's data
+opened, the kept letter delivered, nothing moved by a second start; a
+present name taken refuses the start and nothing moves; a renaming the
+database refuses half-way rolls the move back and the next start resumes;
+and the move is undone by renaming back — the procedure ADR 0180 gives —,
+which restores the fixture byte for byte.

@@ -37,7 +37,7 @@ type postOffice struct {
 }
 
 // outboxTable is the post office's outbox, as kit names it.
-const outboxTable = "kit_queue__post__notify__outbox"
+const outboxTable = "app_queue__post__notify__outbox"
 
 // The mail's words, which must never rest in clear in the outbox's table.
 const (

@@ -1340,8 +1340,8 @@ packages:
         value: "\"env\""
       - blockDoc: Where a running app found a secret.
         doc: |-
-          SecretFromFile is kit's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,
-          or .kit/secrets/dev in dev.
+          SecretFromFile is the framework's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,
+          or the data directory's .secrets in dev.
         name: SecretFromFile
         type: string
         value: "\"file\""
@@ -3085,8 +3085,8 @@ packages:
         value: "\"env\""
       - blockDoc: Where a running app found a secret.
         doc: |-
-          SecretFromFile is kit's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,
-          or .kit/secrets/dev in dev.
+          SecretFromFile is the framework's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,
+          or the data directory's .secrets in dev.
         name: SecretFromFile
         value: "\"file\""
       - blockDoc: Where a running app found a secret.
@@ -7214,11 +7214,11 @@ packages:
         name: MigrationSetMessage
         struct:
           fields:
-            - doc: "Name is the set's origin: \"kit\", \"product\", or a module's name."
+            - doc: "Name is the set's origin: \"app\", \"product\", or a module's name."
               name: Name
               tag: json:"name"
               type: string
-            - doc: "Table is its version table: \"kit_migrations\", \"schema_migrations\"."
+            - doc: "Table is its version table: \"app_migrations\", \"schema_migrations\"."
               name: Table
               tag: json:"table"
               type: string

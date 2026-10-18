@@ -29,7 +29,7 @@ import (
 // leaves the store's files.
 //
 // A hash-chained append-only log is a mechanism the SDK lacks, so the
-// journal is a store of kit's own, kit.privacy/store/journal, on the SDK's
+// journal is a store of kit's own, app.privacy/store/journal, on the SDK's
 // document store, until the SDK has one (step 4). The chain is computed over
 // an entry's JSON before anything seals it: sealing (step 3) must hash
 // first, and verify what it opened. An entry's reason is sealed under the
