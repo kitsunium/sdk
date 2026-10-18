@@ -286,7 +286,12 @@ own SIGKILLs — `Stop`'s escalation and `teardown` — are resent until the rea
 (§Stop). The
 shell therefore stays the leader, so a fixture without a private group runs
 `shellOnlyWait` — a read from a FIFO the test made, nothing beneath the
-shell — since its cleanup kills the leader's pid alone;
+shell — since its cleanup kills the leader's pid alone; and so does a fixture
+that needs its group EMPTY once the leader is reaped
+(`Test_handle_signalGroupAllowGone`): a forked `sleep` outlives the kill as
+an orphaned zombie only init reaps, and darwin answers a zombie-only group
+whose leader was collected with `EPERM`, a refusal `Stop` cannot read as gone
+(§Stop);
 `creds_unix_internal_test.go` pins `UnknownUser` / `UnknownGroup`.
 `Test_applyNice` and `Test_applyPostStart` apply every niceness to a
 disposable child (`niceChild`: a shell blocked on a pipe the test closes, so
