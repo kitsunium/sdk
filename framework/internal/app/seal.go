@@ -119,6 +119,9 @@ type sealer struct {
 	// 5c).
 	dual  *derivedKeys
 	locks *sealLocks
+	// onWait, nil but in a test, runs when a destruction first finds a
+	// stripe it needs taken (alone).
+	onWait func()
 }
 
 // sealLocks order, per data key, the writes that seal under it and its
@@ -167,7 +170,10 @@ func (z *sealer) alone(ctx context.Context, refs ...string) (func(), error) {
 	locks := z.locks.stripes(refs)
 	deadline := time.Now().Add(aloneFor)
 	wait := 100 * time.Microsecond
-	for !tryAll(locks) {
+	for tries := 0; !tryAll(locks); tries++ {
+		if tries == 0 && z.onWait != nil {
+			z.onWait()
+		}
 		if time.Now().After(deadline) {
 			return nil, failure(CodeSealShred, "SEAL_SHRED_BUSY", "a data key could not be destroyed: writes under it did not end", nil)
 		}

@@ -348,8 +348,9 @@ func (h *historied) sealFormer(ctx context.Context, key, ref string) error {
 // moveFormer seals again, under to, the former values of the record under
 // key sealed under from: a held record's, moved away from its person
 // before their key is destroyed. A value whose key is destroyed stays as it
-// is: nothing opens it.
-func (h *historied) moveFormer(ctx context.Context, key, from, to string) error {
+// is: nothing opens it. opened, when not nil, runs between a value's
+// opening and its sealing again.
+func (h *historied) moveFormer(ctx context.Context, key, from, to string, opened func()) error {
 	return h.rewriteFormer(ctx, key, func(p string, value json.RawMessage) (json.RawMessage, error) {
 		if ref, _ := boxRef(value); ref != from {
 			return value, nil
@@ -360,6 +361,9 @@ func (h *historied) moveFormer(ctx context.Context, key, from, to string) error 
 			return value, nil
 		case err != nil:
 			return nil, err
+		}
+		if opened != nil {
+			opened()
 		}
 		return h.toHistory(ctx, key, p, to, v)
 	})

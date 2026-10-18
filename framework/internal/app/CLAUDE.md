@@ -393,8 +393,11 @@ has the map): before writing something generic here, look for it there.
   step 5a's move still meets them, and `kit.privacy`'s ids are read. Held by
   `renamed_refs_internal_test.go` (a pass refused at each of its writes,
   resumed at once and after a restart, ending where an uninterrupted one
-  does; a hold filed twice listed once; an erasure during the pass leaving
-  no key) and `connectors/sqlite`'s `testdata/former-refs` in
+  does; a hold filed twice listed once; an erasure during a move — the pass
+  paused by the test hook `privacyRun.relabelOpened` between opening a
+  former value and sealing it again, the erasure parked on the history's
+  writer or on the stripes (`sealer.onWait`) — and one before the pass,
+  leaving no key) and `connectors/sqlite`'s `testdata/former-refs` in
   `former_refs_test.go`, with the PostgreSQL and MySQL suites'
   `former_refs_test.go` (the fixture copied by `data copy`).
 - **The core reads none of the tool's variables.** `KIT_DEV_*`,

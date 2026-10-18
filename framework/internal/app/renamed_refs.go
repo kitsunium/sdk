@@ -281,16 +281,27 @@ func (s *storeCore) applyMoves(ctx context.Context, key string, moves []keyMove,
 			return s.said(err, key, "")
 		}
 	}
+	opened := s.relabelOpened(key)
 	var failed []error
 	for _, m := range moves {
 		if h := s.historied(); former && h != nil {
-			failed = append(failed, h.moveFormer(ctx, key, m.from, m.to))
+			failed = append(failed, h.moveFormer(ctx, key, m.from, m.to, opened))
 		}
 		if versions {
 			failed = append(failed, s.moveVersions(ctx, key, m.from, m.to))
 		}
 	}
 	return errors.Join(failed...)
+}
+
+// relabelOpened is what runs when the pass has opened a former value of the
+// record under key and not yet sealed it again: nil but in a test.
+func (s *storeCore) relabelOpened(key string) func() {
+	a := s.app()
+	if a == nil || a.privacy.relabelOpened == nil {
+		return nil
+	}
+	return func() { a.privacy.relabelOpened(s.id, key) }
 }
 
 // subjectKept is the subject of the record under key — its newest version's

@@ -1101,8 +1101,11 @@ are, then hold the same. `renamed_refs_internal_test.go`: a pass refused at
 each of its 18 writes, resumed at once and after a restart, reads as before
 the pass and ends where an uninterrupted one does; a hold filed twice — the
 pass stopped between its two writes — is listed once and holds its record;
-an erasure running during the pass leaves no key of the person (ten rounds,
-under the race detector). The 5a, 5b and 5c-1 fixtures read as before: their
+an erasure that comes while the pass holds a former value it opened under the
+person's former key and has not sealed again — the pass paused there by a
+hook, the erasure observed parked or ended, never a timing — leaves no key of
+the person and nothing of her readable, and so does an erasure before the
+pass (50 runs under the race detector). The 5a, 5b and 5c-1 fixtures read as before: their
 `privacy holds` after the start lists the present references. Seen red
 before green: with an erasure destroying the present key alone, the former
 keys outlive it and ivy's and leo's notes, and dan's from a backup, read
@@ -1110,9 +1113,21 @@ again; without the pass, every former key still seals what it sealed; with
 the former hold removed before the new one is written, a pass interrupted
 between the two loses the hold; with a hold whose key no longer opens filed
 again, a backup taken before the pass and restored after it makes keys
-again for the held. Not
-seen red: the shared stripes during a move (the race the erasure test runs is
-not reproduced without them).
+again for the held.
+
+**Two things hold an erasure off a move, each enough alone, shown so.** A
+value is opened and sealed again inside the writer of the document it rests
+in (`moveFormer`'s, `moveVersions`' and the record's `Update`), which the
+erasure needs to clear the record: paused after the opening, the pass holds
+the erasure parked on the history's writer — so the pass with its shared
+stripes taken out still holds; and the stripes of both keys are held shared,
+which the erasure's destruction needs alone. With the move made to seal
+outside the writer, the erasure parks on the stripes instead, and the test
+holds; with that and the stripes taken out, the erasure ends inside the move
+and the move then makes the person's present key again — red. The order the
+other way, an erasure before the pass, leaves the pass nothing of the person
+to open: the record is cleared, its history deleted, its versions rewritten,
+before either key goes.
 
 **Verified.** `GOWORK=off go test -race ./...` in the root module, in
 `internal`'s security packages and `pkg/v1/security`, and in the four

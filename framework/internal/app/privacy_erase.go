@@ -306,7 +306,7 @@ func (s *storeCore) moveOwn(ctx context.Context, a *App, key string) error {
 	var moved []error
 	for _, from := range keys.personRefs(id) {
 		if h := s.historied(); h != nil {
-			moved = append(moved, h.moveFormer(ctx, key, from, to))
+			moved = append(moved, h.moveFormer(ctx, key, from, to, nil))
 		}
 		// Its versions too (ADR 0007 §4): a hold keeps them readable.
 		moved = append(moved, s.moveVersions(ctx, key, from, to))

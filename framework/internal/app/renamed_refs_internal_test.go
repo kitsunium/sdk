@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -323,39 +324,125 @@ func TestAHoldFiledTwiceIsOneHold(t *testing.T) {
 	}
 }
 
-// An erasure that runs while the pass moves a person's records never leaves a
-// key of theirs behind: whichever goes first, both of the person's data keys
-// are gone once both end, and nothing of theirs reads — the pass holds the
-// stripes of the keys it moves shared, the erasure takes them alone.
-func TestAnErasureDuringTheReSealLeavesNoKey(t *testing.T) {
-	needsFileStore(t)
-	for round := range 10 {
-		app, cards := relabelApp(t, t.TempDir())
-		seedFormer(t, app, cards)
-		ctx := t.Context()
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			app.relabel(ctx)
-		}()
-		if _, err := app.erase(ctx, "the person asked", []string{"ann"}); err != nil {
-			t.Fatalf("round %d: the erasure: %v", round, err)
+// annIsGone checks that nothing of ann is left: neither of her two data keys,
+// and nothing of her by any way the store reads — her card, its former
+// notes, its versions.
+func annIsGone(t *testing.T, app *App, cards *StoreService[card]) {
+	t.Helper()
+	ctx := t.Context()
+	keys, err := app.derivedKeys(ctx)
+	must(t, err)
+	for _, ref := range []string{keys.present.personRef("ann"), keys.former.personRef("ann")} {
+		if _, err := app.privacyKeyStore().engine().Get(ctx, ref); !plug.Refused(err, plug.RefusalNotFound) {
+			t.Errorf("ann's data key %s outlived her erasure: %v", ref, err)
 		}
-		<-done
-		keys, err := app.derivedKeys(ctx)
-		must(t, err)
-		for _, ref := range keys.personRefs("ann") {
-			if _, err := app.privacyKeyStore().engine().Get(ctx, ref); !plug.Refused(err, plug.RefusalNotFound) {
-				t.Errorf("round %d: ann's data key %s outlived the erasure: %v", round, ref, err)
-			}
-		}
-		c, err := cards.Get(ctx, "c1")
-		must(t, err)
-		former, err := cards.Former(ctx, "c1", "/note")
-		must(t, err)
-		if c.Note != "" || slices.ContainsFunc(former, func(f Former) bool { return strings.Contains(string(f.Value), "ann") }) {
-			t.Errorf("round %d: ann reads after her erasure: %+v %+v", round, c, former)
-		}
-		must(t, app.Stop(ctx))
 	}
+	c, err := cards.Get(ctx, "c1")
+	must(t, err)
+	former, err := cards.Former(ctx, "c1", "/note")
+	must(t, err)
+	revs, err := cards.Revisions(ctx, "c1")
+	must(t, err)
+	read := fmt.Sprintf("%+v %+v %+v", c, former, revs)
+	if strings.Contains(read, "ann's") {
+		t.Errorf("ann reads after her erasure: %s", read)
+	}
+}
+
+// erasureParked reports where the erasure — the goroutine running
+// App.erase — is parked, read from the goroutines' stacks: "history" when it
+// waits for the history's writer, "" while it is not parked there.
+func erasureParked() string {
+	buf := make([]byte, 1<<20)
+	buf = buf[:runtime.Stack(buf, true)]
+	for g := range strings.SplitSeq(string(buf), "\n\n") {
+		if strings.Contains(g, "app.(*App).erase(") && strings.Contains(g, "sync.(*Mutex).Lock") && strings.Contains(g, "app.(*historied).put(") {
+			return "history"
+		}
+	}
+	return ""
+}
+
+// An erasure that comes while the pass holds a former value of a person it
+// has opened under her former key, and not yet sealed under her present one,
+// cannot slip in between: two things hold it, each enough alone. The move
+// runs inside the writer of the record's history (moveFormer's Update), which
+// the erasure needs to clear the record — it waits there, then deletes what
+// the move wrote —; and the pass holds the stripes of both keys shared,
+// which the erasure's destruction needs alone (sealer.alone). Either way the
+// erasure destroys both keys once the move ends — the one the move made
+// among them —, and nothing of her reads. Paused by a hook, never by
+// timing: the test resumes the pass once the erasure is parked, or has
+// ended.
+func TestAnErasureDuringAMoveWaitsForIt(t *testing.T) {
+	needsFileStore(t)
+	app, cards := relabelApp(t, t.TempDir())
+	defer func() { must(t, app.Stop(t.Context())) }()
+	seedFormer(t, app, cards)
+	ctx := t.Context()
+	z, err := app.sealing(ctx)
+	must(t, err)
+	paused, resume, waiting := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var pauseOnce, waitOnce sync.Once
+	app.privacy.relabelOpened = func(_, key string) {
+		if key == "c1" {
+			pauseOnce.Do(func() {
+				close(paused)
+				<-resume
+			})
+		}
+	}
+	z.onWait = func() { waitOnce.Do(func() { close(waiting) }) }
+	passed := make(chan struct{})
+	go func() {
+		defer close(passed)
+		app.relabel(ctx)
+	}()
+	<-paused
+	erased := make(chan error, 1)
+	go func() {
+		_, err := app.erase(ctx, "the person asked", []string{"ann"})
+		erased <- err
+	}()
+	var eraseErr error
+	ended := false
+	for parked := ""; parked == "" && !ended; {
+		select {
+		case <-waiting:
+			parked = "stripes"
+		case eraseErr = <-erased:
+			ended = true
+		default:
+			parked = erasureParked()
+			runtime.Gosched()
+		}
+		if parked != "" {
+			t.Logf("the erasure waits for the move: on the %s", parked)
+		}
+	}
+	if ended {
+		t.Log("the erasure ended inside the move")
+	}
+	close(resume)
+	<-passed
+	if !ended {
+		eraseErr = <-erased
+	}
+	must(t, eraseErr)
+	annIsGone(t, app, cards)
+}
+
+// An erasure before the pass leaves the pass nothing to move for the person:
+// what it finds under her former key no longer opens, so it seals nothing
+// again, and no key of hers is made under the present reference.
+func TestAPassAfterAnErasureMakesNoKey(t *testing.T) {
+	needsFileStore(t)
+	app, cards := relabelApp(t, t.TempDir())
+	defer func() { must(t, app.Stop(t.Context())) }()
+	seedFormer(t, app, cards)
+	_, err := app.erase(t.Context(), "the person asked", []string{"ann"})
+	must(t, err)
+	annIsGone(t, app, cards)
+	app.relabel(t.Context())
+	annIsGone(t, app, cards)
 }
