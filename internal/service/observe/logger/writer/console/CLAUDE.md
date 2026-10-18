@@ -69,6 +69,16 @@ terminal emulator's and is not reproducible.
   (not a constant — the clone is not this package's property), is
   mutation-checked in its own doc comment, and is covered by the race-off alloc
   lane (`tools/alloc-lane-targets.txt`, SDK-wide rule 12).
+- **The gate counts the window's own allocations, not the process's.**
+  `runtime.MemStats.Mallocs` is process-wide: it once failed this gate in CI at
+  "6 allocations, want 0" over 500 bare writes — a path with no allocation site
+  — and passed on the rerun, unchanged. `mallocsOver` now records every
+  allocation in the heap profile (`MemProfileRate = 1`) for the window and counts
+  those whose stack passes through `allocWindow`, the frame only the measured
+  calls have; a stack too deep to tell is counted, and the tiny block is cleared
+  by `ReadMemStats` before the window so a tiny allocation is seen too. No
+  tolerance: one allocation on one write fails it.
+  `TestAllocWindowCountsARealAllocation` is the instrument's negative control.
 - **This SDK's code is 1.94 % of an emit.** `consoleSink.Write` is 21.79 % of
   the CPU profile, of which `internal/poll.(*FD).Write` — the kernel — is
   19.85 %.
