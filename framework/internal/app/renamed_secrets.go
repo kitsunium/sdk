@@ -6,7 +6,9 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
@@ -28,12 +30,19 @@ import (
 // or under data-key pinned by its variable, whose name did not change — and
 // sealed under the present one alone.
 //
-// Nothing a former release kept is ever written, replaced or deleted here:
-// kit-data-key stops rotating and keeps every version it had, so that what it
-// wrapped stays readable until the minor that ends Q12's window, which
-// removes the former names once a pass finds nothing under them. Until then
-// the release before this one still finds its secrets where it left them;
-// what it no longer opens is a data key this one re-wrapped, which
+// An erasure destroys the one wrapped key its subject has, under whichever
+// root wraps it, and folds the store of data keys: in what the product
+// keeps, nothing is left that either root opens. What it cannot reach — a
+// backup of that store, a database's own history of its rows — holds a
+// wrapped copy that opens only while the version that wrapped it is kept,
+// the bound ADR 0142 sets. kit-data-key no longer rotates, so its versions
+// are retired on the schedule its rotation would have pruned them on, once
+// nothing is left under them (retireFormerDataKey): the same bound.
+//
+// Nothing else a former release kept is written, replaced or deleted: until
+// kit-data-key's retirement the release before this one finds its secrets
+// where it left them, and after it a fresh version under the same name;
+// what it does not open is a data key this one re-wrapped, which
 // `privacy rewrap -back` moves back under kit-data-key before it starts.
 
 const (
@@ -173,6 +182,67 @@ func (a *App) formerDataKeyring(ctx context.Context) (*secret.Keyring, error) {
 		return nil, failure(CodeSealKey, "SEAL_FORMER_KEY", "the data-key a former release kept could not be read", err)
 	}
 	return keyring, nil
+}
+
+// retireFormerDataKey destroys what kit-data-key's versions hold once its
+// rotation would have pruned them: when its newest version is older than
+// data-key's Keep times its RotateEvery — the instant data-key's own rotation
+// prunes a version — and a re-wrap pass that read it found no data key
+// under it and none it could not open. The store offers no deletion, so a
+// fresh random version is written under the name and every other version
+// pruned: what a former release wrapped under them — a wrapped key a backup
+// or a database's own history kept of an erased person, a box under
+// data-key itself older than that — stops opening, as it would have under
+// the former release's own rotation (ADR 0142: an erasure is complete
+// everywhere once the version that wrapped the key is pruned). Nothing the
+// running product still needs is under it: every data key moved, and the
+// way back (`privacy rewrap -back`) wraps under the fresh version, which the
+// former release opens. It runs after every clean pass, so a fresh version
+// that wrapped nothing is replaced again a Keep×RotateEvery later.
+func (a *App) retireFormerDataKey(ctx context.Context, z *sealer, report secret.RewrapReport) {
+	kept := a.secretsNow().kept
+	if z.former == nil || kept == nil || report.FromFormer > 0 || report.Unreadable > 0 {
+		return
+	}
+	name := formerSecretPrefix + dataKeySecret
+	retired, due := a.formerRetirementDue(ctx, kept, name)
+	if !due {
+		return
+	}
+	fresh, err := secret.Random(dataKeyBytes)()
+	if err == nil {
+		_, err = kept.Put(ctx, name, fresh)
+	}
+	if err == nil {
+		err = kept.Prune(ctx, name, 1)
+	}
+	if err != nil {
+		logger.Warn(ctx, a.log, "the data-key a former release kept could not be retired: the next clean re-wrap tries again",
+			logger.String("secret", name), logger.String("error", errs.PublicOf(err)))
+		return
+	}
+	logger.Info(ctx, a.log, "the versions of the data-key a former release kept are retired: nothing they wrapped opens any more (ADR 0180 step 5b)",
+		logger.String("secret", name), logger.Int("retired", retired))
+}
+
+// formerRetirementDue reports whether the former data-key name in kept is due
+// for retirement — its newest version older than data-key's Keep times its
+// RotateEvery, the instant data-key's own rotation prunes a version —, and
+// how many versions it holds. A version without its instant is never judged
+// due.
+func (a *App) formerRetirementDue(ctx context.Context, kept secret.Store, name string) (int, bool) {
+	a.privacy.mu.Lock()
+	sec := a.privacy.dataKey
+	a.privacy.mu.Unlock()
+	if sec == nil {
+		return 0, false
+	}
+	versions, err := kept.Versions(ctx, name)
+	if err != nil || len(versions) == 0 || versions[0].Created.IsZero() {
+		return 0, false
+	}
+	bound := versions[0].Created.Add(time.Duration(sec.opts.keep) * sec.opts.every)
+	return len(versions), !a.clock.Now().Before(bound)
 }
 
 // formerOwnSecret is the present name of one of the framework's own secrets

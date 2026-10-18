@@ -320,6 +320,7 @@ go_test(
         "ratelimit_internal_test.go",
         "records_keys_internal_test.go",
         "renamed_rest_test.go",
+        "renamed_secrets_erase_internal_test.go",
         "renamed_secrets_internal_test.go",
         "renamed_test.go",
         "replace_internal_test.go",

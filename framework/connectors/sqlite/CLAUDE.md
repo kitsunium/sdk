@@ -109,4 +109,7 @@ nothing, and everything read with the former secrets gone; an index key
 under both names refused (`CodeRenameTarget`); a copy refused half-way
 (`CodeRenameFailed`) resumed by the next start; `app-data-key` rotated and
 pruned once moved; and `privacy rewrap -back`, the way back, leaving every
-data key under `kit-data-key`.
+data key under `kit-data-key`. `former_keys_erase_test.go`: a person erased
+after the move, their boxes restored from a backup taken just before the
+erasure, opens under neither data-key, nor each alone, nor after `privacy
+rewrap -back`.

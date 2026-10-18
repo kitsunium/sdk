@@ -502,6 +502,7 @@ func (a *App) rewrapDataKeys(ctx context.Context) {
 		report, err = z.keys.Rewrap(ctx)
 		if err == nil {
 			a.saidRewrapped(ctx, report)
+			a.retireFormerDataKey(ctx, z, report)
 			return
 		}
 		logger.Warn(ctx, a.log, "some of the framework's data keys could not be re-wrapped", logger.Int("unreadable", report.Unreadable),

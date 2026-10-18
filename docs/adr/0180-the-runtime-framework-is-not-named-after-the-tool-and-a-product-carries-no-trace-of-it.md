@@ -734,7 +734,7 @@ references are made the same way.
 |---|---|
 | `kit-index-key` in the environment's store | `app-index-key`, its value copied once (its name binds nothing) |
 | `kit-smtp-url` | `app-smtp-url`, copied once, and again when the former is the newer — an operator who went back to the former release and set it there |
-| `kit-data-key` | `app-data-key`, a new secret generated under its name, every data key re-wrapped under it; `kit-data-key` read, never written, never rotated, never deleted |
+| `kit-data-key` | `app-data-key`, a new secret generated under its name, every data key re-wrapped under it; `kit-data-key` read, never wrapped under; retired — one fresh version, the others pruned — on the schedule its rotation would have pruned them on |
 | a box sealed under data-key itself, bound to `kit/v1 sealed at rest` | bound to `app/v1 sealed at rest`; the former label read |
 | the prefix a product's secret, setting or database may not take: `kit-` | `app-` and `kit-` |
 | — | `privacy rewrap [-back]`: the pass now, or every data key back under `kit-data-key` |
@@ -780,16 +780,41 @@ written under a former name or label: a new key is wrapped under
 made and `secrets set` writing under `app-…` — `secrets set kit-smtp-url`
 is refused, naming `app-smtp-url`.
 
-**An erasure stays an erasure.** A destroyed data key is not in the store
-of data keys: the pass has nothing to move, and makes nothing. A box it
-sealed reads as its zero value before and after, and the erased person's
-export stays empty.
+**An erasure stays an erasure, at once, under both roots.** A subject has
+one wrapped key in the store of data keys, under whichever root wraps it —
+never one under each. A person erased after the move has their key under
+`app-data-key`; the erasure destroys it and folds the store, so nothing the
+product keeps opens under either data-key, and `privacy rewrap -back` has
+nothing of theirs to move. A key destroyed before the move is not in the
+store: the pass has nothing to move and makes nothing.
+
+What the product cannot reach is a copy outside its store — a backup of the
+store of data keys, a database's own history of a row (its write-ahead log,
+a row version not yet vacuumed). ADR 0142 bounds it: such a wrapped copy
+opens only while the root version that wrapped it is kept, and data-key's
+rotation prunes a version after Keep × RotateEvery (90 days by default).
+`kit-data-key` no longer rotates, so it would have kept every version it had
+for the whole window. It is retired on the schedule its rotation would have
+followed instead (`retireFormerDataKey`). Once its newest version is older
+than Keep × RotateEvery, a clean re-wrap pass that found no key under it
+writes one fresh random version under the name and prunes every other. The
+store offers no deletion, so this is the only way to destroy a version's
+material. After that, a backup's copy of an erased person's key wrapped under
+`kit-data-key` opens nothing, as it would not have under the former
+release's own rotation. Nothing the running product needs is under those
+versions: every data key moved. A box under data-key itself sealed under
+them is older than the bound, which data-key's own pruning has always
+allowed to read as empty (ADR 0006 §4). The way back still works:
+`privacy rewrap -back` wraps under the fresh version, which the former
+release opens. The retirement runs after every clean pass, so a fresh
+version that wrapped nothing is replaced again Keep × RotateEvery later.
 
 **What 5b does not touch.** The privacy journal (its chain is over the
 entries' plaintext and its references, neither of which changes), the holds,
 every box under a data key (the re-wrap moves the key, never a box), and
-what a former release kept: its three secrets stay byte for byte, so the
-release before this one still finds them.
+what a former release kept: its three secrets stay byte for byte until
+`kit-data-key`'s retirement, so the release before this one still finds
+them.
 
 **What is left for 5c, and for the minor that ends the window.** 5c: the
 labels `kit/v1 subject reference`, `kit/v1 record reference`, `kit/v1
@@ -838,6 +863,14 @@ without `Former` the fixture's journal does not open; without the former
 label the kept notice reads as empty; without the former name's read the
 index key and the SMTP URL are not found before their copy; the SDK's
 engine without its fallback opens nothing the former root wrapped.
+`former_keys_erase_test.go`: a person erased after the move, their boxes
+restored from a backup taken just before the erasure beside the keys as the
+erasure left them, opens under neither data-key — with both, with each
+alone, after `privacy rewrap -back`; seen red with the key destruction taken
+out. `renamed_secrets_erase_internal_test.go`: a backup of the data taken
+before the move, restored beside the present secrets, still opens an erased
+person within ADR 0142's bound, and nothing of them once `kit-data-key` is
+retired past it; seen red with the retirement taken out.
 
 **Verified.** `GOWORK=off go test -race ./...` in the root module, in
 `internal`, and in the four connector modules (`postgres` and `mysql` also
@@ -1000,7 +1033,8 @@ of each connector module (`release:minor`).
   `kit-smtp-url` to `app-index-key` and `app-smtp-url` in the store the
   environment keeps, makes `app-data-key`, and re-wraps every data key
   under it, once, saying on its log how many moved. Nothing a former
-  release kept is written or deleted. The cost is the re-wrap pass every
+  release kept is written or deleted, but `kit-data-key`, retired once its
+  rotation would have pruned its versions (§Step 5b, done). The cost is the re-wrap pass every
   start already ran, plus one write per data key, once (§Step 5b, done:
   5.3 µs a key in memory, the store's write not measured); a product with
   many keys takes that much longer to start the first time. A start
@@ -1021,10 +1055,6 @@ of each connector module (`release:minor`).
   `app-smtp-url`; `secrets set` takes those names (`kit-smtp-url` is refused,
   naming `app-smtp-url`). A pinned `<PRODUCT>_DATA_KEY` or
   `<PRODUCT>_INDEX_KEY` changes nothing.
-- *Backups*: `kit-data-key` keeps every version it had for the window, so a
-  backup's wrapped copy of an erased person's data key stays openable under
-  it until the minor that ends the window deletes it — where its rotation
-  would have pruned that version within three rotations.
 - *Going back* to the release before this one, while the former names are
   still read (until the minor that ends the window): stop the product, run
   `<product> privacy rewrap -back`, which moves every data key back under
@@ -1145,7 +1175,7 @@ clear, and accepting both keeps the old names longer.
 | Accepted, step 1 done | 2026-10-17 | The migration table marks step 1 done; §Step 1, done records the Studio's routes, guard and handlers in `studiokit` behind `plug.Studio` (`StudioDriverConfig`: `Env`, `Settings`, `Forced`, `DevBuild`, `Mount`), reading the app through `plug.StudioHost`, which the core implements and only `EnableStudio` reaches; the event stream and the profiler `studiokit`'s own, their hooks gone; the tool's nine variables read by `studiokit` alone; the probes, the reserved `/_kit/`, the captured mail's header (shared with `Mailer.Captured`) and the dev announcement kept in the core for step 4; the initgraph test's `studioCode` and `toolVariables`; and the measure — the smallest product 2.1 kB of code and 4.0 kB of file less, none of the tool's names, and §Context's "compiled into every production binary" corrected: the handlers were already unlinked without the Studio. No decision changed |
 | Accepted, step 4 done | 2026-10-18 | The migration table marks step 4 done; §Step 4, done records the runtime names — the operator's variables under the product's prefix and reserved in its namespace, `/_app/health/*` and `/_app/api/*`, `app:"…"`, the graph's `"app"` values and its `app` fields, the checks, loops, owner column and actor named `app`, `app_node`/`app_loop`, `X-Attachments`, `app-telemetry/v1`, `model.VarEnv` and its siblings holding the name after the prefix —, what keeps the tool's name (its nine variables, §3) and what waits for step 5 (the names at rest, and `kit.privacy`, whose stores rest under its name), the refusals of Q12 (`CodeRenamed` 0.4.2.85, `DiagnosticsError.Renamed`: a variable, a tag; a former probe path answering, logged as deprecated); §Breaking changes says what an operator and a product change. No decision changed |
 | Accepted, step 5a done | 2026-10-18 | The migration table splits step 5 and marks 5a done; §Step 5a, done records the names at rest moved, never copied and never replacing — `kit_migrations` (its history taken by `app_migrations`, the set `app`), `kit_tables`, `kit_queue__…`, `kit_privacy__…` (with their derived tables and PostgreSQL's indexes) to `app_…` by a migration of `kit_migrations` under its lock, `.kit/data` to `.app/data`, `kit.privacy` to `app.privacy` with its directory —, the refusals (`CodeRenameTarget` 0.4.2.86, `CodeRenameFailed` 0.4.2.87), why the secret prefix and the labels are 5b's (the keyring binds the secret's name; a sealed value binds its store's node id), the module name `kit` kept reserved, and what holds it, a former release's data in `connectors/sqlite/testdata/former`; §Breaking changes says what the first start does and how to go back. No decision changed |
-| Accepted, step 5b done | 2026-10-18 | The migration table splits step 5 in three and marks 5b done; §Step 5b, done records why the re-seal is two changes (what a keyring wraps is bound to the secret's name and moves by a re-wrap; what a reference names re-keys every data key and every box, and the journal's chain records the references: 5c), the secrets `kit-index-key` and `kit-smtp-url` copied to `app-…` once (`CodeRenameTarget` for two index keys, `CodeRenameFailed` for a refused copy — no new code), `app-data-key` made and every data key re-wrapped under it through the SDK's new `SubjectKeysConfig.Former` (`RewrapReport.FromFormer`), the wrapped key itself as the durable mark of the progress, a box under data-key itself sealed under `app/v1 sealed at rest` and read under both labels, `app-` reserved beside `kit-`, `privacy rewrap [-back]`, erasures kept, what 5c and the minor that ends the window do, the measure, and what holds it (`connectors/sqlite/testdata/former-keys`, written by the release before); §Breaking changes says what the first start does, its cost, and the way back. No decision changed |
+| Accepted, step 5b done | 2026-10-18 | The migration table splits step 5 in three and marks 5b done; §Step 5b, done records why the re-seal is two changes (what a keyring wraps is bound to the secret's name and moves by a re-wrap; what a reference names re-keys every data key and every box, and the journal's chain records the references: 5c), the secrets `kit-index-key` and `kit-smtp-url` copied to `app-…` once (`CodeRenameTarget` for two index keys, `CodeRenameFailed` for a refused copy — no new code), `app-data-key` made and every data key re-wrapped under it through the SDK's new `SubjectKeysConfig.Former` (`RewrapReport.FromFormer`), the wrapped key itself as the durable mark of the progress, a box under data-key itself sealed under `app/v1 sealed at rest` and read under both labels, `app-` reserved beside `kit-`, `privacy rewrap [-back]`, an erasure unreadable at once under both roots and `kit-data-key` retired on the schedule its rotation would have pruned it on (ADR 0142's bound for a copy outside the store), what 5c and the minor that ends the window do, the measure, and what holds it (`connectors/sqlite/testdata/former-keys`, written by the release before); §Breaking changes says what the first start does, its cost, and the way back. No decision changed |
 | Accepted, step 3 done | 2026-10-18 | The migration table marks step 3 done; §Step 3, done records the rename — `framework/app`, `apptest`, `framework/internal/app` and its engines `storeengine`, `queueengine`, `workflowengine`, `mailengine`, `jobengine`, `serverengine`, `studioengine`, `design/framework/app.yaml`, the codes at their values under re-pointed owners, `model.Version` 6 with `ProvenanceApp`, `PortOwnerApp` and `SettingAppDev` —, the texts of §2 and what they leave to steps 4 and 5; §Breaking changes gives a product's migration, a rewrite of the import path and the qualifier then the shadowing files; §4 records what the platform found at step 2, `kit dev` building with a `go.mod` outside the tree (`-modfile`). No decision changed |
 
 ## Deferred

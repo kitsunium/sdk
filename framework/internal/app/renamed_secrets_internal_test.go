@@ -21,11 +21,11 @@ import (
 
 // startCards starts a store of cards on the data in dir, in dev — its
 // secrets in the file store beside the data —, and returns it running.
-func startCards(t *testing.T, dir string) (*App, *StoreService[card]) {
+func startCards(t *testing.T, dir string, opts ...AppConfigurer) (*App, *StoreService[card]) {
 	t.Helper()
 	svc := NewService("moved", "Cards whose data keys move, for the step 5b tests.")
 	cards := svc.Store("cards", func(c card) string { return c.ID })
-	a := NewApp("moved", svc).With(DataDir(dir), Listen("127.0.0.1:0"), Env(EnvDev), Analyze(false), Logs(io.Discard))
+	a := NewApp("moved", svc).With(append([]AppConfigurer{DataDir(dir), Listen("127.0.0.1:0"), Env(EnvDev), Analyze(false), Logs(io.Discard)}, opts...)...)
 	must(t, a.Start(t.Context()))
 	return a, cards
 }
