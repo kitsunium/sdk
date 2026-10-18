@@ -155,7 +155,7 @@ func TestAuthSpansDrawNoEdge(t *testing.T) {
 	a := start(t)
 	token := signIn(t, a, "acc_cy", "cy@x.dev", "Cy")
 	call(t, a, "GET /me", noBody, "Cookie", "sid="+token)
-	r := call(t, a, "GET /_kit/api/traces?root=members/endpoint/Me", noBody)
+	r := call(t, a, "GET /_app/api/traces?root=members/endpoint/Me", noBody)
 	var traces []model.Trace
 	r.json(t, &traces)
 	if len(traces) != 1 {
@@ -257,7 +257,7 @@ func TestClientAddress(t *testing.T) {
 		{"on", "::ffff:198.51.100.4", "198.51.100.4"},
 	} {
 		t.Run(c.trust+"/"+c.forwarded, func(t *testing.T) {
-			t.Setenv("KIT_TRUST_PROXY", c.trust)
+			t.Setenv("SHOP_TRUST_PROXY", c.trust)
 			a := start(t)
 			token := signIn(t, a, "acc_ip", "ip@x.dev", "Ip")
 			headers := []string{"Cookie", "sid=" + token, "User-Agent", strings.Repeat("é", 300)}

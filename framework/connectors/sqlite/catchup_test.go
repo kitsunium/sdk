@@ -36,7 +36,7 @@ type watcher struct {
 // writes memos no watch hears —, its data in dir, on a SQLite file.
 func newWatcher(t *testing.T, dir string, watching bool) *watcher {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("BUREAU_SECRETS", "memory")
 	d := &watcher{}
 	svc := app.NewService("bureau", "Memos, screened.")
 	d.memos = svc.Store("memos", func(m memo) string { return m.ID })

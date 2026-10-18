@@ -24,10 +24,10 @@ var Keeper = app.NewService("keeper", "Accounts that remember what they held, fo
 // Holder is an account.
 type Holder struct {
 	ID       string `json:"id"`
-	Email    string `json:"email" kit:"subject,history=3"`
-	Nick     string `json:"nick,omitempty" kit:"public,history=10"`
+	Email    string `json:"email" app:"subject,history=3"`
+	Nick     string `json:"nick,omitempty" app:"public,history=10"`
 	Logins   int    `json:"logins"`
-	Password string `json:"password,omitempty" kit:"secret"`
+	Password string `json:"password,omitempty" app:"secret"`
 }
 
 func (h Holder) Key() string { return h.ID }
@@ -52,8 +52,8 @@ var (
 // data directory.
 func startKeeper(t *testing.T, opts ...app.AppConfigurer) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
-	pinDataKeyWithoutFileStore(t)
+	t.Setenv("KEEPER_SMTP_URL", "")
+	pinDataKeyWithoutFileStore(t, "keeper")
 	a := app.NewApp("keeper", Keeper).With(append([]app.AppConfigurer{
 		app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
 	}, opts...)...)

@@ -100,11 +100,11 @@ const (
 	// SecretFromEnv is the environment: the variable, or the file its _FILE
 	// form names.
 	SecretFromEnv = "env"
-	// SecretFromFile is kit's encrypted file store: KIT_SECRETS=file:<dir>,
+	// SecretFromFile is kit's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,
 	// or .kit/secrets/dev in dev.
 	SecretFromFile = "file"
 	// SecretFromMemory is a store in the process's memory: a test, or
-	// KIT_SECRETS=memory. A generated secret is made again at every start.
+	// <PRODUCT>_SECRETS=memory. A generated secret is made again at every start.
 	SecretFromMemory = "memory"
 	// SecretFromStore is a store the product's code gave kit.
 	SecretFromStore = "store"
@@ -140,7 +140,7 @@ const (
 	SelectDefault = "default" // the default case: the select never blocks
 )
 
-// What a field holds: the classes of a kit tag (ADR 0006).
+// What a field holds: the classes of an app tag (ADR 0006).
 const (
 	// ClassPublic holds nothing personal and nothing secret: the question
 	// was asked.
@@ -702,7 +702,7 @@ type FieldMessage struct {
 	// Doc is the field's comment, when the analyzer found one.
 	Doc string `json:"doc,omitempty"`
 
-	// Class is what the field holds, as its kit tag says (ADR 0006): one of
+	// Class is what the field holds, as its app tag says (ADR 0006): one of
 	// the Class constants, or empty when the field is unclassified. A
 	// subject field is personal unless it is special.
 	Class string `json:"class,omitempty"`

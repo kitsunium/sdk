@@ -85,35 +85,35 @@ func TestTheGraphSaysWhereAModuleIsMounted(t *testing.T) {
 	}
 }
 
-// The environment is the name KIT_ENV gives, lower-cased, and app.Env wins
+// The environment is the name SHOP_ENV gives, lower-cased, and app.Env wins
 // over it as it does for everything else.
 func TestOnlyReadsTheEnvironmentsName(t *testing.T) {
-	t.Setenv("KIT_ENV", "Staging")
+	t.Setenv("SHOP_ENV", "Staging")
 	a := app.NewApp("shop", Shop, Audit, Members).With(app.Mount(ReviewsModule, app.Only("staging")))
 	if !mountsReviews(a) {
-		t.Error("KIT_ENV=Staging does not hold a mount for staging")
+		t.Error("SHOP_ENV=Staging does not hold a mount for staging")
 	}
 	if mountsReviews(a.With(app.Env("production"))) {
 		t.Error("app.Env(production) holds a mount for staging")
 	}
-	t.Setenv("KIT_ENV", "")
+	t.Setenv("SHOP_ENV", "")
 	if !mountsReviews(app.NewApp("shop", Shop, Audit, Members).With(app.Mount(ReviewsModule, app.Only("production")))) {
-		t.Error("an unset KIT_ENV is not production")
+		t.Error("an unset SHOP_ENV is not production")
 	}
 }
 
 // The start resolves the mounts again for the environment it reads: an app
-// declared before KIT_ENV changed mounts what the environment it starts in
+// declared before SHOP_ENV changed mounts what the environment it starts in
 // says, and keeps doing so when it starts again.
 func TestOnlyIsResolvedAgainAtTheStart(t *testing.T) {
-	t.Setenv("KIT_SMTP_URL", "")
-	t.Setenv("KIT_ENV", "")
+	t.Setenv("SHOP_SMTP_URL", "")
+	t.Setenv("SHOP_ENV", "")
 	a := app.NewApp("shop", Shop, Audit, Members).With(app.Mount(ReviewsModule, app.Only("dev")),
 		app.InMemory(), app.Listen("127.0.0.1:0"), app.Analyze(false), app.Logs(io.Discard))
 	if mountsReviews(a) {
 		t.Fatal("a mount for dev holds in production")
 	}
-	t.Setenv("KIT_ENV", "dev")
+	t.Setenv("SHOP_ENV", "dev")
 	for range 2 {
 		if err := a.Start(t.Context()); err != nil {
 			t.Fatalf("start: %v", err)

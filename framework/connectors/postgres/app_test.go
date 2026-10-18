@@ -36,7 +36,7 @@ var migrations = []app.Migration{
 // sets.
 func ledger(t *testing.T, logs io.Writer, opts ...app.DatabaseOption) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("LEDGER_SECRETS", "memory")
 	books := app.NewService("books", "The books.")
 	books.Store("entries", func(e entry) string { return e.ID })
 	return app.NewApp("ledger", books).With(
@@ -87,7 +87,7 @@ func status(t *testing.T, base, path string) int {
 func eventually(t *testing.T, base, what string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
-	for status(t, base, "/_kit/health/ready") != http.StatusOK {
+	for status(t, base, "/_app/health/ready") != http.StatusOK {
 		if time.Now().After(deadline) {
 			t.Fatalf("not ready %s", what)
 		}

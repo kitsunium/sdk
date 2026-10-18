@@ -25,7 +25,7 @@ func Mount(m *Module, opts ...MountOption) AppOption {
 // Prefix serves a module's routes under prefix — "/trust/" — instead of
 // "/<module>/"; "/" shares the product's route space, where a route both
 // declare is refused as any two are. A prefix starts and ends with '/', and
-// never lies under /_kit/.
+// never lies under /_app/, nor under /_kit/ while its probes answer there.
 //
 //go:noinline
 func Prefix(prefix string) MountOption {
@@ -34,7 +34,7 @@ func Prefix(prefix string) MountOption {
 }
 
 // Only makes a mount hold in the environments envs names alone — the name
-// KIT_ENV or [Env] gives, lower-cased, "production" when neither does:
+// <PRODUCT>_ENV or [Env] gives, lower-cased, "production" when neither does:
 //
 //	a := app.NewApp("vigie", identity.Service).
 //		With(app.Mount(debugbar.Module, app.Only("dev", "staging")))

@@ -123,7 +123,7 @@ func (s *storeCore) startTrash(ctx context.Context, a *App) error {
 	if s.trashLength() == 0 {
 		return nil
 	}
-	r.state = a.kitLoop(s.id+" trash", s.id, model.LoopRetention, "purge after "+humanDuration(s.trashLength()), loopOrigin{model.ProvenanceApp, "kit"})
+	r.state = a.kitLoop(s.id+" trash", s.id, model.LoopRetention, "purge after "+humanDuration(s.trashLength()), loopOrigin{model.ProvenanceApp, frameworkName})
 	loopCtx, cancel := context.WithCancel(context.WithoutCancel(a.baseCtx))
 	r.cancel = cancel
 	s.bin.Store(r)

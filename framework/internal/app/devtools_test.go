@@ -60,7 +60,7 @@ func TestLogsAreKeptBesideTheirSpans(t *testing.T) {
 	}
 
 	var logs []model.LogRecord
-	call(t, prod, "GET /_kit/api/logs?trace="+tr.TraceID, noBody).json(t, &logs)
+	call(t, prod, "GET /_app/api/logs?trace="+tr.TraceID, noBody).json(t, &logs)
 	var msgs []string
 	for _, l := range logs {
 		msgs = append(msgs, l.Level+":"+l.Message)
@@ -72,17 +72,17 @@ func TestLogsAreKeptBesideTheirSpans(t *testing.T) {
 		t.Error("records are not oldest first")
 	}
 	logs = nil
-	call(t, prod, "GET /_kit/api/logs?level=warn&node=bench/endpoint/Hello", noBody).json(t, &logs)
+	call(t, prod, "GET /_app/api/logs?level=warn&node=bench/endpoint/Hello", noBody).json(t, &logs)
 	if len(logs) != 1 || logs[0].Message != "careful" {
 		t.Errorf("warn and above: %+v", logs)
 	}
 	logs = nil
-	call(t, prod, "GET /_kit/api/logs?limit=1", noBody).json(t, &logs)
+	call(t, prod, "GET /_app/api/logs?limit=1", noBody).json(t, &logs)
 	if len(logs) != 1 || logs[0].Message != "careful" {
 		t.Errorf("the last record: %+v", logs)
 	}
 	for _, bad := range []string{"level=loud", "limit=0", "limit=x", "limit=5000"} {
-		if r := call(t, prod, "GET /_kit/api/logs?"+bad, noBody); r.status != http.StatusBadRequest {
+		if r := call(t, prod, "GET /_app/api/logs?"+bad, noBody); r.status != http.StatusBadRequest {
 			t.Errorf("%s: %d", bad, r.status)
 		}
 	}
@@ -165,7 +165,7 @@ func TestPayloadsAreKeptRedacted(t *testing.T) {
 		return err == nil
 	})
 	var traces []model.Trace
-	call(t, a, "GET /_kit/api/traces?root=shop/endpoint/CreateItem", noBody).json(t, &traces)
+	call(t, a, "GET /_app/api/traces?root=shop/endpoint/CreateItem", noBody).json(t, &traces)
 	found := false
 	for _, tr := range traces {
 		for _, sp := range tr.Spans {
@@ -191,7 +191,7 @@ func TestTracesThroughANode(t *testing.T) {
 	const sub = "audit/subscription/record"
 	var through []model.Trace
 	eventually(t, "the delivery's span", func() bool {
-		call(t, a, "GET /_kit/api/traces?node="+sub, noBody).json(t, &through)
+		call(t, a, "GET /_app/api/traces?node="+sub, noBody).json(t, &through)
 		return len(through) > 0
 	})
 	for _, tr := range through {
@@ -203,16 +203,16 @@ func TestTracesThroughANode(t *testing.T) {
 		t.Errorf("the delivery's trace starts at %q, want the request that published", through[0].Root)
 	}
 	var rooted []model.Trace
-	call(t, a, "GET /_kit/api/traces?root="+sub, noBody).json(t, &rooted)
+	call(t, a, "GET /_app/api/traces?root="+sub, noBody).json(t, &rooted)
 	if len(rooted) != 0 {
 		t.Errorf("a subscription roots %d traces", len(rooted))
 	}
 	var both []model.Trace
-	call(t, a, "GET /_kit/api/traces?root=shop/endpoint/CreateItem&node="+sub, noBody).json(t, &both)
+	call(t, a, "GET /_app/api/traces?root=shop/endpoint/CreateItem&node="+sub, noBody).json(t, &both)
 	if len(both) == 0 || both[0].TraceID != through[0].TraceID {
 		t.Errorf("rooted at the endpoint and through the subscription: %d traces", len(both))
 	}
-	if r := call(t, a, "GET /_kit/api/traces?node=nowhere", noBody); string(r.body) != "[]\n" {
+	if r := call(t, a, "GET /_app/api/traces?node=nowhere", noBody); string(r.body) != "[]\n" {
 		t.Errorf("through a node nothing went through: %s", r.body)
 	}
 }

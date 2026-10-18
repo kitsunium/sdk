@@ -111,7 +111,7 @@ func TestTheStudioShowsFormerValuesRedacted(t *testing.T) {
 	ctx := t.Context()
 	must(t, Holders.Insert(ctx, Holder{ID: "h1", Email: "a1@x.dev", Nick: "n1", Password: "$test$c2FsdA$aGFzaDE"}))
 	must(t, Holders.Put(ctx, Holder{ID: "h1", Email: "a2@x.dev", Nick: "n2", Password: "$test$c2FsdA$aGFzaDI"}))
-	r := call(t, a, "GET /_kit/api/former?store=keeper/store/holders&key=h1", noBody)
+	r := call(t, a, "GET /_app/api/former?store=keeper/store/holders&key=h1", noBody)
 	var got model.RecordHistory
 	r.json(t, &got)
 	if leaked := mentions(string(r.body), "a1@x.dev", "aGFzaD"); leaked != nil {
@@ -126,7 +126,7 @@ func TestTheStudioShowsFormerValuesRedacted(t *testing.T) {
 			t.Errorf("%s shows %q, want %q", pointer, shown, want)
 		}
 	}
-	if r := call(t, a, "GET /_kit/api/former?store=keeper/store/holders&key=nobody", noBody); r.status != 404 {
+	if r := call(t, a, "GET /_app/api/former?store=keeper/store/holders&key=nobody", noBody); r.status != 404 {
 		t.Errorf("a missing record: %d", r.status)
 	}
 }

@@ -23,7 +23,7 @@ import (
 type member struct {
 	ID    string `json:"id"`
 	Email string `json:"email"`
-	Nick  string `json:"nick" kit:"history=2"`
+	Nick  string `json:"nick" app:"history=2"`
 	State string `json:"state"`
 }
 
@@ -56,8 +56,8 @@ func newRegister() register {
 // runRegister runs the register on db, until the test ends.
 func runRegister(t *testing.T, r register, db *app.FakeDB) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
-	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("REGISTER_SMTP_URL", "")
+	t.Setenv("REGISTER_SECRETS", "memory")
 	t.Setenv("REGISTER_DATABASE_URL", verifiedURL())
 	a := app.NewApp("register", r.svc).With(app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false),
 		app.Logs(&syncBuffer{}), app.DataDir(t.TempDir()), app.Database("database", db.Engine()))
@@ -162,8 +162,8 @@ func TestAWorkflowWakesAtTheCommit(t *testing.T) {
 	for _, b := range backends {
 		t.Run(b.name, func(t *testing.T) {
 			r := newRegister()
-			t.Setenv("KIT_SMTP_URL", "")
-			t.Setenv("KIT_SECRETS", "memory")
+			t.Setenv("REGISTER_SMTP_URL", "")
+			t.Setenv("REGISTER_SECRETS", "memory")
 			t.Setenv("REGISTER_DATABASE_URL", verifiedURL())
 			a := app.NewApp("register", r.svc).With(append([]app.AppConfigurer{
 				app.Listen("127.0.0.1:0"), app.Env(app.EnvDev),

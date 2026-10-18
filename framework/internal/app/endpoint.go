@@ -204,7 +204,7 @@ func parseRoute(route string) (method, path string, wildcards []string, problem 
 	if !strings.HasPrefix(path, "/") || strings.ContainsAny(path, " \t?#") {
 		return "", "", nil, say("route.path", "route", route)
 	}
-	if path == "/_kit" || strings.HasPrefix(path, "/_kit/") {
+	if reservedPath(path) {
 		return "", "", nil, say("route.reserved", "route", route)
 	}
 	for _, m := range wildcardRe().FindAllStringSubmatch(path, -1) {

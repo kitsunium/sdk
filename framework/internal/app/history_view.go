@@ -132,7 +132,7 @@ func (s *storeCore) formerShown(ctx context.Context, key string) (model.RecordHi
 }
 
 // studioFormer is a record's former values, as the Studio's data view shows
-// them (GET /_kit/api/former?store=&key=).
+// them (GET /_app/api/former?store=&key=).
 func (a *App) studioFormer(ctx context.Context, store, key string) (model.RecordHistory, error) {
 	st, ok := a.findNode(store).(formerSource)
 	if !ok {

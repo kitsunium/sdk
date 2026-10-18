@@ -50,9 +50,9 @@ const (
 // SQLite database unless the options say otherwise.
 func newPostOffice(t *testing.T, dir string, opts ...app.AppOption) *postOffice {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
-	t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")
+	t.Setenv("POST_SECRETS", "memory")
+	t.Setenv("POST_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("POST_INDEX_KEY", "an index key of more than 16 bytes")
 	svc := app.NewService("post", "Notices, mailed.")
 	p := &postOffice{}
 	p.notices = svc.Store("notices", func(n notice) string { return n.ID })
@@ -122,7 +122,7 @@ func payloads(t *testing.T, db *stdsql.DB) [][]byte {
 // dead, for the table to be read.
 func TestAMailCommittedIsSealedInTheOutbox(t *testing.T) {
 	needsFileStore(t)
-	t.Setenv("KIT_SMTP_URL", "smtp://127.0.0.1:1?tls=none")
+	t.Setenv("POST_SMTP_URL", "smtp://127.0.0.1:1?tls=none")
 	dir := t.TempDir()
 	p := newPostOffice(t, dir, onSQLite())
 	run(t, p.app)

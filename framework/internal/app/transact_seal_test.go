@@ -28,13 +28,13 @@ type vault struct {
 
 type vaultPerson struct {
 	ID    string `json:"id"`
-	Email string `json:"email" kit:"subject"`
-	Name  string `json:"name" kit:"personal"`
+	Email string `json:"email" app:"subject"`
+	Name  string `json:"name" app:"personal"`
 }
 
 type vaultMemo struct {
 	ID   string `json:"id"`
-	Body string `json:"body" kit:"personal"`
+	Body string `json:"body" app:"personal"`
 }
 
 // errTakeBack rolls a vault's transaction back.
@@ -53,10 +53,10 @@ func eachSealingBackend(t *testing.T, test func(t *testing.T, v *vault, a *app.A
 	} {
 		t.Run(b.name, func(t *testing.T) {
 			needsFileStore(t)
-			t.Setenv("KIT_SMTP_URL", "")
-			t.Setenv("KIT_SECRETS", "memory")
-			t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
-			t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")
+			t.Setenv("VAULT_SMTP_URL", "")
+			t.Setenv("VAULT_SECRETS", "memory")
+			t.Setenv("VAULT_DATA_KEY", "a data key of exactly 32 bytes..")
+			t.Setenv("VAULT_INDEX_KEY", "an index key of more than 16 bytes")
 			v := &vault{svc: app.NewService("vault", "Sealed records, for the transactions' tests.")}
 			v.people = v.svc.Store("people", func(p vaultPerson) string { return p.ID }, app.Purpose("Keep the people"))
 			v.memos = v.svc.Store("memos", func(m vaultMemo) string { return m.ID }, app.Purpose("Keep the memos"))

@@ -134,10 +134,14 @@ packages:
         name: RecordSize
         type: int
         value: "64"
-      - doc: Protocol names the wire this package speaks, in the handshake.
+      - doc: |-
+          Protocol names the wire this package speaks, in the handshake. Since
+          ADR 0180 step 4 it is app-telemetry/v1, a name the product sends; the
+          wire is unchanged, and a collector accepts kit-telemetry/v1 as the
+          same for two minors.
         name: Protocol
         type: string
-        value: "\"kit-telemetry/v1\""
+        value: "\"app-telemetry/v1\""
       - blockDoc: The ring's bounds and default, in events.
         name: MinBuffer
         type: int

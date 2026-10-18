@@ -82,7 +82,7 @@ func (f *fakeHashing) counts() (hashes, verifies int32) {
 type lockAccount struct {
 	ID       string `json:"id"`
 	Logins   int    `json:"logins"`
-	Password string `json:"password,omitempty" kit:"secret"`
+	Password string `json:"password,omitempty" app:"secret"`
 }
 
 // locks is a store of accounts under a policy, in a running app.

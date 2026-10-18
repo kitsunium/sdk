@@ -169,7 +169,7 @@ func nodeAttr(attrs []logger.Attr) (node string, rest []logger.Attr) {
 
 // shownAttrs are the attributes the Studio shows, at most maxLogAttrs: a
 // group flattens into dotted keys, a structured value becomes JSON, and a
-// secret — by its key, or by a field tagged kit:"secret" — is redacted.
+// secret — by its key, or by a field tagged app:"secret" — is redacted.
 func shownAttrs(attrs []logger.Attr) map[string]string {
 	var out map[string]string
 	for key, text := range redactor.Attrs(attrs, maxLogText) {
@@ -247,7 +247,7 @@ func (h *hub) recentLogs(f logFilter, limit int) []model.LogRecord {
 }
 
 // studioLogs are the latest records the hub keeps, as the Studio's
-// GET /_kit/api/logs?trace=&node=&level=&limit= asks them: of a trace, of a
+// GET /_app/api/logs?trace=&node=&level=&limit= asks them: of a trace, of a
 // node, from a level, at most limit — defaultLogs when it is empty.
 func (a *App) studioLogs(trace, node, level, limitText string) ([]model.LogRecord, error) {
 	f := logFilter{trace: trace, node: node}

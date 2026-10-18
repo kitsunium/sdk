@@ -9,7 +9,7 @@ import (
 
 const (
 	// EnvDev serves the Studio, analyzes the source and binds loopback. Only
-	// `kit dev` or an explicit KIT_ENV=dev turns it on.
+	// `kit dev` or an explicit <PRODUCT>_ENV=dev turns it on.
 	EnvDev string = iapp.EnvDev
 
 	// EnvProduction is the default: no Studio, no source, no analysis.
@@ -19,20 +19,20 @@ const (
 // AppOption configures an app. Options win over the environment.
 type AppOption = iapp.AppConfigurer
 
-// Env selects the environment, instead of KIT_ENV.
+// Env selects the environment, instead of <PRODUCT>_ENV.
 func Env(env string) AppOption {
 	//: the implementation is framework/internal/app's; this facade only forwards.
 	return iapp.Env(env)
 }
 
-// Listen sets the listening address, instead of KIT_ADDR or PORT. ":0" picks
+// Listen sets the listening address, instead of <PRODUCT>_ADDR or PORT. ":0" picks
 // a free port; App.URL tells which.
 func Listen(addr string) AppOption {
 	//: the implementation is framework/internal/app's; this facade only forwards.
 	return iapp.Listen(addr)
 }
 
-// DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.
+// DataDir sets where stores and queues persist, instead of <PRODUCT>_DATA_DIR.
 // Given to an app after [InMemory], it wins: the last of the two says where
 // the data is — so a test helper that runs the product in memory runs it
 // on disk with the one option its test gives (apptest.NewDisk).
@@ -68,7 +68,7 @@ func Clock(c clock.Timed) AppOption {
 }
 
 // InMemory keeps data in memory. On an app, it overrides the data directory
-// for every store and queue — KIT_DATA_DIR, and a [DataDir] given before it:
+// for every store and queue — <PRODUCT>_DATA_DIR, and a [DataDir] given before it:
 // what a test wants. On a store, it keeps that store in memory even when the
 // app has a data directory.
 func InMemory() interface {

@@ -18,7 +18,7 @@ var Line = app.NewService("line", "Prints a status line.")
 
 // Entry is what the probe's store keeps.
 type Entry struct {
-	ID string `json:"id" kit:"public"`
+	ID string `json:"id" app:"public"`
 }
 
 // Entries is the store the program declares without importing its

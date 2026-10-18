@@ -68,7 +68,7 @@ func TestARotatedPasswordReachesTheNextConnection(t *testing.T) {
 	run(t, a)
 	t.Setenv("LEDGER_DATABASE_URL", fakeURL("ledger", "second", "tls=verify-full"))
 	db.Retire()
-	if r := call(t, a, "GET /_kit/health/ready", noBody); r.status != http.StatusOK {
+	if r := call(t, a, "GET /_app/health/ready", noBody); r.status != http.StatusOK {
 		t.Fatalf("ready: %d %s", r.status, r.body)
 	}
 	if logins := db.Logins(); len(logins) < 2 || logins[0] != "first" || logins[len(logins)-1] != "second" {
@@ -85,7 +85,7 @@ func TestTheStudioSamplesTheDatabases(t *testing.T) {
 	var logs syncBuffer
 	a := ledgerApp(t, newLedger(), &logs, app.Database("database", db.Engine(), app.Migrations(migrations...)), app.Env(app.EnvDev), app.Analyze(false))
 	run(t, a)
-	r := call(t, a, "GET /_kit/api/databases", noBody)
+	r := call(t, a, "GET /_app/api/databases", noBody)
 	var got []model.Database
 	r.json(t, &got)
 	if r.status != http.StatusOK || len(got) != 1 || !got[0].Ready || got[0].Pool == nil || len(got[0].Migrations) != 1 || len(got[0].Migrations[0].Applied) != 2 {

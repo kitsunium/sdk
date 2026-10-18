@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// The modes of KIT_RETENTION.
+// The modes of <PRODUCT>_RETENTION.
 const (
 	// RetentionOn erases and deletes what is due: the default.
 	RetentionOn = "on"
@@ -66,7 +66,7 @@ const (
 // Personal data (ADR 0006): what app.Export gives a person, what app.Erase
 // did, and what a running app says of the personal data it keeps — the
 // register of processing, the legal holds and the privacy journal. The
-// Studio's Privacy page reads Privacy from GET /_kit/api/privacy, in dev;
+// Studio's Privacy page reads Privacy from GET /_app/api/privacy, in dev;
 // `<product> privacy …` prints the same.
 
 // PersonalDataMessage is a person's data as app.Export gives it (GDPR art. 15 and
@@ -90,13 +90,13 @@ type StoreDataMessage struct {
 	Recipients []string `json:"recipients,omitempty"`
 	// Records are the records, their secret members left out. They hold the
 	// person's data, which the Studio and the logs never show.
-	Records []json.RawMessage `json:"records" kit:"personal"`
+	Records []json.RawMessage `json:"records" app:"personal"`
 	// Former are the former values of the records' fields that keep them
 	// (ADR 0007), record by record; a secret field's are left out.
-	Former []RecordFormerMessage `json:"former,omitempty" kit:"personal"`
+	Former []RecordFormerMessage `json:"former,omitempty" app:"personal"`
 	// Versions are the versions of the records a store with revisions keeps
 	// (ADR 0007 §3), record by record, their secret members left out.
-	Versions []ExportedVersionsMessage `json:"versions,omitempty" kit:"personal"`
+	Versions []ExportedVersionsMessage `json:"versions,omitempty" app:"personal"`
 }
 
 // ExportedVersionsMessage are the versions of one exported record, as a
@@ -123,18 +123,18 @@ type StoreErasureMessage struct {
 	// Store is the store's node ID.
 	Store string `json:"store"`
 	// Erased are the records whose personal data was cleared.
-	Erased []string `json:"erased,omitempty" kit:"personal"`
+	Erased []string `json:"erased,omitempty" app:"personal"`
 	// Deleted are the records removed.
-	Deleted []string `json:"deleted,omitempty" kit:"personal"`
+	Deleted []string `json:"deleted,omitempty" app:"personal"`
 	// Held are the records a hold keeps, untouched.
-	Held []string `json:"held,omitempty" kit:"personal"`
+	Held []string `json:"held,omitempty" app:"personal"`
 }
 
 // PrivacyMessage is what a running app says of the personal data it keeps.
 // It is the Privacy page's data: the register, the holds and the journal's
 // state.
 type PrivacyMessage struct {
-	// Retention is KIT_RETENTION: one of the Retention constants.
+	// Retention is <PRODUCT>_RETENTION: one of the Retention constants.
 	Retention string `json:"retention"`
 	// Register is the record of processing, as far as the code knows it.
 	Register RegisterMessage `json:"register"`
@@ -222,7 +222,7 @@ type JournalEntryEvent struct {
 	// Op is one of the Journal constants.
 	Op string `json:"op"`
 	// DryRun marks what the retention would have done under
-	// KIT_RETENTION=dry-run: nothing changed.
+	// <PRODUCT>_RETENTION=dry-run: nothing changed.
 	DryRun bool `json:"dryRun,omitempty"`
 	// Store is the store's node ID.
 	Store string `json:"store,omitempty"`

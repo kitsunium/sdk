@@ -75,7 +75,7 @@ func newRetentionRun(s *storeCore, a *App, mode string) *retentionRun {
 		s: s, a: a, mode: mode, agenda: map[string]time.Time{},
 		wake: make(chan struct{}, 1), done: make(chan struct{}),
 	}
-	r.state = a.kitLoop(s.id+" retention", s.id, model.LoopRetention, r.schedule(), loopOrigin{model.ProvenanceApp, "kit"})
+	r.state = a.kitLoop(s.id+" retention", s.id, model.LoopRetention, r.schedule(), loopOrigin{model.ProvenanceApp, frameworkName})
 	return r
 }
 

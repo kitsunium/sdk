@@ -24,7 +24,7 @@ var Atelier = app.NewService("atelier", "Sketches, screened by the atelier itsel
 // its passes.
 type Sketch struct {
 	ID       string `json:"id"`
-	Caption  string `json:"caption" kit:"moderated"`
+	Caption  string `json:"caption" app:"moderated"`
 	Screened int    `json:"screened"`
 }
 
@@ -137,7 +137,7 @@ func TestTheGraphSaysAWatchHearsItsOwnStores(t *testing.T) {
 func TestAModulesWatchHearsItsOwnModuleWhenAsked(t *testing.T) {
 	type card struct {
 		ID   string `json:"id"`
-		Text string `json:"text" kit:"moderated"`
+		Text string `json:"text" app:"moderated"`
 	}
 	desk := app.NewService("desk", "The pinboard's desk.")
 	desk.Store("cards", func(c card) string { return c.ID })

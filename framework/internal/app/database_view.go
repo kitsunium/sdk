@@ -52,7 +52,7 @@ func (r *databaseRun) describe() model.Database {
 }
 
 // studioDatabases are the app's databases as the Studio's
-// GET /_kit/api/databases shows them, in dev: each sampled now — a new
+// GET /_app/api/databases shows them, in dev: each sampled now — a new
 // check, its migrations read again, its pool.
 func (a *App) studioDatabases(ctx context.Context) []model.Database {
 	for _, run := range a.databaseRuns() {

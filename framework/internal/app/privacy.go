@@ -122,7 +122,7 @@ func withActor(ctx context.Context, who string) context.Context {
 }
 
 // actorOf is who a journal entry says did it: kit's own actor, else the
-// user, else the node that called, else kit.
+// user, else the node that called, else the framework.
 func actorOf(ctx context.Context) string {
 	if who, ok := ctx.Value(actorKey{}).(string); ok && who != "" {
 		return who
@@ -130,7 +130,7 @@ func actorOf(ctx context.Context) string {
 	if uid, ok := UserID(ctx); ok {
 		return string(uid)
 	}
-	return cmp.Or(currentNode(ctx), "kit")
+	return cmp.Or(currentNode(ctx), frameworkName)
 }
 
 // beginPrivacy opens a privacy operation's span on a store's node: a read
@@ -318,10 +318,10 @@ func (a *App) privacySettings(ctx context.Context) []model.Setting {
 		out = append(out, a.retentionSetting())
 	}
 	if personal || seals {
-		out = append(out, model.Setting{Name: "KIT_INDEX_KEY", Secret: true, From: a.kitSecretFrom(ctx, indexSecret)})
+		out = append(out, model.Setting{Name: a.variable(varIndexKeyStem), Secret: true, From: a.kitSecretFrom(ctx, indexSecret)})
 	}
 	if seals {
-		out = append(out, model.Setting{Name: secretVariable("KIT", dataKeySecret), Secret: true, From: a.kitSecretFrom(ctx, dataKeySecret)})
+		out = append(out, model.Setting{Name: a.variable(varDataKeyStem), Secret: true, From: a.kitSecretFrom(ctx, dataKeySecret)})
 	}
 	return out
 }

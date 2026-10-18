@@ -173,7 +173,7 @@ func (a *App) dataContainers(volume, memory []string, dev bool) []model.Containe
 			Technology: "JSON files · atomic writes · file queues",
 			Doc:        "The data directory: each store is a JSON document replaced atomically on every write; each subscription and outbox is a file queue.",
 			Nodes:      volume,
-			Settings:   []string{model.VarDataDir},
+			Settings:   []string{a.variable(varDataDir)},
 		}
 		if dev {
 			c.Location = a.nearRoot(a.dataDir)
@@ -210,7 +210,7 @@ func (an *archNodes) addMail(arch *model.Architecture, dev bool) {
 	if len(an.captured) == 0 {
 		return
 	}
-	name, doc := "Mail capture", "Keeps every mail the product sends and delivers none: set KIT_SMTP_URL to deliver."
+	name, doc := "Mail capture", "Keeps every mail the product sends and delivers none: set <PRODUCT>_SMTP_URL to deliver."
 	if dev {
 		name, doc = "Studio mailbox (dev capture)", "Keeps every mail the product sends, for the Studio's mailbox; delivers none."
 	}
@@ -368,7 +368,7 @@ func (a *App) ports(productHTTP bool) []model.Port {
 	}
 	port := model.Port{
 		Owner: model.PortOwnerApp, Serves: serves,
-		Settings: []string{model.VarAddr, model.VarAllowedHosts, model.VarTrustProxy},
+		Settings: []string{a.variable(varAddr), a.variable(varAllowedHosts), a.variable(varTrustProxy)},
 	}
 	if a.cfg.env == EnvDev {
 		port.Address = a.listenAddr()

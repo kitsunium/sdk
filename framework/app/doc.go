@@ -72,7 +72,7 @@
 // construction, the edges the running product observed — each with its
 // counters — and, in dev, the edges the static analysis found in the code,
 // each with its call sites. In dev the app serves it, live, in the Studio at
-// /_kit/.
+// /_app/.
 //
 // # Building blocks
 //
@@ -146,8 +146,8 @@
 // # Running
 //
 // [App].Main understands its commands — serve, graph, healthcheck, config,
-// secrets, migrate — and the environment: KIT_ENV (dev serves the Studio; production is the default),
-// KIT_ADDR or PORT, KIT_DATA_DIR, KIT_ALLOWED_HOSTS, KIT_LOG_LEVEL. The
+// secrets, migrate — and the environment: <PRODUCT>_ENV (dev serves the Studio; production is the default),
+// <PRODUCT>_ADDR or PORT, <PRODUCT>_DATA_DIR, <PRODUCT>_ALLOWED_HOSTS, <PRODUCT>_LOG_LEVEL. The
 // Studio's pages are the kit tool's, not the product's: in dev a server
 // serves the read-only API the Studio reads, and no route that acts on the
 // product exists. The mechanics underneath — lifecycle, health, scheduler, queue, tracing,

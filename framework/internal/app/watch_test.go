@@ -249,7 +249,7 @@ func TestANoticeContinuesTheWritesTrace(t *testing.T) {
 func deliveryIn(t *testing.T, a *app.App, root string) *model.Span {
 	t.Helper()
 	var traces []model.Trace
-	call(t, a, "GET /_kit/api/traces?node="+watchID, noBody).json(t, &traces)
+	call(t, a, "GET /_app/api/traces?node="+watchID, noBody).json(t, &traces)
 	for i := range traces {
 		for j, s := range traces[i].Spans {
 			if traces[i].Root == root && s.Node == watchID {

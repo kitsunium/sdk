@@ -30,7 +30,7 @@ func Set[V any](name string, value V) AppOption {
 
 // ConfigFiles gives the framework the product's configuration files: config/config.<ext>,
 // which every environment reads, and config/<env>.<ext>, the environment's
-// own — <env> being KIT_ENV as written, dev when kit dev runs the product —
+// own — <env> being <PRODUCT>_ENV as written, dev when kit dev runs the product —
 // in JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of
 // the settings to their values; it never holds a secret, and a key no
 // service declares stops the start. The files belong in the binary:

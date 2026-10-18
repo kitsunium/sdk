@@ -504,7 +504,7 @@ func Set(name string, value any) AppConfigurer {
 
 // ConfigFiles gives the framework the product's configuration files: config/config.<ext>,
 // which every environment reads, and config/<env>.<ext>, the environment's
-// own — <env> being KIT_ENV as written, dev when kit dev runs the product —
+// own — <env> being <PRODUCT>_ENV as written, dev when kit dev runs the product —
 // in JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of
 // the settings to their values; it never holds a secret, and a key no
 // service declares stops the start. The files belong in the binary:
@@ -529,6 +529,7 @@ func (a *App) resolveSettings() resolvedSettings {
 	for _, file := range a.configFiles(r.problem) {
 		r.fromFile(file)
 	}
+	r.resolved.problems = append(r.resolved.problems, reservedVariables(r.prefix, decls, r.secrets)...)
 	r.resolved.problems = append(r.resolved.problems, strayVariables(r.prefix, decls, r.secrets)...)
 	for _, d := range decls {
 		r.fromEnv(d)
@@ -677,19 +678,30 @@ func platformVariable(name, value string) bool {
 	return strings.Contains(name, "_ENV_")
 }
 
-// strayVariables warns of each variable under the product's prefix that no
-// setting or secret reads: a typo, most often, which would otherwise be
-// ignored. A warning and not a refusal: the platform a product runs on may
-// set variables of its own under the same prefix.
-func strayVariables(prefix string, decls []settingDecl, secrets map[string]bool) []model.Diagnostic {
+// knownVariables are the variables under the product's prefix something
+// reads: the framework's own (ADR 0180 §3), each setting's, each secret's and
+// its _FILE twin.
+func knownVariables(prefix string, decls []settingDecl, secrets map[string]bool) map[string]bool {
 	known := map[string]bool{}
+	for _, stem := range operatorStems {
+		known[prefix+"_"+stem] = true
+	}
 	for _, d := range decls {
 		known[variableOf(prefix, d.base().key())] = true
 	}
 	for name := range secrets {
 		v := variableOf(prefix, name)
-		known[v], known[v+"_FILE"] = true, true
+		known[v], known[v+varFileSuffix] = true, true
 	}
+	return known
+}
+
+// strayVariables warns of each variable under the product's prefix that no
+// setting or secret reads: a typo, most often, which would otherwise be
+// ignored. A warning and not a refusal: the platform a product runs on may
+// set variables of its own under the same prefix.
+func strayVariables(prefix string, decls []settingDecl, secrets map[string]bool) []model.Diagnostic {
+	known := knownVariables(prefix, decls, secrets)
 	var stray []string
 	for _, kv := range os.Environ() {
 		name, value, _ := strings.Cut(kv, "=")
@@ -701,6 +713,28 @@ func strayVariables(prefix string, decls []settingDecl, secrets map[string]bool)
 	out := make([]model.Diagnostic, 0, len(stray))
 	for _, name := range slices.Compact(stray) {
 		out = append(out, diagnosticOf("warning", "", nil, say("setting.stray", "variable", name)))
+	}
+	return out
+}
+
+// reservedVariables refuses each setting, secret or database URL of the
+// product read from a variable of the framework's own — TODO_DATA_DIR,
+// TODO_SMTP_URL —, which the framework reads under the product's prefix
+// since ADR 0180 step 4: the two would share it. A secret's _FILE twin is
+// judged too.
+func reservedVariables(prefix string, decls []settingDecl, secrets map[string]bool) []model.Diagnostic {
+	var out []model.Diagnostic
+	for _, d := range decls {
+		b := d.base()
+		if v := variableOf(prefix, b.key()); reservedVariable(prefix, v) {
+			out = append(out, diagnosticOf("error", b.owner(), nil, say("setting.reserved", "key", b.key(), "variable", v)))
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(secrets)) {
+		v := variableOf(prefix, name)
+		if reservedVariable(prefix, v) || reservedVariable(prefix, v+varFileSuffix) {
+			out = append(out, diagnosticOf("error", "", nil, say("secret.reserved", "name", name, "variable", v)))
+		}
 	}
 	return out
 }
@@ -882,7 +916,7 @@ func (a *App) configFiles(problem func(node string, at *pos, key string, args ..
 	}
 	env := a.cfg.envName
 	if !envNameGrammar().MatchString(env) {
-		problem("", nil, "setting.env-name", "env", env)
+		problem("", nil, "setting.env-name", "env", env, "prefix", appPrefix(a.name))
 		return nil
 	}
 	bases := []string{configBase}

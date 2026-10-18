@@ -238,14 +238,14 @@ The package imports the standard library and the framework's model only, so that
 
 <a name="LabelLoop"></a>
 ```go
-const LabelLoop string = "kit_loop"
+const LabelLoop string = "app_loop"
 ```
 
 LabelLoop is the pprof label naming the loop a goroutine belongs to.
 
 <a name="LabelNode"></a>
 ```go
-const LabelNode string = "kit_node"
+const LabelNode string = "app_node"
 ```
 
 LabelNode is the pprof label naming the node a goroutine works for.

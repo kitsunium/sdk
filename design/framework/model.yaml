@@ -152,7 +152,7 @@ packages:
         target: core.FormerMessage
       - doc: |-
           RecordHistory is what kit remembers of one record, as the Studio's data
-          view shows it (GET /_kit/api/former): each field's former values, newest
+          view shows it (GET /_app/api/former): each field's former values, newest
           first, by the field's JSON pointer — a secret field's without their
           values, a personal or special one's redacted.
         name: RecordHistory
@@ -170,18 +170,18 @@ packages:
         target: core.EditMessage
       - doc: |-
           RecordVersions is a record's versions as the Studio's data view shows
-          them (GET /_kit/api/revisions), and what changed between two.
+          them (GET /_app/api/revisions), and what changed between two.
         name: RecordVersions
         target: core.RecordVersionsMessage
       - doc: |-
           TrashedRecord is one record in a store's trash as the Studio lists it
-          (GET /_kit/api/trash): its key, when the product deleted it and when kit
+          (GET /_app/api/trash): its key, when the product deleted it and when kit
           purges it — never its value.
         name: TrashedRecord
         target: core.TrashedRecordMessage
       - doc: |-
           StoreTrash is a page of a store's trash as the Studio lists it (GET
-          /_kit/api/trash), in key order.
+          /_app/api/trash), in key order.
         name: StoreTrash
         target: core.StoreTrashMessage
       - doc: ExportedVersions are the versions of one exported record.
@@ -623,7 +623,7 @@ packages:
       - doc: |-
           Payload is the request and the response of a span, as JSON, in dev only.
           Every member whose name says it is a secret — password, token, secret,
-          authorization, cookie… — or whose Go field is tagged kit:"secret" is
+          authorization, cookie… — or whose Go field is tagged app:"secret" is
           replaced by "[redacted]", and each side is cut at 8 KiB.
         name: Payload
         target: core.Payload
@@ -699,7 +699,7 @@ packages:
           dev, and the product's HTTP when it declares any.
         name: PortOwnerApp
         type: string
-        value: "\"kit\""
+        value: "\"app\""
       - blockDoc: What a port serves.
         name: ServesHealth
         type: string
@@ -1177,9 +1177,10 @@ packages:
           framework/app and framework/internal/app, so a source position the
           document gives in the framework's code names those paths, and the
           constants of the framework's own provenance, port owner and setting
-          origin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]. The
-          values the graph spells after the framework follow with its runtime
-          names (ADR 0180 step 4).
+          origin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]; since
+          ADR 0180's step 4 their values are "app" and "appdev", the build's
+          and the graph's version of the framework are their field "app", and
+          the variable a framework setting names carries the product's prefix.
         name: Version
         type: int
         value: "6"
@@ -1339,7 +1340,7 @@ packages:
         value: "\"env\""
       - blockDoc: Where a running app found a secret.
         doc: |-
-          SecretFromFile is kit's encrypted file store: KIT_SECRETS=file:<dir>,
+          SecretFromFile is kit's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,
           or .kit/secrets/dev in dev.
         name: SecretFromFile
         type: string
@@ -1347,7 +1348,7 @@ packages:
       - blockDoc: Where a running app found a secret.
         doc: |-
           SecretFromMemory is a store in the process's memory: a test, or
-          KIT_SECRETS=memory. A generated secret is made again at every start.
+          <PRODUCT>_SECRETS=memory. A generated secret is made again at every start.
         name: SecretFromMemory
         type: string
         value: "\"memory\""
@@ -1415,28 +1416,28 @@ packages:
         name: SelectDefault
         type: string
         value: "\"default\""
-      - blockDoc: "What a field holds: the classes of a kit tag (ADR 0006)."
+      - blockDoc: "What a field holds: the classes of an app tag (ADR 0006)."
         doc: |-
           ClassPublic holds nothing personal and nothing secret: the question
           was asked.
         name: ClassPublic
         type: string
         value: "\"public\""
-      - blockDoc: "What a field holds: the classes of a kit tag (ADR 0006)."
+      - blockDoc: "What a field holds: the classes of an app tag (ADR 0006)."
         doc: |-
           ClassPersonal holds data about an identifiable person: a name, an
           address, a message a person wrote.
         name: ClassPersonal
         type: string
         value: "\"personal\""
-      - blockDoc: "What a field holds: the classes of a kit tag (ADR 0006)."
+      - blockDoc: "What a field holds: the classes of an app tag (ADR 0006)."
         doc: |-
           ClassSpecial holds the special categories of GDPR art. 9(1), or
           criminal convictions (art. 10).
         name: ClassSpecial
         type: string
         value: "\"special\""
-      - blockDoc: "What a field holds: the classes of a kit tag (ADR 0006)."
+      - blockDoc: "What a field holds: the classes of an app tag (ADR 0006)."
         doc: "ClassSecret holds a credential: a password's hash, a token's digest."
         name: ClassSecret
         type: string
@@ -1623,19 +1624,19 @@ packages:
         name: NetworkLocal
         type: string
         value: "\"local\""
-      - blockDoc: The modes of KIT_RETENTION.
+      - blockDoc: The modes of <PRODUCT>_RETENTION.
         doc: "RetentionOn erases and deletes what is due: the default."
         name: RetentionOn
         type: string
         value: "\"on\""
-      - blockDoc: The modes of KIT_RETENTION.
+      - blockDoc: The modes of <PRODUCT>_RETENTION.
         doc: |-
           RetentionDryRun journals what the retention would do and changes
           nothing: how a new retention is deployed over old data.
         name: RetentionDryRun
         type: string
         value: "\"dry-run\""
-      - blockDoc: The modes of KIT_RETENTION.
+      - blockDoc: The modes of <PRODUCT>_RETENTION.
         doc: RetentionOff runs no retention, warned of at every start outside dev.
         name: RetentionOff
         type: string
@@ -1807,83 +1808,131 @@ packages:
       - blockDoc: Where a setting's value comes from.
         name: SettingAppDev
         type: string
-        value: "\"kitdev\""
+        value: "\"appdev\""
       - blockDoc: Where a setting's value comes from.
         name: SettingFile
         type: string
         value: "\"file\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarEnv
         type: string
-        value: "\"KIT_ENV\""
+        value: "\"ENV\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarAddr
         type: string
-        value: "\"KIT_ADDR\""
+        value: "\"ADDR\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarDataDir
         type: string
-        value: "\"KIT_DATA_DIR\""
+        value: "\"DATA_DIR\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarStudio
         type: string
         value: "\"KIT_STUDIO\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarStudioRemote
         type: string
         value: "\"KIT_STUDIO_REMOTE\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarAnalyze
         type: string
         value: "\"KIT_ANALYZE\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarTrustProxy
         type: string
-        value: "\"KIT_TRUST_PROXY\""
+        value: "\"TRUST_PROXY\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarAllowedHosts
         type: string
-        value: "\"KIT_ALLOWED_HOSTS\""
+        value: "\"ALLOWED_HOSTS\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarLogLevel
         type: string
-        value: "\"KIT_LOG_LEVEL\""
+        value: "\"LOG_LEVEL\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarSMTPURL
         type: string
-        value: "\"KIT_SMTP_URL\""
+        value: "\"SMTP_URL\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         doc: |-
           VarRetention sets what the stores' retention loops do: on, dry-run
           or off (ADR 0006).
         name: VarRetention
         type: string
-        value: "\"KIT_RETENTION\""
+        value: "\"RETENTION\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         doc: |-
           VarDevForced is how kit dev tells the product which of the variables
           above it set itself for this launch: their origin is kit dev.
@@ -1995,7 +2044,7 @@ packages:
           sweep, a declared loop's wake cycle.
         name: ProvenanceApp
         type: string
-        value: "\"kit\""
+        value: "\"app\""
       - blockDoc: "Loop provenances: who wrote the code that loops."
         doc: "ProvenanceProduct loops are written by hand in the product: Service.Go."
         name: ProvenanceProduct
@@ -2455,7 +2504,7 @@ packages:
           PortOwnerApp is the framework's own listener: the health probes, the Studio in
           dev, and the product's HTTP when it declares any.
         name: PortOwnerApp
-        value: "\"kit\""
+        value: "\"app\""
       - blockDoc: What a port serves.
         name: ServesHealth
         value: "\"health\""
@@ -2895,9 +2944,10 @@ packages:
           framework/app and framework/internal/app, so a source position the
           document gives in the framework's code names those paths, and the
           constants of the framework's own provenance, port owner and setting
-          origin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]. The
-          values the graph spells after the framework follow with its runtime
-          names (ADR 0180 step 4).
+          origin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]; since
+          ADR 0180's step 4 their values are "app" and "appdev", the build's
+          and the graph's version of the framework are their field "app", and
+          the variable a framework setting names carries the product's prefix.
         name: Version
         type: int
         value: "6"
@@ -3035,14 +3085,14 @@ packages:
         value: "\"env\""
       - blockDoc: Where a running app found a secret.
         doc: |-
-          SecretFromFile is kit's encrypted file store: KIT_SECRETS=file:<dir>,
+          SecretFromFile is kit's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,
           or .kit/secrets/dev in dev.
         name: SecretFromFile
         value: "\"file\""
       - blockDoc: Where a running app found a secret.
         doc: |-
           SecretFromMemory is a store in the process's memory: a test, or
-          KIT_SECRETS=memory. A generated secret is made again at every start.
+          <PRODUCT>_SECRETS=memory. A generated secret is made again at every start.
         name: SecretFromMemory
         value: "\"memory\""
       - blockDoc: Where a running app found a secret.
@@ -3095,25 +3145,25 @@ packages:
       - blockDoc: Select case kinds.
         name: SelectDefault
         value: "\"default\""
-      - blockDoc: "What a field holds: the classes of a kit tag (ADR 0006)."
+      - blockDoc: "What a field holds: the classes of an app tag (ADR 0006)."
         doc: |-
           ClassPublic holds nothing personal and nothing secret: the question
           was asked.
         name: ClassPublic
         value: "\"public\""
-      - blockDoc: "What a field holds: the classes of a kit tag (ADR 0006)."
+      - blockDoc: "What a field holds: the classes of an app tag (ADR 0006)."
         doc: |-
           ClassPersonal holds data about an identifiable person: a name, an
           address, a message a person wrote.
         name: ClassPersonal
         value: "\"personal\""
-      - blockDoc: "What a field holds: the classes of a kit tag (ADR 0006)."
+      - blockDoc: "What a field holds: the classes of an app tag (ADR 0006)."
         doc: |-
           ClassSpecial holds the special categories of GDPR art. 9(1), or
           criminal convictions (art. 10).
         name: ClassSpecial
         value: "\"special\""
-      - blockDoc: "What a field holds: the classes of a kit tag (ADR 0006)."
+      - blockDoc: "What a field holds: the classes of an app tag (ADR 0006)."
         doc: "ClassSecret holds a credential: a password's hash, a token's digest."
         name: ClassSecret
         value: "\"secret\""
@@ -3293,17 +3343,17 @@ packages:
           Windows: what a product declares when it does not care which.
         name: NetworkLocal
         value: "\"local\""
-      - blockDoc: The modes of KIT_RETENTION.
+      - blockDoc: The modes of <PRODUCT>_RETENTION.
         doc: "RetentionOn erases and deletes what is due: the default."
         name: RetentionOn
         value: "\"on\""
-      - blockDoc: The modes of KIT_RETENTION.
+      - blockDoc: The modes of <PRODUCT>_RETENTION.
         doc: |-
           RetentionDryRun journals what the retention would do and changes
           nothing: how a new retention is deployed over old data.
         name: RetentionDryRun
         value: "\"dry-run\""
-      - blockDoc: The modes of KIT_RETENTION.
+      - blockDoc: The modes of <PRODUCT>_RETENTION.
         doc: RetentionOff runs no retention, warned of at every start outside dev.
         name: RetentionOff
         value: "\"off\""
@@ -3439,71 +3489,119 @@ packages:
         value: "\"store\""
       - blockDoc: Where a setting's value comes from.
         name: SettingAppDev
-        value: "\"kitdev\""
+        value: "\"appdev\""
       - blockDoc: Where a setting's value comes from.
         name: SettingFile
         value: "\"file\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarEnv
-        value: "\"KIT_ENV\""
+        value: "\"ENV\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarAddr
-        value: "\"KIT_ADDR\""
+        value: "\"ADDR\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarDataDir
-        value: "\"KIT_DATA_DIR\""
+        value: "\"DATA_DIR\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarStudio
         value: "\"KIT_STUDIO\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarStudioRemote
         value: "\"KIT_STUDIO_REMOTE\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarAnalyze
         value: "\"KIT_ANALYZE\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarTrustProxy
-        value: "\"KIT_TRUST_PROXY\""
+        value: "\"TRUST_PROXY\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarAllowedHosts
-        value: "\"KIT_ALLOWED_HOSTS\""
+        value: "\"ALLOWED_HOSTS\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarLogLevel
-        value: "\"KIT_LOG_LEVEL\""
+        value: "\"LOG_LEVEL\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         name: VarSMTPURL
-        value: "\"KIT_SMTP_URL\""
+        value: "\"SMTP_URL\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         doc: |-
           VarRetention sets what the stores' retention loops do: on, dry-run
           or off (ADR 0006).
         name: VarRetention
-        value: "\"KIT_RETENTION\""
+        value: "\"RETENTION\""
       - blockDoc: |-
-          The settings kit reads, by the environment variable that sets each: kit's
-          configuration reads them, the connectors and the architecture name them.
+          The settings the framework reads, by the variable that sets each. The
+          framework's own are named under the product's prefix — its name
+          upper-cased, every other character an underscore —, so a constant holds
+          the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+          (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+          the tool's, set by it and read whole by the Studio subsystem alone.
         doc: |-
           VarDevForced is how kit dev tells the product which of the variables
           above it set itself for this launch: their origin is kit dev.
@@ -3589,7 +3687,7 @@ packages:
           ProvenanceApp loops are written by the framework for a declaration: a workflow's
           sweep, a declared loop's wake cycle.
         name: ProvenanceApp
-        value: "\"kit\""
+        value: "\"app\""
       - blockDoc: "Loop provenances: who wrote the code that loops."
         doc: "ProvenanceProduct loops are written by hand in the product: Service.Go."
         name: ProvenanceProduct
@@ -4077,7 +4175,7 @@ packages:
               tag: json:"ports,omitempty"
               type: "[]PortMessage"
             - doc: |-
-                Settings are the settings that configure it: KIT_DATA_DIR for the
+                Settings are the settings that configure it: TODO_DATA_DIR for the
                 data directory; a database's URL and tuning variables for a database.
               name: Settings
               tag: json:"settings,omitempty"
@@ -4583,7 +4681,7 @@ packages:
                 Value is the field's value then, as JSON; absent for a secret field,
                 whose former values are never given.
               name: Value
-              tag: json:"value,omitempty" kit:"personal"
+              tag: json:"value,omitempty" app:"personal"
               type: json.RawMessage
             - doc: Until is when it was replaced, on the app's clock.
               name: Until
@@ -4597,7 +4695,7 @@ packages:
               type: string
       - doc: |-
           RecordHistoryMessage is what kit remembers of one record, as the Studio's data
-          view shows it (GET /_kit/api/former): each field's former values, newest
+          view shows it (GET /_app/api/former): each field's former values, newest
           first, by the field's JSON pointer — a secret field's without their
           values, a personal or special one's redacted.
         name: RecordHistoryMessage
@@ -4638,7 +4736,7 @@ packages:
                 Value is the record as it was: in an export, its secret members left
                 out; in the Studio, as the data browser shows a record.
               name: Value
-              tag: json:"value,omitempty" kit:"personal"
+              tag: json:"value,omitempty" app:"personal"
               type: json.RawMessage
       - doc: |-
           EditMessage is one change between two versions of a record, in RFC 6902's
@@ -4657,14 +4755,14 @@ packages:
               tag: json:"path"
               type: string
             - name: From
-              tag: json:"from,omitempty" kit:"personal"
+              tag: json:"from,omitempty" app:"personal"
               type: json.RawMessage
             - name: To
-              tag: json:"to,omitempty" kit:"personal"
+              tag: json:"to,omitempty" app:"personal"
               type: json.RawMessage
       - doc: |-
           RecordVersionsMessage is a record's versions as the Studio's data view
-          shows them (GET /_kit/api/revisions): newest first, each as the data
+          shows them (GET /_app/api/revisions): newest first, each as the data
           browser shows a record — a member sealed at rest sealed, a personal,
           special or secret one redacted —, and, when two were asked for, what
           changed from one to the other, a value given only where the data browser
@@ -4689,7 +4787,7 @@ packages:
               type: "[]EditMessage"
       - doc: |-
           TrashedRecordMessage is one record in a store's trash as the Studio lists
-          it (GET /_kit/api/trash, ADR 0178 C4): its key, when the product deleted
+          it (GET /_app/api/trash, ADR 0178 C4): its key, when the product deleted
           it and when kit purges it, on the app's clock — never its value. A key
           that reads a personal, special or secret member — the subject included —
           is not given, as the data browser never shows that member: Hidden says so.
@@ -4718,7 +4816,7 @@ packages:
               type: time.Time
       - doc: |-
           StoreTrashMessage is a page of a store's trash as the Studio lists it (GET
-          /_kit/api/trash?store=&offset=&limit=): Total records in the trash, in
+          /_app/api/trash?store=&offset=&limit=): Total records in the trash, in
           key order, Records those from the page's offset, Next the offset of the
           page after — absent on the last. A page is bounded, 200 records unless
           the Studio asks from 1 to 1000; an offset counts records, never quotes a
@@ -4918,9 +5016,9 @@ packages:
               name: Env
               tag: json:"env,omitempty"
               type: string
-            - doc: Kit is the kit version that produced the graph.
-              name: Kit
-              tag: json:"kit,omitempty"
+            - doc: App is the version of the framework that produced the graph.
+              name: App
+              tag: json:"app,omitempty"
               type: string
             - doc: Go is the Go version the product was built with.
               name: Go
@@ -4931,8 +5029,8 @@ packages:
               tag: json:"startedAt,omitempty"
               type: "*time.Time"
             - doc: |-
-                Build says what the binary was built from: the product, kit and the
-                SDK kit depends on.
+                Build says what the binary was built from: the product, the framework
+                and the SDK the framework depends on.
               name: Build
               tag: json:"build,omitempty"
               type: "*BuildMessage"
@@ -4948,13 +5046,13 @@ packages:
               tag: json:"product"
               type: ModuleVersionMessage
             - doc: |-
-                Kit is the framework: since ADR 0162 the SDK module,
+                App is the framework: since ADR 0162 the SDK module,
                 github.com/kitsunium/sdk, which holds it.
-              name: Kit
-              tag: json:"kit"
+              name: App
+              tag: json:"app"
               type: ModuleVersionMessage
             - doc: |-
-                SDK is the SDK the framework is built on — the same module as Kit
+                SDK is the SDK the framework is built on — the same module as App
                 since ADR 0162, so the two say the same version.
               name: SDK
               tag: json:"sdk"
@@ -6309,7 +6407,7 @@ packages:
               tag: json:"doc,omitempty"
               type: string
             - doc: |-
-                Class is what the field holds, as its kit tag says (ADR 0006): one of
+                Class is what the field holds, as its app tag says (ADR 0006): one of
                 the Class constants, or empty when the field is unclassified. A
                 subject field is personal unless it is special.
               name: Class
@@ -6491,19 +6589,19 @@ packages:
                 Records are the records, their secret members left out. They hold the
                 person's data, which the Studio and the logs never show.
               name: Records
-              tag: json:"records" kit:"personal"
+              tag: json:"records" app:"personal"
               type: "[]json.RawMessage"
             - doc: |-
                 Former are the former values of the records' fields that keep them
                 (ADR 0007), record by record; a secret field's are left out.
               name: Former
-              tag: json:"former,omitempty" kit:"personal"
+              tag: json:"former,omitempty" app:"personal"
               type: "[]RecordFormerMessage"
             - doc: |-
                 Versions are the versions of the records a store with revisions keeps
                 (ADR 0007 §3), record by record, their secret members left out.
               name: Versions
-              tag: json:"versions,omitempty" kit:"personal"
+              tag: json:"versions,omitempty" app:"personal"
               type: "[]ExportedVersionsMessage"
       - doc: |-
           ExportedVersionsMessage are the versions of one exported record, as a
@@ -6544,15 +6642,15 @@ packages:
               type: string
             - doc: Erased are the records whose personal data was cleared.
               name: Erased
-              tag: json:"erased,omitempty" kit:"personal"
+              tag: json:"erased,omitempty" app:"personal"
               type: "[]string"
             - doc: Deleted are the records removed.
               name: Deleted
-              tag: json:"deleted,omitempty" kit:"personal"
+              tag: json:"deleted,omitempty" app:"personal"
               type: "[]string"
             - doc: Held are the records a hold keeps, untouched.
               name: Held
-              tag: json:"held,omitempty" kit:"personal"
+              tag: json:"held,omitempty" app:"personal"
               type: "[]string"
       - doc: |-
           PrivacyMessage is what a running app says of the personal data it keeps.
@@ -6561,7 +6659,7 @@ packages:
         name: PrivacyMessage
         struct:
           fields:
-            - doc: "Retention is KIT_RETENTION: one of the Retention constants."
+            - doc: "Retention is <PRODUCT>_RETENTION: one of the Retention constants."
               name: Retention
               tag: json:"retention"
               type: string
@@ -6720,7 +6818,7 @@ packages:
               type: string
             - doc: |-
                 DryRun marks what the retention would have done under
-                KIT_RETENTION=dry-run: nothing changed.
+                <PRODUCT>_RETENTION=dry-run: nothing changed.
               name: DryRun
               tag: json:"dryRun,omitempty"
               type: bool
@@ -7158,7 +7256,7 @@ packages:
         struct:
           fields:
             - doc: |-
-                Name is the environment variable that sets it: "KIT_ADDR",
+                Name is the environment variable that sets it: "TODO_ADDR",
                 "TODO_BASE_URL".
               name: Name
               tag: json:"name"
@@ -7485,7 +7583,7 @@ packages:
             - doc: |-
                 Library names the code that loops, for a library or kit loop:
                 "net/http", "sdk/v1/app/scheduler", "sdk/v1/data/queue",
-                "sdk/v1/app/mail/spool", "sdk/v1/app/statemachine", "kit".
+                "sdk/v1/app/mail/spool", "sdk/v1/app/statemachine", "app".
               name: Library
               tag: json:"library,omitempty"
               type: string
@@ -7675,7 +7773,7 @@ packages:
       - doc: |-
           Payload is the request and the response of a span, as JSON, in dev only.
           Every member whose name says it is a secret — password, token, secret,
-          authorization, cookie… — or whose Go field is tagged kit:"secret" is
+          authorization, cookie… — or whose Go field is tagged app:"secret" is
           replaced by "[redacted]", and each side is cut at 8 KiB.
         name: Payload
         struct:

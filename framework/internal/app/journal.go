@@ -48,7 +48,7 @@ type journalRecord struct {
 	By      string    `json:"by"`
 	// Reason is what the caller said, kept for whoever runs the product:
 	// the Studio never shows it.
-	Reason string `json:"reason,omitempty" kit:"secret"`
+	Reason string `json:"reason,omitempty" app:"secret"`
 	Hash   string `json:"hash"`
 }
 

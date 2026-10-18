@@ -34,7 +34,7 @@ type managedSecret struct {
 	// environment's store — the same, for the product's.
 	name, stored string
 	// env reads its variable under envName — kit's own under its bare name,
-	// smtp-url for KIT_SMTP_URL — and variable names it.
+	// smtp-url for <PRODUCT>_SMTP_URL — and variable names it.
 	env      secret.Store
 	envName  string
 	variable string
@@ -112,10 +112,10 @@ func (a *App) managedSecrets() []managedSecret {
 	out = append(out, own...)
 	if a.usesIndexKey() {
 		name := kitSecretPrefix + indexSecret
-		out = append(out, managedSecret{name: name, stored: name, env: st.kitEnv, envName: indexSecret, variable: secretVariable("KIT", indexSecret), index: true})
+		out = append(out, managedSecret{name: name, stored: name, env: st.kitEnv, envName: indexSecret, variable: secretVariable(prefix, indexSecret), index: true})
 	}
 	if a.hasMailer() {
-		out = append(out, managedSecret{name: kitSecretPrefix + smtpSecret, stored: kitSecretPrefix + smtpSecret, env: st.kitEnv, envName: smtpSecret, variable: secretVariable("KIT", smtpSecret)})
+		out = append(out, managedSecret{name: kitSecretPrefix + smtpSecret, stored: kitSecretPrefix + smtpSecret, env: st.kitEnv, envName: smtpSecret, variable: secretVariable(prefix, smtpSecret)})
 	}
 	return out
 }
@@ -161,7 +161,7 @@ func (a *App) listSecrets(ctx context.Context, all []managedSecret, stdout, stde
 		made := "operator"
 		switch {
 		case m.generated():
-			made = "kit"
+			made = frameworkName
 		case m.optional():
 			made = "operator, optional"
 		}
@@ -236,7 +236,7 @@ func (a *App) setSecret(ctx context.Context, all []managedSecret, name string, s
 	}
 	st := a.secretsNow()
 	if st.kept == nil {
-		fmt.Fprintf(stderr, "KIT_SECRETS=env keeps no store: set %s where the product runs\n", managed.variable)
+		fmt.Fprintf(stderr, "%s=env keeps no store: set %s where the product runs\n", a.variable(varSecrets), managed.variable)
 		return 1
 	}
 	if _, err := st.kept.Get(ctx, managed.stored); managed.index && err == nil {
@@ -286,7 +286,7 @@ func (a *App) rotateSecrets(ctx context.Context, all []managedSecret, name strin
 	}
 	st := a.secretsNow()
 	if st.kept == nil {
-		fmt.Fprintln(stderr, "KIT_SECRETS=env keeps no store the framework can write")
+		fmt.Fprintln(stderr, a.variable(varSecrets)+"=env keeps no store the framework can write")
 		return 1
 	}
 	for i := range targets {

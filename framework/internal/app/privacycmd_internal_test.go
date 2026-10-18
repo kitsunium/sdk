@@ -18,8 +18,8 @@ import (
 // letter is what the privacy command's product keeps.
 type letter struct {
 	ID   string     `json:"id"`
-	To   string     `json:"to" kit:"subject"`
-	Body string     `json:"body" kit:"personal"`
+	To   string     `json:"to" app:"subject"`
+	Body string     `json:"body" app:"personal"`
 	Sent *time.Time `json:"sent,omitempty"`
 }
 
@@ -86,7 +86,7 @@ func (s privacyStep) run(t *testing.T, dir string) {
 // one to bob, and stops it: the command's retention finds bob's due.
 func lettersIn(t *testing.T, dir string) {
 	t.Helper()
-	t.Setenv("KIT_RETENTION", "off")
+	t.Setenv("POST_RETENTION", "off")
 	app := NewApp("post", cmdPrivacy).With(DataDir(dir), Env(EnvProduction), Listen("127.0.0.1:0"), Logs(io.Discard))
 	if err := app.Start(t.Context()); err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func lettersIn(t *testing.T, dir string) {
 	if err := app.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("KIT_RETENTION", "on")
+	t.Setenv("POST_RETENTION", "on")
 }
 
 func TestThePrivacyCommand(t *testing.T) {

@@ -234,7 +234,7 @@ const (
 	CodeTrash errs.Code = iapp.CodeTrash
 
 	// CodeTrashList refuses the Studio's list of a store's trash (GET
-	// /_kit/api/trash) when the store named is none of the product's — a
+	// /_app/api/trash) when the store named is none of the product's — a
 	// NotFound — or keeps no trash, having no app.Revisions — an Invalid (ADR
 	// 0178 C4).
 	CodeTrashList errs.Code = iapp.CodeTrashList
@@ -285,6 +285,12 @@ const (
 	// irreversible with [Irreversible]: what it changed is undone by a new
 	// forward migration, never by migrate down.
 	CodeMigrationIrreversible errs.Code = iapp.CodeMigrationIrreversible
+
+	// CodeRenamed refuses a start that meets a runtime name the framework no
+	// longer reads (ADR 0180 §3): a KIT_<NAME> variable of the operator's, a
+	// field tagged kit:"…". The [DiagnosticsError] names each old name and
+	// the one that replaces it, and carries this code.
+	CodeRenamed errs.Code = iapp.CodeRenamed
 
 	// The signals the framework ends one of its own steps with and catches itself — a
 	// caller never receives one —, typed when the SDK made rule 2 a gate.

@@ -65,7 +65,7 @@ func TestAWorkflowKeepsItsInstancesAcrossARestart(t *testing.T) {
 
 	clk.Advance(time.Hour / 2)
 	run(func(a *app.App) {
-		r := call(t, a, "GET /_kit/api/instances?workflow=shop/workflow/lifecycle", noBody)
+		r := call(t, a, "GET /_app/api/instances?workflow=shop/workflow/lifecycle", noBody)
 		var list []model.Instance
 		r.json(t, &list)
 		for _, got := range list {

@@ -21,9 +21,9 @@ var Desk = app.NewService("desk", "Notes about people, for apptest's tests.")
 // Note is about its author.
 type Note struct {
 	ID     string `json:"id"`
-	Author string `json:"author" kit:"subject"`
-	Body   string `json:"body" kit:"personal"`
-	Topic  string `json:"topic" kit:"public"`
+	Author string `json:"author" app:"subject"`
+	Body   string `json:"body" app:"personal"`
+	Topic  string `json:"topic" app:"public"`
 }
 
 var Notes = Desk.Store("notes", func(n Note) string { return n.ID },
@@ -33,7 +33,7 @@ var Notes = Desk.Store("notes", func(n Note) string { return n.ID },
 // free port — unless the test's options say otherwise.
 func start(t *testing.T, opts ...app.AppOption) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
+	t.Setenv("DESK_SMTP_URL", "")
 	a := app.NewApp("desk", Desk).With(append([]app.AppOption{
 		app.InMemory(), app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
 	}, opts...)...)

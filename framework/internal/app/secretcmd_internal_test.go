@@ -30,8 +30,8 @@ var cmdSecrets = func() *Service {
 // production, on a file store in dir.
 func secretsCmd(t *testing.T, dir, stdin string, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "file:"+dir)
-	t.Setenv("KIT_SECRETS_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
+	t.Setenv("VAULT_SECRETS", "file:"+dir)
+	t.Setenv("VAULT_SECRETS_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
 	app := NewApp("vault", cmdSecrets).With(Env(EnvProduction), Logs(io.Discard))
 	var out, errOut bytes.Buffer
 	code = app.secretsCommand(t.Context(), args, strings.NewReader(stdin), &out, &errOut)
@@ -45,7 +45,7 @@ func TestTheSecretsCommand(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "secrets")
 	code, out, _ := secretsCmd(t, dir, "", "list")
 	for _, want := range []string{
-		"api-token", "nowhere", "VAULT_API_TOKEN", "seal-key", "not made yet", "kit-smtp-url", "KIT_SMTP_URL",
+		"api-token", "nowhere", "VAULT_API_TOKEN", "seal-key", "not made yet", "kit-smtp-url", "VAULT_SMTP_URL",
 		"partner-token  operator, optional  absent  VAULT_PARTNER_TOKEN",
 	} {
 		if code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), strings.Join(strings.Fields(want), " ")) {
@@ -91,13 +91,13 @@ func TestTheSecretsCommand(t *testing.T) {
 		}
 	}
 
-	// kit's own secret is read from its own variable, KIT_SMTP_URL.
-	t.Setenv("KIT_SMTP_URL", "smtp://relay.example.com:2525?tls=none")
-	if _, out, _ := secretsCmd(t, dir, "", "list"); !strings.Contains(strings.Join(strings.Fields(out), " "), "kit-smtp-url operator env KIT_SMTP_URL") {
-		t.Errorf("KIT_SMTP_URL is not where the list finds kit-smtp-url:\n%s", out)
+	// kit's own secret is read from its own variable, VAULT_SMTP_URL.
+	t.Setenv("VAULT_SMTP_URL", "smtp://relay.example.com:2525?tls=none")
+	if _, out, _ := secretsCmd(t, dir, "", "list"); !strings.Contains(strings.Join(strings.Fields(out), " "), "kit-smtp-url operator env VAULT_SMTP_URL") {
+		t.Errorf("VAULT_SMTP_URL is not where the list finds kit-smtp-url:\n%s", out)
 	}
-	if _, _, errOut := secretsCmd(t, dir, "smtp://other.example.com:25?tls=none", "set", "kit-smtp-url"); !strings.Contains(errOut, "KIT_SMTP_URL is set") {
-		t.Errorf("set under KIT_SMTP_URL: %q", errOut)
+	if _, _, errOut := secretsCmd(t, dir, "smtp://other.example.com:25?tls=none", "set", "kit-smtp-url"); !strings.Contains(errOut, "VAULT_SMTP_URL is set") {
+		t.Errorf("set under VAULT_SMTP_URL: %q", errOut)
 	}
 
 	// The variable wins over the store, and set says so.
@@ -112,11 +112,11 @@ func TestTheSecretsCommand(t *testing.T) {
 
 // Where the environment keeps no store, set says what to do instead.
 func TestTheSecretsCommandWithoutAStore(t *testing.T) {
-	t.Setenv("KIT_SECRETS", "env")
+	t.Setenv("VAULT_SECRETS", "env")
 	app := NewApp("vault", cmdSecrets).With(Env(EnvProduction), Logs(io.Discard))
 	var out, errOut bytes.Buffer
 	if code := app.secretsCommand(t.Context(), []string{"set", "api-token"}, strings.NewReader("x"), &out, &errOut); code != 1 ||
-		!strings.Contains(errOut.String(), "KIT_SECRETS=env keeps no store: set VAULT_API_TOKEN where the product runs") {
+		!strings.Contains(errOut.String(), "VAULT_SECRETS=env keeps no store: set VAULT_API_TOKEN where the product runs") {
 		t.Fatalf("set: %d %q", code, errOut.String())
 	}
 }
@@ -153,8 +153,8 @@ func TestTheSecretsCommandKeepsADatabasesURL(t *testing.T) {
 	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
 		t.Skip("the SDK's file store needs file modes that are access lists")
 	}
-	t.Setenv("KIT_SECRETS", "file:"+filepath.Join(t.TempDir(), "secrets"))
-	t.Setenv("KIT_SECRETS_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
+	t.Setenv("VAULT_SECRETS", "file:"+filepath.Join(t.TempDir(), "secrets"))
+	t.Setenv("VAULT_SECRETS_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
 	app := NewApp("vault", cmdSecrets).With(Env(EnvProduction), Logs(io.Discard), Database("database", NewFakeDB(sql.DialectPostgres).Engine()))
 	code, out := secretsOf(t, app, "", "list")
 	for _, want := range []string{"database-url", "VAULT_DATABASE_URL"} {
@@ -206,10 +206,10 @@ func TestTheSecretsCommandListsKitsIndexKey(t *testing.T) {
 	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
 		t.Skip("the SDK's file store needs file modes that are access lists")
 	}
-	t.Setenv("KIT_SECRETS", "file:"+filepath.Join(t.TempDir(), "secrets"))
-	t.Setenv("KIT_SECRETS_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
-	t.Setenv("KIT_INDEX_KEY", "")
-	t.Setenv("KIT_INDEX_KEY_FILE", "")
+	t.Setenv("VAULT_SECRETS", "file:"+filepath.Join(t.TempDir(), "secrets"))
+	t.Setenv("VAULT_SECRETS_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
+	t.Setenv("VAULT_INDEX_KEY", "")
+	t.Setenv("VAULT_INDEX_KEY_FILE", "")
 	svc := NewService("cmd-people", "People's cards, whose subject the framework references.")
 	svc.Store("cards", func(c card) string { return c.ID })
 	app := NewApp("vault", svc).With(Env(EnvProduction), Logs(io.Discard))
@@ -221,13 +221,13 @@ func TestTheSecretsCommandListsKitsIndexKey(t *testing.T) {
 		}
 		return ""
 	}
-	if code, out := secretsOf(t, app, "", "list"); code != 0 || line(out) != "kit-index-key kit not made yet KIT_INDEX_KEY - - -" {
+	if code, out := secretsOf(t, app, "", "list"); code != 0 || line(out) != "kit-index-key app not made yet VAULT_INDEX_KEY - - -" {
 		t.Fatalf("list (%d):\n%s", code, out)
 	}
 	if code, out := secretsOf(t, app, "an index key of thirty-two bytes\n", "set", "kit-index-key"); code != 0 || out != "kit-index-key: version 1\n" {
 		t.Fatalf("set where the store holds none: %d %q", code, out)
 	}
-	if code, out := secretsOf(t, app, "", "list"); code != 0 || !strings.HasPrefix(line(out), "kit-index-key kit file KIT_INDEX_KEY 1 ") ||
+	if code, out := secretsOf(t, app, "", "list"); code != 0 || !strings.HasPrefix(line(out), "kit-index-key app file VAULT_INDEX_KEY 1 ") ||
 		!strings.HasSuffix(line(out), " never") {
 		t.Fatalf("list once made (%d):\n%s", code, out)
 	}

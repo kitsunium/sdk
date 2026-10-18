@@ -96,7 +96,7 @@ packages:
           - comment: 0.4.2.18 — the app could not listen on its address
             name: CodeAppListen
             value: "0x00_04_02_12"
-          - comment: 0.4.2.19 — KIT_SMTP_URL cannot be used
+          - comment: 0.4.2.19 — <PRODUCT>_SMTP_URL cannot be used
             doc: Mailers.
             name: CodeMailConfig
             value: "0x00_04_02_13"
@@ -125,7 +125,7 @@ packages:
           - comment: 0.4.2.26 — a hand-written loop's supervisor refused to start
             name: CodeLoopStart
             value: "0x00_04_02_1A"
-          - comment: "0.4.2.27 — the environment's secret store cannot be used: KIT_SECRETS, KIT_SECRETS_KEY"
+          - comment: "0.4.2.27 — the environment's secret store cannot be used: <PRODUCT>_SECRETS, <PRODUCT>_SECRETS_KEY"
             doc: Secrets.
             name: CodeSecretStore
             value: "0x00_04_02_1B"
@@ -361,11 +361,27 @@ packages:
             name: CodeMigrationIrreversible
             value: "0x00_04_02_54"
         type: errs.Code
+      - const:
+          - comment: "0.4.2.85 — a runtime name the framework no longer reads was met at the start: the name that replaces it is said"
+            doc: |-
+              CodeRenamed refuses a start that meets a runtime name the framework
+              no longer reads (ADR 0180 §3, Q12): an operator's variable still
+              named KIT_<NAME> where the framework reads <PRODUCT>_<NAME>, a
+              struct field still tagged kit:"…" where it reads app:"…". Ignored,
+              the first would start the product on a default — an empty data
+              directory —, the second would store a personal field in clear. The
+              refusal is a [DiagnosticsError] naming every old name met and the
+              name that replaces it, all at once; it carries this code, which
+              errs.HasCode reads through it. The refusal holds for two minors,
+              then the old names are forgotten.
+            name: CodeRenamed
+            value: "0x00_04_02_55"
+        type: errs.Code
     constants:
       - blockDoc: The environments.
         doc: |-
           EnvDev serves the Studio, analyzes the source and binds loopback. Only
-          `kit dev` or an explicit KIT_ENV=dev turns it on.
+          `kit dev` or an explicit <PRODUCT>_ENV=dev turns it on.
         name: EnvDev
         value: "\"dev\""
       - blockDoc: The environments.
@@ -528,7 +544,7 @@ packages:
 
       Package app — the catalog of the generic mechanics a node is built from.
 
-      Package app — the kit tag: the classes and words a field of personal data
+      Package app — the app tag: the classes and words a field of personal data
       carries.
 
       Package app — the plan of a Go type's classified members, computed once per
@@ -1050,7 +1066,7 @@ packages:
           - name: C
           - constraint: any
             name: R
-      - doc: Env selects the environment, instead of KIT_ENV.
+      - doc: Env selects the environment, instead of <PRODUCT>_ENV.
         in:
           - name: env
             type: string
@@ -1058,7 +1074,7 @@ packages:
         out:
           - type: AppConfigurer
       - doc: |-
-          Listen sets the listening address, instead of KIT_ADDR or PORT. ":0" picks
+          Listen sets the listening address, instead of <PRODUCT>_ADDR or PORT. ":0" picks
           a free port; App.URL tells which.
         in:
           - name: addr
@@ -1067,7 +1083,7 @@ packages:
         out:
           - type: AppConfigurer
       - doc: |-
-          DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.
+          DataDir sets where stores and queues persist, instead of <PRODUCT>_DATA_DIR.
           Given to an app after [InMemory], it wins: the last of the two says where
           the data is — so a test helper that runs the product in memory runs it
           on disk with the one option its test gives (apptest.NewDisk).
@@ -1111,7 +1127,7 @@ packages:
           - type: AppConfigurer
       - doc: |-
           InMemory keeps data in memory. On an app, it overrides the data directory
-          for every store and queue — KIT_DATA_DIR, and a [DataDir] given before it:
+          for every store and queue — <PRODUCT>_DATA_DIR, and a [DataDir] given before it:
           what a test wants. On a store, it keeps that store in memory even when the
           app has a data directory.
         name: InMemory
@@ -1571,7 +1587,7 @@ packages:
           - type: "*Mailer"
       - doc: |-
           NewModule declares a module named name — lower-case letters, digits and
-          dashes, starting with a letter; "kit", "external" and "schema" are the framework's — that doc
+          dashes, starting with a letter; "app", "kit", "external" and "schema" are the framework's — that doc
           describes, made of parts: its services, which it adopts, the modules it
           requires ([Requires]), and the migrations of the data it keeps outside
           the framework's stores ([Migrations]), run on the database that keeps it. Declare it
@@ -1628,7 +1644,7 @@ packages:
           Prefix serves a module's routes under prefix — "/trust/" — instead of
           "/<module>/"; "/" shares the product's route space, where a route both
           declare is refused as any two are. A prefix starts and ends with '/', and
-          never lies under /_kit/.
+          never lies under /_app/, nor under /_kit/ while its probes answer there.
         in:
           - name: prefix
             type: string
@@ -1637,7 +1653,7 @@ packages:
           - type: MountConfigurer
       - doc: |-
           Only makes a mount hold in the environments envs names alone — the name
-          KIT_ENV or [Env] gives, lower-cased, "production" when neither does:
+          <PRODUCT>_ENV or [Env] gives, lower-cased, "production" when neither does:
 
           	a := app.NewApp("vigie", identity.Service).
           		With(app.Mount(debugbar.Module, app.Only("dev", "staging")))
@@ -1921,7 +1937,7 @@ packages:
         name: ClearCookie
       - doc: |-
           ClientIP returns the address of the client of the request ctx serves: the
-          connection's peer, or — only when KIT_TRUST_PROXY=on — the last address of
+          connection's peer, or — only when <PRODUCT>_TRUST_PROXY=on — the last address of
           X-Forwarded-For, the one the trusted proxy appended. It is "" outside an HTTP request.
         in:
           - name: ctx
@@ -2259,7 +2275,7 @@ packages:
       - doc: |-
           ConfigFiles gives the framework the product's configuration files: config/config.<ext>,
           which every environment reads, and config/<env>.<ext>, the environment's
-          own — <env> being KIT_ENV as written, dev when kit dev runs the product —
+          own — <env> being <PRODUCT>_ENV as written, dev when kit dev runs the product —
           in JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of
           the settings to their values; it never holds a secret, and a key no
           service declares stops the start. The files belong in the binary:
@@ -2338,7 +2354,7 @@ packages:
       - doc: |-
           Telemetry exports the app's telemetry on the private socket at path —
           absolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the
-          product's own account. It wins over KIT_TELEMETRY.
+          product's own account. It wins over <PRODUCT>_TELEMETRY.
         in:
           - name: path
             type: string
@@ -2612,7 +2628,7 @@ packages:
 
               	serve        run the product (the default)
               	graph        print the product graph: -format json|mermaid
-              	healthcheck  exit 0 when the product running on KIT_ADDR is ready
+              	healthcheck  exit 0 when the product running on <PRODUCT>_ADDR is ready
               	config       every setting: its value, never a secret's, and its origin
               	secrets      list the secrets, set one from standard input, rotate one
               	migrate      the databases' migrations: status, up, down SET VERSION
@@ -2677,8 +2693,9 @@ packages:
           - doc: |-
               Unwrap is what the refusal is, when the framework has a code for it: with
               packages in Missing, an error carrying [CodeSubsystemMissing] (ADR
-              0179 §6), which errs.HasCode reads through the refusal; nil
-              otherwise.
+              0179 §6); with names in Renamed, one carrying [CodeRenamed] (ADR 0180
+              §3); both joined when the start found both. errs.HasCode reads either
+              through the refusal; nil when it found neither.
             name: Unwrap
             out:
               - type: error
@@ -2692,6 +2709,13 @@ packages:
                 Missing are the registration packages the program does not import
                 and a declaration needs (ADR 0179 §6), sorted; nil when none is.
               name: Missing
+              type: "[]string"
+            - doc: |-
+                Renamed are the old runtime names the start met (ADR 0180 §3, Q12),
+                each written "<old> -> <new>" — "KIT_DATA_DIR -> TODO_DATA_DIR",
+                `shop.Report.Email kit:"personal" -> app:"personal"` —, sorted; nil
+                when none was.
+              name: Renamed
               type: "[]string"
       - doc: |-
           AnalyzeFunc reads the product's source — the Go module rooted at dir, and
@@ -3349,13 +3373,13 @@ packages:
           retrying a failure and dead-lettering a message after its last attempt.
 
           The transport is the SDK's mail package: SMTP when the mail connector's
-          secret smtp-url is set — KIT_SMTP_URL, smtp://user:password@host:587?tls=
+          secret smtp-url is set — <PRODUCT>_SMTP_URL, smtp://user:password@host:587?tls=
           starttls|implicit|none — and otherwise the capture transport, which keeps
           every message for the Studio's mailbox and for tests ([Mailer.Captured])
           and delivers nothing. Outside dev, the capture transport is reported as a
           warning. The URL is read again before every delivery: replacing it where
           it lives — a new version in the store, a new file behind
-          KIT_SMTP_URL_FILE — takes effect at the next mail. The outbox and the
+          <PRODUCT>_SMTP_URL_FILE — takes effect at the next mail. The outbox and the
           transports are the SDK's, which the mail subsystem plugs in
           (framework/app/mail, ADR 0179 step 6).
         methods:
@@ -4224,7 +4248,7 @@ packages:
               With [Generated], the framework makes it: version 1 on the first start, a new version
               on its schedule, the previous ones kept so that what they sealed or signed
               still opens and verifies. It lives in the store the environment keeps — an
-              encrypted file store in dev, KIT_SECRETS elsewhere. Its variable pins it:
+              encrypted file store in dev, <PRODUCT>_SECRETS elsewhere. Its variable pins it:
               the framework then uses the value as it is and does not rotate it.
 
               name is 1 to 63 lower-case letters, digits and dashes, starting and ending
@@ -4444,7 +4468,7 @@ packages:
           a handler holds can never alias what the store holds, and the memory and
           file backends behave identically.
 
-          With a data directory (KIT_DATA_DIR; ".kit/data" in dev) the store persists
+          With a data directory (<PRODUCT>_DATA_DIR; ".kit/data" in dev) the store persists
           every write before returning, atomically — a crash never leaves a torn
           file — and a write costs one entity, whatever the store holds. Without one,
           it lives in memory. A store a database keeps ([Database], [Keeps]) lives
@@ -5247,11 +5271,11 @@ packages:
       - doc: LabelNode is the pprof label naming the node a goroutine works for.
         name: LabelNode
         type: string
-        value: "\"kit_node\""
+        value: "\"app_node\""
       - doc: LabelLoop is the pprof label naming the loop a goroutine belongs to.
         name: LabelLoop
         type: string
-        value: "\"kit_loop\""
+        value: "\"app_loop\""
       - blockDoc: The write modes.
         doc: |-
           WriteUpsert writes whatever the key holds: a creation or a
@@ -8611,13 +8635,13 @@ packages:
           retrying a failure and dead-lettering a message after its last attempt.
 
           The transport is the SDK's mail package: SMTP when the mail connector's
-          secret smtp-url is set — KIT_SMTP_URL, smtp://user:password@host:587?tls=
+          secret smtp-url is set — <PRODUCT>_SMTP_URL, smtp://user:password@host:587?tls=
           starttls|implicit|none — and otherwise the capture transport, which keeps
           every message for the Studio's mailbox and for tests ([Mailer].Captured)
           and delivers nothing. Outside dev, the capture transport is reported as a
           warning. The URL is read again before every delivery: replacing it where
           it lives — a new version in the store, a new file behind
-          KIT_SMTP_URL_FILE — takes effect at the next mail. The outbox and the
+          <PRODUCT>_SMTP_URL_FILE — takes effect at the next mail. The outbox and the
           transports are the SDK's, which the mail subsystem plugs in
           (framework/app/mail, ADR 0179 step 6).
         name: Mailer
@@ -8834,7 +8858,7 @@ packages:
           a handler holds can never alias what the store holds, and the memory and
           file backends behave identically.
 
-          With a data directory (KIT_DATA_DIR; ".kit/data" in dev) the store persists
+          With a data directory (<PRODUCT>_DATA_DIR; ".kit/data" in dev) the store persists
           every write before returning, atomically — a crash never leaves a torn
           file — and a write costs one entity, whatever the store holds. Without one,
           it lives in memory. A store is a port (ADR 0004): what it runs on is its
@@ -8958,7 +8982,7 @@ packages:
         value: "0x00_04_02_3B"
       - doc: |-
           EnvDev serves the Studio, analyzes the source and binds loopback. Only
-          `kit dev` or an explicit KIT_ENV=dev turns it on.
+          `kit dev` or an explicit <PRODUCT>_ENV=dev turns it on.
         name: EnvDev
         type: string
         value: "\"dev\""
@@ -9302,7 +9326,7 @@ packages:
         value: "0x00_04_02_4E"
       - doc: |-
           CodeTrashList refuses the Studio's list of a store's trash (GET
-          /_kit/api/trash) when the store named is none of the product's — a
+          /_app/api/trash) when the store named is none of the product's — a
           NotFound — or keeps no trash, having no app.Revisions — an Invalid (ADR
           0178 C4).
         name: CodeTrashList
@@ -9425,6 +9449,14 @@ packages:
         name: CodeMigrationIrreversible
         type: errs.Code
         value: "0x00_04_02_54"
+      - doc: |-
+          CodeRenamed refuses a start that meets a runtime name the framework no
+          longer reads (ADR 0180 §3): a KIT_<NAME> variable of the operator's, a
+          field tagged kit:"…". The [DiagnosticsError] names each old name and
+          the one that replaces it, and carries this code.
+        name: CodeRenamed
+        type: errs.Code
+        value: "0x00_04_02_55"
     doc: |-
       Package app — who may call an operation: the principal, the rules and their
       checks.
@@ -9500,7 +9532,7 @@ packages:
       construction, the edges the running product observed — each with its
       counters — and, in dev, the edges the static analysis found in the code,
       each with its call sites. In dev the app serves it, live, in the Studio at
-      /_kit/.
+      /_app/.
 
       # Building blocks
 
@@ -9574,8 +9606,8 @@ packages:
       # Running
 
       [App].Main understands its commands — serve, graph, healthcheck, config,
-      secrets, migrate — and the environment: KIT_ENV (dev serves the Studio; production is the default),
-      KIT_ADDR or PORT, KIT_DATA_DIR, KIT_ALLOWED_HOSTS, KIT_LOG_LEVEL. The
+      secrets, migrate — and the environment: <PRODUCT>_ENV (dev serves the Studio; production is the default),
+      <PRODUCT>_ADDR or PORT, <PRODUCT>_DATA_DIR, <PRODUCT>_ALLOWED_HOSTS, <PRODUCT>_LOG_LEVEL. The
       Studio's pages are the kit tool's, not the product's: in dev a server
       serves the read-only API the Studio reads, and no route that acts on the
       product exists. The mechanics underneath — lifecycle, health, scheduler, queue, tracing,
@@ -9888,7 +9920,7 @@ packages:
         name: NoTransaction
         out:
           - type: CommandOption
-      - doc: Env selects the environment, instead of KIT_ENV.
+      - doc: Env selects the environment, instead of <PRODUCT>_ENV.
         in:
           - name: env
             type: string
@@ -9896,7 +9928,7 @@ packages:
         out:
           - type: AppOption
       - doc: |-
-          Listen sets the listening address, instead of KIT_ADDR or PORT. ":0" picks
+          Listen sets the listening address, instead of <PRODUCT>_ADDR or PORT. ":0" picks
           a free port; App.URL tells which.
         in:
           - name: addr
@@ -9905,7 +9937,7 @@ packages:
         out:
           - type: AppOption
       - doc: |-
-          DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.
+          DataDir sets where stores and queues persist, instead of <PRODUCT>_DATA_DIR.
           Given to an app after [InMemory], it wins: the last of the two says where
           the data is — so a test helper that runs the product in memory runs it
           on disk with the one option its test gives (apptest.NewDisk).
@@ -9949,7 +9981,7 @@ packages:
           - type: AppOption
       - doc: |-
           InMemory keeps data in memory. On an app, it overrides the data directory
-          for every store and queue — KIT_DATA_DIR, and a [DataDir] given before it:
+          for every store and queue — <PRODUCT>_DATA_DIR, and a [DataDir] given before it:
           what a test wants. On a store, it keeps that store in memory even when the
           app has a data directory.
         name: InMemory
@@ -10351,7 +10383,7 @@ packages:
           - type: MailerOption
       - doc: |-
           NewModule declares a module named name — lower-case letters, digits and
-          dashes, starting with a letter; "kit", "external" and "schema" are the framework's — that doc
+          dashes, starting with a letter; "app", "kit", "external" and "schema" are the framework's — that doc
           describes, made of parts: its services, which it adopts, the modules it
           requires ([Requires]), and the migrations of the data it keeps outside
           the framework's stores ([Migrations]), run on the database that keeps it. Declare it
@@ -10408,7 +10440,7 @@ packages:
           Prefix serves a module's routes under prefix — "/trust/" — instead of
           "/<module>/"; "/" shares the product's route space, where a route both
           declare is refused as any two are. A prefix starts and ends with '/', and
-          never lies under /_kit/.
+          never lies under /_app/, nor under /_kit/ while its probes answer there.
         in:
           - name: prefix
             type: string
@@ -10417,7 +10449,7 @@ packages:
           - type: MountOption
       - doc: |-
           Only makes a mount hold in the environments envs names alone — the name
-          KIT_ENV or [Env] gives, lower-cased, "production" when neither does:
+          <PRODUCT>_ENV or [Env] gives, lower-cased, "production" when neither does:
 
           	a := app.NewApp("vigie", identity.Service).
           		With(app.Mount(debugbar.Module, app.Only("dev", "staging")))
@@ -10665,7 +10697,7 @@ packages:
         name: ClearCookie
       - doc: |-
           ClientIP returns the address of the client of the request ctx serves: the
-          connection's peer, or — only when KIT_TRUST_PROXY=on — the last address of
+          connection's peer, or — only when <PRODUCT>_TRUST_PROXY=on — the last address of
           X-Forwarded-For, the one the trusted proxy appended. It is "" outside an HTTP request.
         in:
           - name: ctx
@@ -10996,7 +11028,7 @@ packages:
       - doc: |-
           ConfigFiles gives the framework the product's configuration files: config/config.<ext>,
           which every environment reads, and config/<env>.<ext>, the environment's
-          own — <env> being KIT_ENV as written, dev when kit dev runs the product —
+          own — <env> being <PRODUCT>_ENV as written, dev when kit dev runs the product —
           in JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of
           the settings to their values; it never holds a secret, and a key no
           service declares stops the start. The files belong in the binary:
@@ -11040,7 +11072,7 @@ packages:
       - doc: |-
           Telemetry exports the app's telemetry on the private socket at path —
           absolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the
-          product's own account. It wins over KIT_TELEMETRY.
+          product's own account. It wins over <PRODUCT>_TELEMETRY.
         in:
           - name: path
             type: string
@@ -11217,7 +11249,7 @@ packages:
       - doc: |-
           NewDisk returns a new data directory for t. The secrets the framework makes — its
           data-key and its index key, what the product generates — are kept beside
-          the data, as production keeps them unless KIT_SECRETS says otherwise, so
+          the data, as production keeps them unless <PRODUCT>_SECRETS says otherwise, so
           an app started again on the same Disk opens what the first sealed.
 
           It skips t where the platform keeps no data directory: the SDK's disk

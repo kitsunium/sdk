@@ -105,7 +105,7 @@ func TestTheSourceEndpointServesNoLink(t *testing.T) {
 	must(t, os.Remove(file))
 	linkOrSkip(t, ".env", file)
 	q := url.Values{"module": {src.GoModule}, "file": {src.File}, "line": {"1"}}
-	resp, err := http.Get(app.URL() + "/_kit/api/source?" + q.Encode())
+	resp, err := http.Get(app.URL() + "/_app/api/source?" + q.Encode())
 	must(t, err)
 	defer resp.Body.Close()
 	body, bodyErr := io.ReadAll(resp.Body)

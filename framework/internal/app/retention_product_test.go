@@ -30,15 +30,15 @@ var Lounge = app.NewService("lounge", "Keeps its visitors' stays, and ends them 
 // Stay is one stay: whom it is about, and what they left.
 type Stay struct {
 	ID    string `json:"id"`
-	Email string `json:"email" kit:"subject"`
-	Note  string `json:"note" kit:"personal"`
+	Email string `json:"email" app:"subject"`
+	Note  string `json:"note" app:"personal"`
 	Room  string `json:"room"`
 }
 
 // Doodle is what a visitor drew on the wall, about nobody kit can find.
 type Doodle struct {
 	ID      string `json:"id"`
-	Drawing string `json:"drawing" kit:"personal"`
+	Drawing string `json:"drawing" app:"personal"`
 }
 
 var (
@@ -62,8 +62,8 @@ var (
 // or a data directory.
 func startLounge(t *testing.T, keeps app.AppConfigurer) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
-	pinDataKeyWithoutFileStore(t)
+	t.Setenv("LOUNGE_SMTP_URL", "")
+	pinDataKeyWithoutFileStore(t, "lounge")
 	a := app.NewApp("lounge", Lounge).With(keeps, app.Listen("127.0.0.1:0"), app.Env(app.EnvDev),
 		app.Analyze(false), app.Logs(io.Discard))
 	if err := a.Start(t.Context()); err != nil {

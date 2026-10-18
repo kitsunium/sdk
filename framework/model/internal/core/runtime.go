@@ -40,26 +40,30 @@ const (
 	SettingOption  = "option"  // the product's code: an AppOption
 	SettingDefault = "default" // kit's default for the environment
 	SettingStore   = "store"   // the environment's secret store (a secret)
-	SettingAppDev  = "kitdev"  // kit dev set the variable, for this launch
+	SettingAppDev  = "appdev"  // kit dev set the variable, for this launch
 	SettingFile    = "file"    // a configuration file of the product (Detail)
 )
 
-// The settings kit reads, by the environment variable that sets each: kit's
-// configuration reads them, the connectors and the architecture name them.
+// The settings the framework reads, by the variable that sets each. The
+// framework's own are named under the product's prefix — its name
+// upper-cased, every other character an underscore —, so a constant holds
+// the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+// (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+// the tool's, set by it and read whole by the Studio subsystem alone.
 const (
-	VarEnv          = "KIT_ENV"
-	VarAddr         = "KIT_ADDR"
-	VarDataDir      = "KIT_DATA_DIR"
+	VarEnv          = "ENV"
+	VarAddr         = "ADDR"
+	VarDataDir      = "DATA_DIR"
 	VarStudio       = "KIT_STUDIO"
 	VarStudioRemote = "KIT_STUDIO_REMOTE"
 	VarAnalyze      = "KIT_ANALYZE"
-	VarTrustProxy   = "KIT_TRUST_PROXY"
-	VarAllowedHosts = "KIT_ALLOWED_HOSTS"
-	VarLogLevel     = "KIT_LOG_LEVEL"
-	VarSMTPURL      = "KIT_SMTP_URL"
+	VarTrustProxy   = "TRUST_PROXY"
+	VarAllowedHosts = "ALLOWED_HOSTS"
+	VarLogLevel     = "LOG_LEVEL"
+	VarSMTPURL      = "SMTP_URL"
 	// VarRetention sets what the stores' retention loops do: on, dry-run
 	// or off (ADR 0006).
-	VarRetention = "KIT_RETENTION"
+	VarRetention = "RETENTION"
 	// VarDevForced is how kit dev tells the product which of the variables
 	// above it set itself for this launch: their origin is kit dev.
 	VarDevForced = "KIT_DEV_FORCED"
@@ -107,7 +111,7 @@ const (
 	ProvenanceLibrary = "library"
 	// ProvenanceApp loops are written by the framework for a declaration: a workflow's
 	// sweep, a declared loop's wake cycle.
-	ProvenanceApp = "kit"
+	ProvenanceApp = "app"
 	// ProvenanceProduct loops are written by hand in the product: Service.Go.
 	ProvenanceProduct = "product"
 )
@@ -277,7 +281,7 @@ type MigrationMessage struct {
 // SettingMessage is one configuration value kit read when the product started:
 // kit's own, or one a service of the product declares.
 type SettingMessage struct {
-	// Name is the environment variable that sets it: "KIT_ADDR",
+	// Name is the environment variable that sets it: "TODO_ADDR",
 	// "TODO_BASE_URL".
 	Name string `json:"name"`
 	// Value is what kit uses. A secret's is left out: Secret says so.
@@ -456,7 +460,7 @@ type LoopMessage struct {
 	Provenance string `json:"provenance,omitempty"`
 	// Library names the code that loops, for a library or kit loop:
 	// "net/http", "sdk/v1/app/scheduler", "sdk/v1/data/queue",
-	// "sdk/v1/app/mail/spool", "sdk/v1/app/statemachine", "kit".
+	// "sdk/v1/app/mail/spool", "sdk/v1/app/statemachine", "app".
 	Library string `json:"library,omitempty"`
 	// State is one of the Loop state constants.
 	State string `json:"state,omitempty"`
@@ -556,7 +560,7 @@ type SpanMessage struct {
 
 // Payload is the request and the response of a span, as JSON, in dev only.
 // Every member whose name says it is a secret — password, token, secret,
-// authorization, cookie… — or whose Go field is tagged kit:"secret" is
+// authorization, cookie… — or whose Go field is tagged app:"secret" is
 // replaced by "[redacted]", and each side is cut at 8 KiB.
 type Payload struct {
 	// Request is the decoded request, or the message delivered.

@@ -24,7 +24,7 @@ Package app — the build a graph describes: the modules and versions it was mad
 
 Package app — the catalog of the generic mechanics a node is built from.
 
-Package app — the kit tag: the classes and words a field of personal data carries.
+Package app — the app tag: the classes and words a field of personal data carries.
 
 Package app — the plan of a Go type's classified members, computed once per type.
 
@@ -1015,6 +1015,15 @@ The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is th
 
 Code `0.4.2.77`
 
+<a name="CodeRenamed"></a>
+```go
+const CodeRenamed errs.Code = 262741
+```
+
+CodeRenamed refuses a start that meets a runtime name the framework no longer reads (ADR 0180 §3, Q12): an operator's variable still named KIT\_\<NAME> where the framework reads \<PRODUCT>\_\<NAME>, a struct field still tagged kit:"…" where it reads app:"…". Ignored, the first would start the product on a default — an empty data directory —, the second would store a personal field in clear. The refusal is a [DiagnosticsError](#DiagnosticsError) naming every old name met and the name that replaces it, all at once; it carries this code, which errs.HasCode reads through it. The refusal holds for two minors, then the old names are forgotten.
+
+Code `0.4.2.85`
+
 <a name="CodeResealInPlace"></a>
 ```go
 const CodeResealInPlace errs.Code = 262728
@@ -1399,7 +1408,7 @@ DialectSQLite is SQLite.
 const EnvDev = "dev"
 ```
 
-EnvDev serves the Studio, analyzes the source and binds loopback. Only \`kit dev\` or an explicit KIT\_ENV=dev turns it on.
+EnvDev serves the Studio, analyzes the source and binds loopback. Only \`kit dev\` or an explicit \<PRODUCT>\_ENV=dev turns it on.
 
 <a name="EnvProduction"></a>
 ```go
@@ -1706,7 +1715,7 @@ ClearCookie tells the browser to forget the cookie called name.
 func ClientIP(ctx context.Context) string
 ```
 
-ClientIP returns the address of the client of the request ctx serves: the connection's peer, or — only when KIT\_TRUST\_PROXY=on — the last address of X-Forwarded-For, the one the trusted proxy appended. It is "" outside an HTTP request.
+ClientIP returns the address of the client of the request ctx serves: the connection's peer, or — only when \<PRODUCT>\_TRUST\_PROXY=on — the last address of X-Forwarded-For, the one the trusted proxy appended. It is "" outside an HTTP request.
 
 <a name="Clock"></a>
 ## func [Clock](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/config.go>)
@@ -1724,7 +1733,7 @@ Clock makes the app read and wait on c instead of the system clock: a test drive
 func ConfigFiles(fsys fs.FS) AppConfigurer
 ```
 
-ConfigFiles gives the framework the product's configuration files: config/config.\<ext>, which every environment reads, and config/\<env>.\<ext>, the environment's own — \<env> being KIT\_ENV as written, dev when kit dev runs the product — in JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of the settings to their values; it never holds a secret, and a key no service declares stops the start. The files belong in the binary:
+ConfigFiles gives the framework the product's configuration files: config/config.\<ext>, which every environment reads, and config/\<env>.\<ext>, the environment's own — \<env> being \<PRODUCT>\_ENV as written, dev when kit dev runs the product — in JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of the settings to their values; it never holds a secret, and a key no service declares stops the start. The files belong in the binary:
 
 ```
 //go:embed config
@@ -1749,7 +1758,7 @@ Conflict reports a request the resource's current state refuses (409).
 func DataDir(dir string) AppConfigurer
 ```
 
-DataDir sets where stores and queues persist, instead of KIT\_DATA\_DIR. Given to an app after [InMemory](#InMemory), it wins: the last of the two says where the data is — so a test helper that runs the product in memory runs it on disk with the one option its test gives (apptest.NewDisk).
+DataDir sets where stores and queues persist, instead of \<PRODUCT>\_DATA\_DIR. Given to an app after [InMemory](#InMemory), it wins: the last of the two says where the data is — so a test helper that runs the product in memory runs it on disk with the one option its test gives (apptest.NewDisk).
 
 <a name="Database"></a>
 ## func [Database](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/database.go>)
@@ -1857,7 +1866,7 @@ EnableStudio makes a serving app in dev mount the Studio's routes, which framewo
 func Env(env string) AppConfigurer
 ```
 
-Env selects the environment, instead of KIT\_ENV.
+Env selects the environment, instead of \<PRODUCT>\_ENV.
 
 <a name="Erase"></a>
 ## func [Erase](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/privacy_erase.go>)
@@ -1990,7 +1999,7 @@ IdleStop makes a daemon stop itself once, for d, no connection was open on any o
 func InMemory() interface{StoreConfigurer; AppConfigurer}
 ```
 
-InMemory keeps data in memory. On an app, it overrides the data directory for every store and queue — KIT\_DATA\_DIR, and a [DataDir](#DataDir) given before it: what a test wants. On a store, it keeps that store in memory even when the app has a data directory.
+InMemory keeps data in memory. On an app, it overrides the data directory for every store and queue — \<PRODUCT>\_DATA\_DIR, and a [DataDir](#DataDir) given before it: what a test wants. On a store, it keeps that store in memory even when the app has a data directory.
 
 <a name="Index"></a>
 ## func [Index](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/index.go>)
@@ -2046,7 +2055,7 @@ Keeps says what the database keeps: a service's stores, a store, a module's stor
 func Listen(addr string) AppConfigurer
 ```
 
-Listen sets the listening address, instead of KIT\_ADDR or PORT. ":0" picks a free port; App.URL tells which.
+Listen sets the listening address, instead of \<PRODUCT>\_ADDR or PORT. ":0" picks a free port; App.URL tells which.
 
 <a name="Log"></a>
 ## func [Log](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/request.go>)
@@ -2232,7 +2241,7 @@ NewMailer is a mailer no service declares yet, with the default attempts: [Servi
 func NewModule(name string, doc string, parts ...ModuleConfigurer) *Module
 ```
 
-NewModule declares a module named name — lower-case letters, digits and dashes, starting with a letter; "kit", "external" and "schema" are the framework's — that doc describes, made of parts: its services, which it adopts, the modules it requires ([Requires](#Requires)), and the migrations of the data it keeps outside the framework's stores ([Migrations](#Migrations)), run on the database that keeps it. Declare it as a package-level variable of the one package a product imports:
+NewModule declares a module named name — lower-case letters, digits and dashes, starting with a letter; "app", "kit", "external" and "schema" are the framework's — that doc describes, made of parts: its services, which it adopts, the modules it requires ([Requires](#Requires)), and the migrations of the data it keeps outside the framework's stores ([Migrations](#Migrations)), run on the database that keeps it. Declare it as a package-level variable of the one package a product imports:
 
 ```
 var Module = app.NewModule("moderation",
@@ -2388,7 +2397,7 @@ Now returns the app's time: the system clock, or the clock a test gave with [Clo
 func Only(envs ...string) MountConfigurer
 ```
 
-Only makes a mount hold in the environments envs names alone — the name KIT\_ENV or [Env](#Env) gives, lower-cased, "production" when neither does:
+Only makes a mount hold in the environments envs names alone — the name \<PRODUCT>\_ENV or [Env](#Env) gives, lower-cased, "production" when neither does:
 
 ```
 a := app.NewApp("vigie", identity.Service).
@@ -2444,7 +2453,7 @@ PerEnv is the environment variable name, else fallback when it is unset or empty
 func Prefix(prefix string) MountConfigurer
 ```
 
-Prefix serves a module's routes under prefix — "/trust/" — instead of "/\<module>/"; "/" shares the product's route space, where a route both declare is refused as any two are. A prefix starts and ends with '/', and never lies under /\_kit/.
+Prefix serves a module's routes under prefix — "/trust/" — instead of "/\<module>/"; "/" shares the product's route space, where a route both declare is refused as any two are. A prefix starts and ends with '/', and never lies under /\_app/, nor under /\_kit/ while its probes answer there.
 
 <a name="Profile"></a>
 ## func [Profile](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/app_profiles.go>)
@@ -2748,7 +2757,7 @@ Studio switches the Studio on or off in dev. It is always off in production.
 func Telemetry(path string, gids ...int) AppConfigurer
 ```
 
-Telemetry exports the app's telemetry on the private socket at path — absolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the product's own account. It wins over KIT\_TELEMETRY.
+Telemetry exports the app's telemetry on the private socket at path — absolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the product's own account. It wins over \<PRODUCT>\_TELEMETRY.
 
 <a name="Timeout"></a>
 ## func [Timeout](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/endpoint.go>)
@@ -2954,7 +2963,7 @@ It understands ten commands, so every binary of the framework can describe itsel
 ```
 serve        run the product (the default)
 graph        print the product graph: -format json|mermaid
-healthcheck  exit 0 when the product running on KIT_ADDR is ready
+healthcheck  exit 0 when the product running on <PRODUCT>_ADDR is ready
 config       every setting: its value, never a secret's, and its origin
 secrets      list the secrets, set one from standard input, rotate one
 migrate      the databases' migrations: status, up, down SET VERSION
@@ -3333,6 +3342,11 @@ type DiagnosticsError struct {
 	// Missing are the registration packages the program does not import
 	// and a declaration needs (ADR 0179 §6), sorted; nil when none is.
 	Missing     []string
+	// Renamed are the old runtime names the start met (ADR 0180 §3, Q12),
+	// each written "<old> -> <new>" — "KIT_DATA_DIR -> TODO_DATA_DIR",
+	// `shop.Report.Email kit:"personal" -> app:"personal"` —, sorted; nil
+	// when none was.
+	Renamed     []string
 }
 ```
 
@@ -3346,13 +3360,13 @@ func (*DiagnosticsError) Error() string
 Error lists every problem the start found, one per line.
 
 <a name="DiagnosticsError.Unwrap"></a>
-### func \(DiagnosticsError\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/subsystem.go>)
+### func \(DiagnosticsError\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/renamed.go>)
 
 ```go
 func (*DiagnosticsError) Unwrap() error
 ```
 
-Unwrap is what the refusal is, when the framework has a code for it: with packages in Missing, an error carrying [CodeSubsystemMissing](#CodeSubsystemMissing) (ADR 0179 §6), which errs.HasCode reads through the refusal; nil otherwise.
+Unwrap is what the refusal is, when the framework has a code for it: with packages in Missing, an error carrying [CodeSubsystemMissing](#CodeSubsystemMissing) (ADR 0179 §6); with names in Renamed, one carrying [CodeRenamed](#CodeRenamed) (ADR 0180 §3); both joined when the start found both. errs.HasCode reads either through the refusal; nil when it found neither.
 
 <a name="Dialect"></a>
 ## type [Dialect](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/database.go>)
@@ -3378,8 +3392,8 @@ Edit is an alias of `github.com/kitsunium/sdk/framework/model/internal/core.Edit
 type Edit struct {
 	Op   string          `json:"op"`
 	Path string          `json:"path"`
-	From json.RawMessage `json:"from,omitempty" kit:"personal"`
-	To   json.RawMessage `json:"to,omitempty" kit:"personal"`
+	From json.RawMessage `json:"from,omitempty" app:"personal"`
+	To   json.RawMessage `json:"to,omitempty" app:"personal"`
 }
 ```
 
@@ -3580,7 +3594,7 @@ Former is an alias of `github.com/kitsunium/sdk/framework/model/internal/core.Fo
 type Former struct {
 	// Value is the field's value then, as JSON; absent for a secret field,
 	// whose former values are never given.
-	Value json.RawMessage `json:"value,omitempty" kit:"personal"`
+	Value json.RawMessage `json:"value,omitempty" app:"personal"`
 	// Until is when it was replaced, on the app's clock.
 	Until time.Time       `json:"until"`
 	// By is the user who replaced it — app.UserID —, empty for a write
@@ -3739,7 +3753,7 @@ type LoopConfigurer interface {
 
 Mailer is outbound mail: a durable outbox and the transport that empties it. [Mailer.Send](#Mailer.Send) only queues — it returns once the message is safely in the outbox — and the mailer's own loop hands each message to the transport, retrying a failure and dead-lettering a message after its last attempt.
 
-The transport is the SDK's mail package: SMTP when the mail connector's secret smtp-url is set — KIT\_SMTP\_URL, smtp://user:password@host:587?tls= starttls|implicit|none — and otherwise the capture transport, which keeps every message for the Studio's mailbox and for tests ([Mailer.Captured](#Mailer.Captured)) and delivers nothing. Outside dev, the capture transport is reported as a warning. The URL is read again before every delivery: replacing it where it lives — a new version in the store, a new file behind KIT\_SMTP\_URL\_FILE — takes effect at the next mail. The outbox and the transports are the SDK's, which the mail subsystem plugs in (framework/app/mail, ADR 0179 step 6).
+The transport is the SDK's mail package: SMTP when the mail connector's secret smtp-url is set — \<PRODUCT>\_SMTP\_URL, smtp://user:password@host:587?tls= starttls|implicit|none — and otherwise the capture transport, which keeps every message for the Studio's mailbox and for tests ([Mailer.Captured](#Mailer.Captured)) and delivers nothing. Outside dev, the capture transport is reported as a warning. The URL is read again before every delivery: replacing it where it lives — a new version in the store, a new file behind \<PRODUCT>\_SMTP\_URL\_FILE — takes effect at the next mail. The outbox and the transports are the SDK's, which the mail subsystem plugs in (framework/app/mail, ADR 0179 step 6).
 
 ```go
 type Mailer struct{}
@@ -4452,7 +4466,7 @@ Without an option it is provided: the operator gives it in the environment — t
 
 With [Optional](#Optional), a start without it goes on: the product asks [Secret.Present](#Secret.Present) before it uses the secret.
 
-With [Generated](#Generated), the framework makes it: version 1 on the first start, a new version on its schedule, the previous ones kept so that what they sealed or signed still opens and verifies. It lives in the store the environment keeps — an encrypted file store in dev, KIT\_SECRETS elsewhere. Its variable pins it: the framework then uses the value as it is and does not rotate it.
+With [Generated](#Generated), the framework makes it: version 1 on the first start, a new version on its schedule, the previous ones kept so that what they sealed or signed still opens and verifies. It lives in the store the environment keeps — an encrypted file store in dev, \<PRODUCT>\_SECRETS elsewhere. Its variable pins it: the framework then uses the value as it is and does not rotate it.
 
 name is 1 to 63 lower-case letters, digits and dashes, starting and ending with a letter or a digit — one grammar for a file name and a variable — and unique in the app.
 
@@ -4620,7 +4634,7 @@ type StoreConfigurer interface {
 
 StoreService is a typed, keyed collection of entities. Every read returns a copy and every write stores one: an entity is kept as its JSON encoding, so what a handler holds can never alias what the store holds, and the memory and file backends behave identically.
 
-With a data directory (KIT\_DATA\_DIR; ".kit/data" in dev) the store persists every write before returning, atomically — a crash never leaves a torn file — and a write costs one entity, whatever the store holds. Without one, it lives in memory. A store a database keeps ([Database](#Database), [Keeps](#Keeps)) lives in a table of it, and every call is a round trip. A store is a port (ADR 0004): what it runs on is its engine (store\_engine.go) — the SDK's document store, in memory, in files or over SQL —; the framework makes it a node of the graph, observes every call, and speaks for its refusals. Its writes join the transaction their context carries ([Transact](#Transact)).
+With a data directory (\<PRODUCT>\_DATA\_DIR; ".kit/data" in dev) the store persists every write before returning, atomically — a crash never leaves a torn file — and a write costs one entity, whatever the store holds. Without one, it lives in memory. A store a database keeps ([Database](#Database), [Keeps](#Keeps)) lives in a table of it, and every call is a round trip. A store is a port (ADR 0004): what it runs on is its engine (store\_engine.go) — the SDK's document store, in memory, in files or over SQL —; the framework makes it a node of the graph, observes every call, and speaks for its refusals. Its writes join the transaction their context carries ([Transact](#Transact)).
 
 ```go
 type StoreService[T any] struct{}

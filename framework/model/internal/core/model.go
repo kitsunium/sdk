@@ -44,9 +44,10 @@ import "time"
 // framework/app and framework/internal/app, so a source position the
 // document gives in the framework's code names those paths, and the
 // constants of the framework's own provenance, port owner and setting
-// origin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]. The
-// values the graph spells after the framework follow with its runtime
-// names (ADR 0180 step 4).
+// origin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]; since
+// ADR 0180's step 4 their values are "app" and "appdev", the build's
+// and the graph's version of the framework are their field "app", and
+// the variable a framework setting names carries the product's prefix.
 const Version int = 6
 
 // ExternalID is the id of the node standing for the outside world.
@@ -102,14 +103,14 @@ type AppMessage struct {
 	Root string `json:"root,omitempty"`
 	// Env is "dev" or "production".
 	Env string `json:"env,omitempty"`
-	// Kit is the kit version that produced the graph.
-	Kit string `json:"kit,omitempty"`
+	// App is the version of the framework that produced the graph.
+	App string `json:"app,omitempty"`
 	// Go is the Go version the product was built with.
 	Go string `json:"go,omitempty"`
 	// StartedAt is when the process started, for a runtime graph.
 	StartedAt *time.Time `json:"startedAt,omitempty"`
-	// Build says what the binary was built from: the product, kit and the
-	// SDK kit depends on.
+	// Build says what the binary was built from: the product, the framework
+	// and the SDK the framework depends on.
 	Build *BuildMessage `json:"build,omitempty"`
 }
 
@@ -119,10 +120,10 @@ type AppMessage struct {
 type BuildMessage struct {
 	// Product is the product's own module.
 	Product ModuleVersionMessage `json:"product"`
-	// Kit is the framework: since ADR 0162 the SDK module,
+	// App is the framework: since ADR 0162 the SDK module,
 	// github.com/kitsunium/sdk, which holds it.
-	Kit ModuleVersionMessage `json:"kit"`
-	// SDK is the SDK the framework is built on — the same module as Kit
+	App ModuleVersionMessage `json:"app"`
+	// SDK is the SDK the framework is built on — the same module as App
 	// since ADR 0162, so the two say the same version.
 	SDK ModuleVersionMessage `json:"sdk"`
 }

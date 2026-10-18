@@ -127,10 +127,10 @@ func TestProductionSetsNoLabel(t *testing.T) {
 func TestRedaction(t *testing.T) {
 	type inner struct {
 		Name   string `json:"name"`
-		Recipe string `json:"recipe" kit:"secret"`
+		Recipe string `json:"recipe" app:"secret"`
 	}
 	type Embedded struct {
-		Pin string `json:"pin" kit:"other,secret"`
+		Pin string `json:"pin" app:"other,secret"`
 	}
 	type outer struct {
 		Embedded
@@ -260,7 +260,7 @@ func TestMailboxReadsEveryMailer(t *testing.T) {
 		status, raw := get(path)
 		return status, string(raw)
 	}
-	status, raw := get("/_kit/api/mail")
+	status, raw := get("/_app/api/mail")
 	var list []model.MailSummary
 	if err := json.Unmarshal(raw, &list); err != nil || status != 200 {
 		t.Fatalf("mail: %d %s", status, raw)
@@ -272,15 +272,15 @@ func TestMailboxReadsEveryMailer(t *testing.T) {
 	if !slices.Equal(ids, []string{"m3", "m2", "m1"}) {
 		t.Errorf("newest first across mailers: %v", ids)
 	}
-	if status, body := getText("/_kit/api/mail?limit=1"); status != 200 || !strings.Contains(body, "m3") || strings.Contains(body, "m2") {
+	if status, body := getText("/_app/api/mail?limit=1"); status != 200 || !strings.Contains(body, "m3") || strings.Contains(body, "m2") {
 		t.Errorf("limit: %d %s", status, body)
 	}
-	status, raw = get("/_kit/api/mail/m2")
+	status, raw = get("/_app/api/mail/m2")
 	var m model.MailMessage
 	if err := json.Unmarshal(raw, &m); err != nil || status != 200 || m.Text != "body of m2" {
 		t.Errorf("one mail: %d %s", status, raw)
 	}
-	for _, path := range []string{"/_kit/api/mail/nope", "/_kit/api/mail?limit=0"} {
+	for _, path := range []string{"/_app/api/mail/nope", "/_app/api/mail?limit=0"} {
 		if status, _ := get(path); status != http.StatusNotFound && status != http.StatusBadRequest {
 			t.Errorf("%s: %d", path, status)
 		}

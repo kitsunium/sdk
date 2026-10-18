@@ -357,7 +357,7 @@ func (l *Loop) start(_ context.Context, a *App) error {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(a.baseCtx))
 	r := &loopRun{
 		a:      a,
-		state:  a.kitLoop(l.id, l.id, model.LoopWake, l.schedule(), loopOrigin{model.ProvenanceApp, "kit"}),
+		state:  a.kitLoop(l.id, l.id, model.LoopWake, l.schedule(), loopOrigin{model.ProvenanceApp, frameworkName}),
 		wake:   make(chan struct{}, 1),
 		cancel: cancel,
 		done:   make(chan struct{}),

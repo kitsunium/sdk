@@ -25,8 +25,8 @@ import (
 // editor is a person's page: their name sealed where it rests.
 type editor struct {
 	ID    string `json:"id"`
-	Email string `json:"email" kit:"subject"`
-	Name  string `json:"name" kit:"personal"`
+	Email string `json:"email" app:"subject"`
+	Name  string `json:"name" app:"personal"`
 	Bio   string `json:"bio,omitempty"`
 }
 
@@ -35,9 +35,9 @@ var errUndone = errors.New("the transaction is undone")
 
 func TestRevisionsOnTheFile(t *testing.T) {
 	needsFileStore(t)
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
-	t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")
+	t.Setenv("WIKI_SECRETS", "memory")
+	t.Setenv("WIKI_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("WIKI_INDEX_KEY", "an index key of more than 16 bytes")
 	dir := t.TempDir()
 	svc := app.NewService("wiki", "Editors' pages that keep their revisions, sealed; app.Privacy on SQLite.")
 	editors := svc.Store("editors", func(e editor) string { return e.ID }, app.Revisions(2), app.Purpose("Show the editors' pages"))

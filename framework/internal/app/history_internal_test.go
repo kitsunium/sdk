@@ -13,17 +13,17 @@ import (
 // remembering has former values at every kind of place (ADR 0007).
 type remembering struct {
 	ID    string `json:"id"`
-	Nick  string `json:"nick" kit:"public,history=2"`
-	Note  string `json:"note" kit:"history=2"`
-	Token string `json:"token" kit:"history=2"`
+	Nick  string `json:"nick" app:"public,history=2"`
+	Note  string `json:"note" app:"history=2"`
+	Token string `json:"token" app:"history=2"`
 	Card  struct {
-		Holder string `json:"holder" kit:"personal"`
+		Holder string `json:"holder" app:"personal"`
 		Brand  string `json:"brand"`
-	} `json:"card" kit:"history=2"`
+	} `json:"card" app:"history=2"`
 	Creds struct {
-		Hash string `json:"hash" kit:"secret,history=2"`
-		Hint string `json:"hint" kit:"history=2"`
-	} `json:"creds" kit:"personal"`
+		Hash string `json:"hash" app:"secret,history=2"`
+		Hint string `json:"hint" app:"history=2"`
+	} `json:"creds" app:"personal"`
 }
 
 // A former value takes the stricter of its field's class and the classes of

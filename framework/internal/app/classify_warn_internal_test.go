@@ -17,8 +17,8 @@ type lookalike struct {
 	Email           string     `json:"email"`
 	FirstName       string     `json:"first_name"`
 	ClientIP        string     `json:"clientIp"`
-	IBAN            string     `json:"iban" kit:"public"`
-	Phone           string     `json:"phone" kit:"personal"`
+	IBAN            string     `json:"iban" app:"public"`
+	Phone           string     `json:"phone" app:"personal"`
 	Zip             string     `json:"zip"`
 	Tip             string     `json:"tip"`
 	RequireEmail    bool       `json:"requireEmail"`
@@ -216,14 +216,14 @@ func TestFieldsThatPrintAlikeAreWarnedOfApart(t *testing.T) {
 // under the one word kit once had to hide a value.
 type secretive struct {
 	ID           string `json:"id"`
-	Email        string `json:"email" kit:"secret"`
-	PostalAddr   string `json:"postalAddress" kit:"secret"`
-	EmailHash    string `json:"emailHash" kit:"secret"`
-	PasswordHash string `json:"passwordHash" kit:"secret"`
-	PhoneToken   string `json:"phoneToken" kit:"secret"`
-	APIKey       string `json:"apiKey" kit:"secret"`
-	Mobile       bool   `json:"mobile" kit:"secret"`
-	Phone        string `json:"phone" kit:"personal"`
+	Email        string `json:"email" app:"secret"`
+	PostalAddr   string `json:"postalAddress" app:"secret"`
+	EmailHash    string `json:"emailHash" app:"secret"`
+	PasswordHash string `json:"passwordHash" app:"secret"`
+	PhoneToken   string `json:"phoneToken" app:"secret"`
+	APIKey       string `json:"apiKey" app:"secret"`
+	Mobile       bool   `json:"mobile" app:"secret"`
+	Phone        string `json:"phone" app:"personal"`
 }
 
 // secretPersonalSaid is the warning of a secret field named label.

@@ -22,7 +22,7 @@
       "name": "app",
       "dir": "framework/app",
       "layer": "framework",
-      "doc": "Package app — who may call an operation: the principal, the rules and their\nchecks.\n\nPackage app — activities: what a daemon's idle stop waits for besides its\nconnections, a notion of the product's own — sessions still open, work\nstill queued.\n\nPackage app — the App: the services a product mounts, served by one process.\n\nPackage app — the static analysis a product can be given: the platform's\nanalyzer, run in the background in dev (ADR 0147 §1).\n\nPackage app — process profiles: what an app does with its process (ADR\n0147 §5) — serve, run as a daemon, or run one CLI command — and the\nsingleton lock.\n\nPackage app — authentication: the handler that says who calls, and the user\nit names.\n\nPackage app — the catalog of the generic mechanics a node is built from.\n\nPackage app — CLI commands: a short command of the product that Main runs\nonce, in the CLI profile, and whose status is the process's.\n\nPackage app — commands: an operation that changes something, with one\nhandler.\n\nPackage app — the app's options and environments.\n\nPackage app — databases: the SQL engines a store can be kept on.\n\nPackage app — the interfaces of databases: the engine a connector gives, and\nwhat the framework asks of it.\n\nPackage app — the decoding of a request into its typed value.\n\nPackage app is a framework in which every product is its own diagram.\n\nA product is made of services. A service declares its building blocks as\npackage-level values, through its methods:\n\n\tvar Service = app.NewService(\"todos\", \"The todo list.\")\n\n\tvar Todos = Service.Store(\"todos\", func(t Todo) string { return t.ID })\n\n\tvar Changes = Service.Topic[ChangeEvent](\"changes\")\n\n\tvar Lifecycle = Service.Workflow(\"lifecycle\", Todos, func(t *Todo) *Status { return &t.Status }).\n\t\tInitial(Open).\n\t\tOn(\"complete\", Open, Done).\n\t\tAfter(\"auto-archive\", 2*time.Minute, Done, Archived).\n\t\tOnTransition(announce)\n\n\tvar Complete = Service.Command(\"complete\", complete).\n\t\tExpose(\"POST /todos/{id}/complete\", app.Anyone())\n\n\tfunc complete(ctx context.Context, in ByID) (Todo, error) {\n\t\treturn Lifecycle.Fire(ctx, in.ID, \"complete\")\n\t}\n\nAn [App] mounts services and runs them as one process:\n\n\tvar App = app.NewApp(\"todo\", todos.Service, activity.Service)\n\n\tfunc main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }\n\n# The diagram\n\nThe values a product declares are also its description. [App].Graph\nreturns the product as a [model.Graph]: every node with the position of its\ndeclaration and of the function it runs, the edges that exist by\nconstruction, the edges the running product observed — each with its\ncounters — and, in dev, the edges the static analysis found in the code,\neach with its call sites. In dev the app serves it, live, in the Studio at\n/_kit/.\n\n# Building blocks\n\n  - [Service].Command and [Service].Query: the product's operations — a\n    command changes something and runs in one transaction, a query reads.\n    Each is internal until it is exposed: the code that needs it runs it\n    with [Command].Dispatch or [Query].Ask, which is how one service\n    reaches another. [Command].Expose and [Query].Expose give it a route,\n    which says who may run it: the operation's permission\n    ([Command].Allow) or rule ([Command].Authorize), or a marker that it is\n    open on purpose — [Anyone], [AnyUser]. The start refuses an exposure\n    that says none.\n  - [Service].Endpoint: a typed HTTP endpoint, for what HTTP itself is\n    about — a webhook a third party calls. The request is decoded\n    strictly — path, query and header fields by tag, the rest from a JSON\n    body — validated from its `validate` tags, then run through the\n    endpoint's mechanics ([RateLimit], [RateLimitPerClient], [Timeout],\n    [Bulkhead]). [Endpoint].Call runs it in-process; a port calls its\n    implementation ([Service].Implement) so.\n  - [Service].Store: a typed, keyed collection, persisted atomically when\n    the app has a data directory, or in a table of the database that\n    keeps it.\n  - [Transact]: one transaction — what it writes commits together, what\n    it publishes, mails or dispatches leaves at the commit.\n  - [Service].Topic and [Service].Subscribe: asynchronous messages,\n    delivered at least once to every subscription, retried, dead-lettered.\n  - [Service].Workflow: a state machine over a store — event transitions\n    fired by code, timer and guard transitions fired by the daemon's own\n    loop, hooks on entry and after every transition.\n  - [Service].Every and [Service].Cron: scheduled jobs.\n  - [Service].Static: a frontend.\n  - [Service].Listen: an inbound port that is not HTTP — a private socket on\n    this machine speaking a versioned contract (pkg/v1/proc/ipc).\n  - [Service].CLI: a short command-line command, run once by [App].Main.\n\nThe app, the composition root, says where the data lives: [Database]\ndeclares a database on an engine module the product's main imports —\ngithub.com/kitsunium/sdk/framework/connectors/postgres and its siblings,\nthe only code that imports a driver — and [Keeps] which stores it keeps. A\nservice never names a database: its handle is its store, which runs on\nthe SDK's document store over SQL there, a table per store.\n\nDeclaring never fails: a mistake is recorded with its position and\n[App].Start reports every one at once ([DiagnosticsError]).\n\n# Modules\n\nA module ([NewModule]) is a Go module's services, which a product mounts as\none — [App].With at its defaults, [Mount] with a [Prefix] or a [Bind]. What\nit declares is qualified with its name: its services are\n\"<module>.<service>\", its settings and secrets \"<module>.<name>\", its\nroutes served under its prefix; a module it [Requires] is mounted with it,\nand the modules start first. A mount given [Only] holds in the\nenvironments it names alone — app.Mount(m, app.Only(\"dev\", \"staging\")).\n\n# Processes\n\nAn app has a process profile ([Profile]): a server (the default) serves\nHTTP; a daemon serves no HTTP, answers on its listeners and may stop when\nidle ([IdleStop]) — no connection open and no [Service].Activity busy —; a\nCLI run opens what one command reads, runs it and exits. A command may be\nthe app's default ([DefaultCommand]: every argument that names no other\ncommand is its) and never fail its shell ([FailSafe]). [Singleton] keeps\none process of an app per machine, [SingletonPer] one per user, executable\nor configuration ([PerUID], [PerExecutable], [PerConfigDir], [PerEnv]), and\n[SocketPer] names a listener's socket the same way ([SocketPathFor] computes it\nfor a client). [Stop] ends the run of the app a context runs in. A binary\n([NewBinary]) holds process roles — an app each, selected by the leading\narguments — which talk only through a declared contract ([Binary].Talks).\n\n# Running\n\n[App].Main understands its commands — serve, graph, healthcheck, config,\nsecrets, migrate — and the environment: KIT_ENV (dev serves the Studio; production is the default),\nKIT_ADDR or PORT, KIT_DATA_DIR, KIT_ALLOWED_HOSTS, KIT_LOG_LEVEL. The\nStudio's pages are the kit tool's, not the product's: in dev a server\nserves the read-only API the Studio reads, and no route that acts on the\nproduct exists. The mechanics underneath — lifecycle, health, scheduler, queue, tracing,\nlogging, validation, resilience, identifiers — are the kitsunium SDK's.\n\nPackage app — endpoints: an HTTP route and the operation it serves.\n\nPackage app — the errors a product returns to its callers, and their wire\nmapping.\n\nPackage app — exposures: an operation an endpoint serves over HTTP, and\nwho may run it.\n\nPackage app — reading a record's former values.\n\nPackage app — legal holds: records kept whatever their retention says.\n\nPackage app — secondary indexes of a store.\n\nPackage app — jobs: scheduled work run by the daemon's loop.\n\nPackage app — listeners: inbound ports that are not HTTP, a private socket\nspeaking a versioned contract (ADR 0148).\n\nPackage app — loops: work the daemon waits for, woken by time or by events.\n\nPackage app — mailers: a durable outbox and the transport that empties it.\n\nPackage app — modules: a set of services a product mounts as one.\n\nPackage app — the mount of a module: its prefix and its bindings.\n\nPackage app — operations: a typed request answered by a typed response.\n\nPackage app — the password policy of a store's fields.\n\nPackage app — ports: an operation a service needs and does not implement.\n\nPackage app — privacy: the framework's own service for holds and the journal.\n\nPackage app — erasure: a record's personal data removed as its retention\nwould.\n\nPackage app — export: a person's data as the framework gives it back.\n\nPackage app — CPU profiles of the running process, for the Studio.\n\nPackage app — queries: an operation that reads and changes nothing.\n\nPackage app — rate limits on an endpoint, per client.\n\nPackage app — records: the product's data as modules and the Studio reach\nit.\n\nPackage app — replacements: a test's substitute for an operation.\n\nPackage app — the HTTP request and response an endpoint can reach.\n\nPackage app — retention: how long a store keeps its personal data.\n\nPackage app — revisions: a record keeps its versions, diffed and\nrestored.\n\nPackage app — binaries and their process roles: one executable, several\nApps, and the versioned contracts between them (D22).\n\nPackage app — scopes: the parts of a singleton's lock or of a socket's\npath that are only known at the start — the user, the executable, a\nconfiguration directory —, so one declaration keeps one process per user,\nper installed copy or per configuration.\n\nPackage app — secrets: the values the product declares and the operator\nprovides.\n\nPackage app — where the secrets are kept, per environment.\n\nPackage app — services: a bounded context and the building blocks it owns.\n\nPackage app — settings: a value the environment gives a service.\n\nPackage app — the interfaces of settings: the values a setting holds, and\nwhat the framework reads of a declaration.\n\nPackage app — frontends: static assets the product serves.\n\nPackage app — stores: a typed, keyed collection of entities.\n\nPackage app — telemetry: the numbers a product reports, exported on a\nprivate socket when the deployment asks for them (ADR 0149).\n\nPackage app — topics and subscriptions: asynchronous messages of one type.\n\nPackage app — transactions: what a unit of work writes commits together,\nand what it sends leaves at its commit.\n\nPackage app — watches: how a module hears the writes of a product's marked\nfields.\n\nPackage app — workflows: a state machine over the entities of one store.\n"
+      "doc": "Package app — who may call an operation: the principal, the rules and their\nchecks.\n\nPackage app — activities: what a daemon's idle stop waits for besides its\nconnections, a notion of the product's own — sessions still open, work\nstill queued.\n\nPackage app — the App: the services a product mounts, served by one process.\n\nPackage app — the static analysis a product can be given: the platform's\nanalyzer, run in the background in dev (ADR 0147 §1).\n\nPackage app — process profiles: what an app does with its process (ADR\n0147 §5) — serve, run as a daemon, or run one CLI command — and the\nsingleton lock.\n\nPackage app — authentication: the handler that says who calls, and the user\nit names.\n\nPackage app — the catalog of the generic mechanics a node is built from.\n\nPackage app — CLI commands: a short command of the product that Main runs\nonce, in the CLI profile, and whose status is the process's.\n\nPackage app — commands: an operation that changes something, with one\nhandler.\n\nPackage app — the app's options and environments.\n\nPackage app — databases: the SQL engines a store can be kept on.\n\nPackage app — the interfaces of databases: the engine a connector gives, and\nwhat the framework asks of it.\n\nPackage app — the decoding of a request into its typed value.\n\nPackage app is a framework in which every product is its own diagram.\n\nA product is made of services. A service declares its building blocks as\npackage-level values, through its methods:\n\n\tvar Service = app.NewService(\"todos\", \"The todo list.\")\n\n\tvar Todos = Service.Store(\"todos\", func(t Todo) string { return t.ID })\n\n\tvar Changes = Service.Topic[ChangeEvent](\"changes\")\n\n\tvar Lifecycle = Service.Workflow(\"lifecycle\", Todos, func(t *Todo) *Status { return &t.Status }).\n\t\tInitial(Open).\n\t\tOn(\"complete\", Open, Done).\n\t\tAfter(\"auto-archive\", 2*time.Minute, Done, Archived).\n\t\tOnTransition(announce)\n\n\tvar Complete = Service.Command(\"complete\", complete).\n\t\tExpose(\"POST /todos/{id}/complete\", app.Anyone())\n\n\tfunc complete(ctx context.Context, in ByID) (Todo, error) {\n\t\treturn Lifecycle.Fire(ctx, in.ID, \"complete\")\n\t}\n\nAn [App] mounts services and runs them as one process:\n\n\tvar App = app.NewApp(\"todo\", todos.Service, activity.Service)\n\n\tfunc main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }\n\n# The diagram\n\nThe values a product declares are also its description. [App].Graph\nreturns the product as a [model.Graph]: every node with the position of its\ndeclaration and of the function it runs, the edges that exist by\nconstruction, the edges the running product observed — each with its\ncounters — and, in dev, the edges the static analysis found in the code,\neach with its call sites. In dev the app serves it, live, in the Studio at\n/_app/.\n\n# Building blocks\n\n  - [Service].Command and [Service].Query: the product's operations — a\n    command changes something and runs in one transaction, a query reads.\n    Each is internal until it is exposed: the code that needs it runs it\n    with [Command].Dispatch or [Query].Ask, which is how one service\n    reaches another. [Command].Expose and [Query].Expose give it a route,\n    which says who may run it: the operation's permission\n    ([Command].Allow) or rule ([Command].Authorize), or a marker that it is\n    open on purpose — [Anyone], [AnyUser]. The start refuses an exposure\n    that says none.\n  - [Service].Endpoint: a typed HTTP endpoint, for what HTTP itself is\n    about — a webhook a third party calls. The request is decoded\n    strictly — path, query and header fields by tag, the rest from a JSON\n    body — validated from its `validate` tags, then run through the\n    endpoint's mechanics ([RateLimit], [RateLimitPerClient], [Timeout],\n    [Bulkhead]). [Endpoint].Call runs it in-process; a port calls its\n    implementation ([Service].Implement) so.\n  - [Service].Store: a typed, keyed collection, persisted atomically when\n    the app has a data directory, or in a table of the database that\n    keeps it.\n  - [Transact]: one transaction — what it writes commits together, what\n    it publishes, mails or dispatches leaves at the commit.\n  - [Service].Topic and [Service].Subscribe: asynchronous messages,\n    delivered at least once to every subscription, retried, dead-lettered.\n  - [Service].Workflow: a state machine over a store — event transitions\n    fired by code, timer and guard transitions fired by the daemon's own\n    loop, hooks on entry and after every transition.\n  - [Service].Every and [Service].Cron: scheduled jobs.\n  - [Service].Static: a frontend.\n  - [Service].Listen: an inbound port that is not HTTP — a private socket on\n    this machine speaking a versioned contract (pkg/v1/proc/ipc).\n  - [Service].CLI: a short command-line command, run once by [App].Main.\n\nThe app, the composition root, says where the data lives: [Database]\ndeclares a database on an engine module the product's main imports —\ngithub.com/kitsunium/sdk/framework/connectors/postgres and its siblings,\nthe only code that imports a driver — and [Keeps] which stores it keeps. A\nservice never names a database: its handle is its store, which runs on\nthe SDK's document store over SQL there, a table per store.\n\nDeclaring never fails: a mistake is recorded with its position and\n[App].Start reports every one at once ([DiagnosticsError]).\n\n# Modules\n\nA module ([NewModule]) is a Go module's services, which a product mounts as\none — [App].With at its defaults, [Mount] with a [Prefix] or a [Bind]. What\nit declares is qualified with its name: its services are\n\"<module>.<service>\", its settings and secrets \"<module>.<name>\", its\nroutes served under its prefix; a module it [Requires] is mounted with it,\nand the modules start first. A mount given [Only] holds in the\nenvironments it names alone — app.Mount(m, app.Only(\"dev\", \"staging\")).\n\n# Processes\n\nAn app has a process profile ([Profile]): a server (the default) serves\nHTTP; a daemon serves no HTTP, answers on its listeners and may stop when\nidle ([IdleStop]) — no connection open and no [Service].Activity busy —; a\nCLI run opens what one command reads, runs it and exits. A command may be\nthe app's default ([DefaultCommand]: every argument that names no other\ncommand is its) and never fail its shell ([FailSafe]). [Singleton] keeps\none process of an app per machine, [SingletonPer] one per user, executable\nor configuration ([PerUID], [PerExecutable], [PerConfigDir], [PerEnv]), and\n[SocketPer] names a listener's socket the same way ([SocketPathFor] computes it\nfor a client). [Stop] ends the run of the app a context runs in. A binary\n([NewBinary]) holds process roles — an app each, selected by the leading\narguments — which talk only through a declared contract ([Binary].Talks).\n\n# Running\n\n[App].Main understands its commands — serve, graph, healthcheck, config,\nsecrets, migrate — and the environment: <PRODUCT>_ENV (dev serves the Studio; production is the default),\n<PRODUCT>_ADDR or PORT, <PRODUCT>_DATA_DIR, <PRODUCT>_ALLOWED_HOSTS, <PRODUCT>_LOG_LEVEL. The\nStudio's pages are the kit tool's, not the product's: in dev a server\nserves the read-only API the Studio reads, and no route that acts on the\nproduct exists. The mechanics underneath — lifecycle, health, scheduler, queue, tracing,\nlogging, validation, resilience, identifiers — are the kitsunium SDK's.\n\nPackage app — endpoints: an HTTP route and the operation it serves.\n\nPackage app — the errors a product returns to its callers, and their wire\nmapping.\n\nPackage app — exposures: an operation an endpoint serves over HTTP, and\nwho may run it.\n\nPackage app — reading a record's former values.\n\nPackage app — legal holds: records kept whatever their retention says.\n\nPackage app — secondary indexes of a store.\n\nPackage app — jobs: scheduled work run by the daemon's loop.\n\nPackage app — listeners: inbound ports that are not HTTP, a private socket\nspeaking a versioned contract (ADR 0148).\n\nPackage app — loops: work the daemon waits for, woken by time or by events.\n\nPackage app — mailers: a durable outbox and the transport that empties it.\n\nPackage app — modules: a set of services a product mounts as one.\n\nPackage app — the mount of a module: its prefix and its bindings.\n\nPackage app — operations: a typed request answered by a typed response.\n\nPackage app — the password policy of a store's fields.\n\nPackage app — ports: an operation a service needs and does not implement.\n\nPackage app — privacy: the framework's own service for holds and the journal.\n\nPackage app — erasure: a record's personal data removed as its retention\nwould.\n\nPackage app — export: a person's data as the framework gives it back.\n\nPackage app — CPU profiles of the running process, for the Studio.\n\nPackage app — queries: an operation that reads and changes nothing.\n\nPackage app — rate limits on an endpoint, per client.\n\nPackage app — records: the product's data as modules and the Studio reach\nit.\n\nPackage app — replacements: a test's substitute for an operation.\n\nPackage app — the HTTP request and response an endpoint can reach.\n\nPackage app — retention: how long a store keeps its personal data.\n\nPackage app — revisions: a record keeps its versions, diffed and\nrestored.\n\nPackage app — binaries and their process roles: one executable, several\nApps, and the versioned contracts between them (D22).\n\nPackage app — scopes: the parts of a singleton's lock or of a socket's\npath that are only known at the start — the user, the executable, a\nconfiguration directory —, so one declaration keeps one process per user,\nper installed copy or per configuration.\n\nPackage app — secrets: the values the product declares and the operator\nprovides.\n\nPackage app — where the secrets are kept, per environment.\n\nPackage app — services: a bounded context and the building blocks it owns.\n\nPackage app — settings: a value the environment gives a service.\n\nPackage app — the interfaces of settings: the values a setting holds, and\nwhat the framework reads of a declaration.\n\nPackage app — frontends: static assets the product serves.\n\nPackage app — stores: a typed, keyed collection of entities.\n\nPackage app — telemetry: the numbers a product reports, exported on a\nprivate socket when the deployment asks for them (ADR 0149).\n\nPackage app — topics and subscriptions: asynchronous messages of one type.\n\nPackage app — transactions: what a unit of work writes commits together,\nand what it sends leaves at its commit.\n\nPackage app — watches: how a module hears the writes of a product's marked\nfields.\n\nPackage app — workflows: a state machine over the entities of one store.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/app/apptest",
@@ -127,7 +127,7 @@
       "name": "app",
       "dir": "framework/internal/app",
       "layer": "framework",
-      "doc": "Package app — who may call an operation: the principal, the rules and their\nchecks.\n\nPackage app — activities: what a daemon's idle stop waits for besides its\nconnections, a notion of the product's own — sessions still open, work\nstill queued.\n\nPackage app — the App: the services a product mounts, served by one process.\n\nPackage app — the static analysis a product can be given: the platform's\nanalyzer, run in the background in dev (ADR 0147 §1).\n\nPackage app — process profiles: what an app does with its process (ADR\n0147 §5) — serve, run as a daemon, or run one CLI command — and the\nsingleton lock.\n\nPackage app — the architecture the graph draws: where each store keeps its\ndata.\n\nPackage app — authentication: the handler that says who calls, and the user\nit names.\n\nPackage app — the build a graph describes: the modules and versions it was\nmade of.\n\nPackage app — the catalog of the generic mechanics a node is built from.\n\nPackage app — the kit tag: the classes and words a field of personal data\ncarries.\n\nPackage app — the plan of a Go type's classified members, computed once per\ntype.\n\nPackage app — the walk of a value along its classification plan.\n\nPackage app — the warnings for fields whose name suggests personal data left\nunclassified.\n\nPackage app — CLI commands: a short command of the product that Main runs\nonce, in the CLI profile, and whose status is the process's.\n\nPackage app — commands: an operation that changes something, with one\nhandler.\n\nPackage app — the app's options and environments.\n\nPackage app — the config command: every setting, its value and where it\ncomes from.\n\nPackage app — the consumer that drains a queue into its handler.\n\nPackage app — the daemon: what a running app knows of itself beyond its\nnodes.\n\nPackage app — the daemon's HTTP server as the Studio sees it: its loop,\nits counters, and the middleware every request goes through.\n\nPackage app — the daemon's loops: their states, the scheduler that fires\nthe jobs, and the goroutine labels that name them.\n\nPackage app — databases: the SQL engines a store can be kept on.\n\nPackage app — the start's judgement of the declared databases.\n\nPackage app — the interfaces of databases: the engine a connector gives, and\nwhat the framework asks of it.\n\nPackage app — the migrations a database runs, and their lock.\n\nPackage app — the placement of each store: which database keeps its data.\n\nPackage app — a database in a running app.\n\nPackage app — the databases as the graph shows them.\n\nPackage app — the decoding of a request into its typed value.\n\nPackage app — the dev tools' routes of the Studio, read-only.\n\nPackage app is the implementation of framework/app, the framework in which\nevery product is its own diagram. A product imports framework/app, whose\nnames alias and forward to this package's: here, the types carry the role\ntheir name says — StoreService, EndpointService, AppConfigurer — and the\nfacade keeps the names a product writes — Store, Endpoint, AppOption.\n\nPackage app — endpoints: an HTTP route and the operation it serves.\n\nPackage app — the errors a product returns to its callers, and their wire\nmapping.\n\nPackage app — exposures: an operation an endpoint serves over HTTP.\n\nPackage app — what an exposure takes, and what it exposes.\n\nPackage app — the Go modules of the running binary, read from its build\ninfo.\n\nPackage app — the graph: the product as a diagram of what it mounts.\n\nPackage app — history: the former values of the fields that keep them.\n\nPackage app — the history's storage: former values kept beside each record.\n\nPackage app — reading a record's former values.\n\nPackage app — the history as the graph and the Studio show it.\n\nPackage app — what the framework's own writes mean to the history.\n\nPackage app — legal holds: records kept whatever their retention says.\n\nPackage app — secondary indexes of a store.\n\nPackage app — the Studio's read API: the graph, the events, the sources.\n\nPackage app — what the source endpoint needs of the root it reads.\n\nPackage app — how the source endpoint opens a file on Unix.\n\nPackage app — how the source endpoint opens a file on Windows: the link\nitself, never its target.\n\nPackage app — jobs: scheduled work run by the daemon's loop.\n\nPackage app — the privacy journal: what the framework did to personal data, and why.\n\nPackage app — idempotency keys and their leases.\n\nPackage app — the compile-time proof of which roles each declaration plays:\nthe interfaces the app reaches its nodes and options through.\n\nPackage app — listeners: inbound ports that are not HTTP, a private socket\nspeaking a versioned contract (ADR 0148).\n\nPackage app — the compile-time proof that a listener is a starter.\n\nPackage app — what a listener needs of the socket it accepts on.\n\nPackage app — the product's logger and the logs the Studio shows.\n\nPackage app — loops: work the daemon waits for, woken by time or by events.\n\nPackage app — mailers: a durable outbox and the transport that empties it.\n\nPackage app — what building an SMTP transport needs of its URL.\n\nPackage app — Main: the whole main function of a product.\n\nPackage app — the migrate command.\n\nPackage app — modules: a set of services a product mounts as one.\n\nPackage app — the start's checks of the modules an app mounts.\n\nPackage app — what a module keeps: its stores and its migrations.\n\nPackage app — the mount of a module: its prefix and its bindings.\n\nPackage app — nodes: what every declaration shares, and its source position.\n\nPackage app — the interfaces of nodes: what every declaration is, and the\nroles some play.\n\nPackage app — observation: the spans and events of a running product.\n\nPackage app — operations: a typed request answered by a typed response.\n\nPackage app — the password policy of a store's fields.\n\nPackage app — hashing and verifying passwords under their policy.\n\nPackage app — the warnings for endpoints that set passwords outside a\npolicy.\n\nPackage app — ports: an operation a service needs and does not implement.\n\nPackage app — privacy: the framework's own service for holds and the journal.\n\nPackage app — erasure: a record's personal data removed as its retention\nwould.\n\nPackage app — export: a person's data as the framework gives it back.\n\nPackage app — a store's personal data as the graph shows it.\n\nPackage app — the keys that index personal data without revealing it.\n\nPackage app — the Studio's privacy pages: the journal, the holds, the\nregister.\n\nPackage app — the privacy command.\n\nPackage app — what the privacy command prints.\n\nPackage app — `privacy seal`: a whole store sealed now.\n\nPackage app — the process sample: what the running process uses.\n\nPackage app — the Studio's profiler: the live heap and the goroutines,\nfolded onto the graph.\n\nPackage app — queries: an operation that reads and changes nothing.\n\nPackage app — queued commands: a command run later, from its queue.\n\nPackage app — rate limits on an endpoint, per client.\n\nPackage app — records: the product's data as modules and the Studio reach\nit.\n\nPackage app — redaction: what a value shows once its secrets are hidden.\n\nPackage app — the register of processing: each store's line.\n\nPackage app — replacements: a test's substitute for an operation.\n\nPackage app — the HTTP request and response an endpoint can reach.\n\nPackage app — retention: how long a store keeps its personal data.\n\nPackage app — the retention of a store in a running app.\n\nPackage app — one pass of retention: what is due is erased or deleted.\n\nPackage app — record revisions: a store's previous versions of each record.\n\nPackage app — what changed between two versions, and a version written back.\n\nPackage app — where a store's versions are kept, engine by engine.\n\nPackage app — what the privacy rules ask of a record's versions.\n\nPackage app — a record's version written back.\n\nPackage app — what the Studio sees of a record's versions.\n\nPackage app — the revisions command: a version of a record written back.\n\nPackage app — binaries and their process roles: one executable, several\nApps, and the versioned contracts between them (D22).\n\nPackage app — schemas: the JSON Schema of an operation's types.\n\nPackage app — scopes: the parts of a singleton's lock or of a socket's\npath that are only known at the start — the user, the executable, a\nconfiguration directory —, so one declaration keeps one process per user,\nper installed copy or per configuration.\n\nPackage app — the current user outside Windows: the process's UID, read\nfrom the kernel. os/user would ask libc through cgo — linking the program\ndynamically — or read /etc/passwd, for a number the kernel gives at once.\n\nPackage app — the current user on Windows: its SID, from os/user, which\nreads the process token there without cgo.\n\nPackage app — sealing at rest: members sealed where the framework keeps them.\n\nPackage app — where the data keys are, against what they seal.\n\nPackage app — cryptographic erasure: a data key destroyed.\n\nPackage app — a document as it lies at rest, sealed member by member.\n\nPackage app — messages at rest: a queue's members sealed.\n\nPackage app — a store that seals: its records as they rest.\n\nPackage app — a store that seals, as the framework's port sees it.\n\nPackage app — secrets: the values the product declares and the operator\nprovides.\n\nPackage app — the secrets command.\n\nPackage app — where the secrets are kept, per environment.\n\nPackage app — services: a bounded context and the building blocks it owns.\n\nPackage app — settings: a value the environment gives a service.\n\nPackage app — the interfaces of settings: the values a setting holds, and\nwhat the framework reads of a declaration.\n\nPackage app — frontends: static assets the product serves.\n\nPackage app — stores: a typed, keyed collection of entities.\n\nPackage app — the engines a store runs on: memory, files or a database.\n\nPackage app — stores on SQL: the SDK's document store over a database.\n\nPackage app — the framework's own migrations on a database.\n\nPackage app — telemetry: the numbers a product reports, exported on a\nprivate socket when the deployment asks for them (ADR 0149).\n\nPackage app — topics and subscriptions: asynchronous messages of one type.\n\nPackage app — transactions: app.Transact and its levels.\n\nPackage app — a transaction on a database, the database's own.\n\nPackage app — the data's writer turn, where there are no transactions.\n\nPackage app — a transaction writes one database: the dev warning.\n\nPackage app — watches: how a module hears the writes of a product's marked\nfields.\n\nPackage app — a watch in a running app: its queue and its consumer.\n\nPackage app — the sentences the framework says: English from its own table, the\nlanguages after it from framework/app/studio's catalogues.\n\nPackage app — workflows: a state machine over the entities of one store.\n\nPackage app — the ports the workflow engine reaches a store through.\n"
+      "doc": "Package app — who may call an operation: the principal, the rules and their\nchecks.\n\nPackage app — activities: what a daemon's idle stop waits for besides its\nconnections, a notion of the product's own — sessions still open, work\nstill queued.\n\nPackage app — the App: the services a product mounts, served by one process.\n\nPackage app — the static analysis a product can be given: the platform's\nanalyzer, run in the background in dev (ADR 0147 §1).\n\nPackage app — process profiles: what an app does with its process (ADR\n0147 §5) — serve, run as a daemon, or run one CLI command — and the\nsingleton lock.\n\nPackage app — the architecture the graph draws: where each store keeps its\ndata.\n\nPackage app — authentication: the handler that says who calls, and the user\nit names.\n\nPackage app — the build a graph describes: the modules and versions it was\nmade of.\n\nPackage app — the catalog of the generic mechanics a node is built from.\n\nPackage app — the app tag: the classes and words a field of personal data\ncarries.\n\nPackage app — the plan of a Go type's classified members, computed once per\ntype.\n\nPackage app — the walk of a value along its classification plan.\n\nPackage app — the warnings for fields whose name suggests personal data left\nunclassified.\n\nPackage app — CLI commands: a short command of the product that Main runs\nonce, in the CLI profile, and whose status is the process's.\n\nPackage app — commands: an operation that changes something, with one\nhandler.\n\nPackage app — the app's options and environments.\n\nPackage app — the config command: every setting, its value and where it\ncomes from.\n\nPackage app — the consumer that drains a queue into its handler.\n\nPackage app — the daemon: what a running app knows of itself beyond its\nnodes.\n\nPackage app — the daemon's HTTP server as the Studio sees it: its loop,\nits counters, and the middleware every request goes through.\n\nPackage app — the daemon's loops: their states, the scheduler that fires\nthe jobs, and the goroutine labels that name them.\n\nPackage app — databases: the SQL engines a store can be kept on.\n\nPackage app — the start's judgement of the declared databases.\n\nPackage app — the interfaces of databases: the engine a connector gives, and\nwhat the framework asks of it.\n\nPackage app — the migrations a database runs, and their lock.\n\nPackage app — the placement of each store: which database keeps its data.\n\nPackage app — a database in a running app.\n\nPackage app — the databases as the graph shows them.\n\nPackage app — the decoding of a request into its typed value.\n\nPackage app — the dev tools' routes of the Studio, read-only.\n\nPackage app is the implementation of framework/app, the framework in which\nevery product is its own diagram. A product imports framework/app, whose\nnames alias and forward to this package's: here, the types carry the role\ntheir name says — StoreService, EndpointService, AppConfigurer — and the\nfacade keeps the names a product writes — Store, Endpoint, AppOption.\n\nPackage app — endpoints: an HTTP route and the operation it serves.\n\nPackage app — the errors a product returns to its callers, and their wire\nmapping.\n\nPackage app — exposures: an operation an endpoint serves over HTTP.\n\nPackage app — what an exposure takes, and what it exposes.\n\nPackage app — the Go modules of the running binary, read from its build\ninfo.\n\nPackage app — the graph: the product as a diagram of what it mounts.\n\nPackage app — history: the former values of the fields that keep them.\n\nPackage app — the history's storage: former values kept beside each record.\n\nPackage app — reading a record's former values.\n\nPackage app — the history as the graph and the Studio show it.\n\nPackage app — what the framework's own writes mean to the history.\n\nPackage app — legal holds: records kept whatever their retention says.\n\nPackage app — secondary indexes of a store.\n\nPackage app — the Studio's read API: the graph, the events, the sources.\n\nPackage app — what the source endpoint needs of the root it reads.\n\nPackage app — how the source endpoint opens a file on Unix.\n\nPackage app — how the source endpoint opens a file on Windows: the link\nitself, never its target.\n\nPackage app — jobs: scheduled work run by the daemon's loop.\n\nPackage app — the privacy journal: what the framework did to personal data, and why.\n\nPackage app — idempotency keys and their leases.\n\nPackage app — the compile-time proof of which roles each declaration plays:\nthe interfaces the app reaches its nodes and options through.\n\nPackage app — listeners: inbound ports that are not HTTP, a private socket\nspeaking a versioned contract (ADR 0148).\n\nPackage app — the compile-time proof that a listener is a starter.\n\nPackage app — what a listener needs of the socket it accepts on.\n\nPackage app — the product's logger and the logs the Studio shows.\n\nPackage app — loops: work the daemon waits for, woken by time or by events.\n\nPackage app — mailers: a durable outbox and the transport that empties it.\n\nPackage app — what building an SMTP transport needs of its URL.\n\nPackage app — Main: the whole main function of a product.\n\nPackage app — the migrate command.\n\nPackage app — modules: a set of services a product mounts as one.\n\nPackage app — the start's checks of the modules an app mounts.\n\nPackage app — what a module keeps: its stores and its migrations.\n\nPackage app — the mount of a module: its prefix and its bindings.\n\nPackage app — nodes: what every declaration shares, and its source position.\n\nPackage app — the interfaces of nodes: what every declaration is, and the\nroles some play.\n\nPackage app — observation: the spans and events of a running product.\n\nPackage app — operations: a typed request answered by a typed response.\n\nPackage app — the password policy of a store's fields.\n\nPackage app — hashing and verifying passwords under their policy.\n\nPackage app — the warnings for endpoints that set passwords outside a\npolicy.\n\nPackage app — ports: an operation a service needs and does not implement.\n\nPackage app — privacy: the framework's own service for holds and the journal.\n\nPackage app — erasure: a record's personal data removed as its retention\nwould.\n\nPackage app — export: a person's data as the framework gives it back.\n\nPackage app — a store's personal data as the graph shows it.\n\nPackage app — the keys that index personal data without revealing it.\n\nPackage app — the Studio's privacy pages: the journal, the holds, the\nregister.\n\nPackage app — the privacy command.\n\nPackage app — what the privacy command prints.\n\nPackage app — `privacy seal`: a whole store sealed now.\n\nPackage app — the process sample: what the running process uses.\n\nPackage app — the Studio's profiler: the live heap and the goroutines,\nfolded onto the graph.\n\nPackage app — queries: an operation that reads and changes nothing.\n\nPackage app — queued commands: a command run later, from its queue.\n\nPackage app — rate limits on an endpoint, per client.\n\nPackage app — records: the product's data as modules and the Studio reach\nit.\n\nPackage app — redaction: what a value shows once its secrets are hidden.\n\nPackage app — the register of processing: each store's line.\n\nPackage app — replacements: a test's substitute for an operation.\n\nPackage app — the HTTP request and response an endpoint can reach.\n\nPackage app — retention: how long a store keeps its personal data.\n\nPackage app — the retention of a store in a running app.\n\nPackage app — one pass of retention: what is due is erased or deleted.\n\nPackage app — record revisions: a store's previous versions of each record.\n\nPackage app — what changed between two versions, and a version written back.\n\nPackage app — where a store's versions are kept, engine by engine.\n\nPackage app — what the privacy rules ask of a record's versions.\n\nPackage app — a record's version written back.\n\nPackage app — what the Studio sees of a record's versions.\n\nPackage app — the revisions command: a version of a record written back.\n\nPackage app — binaries and their process roles: one executable, several\nApps, and the versioned contracts between them (D22).\n\nPackage app — schemas: the JSON Schema of an operation's types.\n\nPackage app — scopes: the parts of a singleton's lock or of a socket's\npath that are only known at the start — the user, the executable, a\nconfiguration directory —, so one declaration keeps one process per user,\nper installed copy or per configuration.\n\nPackage app — the current user outside Windows: the process's UID, read\nfrom the kernel. os/user would ask libc through cgo — linking the program\ndynamically — or read /etc/passwd, for a number the kernel gives at once.\n\nPackage app — the current user on Windows: its SID, from os/user, which\nreads the process token there without cgo.\n\nPackage app — sealing at rest: members sealed where the framework keeps them.\n\nPackage app — where the data keys are, against what they seal.\n\nPackage app — cryptographic erasure: a data key destroyed.\n\nPackage app — a document as it lies at rest, sealed member by member.\n\nPackage app — messages at rest: a queue's members sealed.\n\nPackage app — a store that seals: its records as they rest.\n\nPackage app — a store that seals, as the framework's port sees it.\n\nPackage app — secrets: the values the product declares and the operator\nprovides.\n\nPackage app — the secrets command.\n\nPackage app — where the secrets are kept, per environment.\n\nPackage app — services: a bounded context and the building blocks it owns.\n\nPackage app — settings: a value the environment gives a service.\n\nPackage app — the interfaces of settings: the values a setting holds, and\nwhat the framework reads of a declaration.\n\nPackage app — frontends: static assets the product serves.\n\nPackage app — stores: a typed, keyed collection of entities.\n\nPackage app — the engines a store runs on: memory, files or a database.\n\nPackage app — stores on SQL: the SDK's document store over a database.\n\nPackage app — the framework's own migrations on a database.\n\nPackage app — telemetry: the numbers a product reports, exported on a\nprivate socket when the deployment asks for them (ADR 0149).\n\nPackage app — topics and subscriptions: asynchronous messages of one type.\n\nPackage app — transactions: app.Transact and its levels.\n\nPackage app — a transaction on a database, the database's own.\n\nPackage app — the data's writer turn, where there are no transactions.\n\nPackage app — a transaction writes one database: the dev warning.\n\nPackage app — watches: how a module hears the writes of a product's marked\nfields.\n\nPackage app — a watch in a running app: its queue and its consumer.\n\nPackage app — the sentences the framework says: English from its own table, the\nlanguages after it from framework/app/studio's catalogues.\n\nPackage app — workflows: a state machine over the entities of one store.\n\nPackage app — the ports the workflow engine reaches a store through.\n"
     },
     {
       "path": "github.com/kitsunium/sdk/framework/internal/app/jobengine",
@@ -552,7 +552,7 @@
       "name": "ClientIP",
       "spelled": "func(ctx context.Context) string",
       "canonical": "func(ctx context.Context) string",
-      "doc": "ClientIP returns the address of the client of the request ctx serves: the\nconnection's peer, or — only when KIT_TRUST_PROXY=on — the last address of\nX-Forwarded-For, the one the trusted proxy appended. It is \"\" outside an HTTP request.\n",
+      "doc": "ClientIP returns the address of the client of the request ctx serves: the\nconnection's peer, or — only when <PRODUCT>_TRUST_PROXY=on — the last address of\nX-Forwarded-For, the one the trusted proxy appended. It is \"\" outside an HTTP request.\n",
       "file": "framework/app/request.go",
       "layer": "framework"
     },
@@ -1288,6 +1288,22 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/app.CodeRenamed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/app",
+      "name": "CodeRenamed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262741",
+      "init": "go:github.com/kitsunium/sdk/framework/internal/app.CodeRenamed",
+      "code": {
+        "value": "0.4.2.85"
+      },
+      "doc": "CodeRenamed refuses a start that meets a runtime name the framework no\nlonger reads (ADR 0180 §3): a KIT_<NAME> variable of the operator's, a\nfield tagged kit:\"…\". The [DiagnosticsError] names each old name and\nthe one that replaces it, and carries this code.\n",
+      "file": "framework/app/errors.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/app.CodeResealInPlace",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/app",
@@ -1779,7 +1795,7 @@
       "code": {
         "value": "0.4.2.82"
       },
-      "doc": "CodeTrashList refuses the Studio's list of a store's trash (GET\n/_kit/api/trash) when the store named is none of the product's — a\nNotFound — or keeps no trash, having no app.Revisions — an Invalid (ADR\n0178 C4).\n",
+      "doc": "CodeTrashList refuses the Studio's list of a store's trash (GET\n/_app/api/trash) when the store named is none of the product's — a\nNotFound — or keeps no trash, having no app.Revisions — an Invalid (ADR\n0178 C4).\n",
       "file": "framework/app/errors.go",
       "layer": "framework"
     },
@@ -1942,7 +1958,7 @@
       "name": "ConfigFiles",
       "spelled": "func(fsys fs.FS) AppOption",
       "canonical": "func(fsys io/fs.FS) github.com/kitsunium/sdk/framework/app.AppOption",
-      "doc": "ConfigFiles gives the framework the product's configuration files: config/config.<ext>,\nwhich every environment reads, and config/<env>.<ext>, the environment's\nown — <env> being KIT_ENV as written, dev when kit dev runs the product —\nin JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of\nthe settings to their values; it never holds a secret, and a key no\nservice declares stops the start. The files belong in the binary:\n\n\t//go:embed config\n\tvar configFiles embed.FS\n\n\ta := app.NewApp(\"todo\", ...).With(app.ConfigFiles(configFiles))\n",
+      "doc": "ConfigFiles gives the framework the product's configuration files: config/config.<ext>,\nwhich every environment reads, and config/<env>.<ext>, the environment's\nown — <env> being <PRODUCT>_ENV as written, dev when kit dev runs the product —\nin JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of\nthe settings to their values; it never holds a secret, and a key no\nservice declares stops the start. The files belong in the binary:\n\n\t//go:embed config\n\tvar configFiles embed.FS\n\n\ta := app.NewApp(\"todo\", ...).With(app.ConfigFiles(configFiles))\n",
       "file": "framework/app/setting.go",
       "layer": "framework"
     },
@@ -1964,7 +1980,7 @@
       "name": "DataDir",
       "spelled": "func(dir string) AppOption",
       "canonical": "func(dir string) github.com/kitsunium/sdk/framework/app.AppOption",
-      "doc": "DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.\nGiven to an app after [InMemory], it wins: the last of the two says where\nthe data is — so a test helper that runs the product in memory runs it\non disk with the one option its test gives (apptest.NewDisk).\n",
+      "doc": "DataDir sets where stores and queues persist, instead of <PRODUCT>_DATA_DIR.\nGiven to an app after [InMemory], it wins: the last of the two says where\nthe data is — so a test helper that runs the product in memory runs it\non disk with the one option its test gives (apptest.NewDisk).\n",
       "file": "framework/app/config.go",
       "layer": "framework"
     },
@@ -2225,7 +2241,7 @@
       "name": "Env",
       "spelled": "func(env string) AppOption",
       "canonical": "func(env string) github.com/kitsunium/sdk/framework/app.AppOption",
-      "doc": "Env selects the environment, instead of KIT_ENV.\n",
+      "doc": "Env selects the environment, instead of <PRODUCT>_ENV.\n",
       "file": "framework/app/config.go",
       "layer": "framework"
     },
@@ -2238,7 +2254,7 @@
       "canonical": "string",
       "value": "\"dev\"",
       "init": "go:github.com/kitsunium/sdk/framework/internal/app.EnvDev",
-      "doc": "EnvDev serves the Studio, analyzes the source and binds loopback. Only\n`kit dev` or an explicit KIT_ENV=dev turns it on.\n",
+      "doc": "EnvDev serves the Studio, analyzes the source and binds loopback. Only\n`kit dev` or an explicit <PRODUCT>_ENV=dev turns it on.\n",
       "file": "framework/app/config.go",
       "layer": "framework"
     },
@@ -2466,7 +2482,7 @@
       "name": "InMemory",
       "spelled": "func() interface{StoreOption; AppOption}",
       "canonical": "func() interface{github.com/kitsunium/sdk/framework/app.StoreOption; github.com/kitsunium/sdk/framework/app.AppOption}",
-      "doc": "InMemory keeps data in memory. On an app, it overrides the data directory\nfor every store and queue — KIT_DATA_DIR, and a [DataDir] given before it:\nwhat a test wants. On a store, it keeps that store in memory even when the\napp has a data directory.\n",
+      "doc": "InMemory keeps data in memory. On an app, it overrides the data directory\nfor every store and queue — <PRODUCT>_DATA_DIR, and a [DataDir] given before it:\nwhat a test wants. On a store, it keeps that store in memory even when the\napp has a data directory.\n",
       "file": "framework/app/config.go",
       "layer": "framework"
     },
@@ -2556,7 +2572,7 @@
       "name": "Listen",
       "spelled": "func(addr string) AppOption",
       "canonical": "func(addr string) github.com/kitsunium/sdk/framework/app.AppOption",
-      "doc": "Listen sets the listening address, instead of KIT_ADDR or PORT. \":0\" picks\na free port; App.URL tells which.\n",
+      "doc": "Listen sets the listening address, instead of <PRODUCT>_ADDR or PORT. \":0\" picks\na free port; App.URL tells which.\n",
       "file": "framework/app/config.go",
       "layer": "framework"
     },
@@ -2673,7 +2689,7 @@
       "spelled": "iapp.Mailer",
       "canonical": "github.com/kitsunium/sdk/framework/internal/app.Mailer",
       "owner": "go:github.com/kitsunium/sdk/framework/internal/app.Mailer",
-      "doc": "Mailer is outbound mail: a durable outbox and the transport that empties\nit. [Mailer].Send only queues — it returns once the message is safely in\nthe outbox — and the mailer's own loop hands each message to the transport,\nretrying a failure and dead-lettering a message after its last attempt.\n\nThe transport is the SDK's mail package: SMTP when the mail connector's\nsecret smtp-url is set — KIT_SMTP_URL, smtp://user:password@host:587?tls=\nstarttls|implicit|none — and otherwise the capture transport, which keeps\nevery message for the Studio's mailbox and for tests ([Mailer].Captured)\nand delivers nothing. Outside dev, the capture transport is reported as a\nwarning. The URL is read again before every delivery: replacing it where\nit lives — a new version in the store, a new file behind\nKIT_SMTP_URL_FILE — takes effect at the next mail. The outbox and the\ntransports are the SDK's, which the mail subsystem plugs in\n(framework/app/mail, ADR 0179 step 6).\n",
+      "doc": "Mailer is outbound mail: a durable outbox and the transport that empties\nit. [Mailer].Send only queues — it returns once the message is safely in\nthe outbox — and the mailer's own loop hands each message to the transport,\nretrying a failure and dead-lettering a message after its last attempt.\n\nThe transport is the SDK's mail package: SMTP when the mail connector's\nsecret smtp-url is set — <PRODUCT>_SMTP_URL, smtp://user:password@host:587?tls=\nstarttls|implicit|none — and otherwise the capture transport, which keeps\nevery message for the Studio's mailbox and for tests ([Mailer].Captured)\nand delivers nothing. Outside dev, the capture transport is reported as a\nwarning. The URL is read again before every delivery: replacing it where\nit lives — a new version in the store, a new file behind\n<PRODUCT>_SMTP_URL_FILE — takes effect at the next mail. The outbox and the\ntransports are the SDK's, which the mail subsystem plugs in\n(framework/app/mail, ADR 0179 step 6).\n",
       "file": "framework/app/mailer.go",
       "layer": "framework"
     },
@@ -2892,7 +2908,7 @@
       "name": "NewModule",
       "spelled": "func(name string, doc string, parts ...ModulePart) *Module",
       "canonical": "func(name string, doc string, parts ...github.com/kitsunium/sdk/framework/app.ModulePart) *github.com/kitsunium/sdk/framework/app.Module",
-      "doc": "NewModule declares a module named name — lower-case letters, digits and\ndashes, starting with a letter; \"kit\", \"external\" and \"schema\" are the framework's — that doc\ndescribes, made of parts: its services, which it adopts, the modules it\nrequires ([Requires]), and the migrations of the data it keeps outside\nthe framework's stores ([Migrations]), run on the database that keeps it. Declare it\nas a package-level variable of the one package a product imports:\n\n\tvar Module = app.NewModule(\"moderation\",\n\t\t\"Reports and moderation under the DSA.\\n\\nfr: Signalements et modération selon le DSA.\",\n\t\tintake.Service, desk.Service, app.Requires(identity.Module))\n\nA service a module lists is its own: what it declared so far is renamed,\nand what it declares later is born qualified. Listing a service links its\npackage; a service is a module's only, and a module's services take\ndeclarations from the module's own Go module only.\n",
+      "doc": "NewModule declares a module named name — lower-case letters, digits and\ndashes, starting with a letter; \"app\", \"kit\", \"external\" and \"schema\" are the framework's — that doc\ndescribes, made of parts: its services, which it adopts, the modules it\nrequires ([Requires]), and the migrations of the data it keeps outside\nthe framework's stores ([Migrations]), run on the database that keeps it. Declare it\nas a package-level variable of the one package a product imports:\n\n\tvar Module = app.NewModule(\"moderation\",\n\t\t\"Reports and moderation under the DSA.\\n\\nfr: Signalements et modération selon le DSA.\",\n\t\tintake.Service, desk.Service, app.Requires(identity.Module))\n\nA service a module lists is its own: what it declared so far is renamed,\nand what it declares later is born qualified. Listing a service links its\npackage; a service is a module's only, and a module's services take\ndeclarations from the module's own Go module only.\n",
       "file": "framework/app/module.go",
       "layer": "framework"
     },
@@ -2980,7 +2996,7 @@
       "name": "Only",
       "spelled": "func(envs ...string) MountOption",
       "canonical": "func(envs ...string) github.com/kitsunium/sdk/framework/app.MountOption",
-      "doc": "Only makes a mount hold in the environments envs names alone — the name\nKIT_ENV or [Env] gives, lower-cased, \"production\" when neither does:\n\n\ta := app.NewApp(\"vigie\", identity.Service).\n\t\tWith(app.Mount(debugbar.Module, app.Only(\"dev\", \"staging\")))\n\nElsewhere the mount is as if it had not been given, its [Prefix] and its\n[Bind] with it; another mount of the module without Only still mounts it.\nSeveral Only on one mount add up. The start refuses an Only that names no\nenvironment, a name that cannot be one — lower-case letters, digits and\ndashes inside, 63 at most —, and a module a mounted module requires\n([Requires]) that its mount leaves out, rather than mounting it at its\ndefaults behind the product's back.\n",
+      "doc": "Only makes a mount hold in the environments envs names alone — the name\n<PRODUCT>_ENV or [Env] gives, lower-cased, \"production\" when neither does:\n\n\ta := app.NewApp(\"vigie\", identity.Service).\n\t\tWith(app.Mount(debugbar.Module, app.Only(\"dev\", \"staging\")))\n\nElsewhere the mount is as if it had not been given, its [Prefix] and its\n[Bind] with it; another mount of the module without Only still mounts it.\nSeveral Only on one mount add up. The start refuses an Only that names no\nenvironment, a name that cannot be one — lower-case letters, digits and\ndashes inside, 63 at most —, and a module a mounted module requires\n([Requires]) that its mount leaves out, rather than mounting it at its\ndefaults behind the product's back.\n",
       "file": "framework/app/mount.go",
       "layer": "framework"
     },
@@ -3168,7 +3184,7 @@
       "name": "Prefix",
       "spelled": "func(prefix string) MountOption",
       "canonical": "func(prefix string) github.com/kitsunium/sdk/framework/app.MountOption",
-      "doc": "Prefix serves a module's routes under prefix — \"/trust/\" — instead of\n\"/<module>/\"; \"/\" shares the product's route space, where a route both\ndeclare is refused as any two are. A prefix starts and ends with '/', and\nnever lies under /_kit/.\n",
+      "doc": "Prefix serves a module's routes under prefix — \"/trust/\" — instead of\n\"/<module>/\"; \"/\" shares the product's route space, where a route both\ndeclare is refused as any two are. A prefix starts and ends with '/', and\nnever lies under /_app/, nor under /_kit/ while its probes answer there.\n",
       "file": "framework/app/mount.go",
       "layer": "framework"
     },
@@ -3660,7 +3676,7 @@
       "spelled": "[T any] iapp.StoreService[T]",
       "canonical": "[T any] github.com/kitsunium/sdk/framework/internal/app.StoreService[T]",
       "owner": "go:github.com/kitsunium/sdk/framework/internal/app.StoreService",
-      "doc": "Store is a typed, keyed collection of entities. Every read returns a copy\nand every write stores one: an entity is kept as its JSON encoding, so what\na handler holds can never alias what the store holds, and the memory and\nfile backends behave identically.\n\nWith a data directory (KIT_DATA_DIR; \".kit/data\" in dev) the store persists\nevery write before returning, atomically — a crash never leaves a torn\nfile — and a write costs one entity, whatever the store holds. Without one,\nit lives in memory. A store is a port (ADR 0004): what it runs on is its\nengine (store_engine.go), today the SDK's document store (docstore); the framework\nmakes it a node of the graph, observes every call, and speaks for its\nrefusals.\n",
+      "doc": "Store is a typed, keyed collection of entities. Every read returns a copy\nand every write stores one: an entity is kept as its JSON encoding, so what\na handler holds can never alias what the store holds, and the memory and\nfile backends behave identically.\n\nWith a data directory (<PRODUCT>_DATA_DIR; \".kit/data\" in dev) the store persists\nevery write before returning, atomically — a crash never leaves a torn\nfile — and a write costs one entity, whatever the store holds. Without one,\nit lives in memory. A store is a port (ADR 0004): what it runs on is its\nengine (store_engine.go), today the SDK's document store (docstore); the framework\nmakes it a node of the graph, observes every call, and speaks for its\nrefusals.\n",
       "file": "framework/app/store.go",
       "layer": "framework"
     },
@@ -3718,7 +3734,7 @@
       "name": "Telemetry",
       "spelled": "func(path string, gids ...int) AppOption",
       "canonical": "func(path string, gids ...int) github.com/kitsunium/sdk/framework/app.AppOption",
-      "doc": "Telemetry exports the app's telemetry on the private socket at path —\nabsolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the\nproduct's own account. It wins over KIT_TELEMETRY.\n",
+      "doc": "Telemetry exports the app's telemetry on the private socket at path —\nabsolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the\nproduct's own account. It wins over <PRODUCT>_TELEMETRY.\n",
       "file": "framework/app/telemetry.go",
       "layer": "framework"
     },
@@ -4138,7 +4154,7 @@
       "name": "NewDisk",
       "spelled": "func(t testing.TB) *Disk",
       "canonical": "func(t testing.TB) *github.com/kitsunium/sdk/framework/app/apptest.Disk",
-      "doc": "NewDisk returns a new data directory for t. The secrets the framework makes — its\ndata-key and its index key, what the product generates — are kept beside\nthe data, as production keeps them unless KIT_SECRETS says otherwise, so\nan app started again on the same Disk opens what the first sealed.\n\nIt skips t where the platform keeps no data directory: the SDK's disk\nfile system is Linux's, macOS's and the BSDs', and refuses Windows.\n",
+      "doc": "NewDisk returns a new data directory for t. The secrets the framework makes — its\ndata-key and its index key, what the product generates — are kept beside\nthe data, as production keeps them unless <PRODUCT>_SECRETS says otherwise, so\nan app started again on the same Disk opens what the first sealed.\n\nIt skips t where the platform keeps no data directory: the SDK's disk\nfile system is Linux's, macOS's and the BSDs', and refuses Windows.\n",
       "file": "framework/app/apptest/apptest.go",
       "layer": "framework"
     },
@@ -5388,7 +5404,7 @@
       "recv": "App",
       "spelled": "func(ctx context.Context, args []string) int",
       "canonical": "func(ctx context.Context, args []string) int",
-      "doc": "Main is the whole main function of a product:\n\n\tfunc main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }\n\nIt understands ten commands, so every binary of the framework can describe itself, be\nprobed, say its configuration, manage its secrets, migrate its databases,\nanswer for the personal data it keeps, replay what its watches hear and\ncopy its data directory into a database without a shell or another tool in\nits image:\n\n\tserve        run the product (the default)\n\tgraph        print the product graph: -format json|mermaid\n\thealthcheck  exit 0 when the product running on KIT_ADDR is ready\n\tconfig       every setting: its value, never a secret's, and its origin\n\tsecrets      list the secrets, set one from standard input, rotate one\n\tmigrate      the databases' migrations: status, up, down SET VERSION\n\tprivacy      the register of processing, a person's export and erasure,\n\t             the legal holds, the privacy journal, the retention\n\trevisions    a record's version restored\n\twatch        replay WATCH: one notice per record of each store that feeds it\n\tdata         the data directory copied into a database: data copy --to NAME,\n\t             verified by fingerprints\n\nA product's CLI command runs when the first argument names it. A command\ndeclared with DefaultCommand runs when the first argument names no command\nat all — with every argument —, and when there is none, in serve's place:\nMain then never answers a usage error.\n\nIt returns the process exit status rather than exiting, so that deferred\nwork runs and a test can call it.\n",
+      "doc": "Main is the whole main function of a product:\n\n\tfunc main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }\n\nIt understands ten commands, so every binary of the framework can describe itself, be\nprobed, say its configuration, manage its secrets, migrate its databases,\nanswer for the personal data it keeps, replay what its watches hear and\ncopy its data directory into a database without a shell or another tool in\nits image:\n\n\tserve        run the product (the default)\n\tgraph        print the product graph: -format json|mermaid\n\thealthcheck  exit 0 when the product running on <PRODUCT>_ADDR is ready\n\tconfig       every setting: its value, never a secret's, and its origin\n\tsecrets      list the secrets, set one from standard input, rotate one\n\tmigrate      the databases' migrations: status, up, down SET VERSION\n\tprivacy      the register of processing, a person's export and erasure,\n\t             the legal holds, the privacy journal, the retention\n\trevisions    a record's version restored\n\twatch        replay WATCH: one notice per record of each store that feeds it\n\tdata         the data directory copied into a database: data copy --to NAME,\n\t             verified by fingerprints\n\nA product's CLI command runs when the first argument names it. A command\ndeclared with DefaultCommand runs when the first argument names no command\nat all — with every argument —, and when there is none, in serve's place:\nMain then never answers a usage error.\n\nIt returns the process exit status rather than exiting, so that deferred\nwork runs and a test can call it.\n",
       "file": "framework/internal/app/main.go",
       "layer": "framework"
     },
@@ -5726,7 +5742,7 @@
       "name": "ClientIP",
       "spelled": "func(ctx context.Context) string",
       "canonical": "func(ctx context.Context) string",
-      "doc": "ClientIP returns the address of the client of the request ctx serves: the\nconnection's peer, or — only when KIT_TRUST_PROXY=on — the last address of\nX-Forwarded-For, the one the trusted proxy appended. It is \"\" outside an HTTP request.\n",
+      "doc": "ClientIP returns the address of the client of the request ctx serves: the\nconnection's peer, or — only when <PRODUCT>_TRUST_PROXY=on — the last address of\nX-Forwarded-For, the one the trusted proxy appended. It is \"\" outside an HTTP request.\n",
       "file": "framework/internal/app/request.go",
       "layer": "framework"
     },
@@ -6417,6 +6433,21 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/internal/app.CodeRenamed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/internal/app",
+      "name": "CodeRenamed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "262741",
+      "code": {
+        "value": "0.4.2.85"
+      },
+      "doc": "CodeRenamed refuses a start that meets a runtime name the framework\nno longer reads (ADR 0180 §3, Q12): an operator's variable still\nnamed KIT_<NAME> where the framework reads <PRODUCT>_<NAME>, a\nstruct field still tagged kit:\"…\" where it reads app:\"…\". Ignored,\nthe first would start the product on a default — an empty data\ndirectory —, the second would store a personal field in clear. The\nrefusal is a [DiagnosticsError] naming every old name met and the\nname that replaces it, all at once; it carries this code, which\nerrs.HasCode reads through it. The refusal holds for two minors,\nthen the old names are forgotten.\n",
+      "file": "framework/internal/app/codes_gen.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/internal/app.CodeResealInPlace",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
@@ -7101,7 +7132,7 @@
       "name": "ConfigFiles",
       "spelled": "func(fsys fs.FS) AppConfigurer",
       "canonical": "func(fsys io/fs.FS) github.com/kitsunium/sdk/framework/internal/app.AppConfigurer",
-      "doc": "ConfigFiles gives the framework the product's configuration files: config/config.<ext>,\nwhich every environment reads, and config/<env>.<ext>, the environment's\nown — <env> being KIT_ENV as written, dev when kit dev runs the product —\nin JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of\nthe settings to their values; it never holds a secret, and a key no\nservice declares stops the start. The files belong in the binary:\n\n\t//go:embed config\n\tvar configFiles embed.FS\n\n\ta := app.NewApp(\"todo\", ...).With(app.ConfigFiles(configFiles))\n",
+      "doc": "ConfigFiles gives the framework the product's configuration files: config/config.<ext>,\nwhich every environment reads, and config/<env>.<ext>, the environment's\nown — <env> being <PRODUCT>_ENV as written, dev when kit dev runs the product —\nin JSON, YAML or TOML (json, yaml or yml, toml). A file maps the names of\nthe settings to their values; it never holds a secret, and a key no\nservice declares stops the start. The files belong in the binary:\n\n\t//go:embed config\n\tvar configFiles embed.FS\n\n\ta := app.NewApp(\"todo\", ...).With(app.ConfigFiles(configFiles))\n",
       "file": "framework/internal/app/setting.go",
       "layer": "framework"
     },
@@ -7123,7 +7154,7 @@
       "name": "DataDir",
       "spelled": "func(dir string) AppConfigurer",
       "canonical": "func(dir string) github.com/kitsunium/sdk/framework/internal/app.AppConfigurer",
-      "doc": "DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.\nGiven to an app after [InMemory], it wins: the last of the two says where\nthe data is — so a test helper that runs the product in memory runs it\non disk with the one option its test gives (apptest.NewDisk).\n",
+      "doc": "DataDir sets where stores and queues persist, instead of <PRODUCT>_DATA_DIR.\nGiven to an app after [InMemory], it wins: the last of the two says where\nthe data is — so a test helper that runs the product in memory runs it\non disk with the one option its test gives (apptest.NewDisk).\n",
       "file": "framework/internal/app/config.go",
       "layer": "framework"
     },
@@ -7286,8 +7317,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/internal/app",
       "name": "DiagnosticsError",
-      "spelled": "struct{Diagnostics []model.Diagnostic; Missing []string}",
-      "canonical": "struct{Diagnostics []github.com/kitsunium/sdk/framework/model.Diagnostic; Missing []string}",
+      "spelled": "struct{Diagnostics []model.Diagnostic; Missing []string; Renamed []string}",
+      "canonical": "struct{Diagnostics []github.com/kitsunium/sdk/framework/model.Diagnostic; Missing []string; Renamed []string}",
       "fields": [
         {
           "name": "Diagnostics",
@@ -7297,6 +7328,11 @@
           "name": "Missing",
           "type": "[]string",
           "doc": "Missing are the registration packages the program does not import\nand a declaration needs (ADR 0179 §6), sorted; nil when none is.\n"
+        },
+        {
+          "name": "Renamed",
+          "type": "[]string",
+          "doc": "Renamed are the old runtime names the start met (ADR 0180 §3, Q12),\neach written \"<old> -> <new>\" — \"KIT_DATA_DIR -> TODO_DATA_DIR\",\n`shop.Report.Email kit:\"personal\" -> app:\"personal\"` —, sorted; nil\nwhen none was.\n"
         }
       ],
       "doc": "DiagnosticsError is returned by Start when declarations are wrong. It lists\nevery problem at once, each with its position.\n",
@@ -7323,8 +7359,8 @@
       "recv": "DiagnosticsError",
       "spelled": "func() error",
       "canonical": "func() error",
-      "doc": "Unwrap is what the refusal is, when the framework has a code for it: with\npackages in Missing, an error carrying [CodeSubsystemMissing] (ADR\n0179 §6), which errs.HasCode reads through the refusal; nil\notherwise.\n",
-      "file": "framework/internal/app/subsystem.go",
+      "doc": "Unwrap is what the refusal is, when the framework has a code for it: with\npackages in Missing, an error carrying [CodeSubsystemMissing] (ADR\n0179 §6); with names in Renamed, one carrying [CodeRenamed] (ADR 0180\n§3); both joined when the start found both. errs.HasCode reads either\nthrough the refusal; nil when it found neither.\n",
+      "file": "framework/internal/app/renamed.go",
       "layer": "framework"
     },
     {
@@ -7518,7 +7554,7 @@
       "name": "Env",
       "spelled": "func(env string) AppConfigurer",
       "canonical": "func(env string) github.com/kitsunium/sdk/framework/internal/app.AppConfigurer",
-      "doc": "Env selects the environment, instead of KIT_ENV.\n",
+      "doc": "Env selects the environment, instead of <PRODUCT>_ENV.\n",
       "file": "framework/internal/app/config.go",
       "layer": "framework"
     },
@@ -7530,7 +7566,7 @@
       "spelled": "untyped string",
       "canonical": "untyped string",
       "value": "\"dev\"",
-      "doc": "EnvDev serves the Studio, analyzes the source and binds loopback. Only\n`kit dev` or an explicit KIT_ENV=dev turns it on.\n",
+      "doc": "EnvDev serves the Studio, analyzes the source and binds loopback. Only\n`kit dev` or an explicit <PRODUCT>_ENV=dev turns it on.\n",
       "file": "framework/internal/app/config.go",
       "layer": "framework"
     },
@@ -7837,7 +7873,7 @@
       "name": "InMemory",
       "spelled": "func() interface{StoreConfigurer; AppConfigurer}",
       "canonical": "func() interface{github.com/kitsunium/sdk/framework/internal/app.StoreConfigurer; github.com/kitsunium/sdk/framework/internal/app.AppConfigurer}",
-      "doc": "InMemory keeps data in memory. On an app, it overrides the data directory\nfor every store and queue — KIT_DATA_DIR, and a [DataDir] given before it:\nwhat a test wants. On a store, it keeps that store in memory even when the\napp has a data directory.\n",
+      "doc": "InMemory keeps data in memory. On an app, it overrides the data directory\nfor every store and queue — <PRODUCT>_DATA_DIR, and a [DataDir] given before it:\nwhat a test wants. On a store, it keeps that store in memory even when the\napp has a data directory.\n",
       "file": "framework/internal/app/config.go",
       "layer": "framework"
     },
@@ -7925,7 +7961,7 @@
       "name": "Listen",
       "spelled": "func(addr string) AppConfigurer",
       "canonical": "func(addr string) github.com/kitsunium/sdk/framework/internal/app.AppConfigurer",
-      "doc": "Listen sets the listening address, instead of KIT_ADDR or PORT. \":0\" picks\na free port; App.URL tells which.\n",
+      "doc": "Listen sets the listening address, instead of <PRODUCT>_ADDR or PORT. \":0\" picks\na free port; App.URL tells which.\n",
       "file": "framework/internal/app/config.go",
       "layer": "framework"
     },
@@ -8107,7 +8143,7 @@
       "name": "Mailer",
       "spelled": "struct{}",
       "canonical": "struct{}",
-      "doc": "Mailer is outbound mail: a durable outbox and the transport that empties\nit. [Mailer.Send] only queues — it returns once the message is safely in\nthe outbox — and the mailer's own loop hands each message to the transport,\nretrying a failure and dead-lettering a message after its last attempt.\n\nThe transport is the SDK's mail package: SMTP when the mail connector's\nsecret smtp-url is set — KIT_SMTP_URL, smtp://user:password@host:587?tls=\nstarttls|implicit|none — and otherwise the capture transport, which keeps\nevery message for the Studio's mailbox and for tests ([Mailer.Captured])\nand delivers nothing. Outside dev, the capture transport is reported as a\nwarning. The URL is read again before every delivery: replacing it where\nit lives — a new version in the store, a new file behind\nKIT_SMTP_URL_FILE — takes effect at the next mail. The outbox and the\ntransports are the SDK's, which the mail subsystem plugs in\n(framework/app/mail, ADR 0179 step 6).\n",
+      "doc": "Mailer is outbound mail: a durable outbox and the transport that empties\nit. [Mailer.Send] only queues — it returns once the message is safely in\nthe outbox — and the mailer's own loop hands each message to the transport,\nretrying a failure and dead-lettering a message after its last attempt.\n\nThe transport is the SDK's mail package: SMTP when the mail connector's\nsecret smtp-url is set — <PRODUCT>_SMTP_URL, smtp://user:password@host:587?tls=\nstarttls|implicit|none — and otherwise the capture transport, which keeps\nevery message for the Studio's mailbox and for tests ([Mailer.Captured])\nand delivers nothing. Outside dev, the capture transport is reported as a\nwarning. The URL is read again before every delivery: replacing it where\nit lives — a new version in the store, a new file behind\n<PRODUCT>_SMTP_URL_FILE — takes effect at the next mail. The outbox and the\ntransports are the SDK's, which the mail subsystem plugs in\n(framework/app/mail, ADR 0179 step 6).\n",
       "file": "framework/internal/app/mailer.go",
       "layer": "framework"
     },
@@ -8489,7 +8525,7 @@
       "name": "NewModule",
       "spelled": "func(name string, doc string, parts ...ModuleConfigurer) *Module",
       "canonical": "func(name string, doc string, parts ...github.com/kitsunium/sdk/framework/internal/app.ModuleConfigurer) *github.com/kitsunium/sdk/framework/internal/app.Module",
-      "doc": "NewModule declares a module named name — lower-case letters, digits and\ndashes, starting with a letter; \"kit\", \"external\" and \"schema\" are the framework's — that doc\ndescribes, made of parts: its services, which it adopts, the modules it\nrequires ([Requires]), and the migrations of the data it keeps outside\nthe framework's stores ([Migrations]), run on the database that keeps it. Declare it\nas a package-level variable of the one package a product imports:\n\n\tvar Module = app.NewModule(\"moderation\",\n\t\t\"Reports and moderation under the DSA.\\n\\nfr: Signalements et modération selon le DSA.\",\n\t\tintake.Service, desk.Service, app.Requires(identity.Module))\n\nA service a module lists is its own: what it declared so far is renamed,\nand what it declares later is born qualified. Listing a service links its\npackage; a service is a module's only, and a module's services take\ndeclarations from the module's own Go module only.\n",
+      "doc": "NewModule declares a module named name — lower-case letters, digits and\ndashes, starting with a letter; \"app\", \"kit\", \"external\" and \"schema\" are the framework's — that doc\ndescribes, made of parts: its services, which it adopts, the modules it\nrequires ([Requires]), and the migrations of the data it keeps outside\nthe framework's stores ([Migrations]), run on the database that keeps it. Declare it\nas a package-level variable of the one package a product imports:\n\n\tvar Module = app.NewModule(\"moderation\",\n\t\t\"Reports and moderation under the DSA.\\n\\nfr: Signalements et modération selon le DSA.\",\n\t\tintake.Service, desk.Service, app.Requires(identity.Module))\n\nA service a module lists is its own: what it declared so far is renamed,\nand what it declares later is born qualified. Listing a service links its\npackage; a service is a module's only, and a module's services take\ndeclarations from the module's own Go module only.\n",
       "file": "framework/internal/app/module.go",
       "layer": "framework"
     },
@@ -8665,7 +8701,7 @@
       "name": "Only",
       "spelled": "func(envs ...string) MountConfigurer",
       "canonical": "func(envs ...string) github.com/kitsunium/sdk/framework/internal/app.MountConfigurer",
-      "doc": "Only makes a mount hold in the environments envs names alone — the name\nKIT_ENV or [Env] gives, lower-cased, \"production\" when neither does:\n\n\ta := app.NewApp(\"vigie\", identity.Service).\n\t\tWith(app.Mount(debugbar.Module, app.Only(\"dev\", \"staging\")))\n\nElsewhere the mount is as if it had not been given, its [Prefix] and its\n[Bind] with it; another mount of the module without Only still mounts it.\nSeveral Only on one mount add up. The start refuses an Only that names no\nenvironment, a name that cannot be one — lower-case letters, digits and\ndashes inside, 63 at most —, and a module a mounted module requires\n([Requires]) that its mount leaves out, rather than mounting it at its\ndefaults behind the product's back.\n",
+      "doc": "Only makes a mount hold in the environments envs names alone — the name\n<PRODUCT>_ENV or [Env] gives, lower-cased, \"production\" when neither does:\n\n\ta := app.NewApp(\"vigie\", identity.Service).\n\t\tWith(app.Mount(debugbar.Module, app.Only(\"dev\", \"staging\")))\n\nElsewhere the mount is as if it had not been given, its [Prefix] and its\n[Bind] with it; another mount of the module without Only still mounts it.\nSeveral Only on one mount add up. The start refuses an Only that names no\nenvironment, a name that cannot be one — lower-case letters, digits and\ndashes inside, 63 at most —, and a module a mounted module requires\n([Requires]) that its mount leaves out, rather than mounting it at its\ndefaults behind the product's back.\n",
       "file": "framework/internal/app/mount.go",
       "layer": "framework"
     },
@@ -8891,7 +8927,7 @@
       "name": "Prefix",
       "spelled": "func(prefix string) MountConfigurer",
       "canonical": "func(prefix string) github.com/kitsunium/sdk/framework/internal/app.MountConfigurer",
-      "doc": "Prefix serves a module's routes under prefix — \"/trust/\" — instead of\n\"/<module>/\"; \"/\" shares the product's route space, where a route both\ndeclare is refused as any two are. A prefix starts and ends with '/', and\nnever lies under /_kit/.\n",
+      "doc": "Prefix serves a module's routes under prefix — \"/trust/\" — instead of\n\"/<module>/\"; \"/\" shares the product's route space, where a route both\ndeclare is refused as any two are. A prefix starts and ends with '/', and\nnever lies under /_app/, nor under /_kit/ while its probes answer there.\n",
       "file": "framework/internal/app/mount.go",
       "layer": "framework"
     },
@@ -9570,7 +9606,7 @@
       "recv": "Service",
       "spelled": "func(name string, opts ...SecretConfigurer) *Secret",
       "canonical": "func(name string, opts ...github.com/kitsunium/sdk/framework/internal/app.SecretConfigurer) *github.com/kitsunium/sdk/framework/internal/app.Secret",
-      "doc": "Secret declares a secret the product needs.\n\nWithout an option it is provided: the operator gives it in the\nenvironment — the variable <APP>_<NAME>, TODO_STRIPE_KEY for the secret\n\"stripe-key\" of the app \"todo\", or TODO_STRIPE_KEY_FILE naming a file that\nholds it, the Docker and Kubernetes way — or in the environment's store,\nwith `the framework secrets set`. It is read at every use, so replacing it where it\nlives takes effect without a restart, and a start without it fails, naming\nthe variable to set.\n\nWith [Optional], a start without it goes on: the product asks\n[Secret.Present] before it uses the secret.\n\nWith [Generated], the framework makes it: version 1 on the first start, a new version\non its schedule, the previous ones kept so that what they sealed or signed\nstill opens and verifies. It lives in the store the environment keeps — an\nencrypted file store in dev, KIT_SECRETS elsewhere. Its variable pins it:\nthe framework then uses the value as it is and does not rotate it.\n\nname is 1 to 63 lower-case letters, digits and dashes, starting and ending\nwith a letter or a digit — one grammar for a file name and a variable — and\nunique in the app.\n",
+      "doc": "Secret declares a secret the product needs.\n\nWithout an option it is provided: the operator gives it in the\nenvironment — the variable <APP>_<NAME>, TODO_STRIPE_KEY for the secret\n\"stripe-key\" of the app \"todo\", or TODO_STRIPE_KEY_FILE naming a file that\nholds it, the Docker and Kubernetes way — or in the environment's store,\nwith `the framework secrets set`. It is read at every use, so replacing it where it\nlives takes effect without a restart, and a start without it fails, naming\nthe variable to set.\n\nWith [Optional], a start without it goes on: the product asks\n[Secret.Present] before it uses the secret.\n\nWith [Generated], the framework makes it: version 1 on the first start, a new version\non its schedule, the previous ones kept so that what they sealed or signed\nstill opens and verifies. It lives in the store the environment keeps — an\nencrypted file store in dev, <PRODUCT>_SECRETS elsewhere. Its variable pins it:\nthe framework then uses the value as it is and does not rotate it.\n\nname is 1 to 63 lower-case letters, digits and dashes, starting and ending\nwith a letter or a digit — one grammar for a file name and a variable — and\nunique in the app.\n",
       "file": "framework/internal/app/secret.go",
       "layer": "framework"
     },
@@ -9888,7 +9924,7 @@
       "name": "StoreService",
       "spelled": "[T any] struct{}",
       "canonical": "[T any] struct{}",
-      "doc": "StoreService is a typed, keyed collection of entities. Every read returns a copy\nand every write stores one: an entity is kept as its JSON encoding, so what\na handler holds can never alias what the store holds, and the memory and\nfile backends behave identically.\n\nWith a data directory (KIT_DATA_DIR; \".kit/data\" in dev) the store persists\nevery write before returning, atomically — a crash never leaves a torn\nfile — and a write costs one entity, whatever the store holds. Without one,\nit lives in memory. A store a database keeps ([Database], [Keeps]) lives\nin a table of it, and every call is a round trip. A store is a port (ADR\n0004): what it runs on is its engine (store_engine.go) — the SDK's\ndocument store, in memory, in files or over SQL —; the framework makes it a node of\nthe graph, observes every call, and speaks for its refusals. Its writes\njoin the transaction their context carries ([Transact]).\n",
+      "doc": "StoreService is a typed, keyed collection of entities. Every read returns a copy\nand every write stores one: an entity is kept as its JSON encoding, so what\na handler holds can never alias what the store holds, and the memory and\nfile backends behave identically.\n\nWith a data directory (<PRODUCT>_DATA_DIR; \".kit/data\" in dev) the store persists\nevery write before returning, atomically — a crash never leaves a torn\nfile — and a write costs one entity, whatever the store holds. Without one,\nit lives in memory. A store a database keeps ([Database], [Keeps]) lives\nin a table of it, and every call is a round trip. A store is a port (ADR\n0004): what it runs on is its engine (store_engine.go) — the SDK's\ndocument store, in memory, in files or over SQL —; the framework makes it a node of\nthe graph, observes every call, and speaks for its refusals. Its writes\njoin the transaction their context carries ([Transact]).\n",
       "file": "framework/internal/app/store.go",
       "layer": "framework"
     },
@@ -10184,7 +10220,7 @@
       "name": "Telemetry",
       "spelled": "func(path string, gids ...int) AppConfigurer",
       "canonical": "func(path string, gids ...int) github.com/kitsunium/sdk/framework/internal/app.AppConfigurer",
-      "doc": "Telemetry exports the app's telemetry on the private socket at path —\nabsolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the\nproduct's own account. It wins over KIT_TELEMETRY.\n",
+      "doc": "Telemetry exports the app's telemetry on the private socket at path —\nabsolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the\nproduct's own account. It wins over <PRODUCT>_TELEMETRY.\n",
       "file": "framework/internal/app/telemetry.go",
       "layer": "framework"
     },
@@ -11832,7 +11868,7 @@
       "name": "LabelLoop",
       "spelled": "string",
       "canonical": "string",
-      "value": "\"kit_loop\"",
+      "value": "\"app_loop\"",
       "doc": "LabelLoop is the pprof label naming the loop a goroutine belongs to.\n",
       "file": "framework/internal/app/plug/plug.go",
       "layer": "framework"
@@ -11844,7 +11880,7 @@
       "name": "LabelNode",
       "spelled": "string",
       "canonical": "string",
-      "value": "\"kit_node\"",
+      "value": "\"app_node\"",
       "doc": "LabelNode is the pprof label naming the node a goroutine works for.\n",
       "file": "framework/internal/app/plug/plug.go",
       "layer": "framework"
@@ -22187,7 +22223,7 @@
       "spelled": "core.Payload",
       "canonical": "github.com/kitsunium/sdk/framework/model/internal/core.Payload",
       "owner": "go:github.com/kitsunium/sdk/framework/model/internal/core.Payload",
-      "doc": "Payload is the request and the response of a span, as JSON, in dev only.\nEvery member whose name says it is a secret — password, token, secret,\nauthorization, cookie… — or whose Go field is tagged kit:\"secret\" is\nreplaced by \"[redacted]\", and each side is cut at 8 KiB.\n",
+      "doc": "Payload is the request and the response of a span, as JSON, in dev only.\nEvery member whose name says it is a secret — password, token, secret,\nauthorization, cookie… — or whose Go field is tagged app:\"secret\" is\nreplaced by \"[redacted]\", and each side is cut at 8 KiB.\n",
       "file": "framework/model/runtime.go",
       "layer": "framework"
     },
@@ -22347,7 +22383,7 @@
       "name": "PortOwnerApp",
       "spelled": "string",
       "canonical": "string",
-      "value": "\"kit\"",
+      "value": "\"app\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.PortOwnerApp",
       "doc": "PortOwnerApp is the framework's own listener: the health probes, the Studio in\ndev, and the product's HTTP when it declares any.\n",
       "file": "framework/model/architecture.go",
@@ -22485,7 +22521,7 @@
       "name": "ProvenanceApp",
       "spelled": "string",
       "canonical": "string",
-      "value": "\"kit\"",
+      "value": "\"app\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.ProvenanceApp",
       "doc": "ProvenanceApp loops are written by the framework for a declaration: a workflow's\nsweep, a declared loop's wake cycle.\n",
       "file": "framework/model/runtime.go",
@@ -22560,7 +22596,7 @@
       "spelled": "core.RecordHistoryMessage",
       "canonical": "github.com/kitsunium/sdk/framework/model/internal/core.RecordHistoryMessage",
       "owner": "go:github.com/kitsunium/sdk/framework/model/internal/core.RecordHistoryMessage",
-      "doc": "RecordHistory is what kit remembers of one record, as the Studio's data\nview shows it (GET /_kit/api/former): each field's former values, newest\nfirst, by the field's JSON pointer — a secret field's without their\nvalues, a personal or special one's redacted.\n",
+      "doc": "RecordHistory is what kit remembers of one record, as the Studio's data\nview shows it (GET /_app/api/former): each field's former values, newest\nfirst, by the field's JSON pointer — a secret field's without their\nvalues, a personal or special one's redacted.\n",
       "file": "framework/model/history.go",
       "layer": "framework"
     },
@@ -22584,7 +22620,7 @@
       "spelled": "core.RecordVersionsMessage",
       "canonical": "github.com/kitsunium/sdk/framework/model/internal/core.RecordVersionsMessage",
       "owner": "go:github.com/kitsunium/sdk/framework/model/internal/core.RecordVersionsMessage",
-      "doc": "RecordVersions is a record's versions as the Studio's data view shows\nthem (GET /_kit/api/revisions), and what changed between two.\n",
+      "doc": "RecordVersions is a record's versions as the Studio's data view shows\nthem (GET /_app/api/revisions), and what changed between two.\n",
       "file": "framework/model/history.go",
       "layer": "framework"
     },
@@ -22797,7 +22833,7 @@
       "canonical": "string",
       "value": "\"file\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.SecretFromFile",
-      "doc": "SecretFromFile is kit's encrypted file store: KIT_SECRETS=file:<dir>,\nor .kit/secrets/dev in dev.\n",
+      "doc": "SecretFromFile is kit's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,\nor .kit/secrets/dev in dev.\n",
       "file": "framework/model/node_info.go",
       "layer": "framework"
     },
@@ -22810,7 +22846,7 @@
       "canonical": "string",
       "value": "\"memory\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.SecretFromMemory",
-      "doc": "SecretFromMemory is a store in the process's memory: a test, or\nKIT_SECRETS=memory. A generated secret is made again at every start.\n",
+      "doc": "SecretFromMemory is a store in the process's memory: a test, or\n<PRODUCT>_SECRETS=memory. A generated secret is made again at every start.\n",
       "file": "framework/model/node_info.go",
       "layer": "framework"
     },
@@ -23024,7 +23060,7 @@
       "name": "SettingAppDev",
       "spelled": "string",
       "canonical": "string",
-      "value": "\"kitdev\"",
+      "value": "\"appdev\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.SettingAppDev",
       "doc": "Where a setting's value comes from.\n",
       "file": "framework/model/runtime.go",
@@ -23272,7 +23308,7 @@
       "spelled": "core.StoreTrashMessage",
       "canonical": "github.com/kitsunium/sdk/framework/model/internal/core.StoreTrashMessage",
       "owner": "go:github.com/kitsunium/sdk/framework/model/internal/core.StoreTrashMessage",
-      "doc": "StoreTrash is a page of a store's trash as the Studio lists it (GET\n/_kit/api/trash), in key order.\n",
+      "doc": "StoreTrash is a page of a store's trash as the Studio lists it (GET\n/_app/api/trash), in key order.\n",
       "file": "framework/model/history.go",
       "layer": "framework"
     },
@@ -23393,7 +23429,7 @@
       "spelled": "core.TrashedRecordMessage",
       "canonical": "github.com/kitsunium/sdk/framework/model/internal/core.TrashedRecordMessage",
       "owner": "go:github.com/kitsunium/sdk/framework/model/internal/core.TrashedRecordMessage",
-      "doc": "TrashedRecord is one record in a store's trash as the Studio lists it\n(GET /_kit/api/trash): its key, when the product deleted it and when kit\npurges it — never its value.\n",
+      "doc": "TrashedRecord is one record in a store's trash as the Studio lists it\n(GET /_app/api/trash): its key, when the product deleted it and when kit\npurges it — never its value.\n",
       "file": "framework/model/history.go",
       "layer": "framework"
     },
@@ -23500,9 +23536,9 @@
       "name": "VarAddr",
       "spelled": "string",
       "canonical": "string",
-      "value": "\"KIT_ADDR\"",
+      "value": "\"ADDR\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.VarAddr",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/runtime.go",
       "layer": "framework"
     },
@@ -23513,9 +23549,9 @@
       "name": "VarAllowedHosts",
       "spelled": "string",
       "canonical": "string",
-      "value": "\"KIT_ALLOWED_HOSTS\"",
+      "value": "\"ALLOWED_HOSTS\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.VarAllowedHosts",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/runtime.go",
       "layer": "framework"
     },
@@ -23528,7 +23564,7 @@
       "canonical": "string",
       "value": "\"KIT_ANALYZE\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.VarAnalyze",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/runtime.go",
       "layer": "framework"
     },
@@ -23539,9 +23575,9 @@
       "name": "VarDataDir",
       "spelled": "string",
       "canonical": "string",
-      "value": "\"KIT_DATA_DIR\"",
+      "value": "\"DATA_DIR\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.VarDataDir",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/runtime.go",
       "layer": "framework"
     },
@@ -23565,9 +23601,9 @@
       "name": "VarEnv",
       "spelled": "string",
       "canonical": "string",
-      "value": "\"KIT_ENV\"",
+      "value": "\"ENV\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.VarEnv",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/runtime.go",
       "layer": "framework"
     },
@@ -23578,9 +23614,9 @@
       "name": "VarLogLevel",
       "spelled": "string",
       "canonical": "string",
-      "value": "\"KIT_LOG_LEVEL\"",
+      "value": "\"LOG_LEVEL\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.VarLogLevel",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/runtime.go",
       "layer": "framework"
     },
@@ -23591,7 +23627,7 @@
       "name": "VarRetention",
       "spelled": "string",
       "canonical": "string",
-      "value": "\"KIT_RETENTION\"",
+      "value": "\"RETENTION\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.VarRetention",
       "doc": "VarRetention sets what the stores' retention loops do: on, dry-run\nor off (ADR 0006).\n",
       "file": "framework/model/runtime.go",
@@ -23604,9 +23640,9 @@
       "name": "VarSMTPURL",
       "spelled": "string",
       "canonical": "string",
-      "value": "\"KIT_SMTP_URL\"",
+      "value": "\"SMTP_URL\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.VarSMTPURL",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/runtime.go",
       "layer": "framework"
     },
@@ -23619,7 +23655,7 @@
       "canonical": "string",
       "value": "\"KIT_STUDIO\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.VarStudio",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/runtime.go",
       "layer": "framework"
     },
@@ -23632,7 +23668,7 @@
       "canonical": "string",
       "value": "\"KIT_STUDIO_REMOTE\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.VarStudioRemote",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/runtime.go",
       "layer": "framework"
     },
@@ -23643,9 +23679,9 @@
       "name": "VarTrustProxy",
       "spelled": "string",
       "canonical": "string",
-      "value": "\"KIT_TRUST_PROXY\"",
+      "value": "\"TRUST_PROXY\"",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.VarTrustProxy",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/runtime.go",
       "layer": "framework"
     },
@@ -23658,7 +23694,7 @@
       "canonical": "int",
       "value": "6",
       "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.Version",
-      "doc": "Version is the schema version of every document in this package.\n\nVersion 2 adds the auth, mailer and loop kinds, the sends and wakes edges,\nthe code level of every node ([CodeInfo]), the C4 context and containers\n([Architecture]) and the daemon's own machinery ([Runtime]).\n\nVersion 3 adds the secret kind ([SecretInfo]), the uses edge, the secret\nspan operation, the rotation loop and the store origin of a setting.\n\nVersion 4 is the one bump the decisions of issue #17 share. It adds the\nport kind ([PortInfo]) and its binding, a declared edge from the port to\nwhat it calls; the endpoint that implements a port\n([EndpointInfo].Implements), which has no method and no path; and the\nreplace mock mode ([MockReplace]). ADR 0004 adds the databases: the store's\ndatabase ([StoreInfo].Database), the database container, the database\nconnector and its adapters, [Runtime].Databases and [Setting].Database.\nADR 0008 adds the modules the app mounts ([Graph].Modules), the module of a\nnode ([Node].Module) and the Go module of a position outside the product's\n([Source].GoModule); and the watch, a subscription fed by stores: its mark\nand the stores that feed it ([SubscriptionInfo].Mark,\n[SubscriptionInfo].Stores), each drawing a declared delivers edge to it.\nADR 0005 adds the command and query kinds ([CommandInfo], [QueryInfo]),\nthe dispatches and asks edges, the endpoint that exposes one\n([EndpointInfo].Exposes), the read model ([StoreInfo].ReadModel), the\ndispatch, ask and handle span operations and the dispatch and ask\ncontrols.\n\nVersion 5 is the first the SDK's framework publishes (ADR 0147). It\nadds what a product is made of beyond its services: the binary\n([KindBinary]) and its process roles ([KindRole]), the short CLI command\n([KindCLI]), the listener that is not HTTP ([KindListener]), the library\nshared between components ([KindLibrary]) and the presentation\n([KindPresentation]); the edge between two roles of a product, which\ncarries a versioned contract ([EdgeContracts], [Edge].Contract); and the\ngrammar every ID follows, written once ([ID], [ParseID]). It removes what\nthe Studio no longer does (D13): the respond, fail and delay mock modes,\nthe control event and its payload — a [Mock] is a test's replacement only.\n\nVersion 6 renames the runtime framework (ADR 0180): its packages are\nframework/app and framework/internal/app, so a source position the\ndocument gives in the framework's code names those paths, and the\nconstants of the framework's own provenance, port owner and setting\norigin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]. The\nvalues the graph spells after the framework follow with its runtime\nnames (ADR 0180 step 4).\n",
+      "doc": "Version is the schema version of every document in this package.\n\nVersion 2 adds the auth, mailer and loop kinds, the sends and wakes edges,\nthe code level of every node ([CodeInfo]), the C4 context and containers\n([Architecture]) and the daemon's own machinery ([Runtime]).\n\nVersion 3 adds the secret kind ([SecretInfo]), the uses edge, the secret\nspan operation, the rotation loop and the store origin of a setting.\n\nVersion 4 is the one bump the decisions of issue #17 share. It adds the\nport kind ([PortInfo]) and its binding, a declared edge from the port to\nwhat it calls; the endpoint that implements a port\n([EndpointInfo].Implements), which has no method and no path; and the\nreplace mock mode ([MockReplace]). ADR 0004 adds the databases: the store's\ndatabase ([StoreInfo].Database), the database container, the database\nconnector and its adapters, [Runtime].Databases and [Setting].Database.\nADR 0008 adds the modules the app mounts ([Graph].Modules), the module of a\nnode ([Node].Module) and the Go module of a position outside the product's\n([Source].GoModule); and the watch, a subscription fed by stores: its mark\nand the stores that feed it ([SubscriptionInfo].Mark,\n[SubscriptionInfo].Stores), each drawing a declared delivers edge to it.\nADR 0005 adds the command and query kinds ([CommandInfo], [QueryInfo]),\nthe dispatches and asks edges, the endpoint that exposes one\n([EndpointInfo].Exposes), the read model ([StoreInfo].ReadModel), the\ndispatch, ask and handle span operations and the dispatch and ask\ncontrols.\n\nVersion 5 is the first the SDK's framework publishes (ADR 0147). It\nadds what a product is made of beyond its services: the binary\n([KindBinary]) and its process roles ([KindRole]), the short CLI command\n([KindCLI]), the listener that is not HTTP ([KindListener]), the library\nshared between components ([KindLibrary]) and the presentation\n([KindPresentation]); the edge between two roles of a product, which\ncarries a versioned contract ([EdgeContracts], [Edge].Contract); and the\ngrammar every ID follows, written once ([ID], [ParseID]). It removes what\nthe Studio no longer does (D13): the respond, fail and delay mock modes,\nthe control event and its payload — a [Mock] is a test's replacement only.\n\nVersion 6 renames the runtime framework (ADR 0180): its packages are\nframework/app and framework/internal/app, so a source position the\ndocument gives in the framework's code names those paths, and the\nconstants of the framework's own provenance, port owner and setting\norigin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]; since\nADR 0180's step 4 their values are \"app\" and \"appdev\", the build's\nand the graph's version of the framework are their field \"app\", and\nthe variable a framework setting names carries the product's prefix.\n",
       "file": "framework/model/model.go",
       "layer": "framework"
     },
@@ -23925,8 +23961,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
       "name": "AppMessage",
-      "spelled": "struct{Name string \"json:\\\"name\\\"\"; Module string \"json:\\\"module,omitempty\\\"\"; Root string \"json:\\\"root,omitempty\\\"\"; Env string \"json:\\\"env,omitempty\\\"\"; Kit string \"json:\\\"kit,omitempty\\\"\"; Go string \"json:\\\"go,omitempty\\\"\"; StartedAt *time.Time \"json:\\\"startedAt,omitempty\\\"\"; Build *BuildMessage \"json:\\\"build,omitempty\\\"\"}",
-      "canonical": "struct{Name string \"json:\\\"name\\\"\"; Module string \"json:\\\"module,omitempty\\\"\"; Root string \"json:\\\"root,omitempty\\\"\"; Env string \"json:\\\"env,omitempty\\\"\"; Kit string \"json:\\\"kit,omitempty\\\"\"; Go string \"json:\\\"go,omitempty\\\"\"; StartedAt *time.Time \"json:\\\"startedAt,omitempty\\\"\"; Build *github.com/kitsunium/sdk/framework/model/internal/core.BuildMessage \"json:\\\"build,omitempty\\\"\"}",
+      "spelled": "struct{Name string \"json:\\\"name\\\"\"; Module string \"json:\\\"module,omitempty\\\"\"; Root string \"json:\\\"root,omitempty\\\"\"; Env string \"json:\\\"env,omitempty\\\"\"; App string \"json:\\\"app,omitempty\\\"\"; Go string \"json:\\\"go,omitempty\\\"\"; StartedAt *time.Time \"json:\\\"startedAt,omitempty\\\"\"; Build *BuildMessage \"json:\\\"build,omitempty\\\"\"}",
+      "canonical": "struct{Name string \"json:\\\"name\\\"\"; Module string \"json:\\\"module,omitempty\\\"\"; Root string \"json:\\\"root,omitempty\\\"\"; Env string \"json:\\\"env,omitempty\\\"\"; App string \"json:\\\"app,omitempty\\\"\"; Go string \"json:\\\"go,omitempty\\\"\"; StartedAt *time.Time \"json:\\\"startedAt,omitempty\\\"\"; Build *github.com/kitsunium/sdk/framework/model/internal/core.BuildMessage \"json:\\\"build,omitempty\\\"\"}",
       "fields": [
         {
           "name": "Name",
@@ -23953,10 +23989,10 @@
           "doc": "Env is \"dev\" or \"production\".\n"
         },
         {
-          "name": "Kit",
+          "name": "App",
           "type": "string",
-          "tag": "json:\"kit,omitempty\"",
-          "doc": "Kit is the kit version that produced the graph.\n"
+          "tag": "json:\"app,omitempty\"",
+          "doc": "App is the version of the framework that produced the graph.\n"
         },
         {
           "name": "Go",
@@ -23974,7 +24010,7 @@
           "name": "Build",
           "type": "*BuildMessage",
           "tag": "json:\"build,omitempty\"",
-          "doc": "Build says what the binary was built from: the product, kit and the\nSDK kit depends on.\n"
+          "doc": "Build says what the binary was built from: the product, the framework\nand the SDK the framework depends on.\n"
         }
       ],
       "doc": "AppMessage identifies the product and the machine that described it.\nIt names the module, the environment and the build the graph was taken\nfrom.\n",
@@ -24379,8 +24415,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
       "name": "BuildMessage",
-      "spelled": "struct{Product ModuleVersionMessage \"json:\\\"product\\\"\"; Kit ModuleVersionMessage \"json:\\\"kit\\\"\"; SDK ModuleVersionMessage \"json:\\\"sdk\\\"\"}",
-      "canonical": "struct{Product github.com/kitsunium/sdk/framework/model/internal/core.ModuleVersionMessage \"json:\\\"product\\\"\"; Kit github.com/kitsunium/sdk/framework/model/internal/core.ModuleVersionMessage \"json:\\\"kit\\\"\"; SDK github.com/kitsunium/sdk/framework/model/internal/core.ModuleVersionMessage \"json:\\\"sdk\\\"\"}",
+      "spelled": "struct{Product ModuleVersionMessage \"json:\\\"product\\\"\"; App ModuleVersionMessage \"json:\\\"app\\\"\"; SDK ModuleVersionMessage \"json:\\\"sdk\\\"\"}",
+      "canonical": "struct{Product github.com/kitsunium/sdk/framework/model/internal/core.ModuleVersionMessage \"json:\\\"product\\\"\"; App github.com/kitsunium/sdk/framework/model/internal/core.ModuleVersionMessage \"json:\\\"app\\\"\"; SDK github.com/kitsunium/sdk/framework/model/internal/core.ModuleVersionMessage \"json:\\\"sdk\\\"\"}",
       "fields": [
         {
           "name": "Product",
@@ -24389,16 +24425,16 @@
           "doc": "Product is the product's own module.\n"
         },
         {
-          "name": "Kit",
+          "name": "App",
           "type": "ModuleVersionMessage",
-          "tag": "json:\"kit\"",
-          "doc": "Kit is the framework: since ADR 0162 the SDK module,\ngithub.com/kitsunium/sdk, which holds it.\n"
+          "tag": "json:\"app\"",
+          "doc": "App is the framework: since ADR 0162 the SDK module,\ngithub.com/kitsunium/sdk, which holds it.\n"
         },
         {
           "name": "SDK",
           "type": "ModuleVersionMessage",
           "tag": "json:\"sdk\"",
-          "doc": "SDK is the SDK the framework is built on — the same module as Kit\nsince ADR 0162, so the two say the same version.\n"
+          "doc": "SDK is the SDK the framework is built on — the same module as App\nsince ADR 0162, so the two say the same version.\n"
         }
       ],
       "doc": "BuildMessage is what a binary was built from, at its three levels.\nIts three levels are the Go toolchain, the main module and the modules it\ndepends on.\n",
@@ -25310,7 +25346,7 @@
           "name": "Settings",
           "type": "[]string",
           "tag": "json:\"settings,omitempty\"",
-          "doc": "Settings are the settings that configure it: KIT_DATA_DIR for the\ndata directory; a database's URL and tuning variables for a database.\n"
+          "doc": "Settings are the settings that configure it: TODO_DATA_DIR for the\ndata directory; a database's URL and tuning variables for a database.\n"
         },
         {
           "name": "Engine",
@@ -25881,8 +25917,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
       "name": "EditMessage",
-      "spelled": "struct{Op string \"json:\\\"op\\\"\"; Path string \"json:\\\"path\\\"\"; From json.RawMessage \"json:\\\"from,omitempty\\\" kit:\\\"personal\\\"\"; To json.RawMessage \"json:\\\"to,omitempty\\\" kit:\\\"personal\\\"\"}",
-      "canonical": "struct{Op string \"json:\\\"op\\\"\"; Path string \"json:\\\"path\\\"\"; From encoding/json.RawMessage \"json:\\\"from,omitempty\\\" kit:\\\"personal\\\"\"; To encoding/json.RawMessage \"json:\\\"to,omitempty\\\" kit:\\\"personal\\\"\"}",
+      "spelled": "struct{Op string \"json:\\\"op\\\"\"; Path string \"json:\\\"path\\\"\"; From json.RawMessage \"json:\\\"from,omitempty\\\" app:\\\"personal\\\"\"; To json.RawMessage \"json:\\\"to,omitempty\\\" app:\\\"personal\\\"\"}",
+      "canonical": "struct{Op string \"json:\\\"op\\\"\"; Path string \"json:\\\"path\\\"\"; From encoding/json.RawMessage \"json:\\\"from,omitempty\\\" app:\\\"personal\\\"\"; To encoding/json.RawMessage \"json:\\\"to,omitempty\\\" app:\\\"personal\\\"\"}",
       "fields": [
         {
           "name": "Op",
@@ -25897,12 +25933,12 @@
         {
           "name": "From",
           "type": "json.RawMessage",
-          "tag": "json:\"from,omitempty\" kit:\"personal\""
+          "tag": "json:\"from,omitempty\" app:\"personal\""
         },
         {
           "name": "To",
           "type": "json.RawMessage",
-          "tag": "json:\"to,omitempty\" kit:\"personal\""
+          "tag": "json:\"to,omitempty\" app:\"personal\""
         }
       ],
       "doc": "EditMessage is one change between two versions of a record, in RFC 6902's\nwords: Op is add, remove or replace, Path the RFC 6901 JSON pointer of the\nmember it changes, From its value before and To its value after, as JSON.\nA member whose value is not given — a secret's, or in the Studio a\npersonal or special one — says it changed, never what: From and To are\nabsent.\n",
@@ -26349,7 +26385,7 @@
           "name": "Class",
           "type": "string",
           "tag": "json:\"class,omitempty\"",
-          "doc": "Class is what the field holds, as its kit tag says (ADR 0006): one of\nthe Class constants, or empty when the field is unclassified. A\nsubject field is personal unless it is special.\n"
+          "doc": "Class is what the field holds, as its app tag says (ADR 0006): one of\nthe Class constants, or empty when the field is unclassified. A\nsubject field is personal unless it is special.\n"
         },
         {
           "name": "Subject",
@@ -26452,13 +26488,13 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
       "name": "FormerMessage",
-      "spelled": "struct{Value json.RawMessage \"json:\\\"value,omitempty\\\" kit:\\\"personal\\\"\"; Until time.Time \"json:\\\"until\\\"\"; By string \"json:\\\"by,omitempty\\\"\"}",
-      "canonical": "struct{Value encoding/json.RawMessage \"json:\\\"value,omitempty\\\" kit:\\\"personal\\\"\"; Until time.Time \"json:\\\"until\\\"\"; By string \"json:\\\"by,omitempty\\\"\"}",
+      "spelled": "struct{Value json.RawMessage \"json:\\\"value,omitempty\\\" app:\\\"personal\\\"\"; Until time.Time \"json:\\\"until\\\"\"; By string \"json:\\\"by,omitempty\\\"\"}",
+      "canonical": "struct{Value encoding/json.RawMessage \"json:\\\"value,omitempty\\\" app:\\\"personal\\\"\"; Until time.Time \"json:\\\"until\\\"\"; By string \"json:\\\"by,omitempty\\\"\"}",
       "fields": [
         {
           "name": "Value",
           "type": "json.RawMessage",
-          "tag": "json:\"value,omitempty\" kit:\"personal\"",
+          "tag": "json:\"value,omitempty\" app:\"personal\"",
           "doc": "Value is the field's value then, as JSON; absent for a secret field,\nwhose former values are never given.\n"
         },
         {
@@ -27195,7 +27231,7 @@
           "name": "DryRun",
           "type": "bool",
           "tag": "json:\"dryRun,omitempty\"",
-          "doc": "DryRun marks what the retention would have done under\nKIT_RETENTION=dry-run: nothing changed.\n"
+          "doc": "DryRun marks what the retention would have done under\n<PRODUCT>_RETENTION=dry-run: nothing changed.\n"
         },
         {
           "name": "Store",
@@ -27875,7 +27911,7 @@
           "name": "Library",
           "type": "string",
           "tag": "json:\"library,omitempty\"",
-          "doc": "Library names the code that loops, for a library or kit loop:\n\"net/http\", \"sdk/v1/app/scheduler\", \"sdk/v1/data/queue\",\n\"sdk/v1/app/mail/spool\", \"sdk/v1/app/statemachine\", \"kit\".\n"
+          "doc": "Library names the code that loops, for a library or kit loop:\n\"net/http\", \"sdk/v1/app/scheduler\", \"sdk/v1/data/queue\",\n\"sdk/v1/app/mail/spool\", \"sdk/v1/app/statemachine\", \"app\".\n"
         },
         {
           "name": "State",
@@ -29391,7 +29427,7 @@
           "doc": "Truncated is set when a side was cut.\n"
         }
       ],
-      "doc": "Payload is the request and the response of a span, as JSON, in dev only.\nEvery member whose name says it is a secret — password, token, secret,\nauthorization, cookie… — or whose Go field is tagged kit:\"secret\" is\nreplaced by \"[redacted]\", and each side is cut at 8 KiB.\n",
+      "doc": "Payload is the request and the response of a span, as JSON, in dev only.\nEvery member whose name says it is a secret — password, token, secret,\nauthorization, cookie… — or whose Go field is tagged app:\"secret\" is\nreplaced by \"[redacted]\", and each side is cut at 8 KiB.\n",
       "file": "framework/model/internal/core/runtime.go",
       "layer": "framework"
     },
@@ -29657,7 +29693,7 @@
       "name": "PortOwnerApp",
       "spelled": "untyped string",
       "canonical": "untyped string",
-      "value": "\"kit\"",
+      "value": "\"app\"",
       "doc": "PortOwnerApp is the framework's own listener: the health probes, the Studio in\ndev, and the product's HTTP when it declares any.\n",
       "file": "framework/model/internal/core/architecture.go",
       "layer": "framework"
@@ -29736,7 +29772,7 @@
           "name": "Retention",
           "type": "string",
           "tag": "json:\"retention\"",
-          "doc": "Retention is KIT_RETENTION: one of the Retention constants.\n"
+          "doc": "Retention is <PRODUCT>_RETENTION: one of the Retention constants.\n"
         },
         {
           "name": "Register",
@@ -30044,7 +30080,7 @@
       "name": "ProvenanceApp",
       "spelled": "untyped string",
       "canonical": "untyped string",
-      "value": "\"kit\"",
+      "value": "\"app\"",
       "doc": "ProvenanceApp loops are written by the framework for a declaration: a workflow's\nsweep, a declared loop's wake cycle.\n",
       "file": "framework/model/internal/core/runtime.go",
       "layer": "framework"
@@ -30172,7 +30208,7 @@
           "tag": "json:\"fields\""
         }
       ],
-      "doc": "RecordHistoryMessage is what kit remembers of one record, as the Studio's data\nview shows it (GET /_kit/api/former): each field's former values, newest\nfirst, by the field's JSON pointer — a secret field's without their\nvalues, a personal or special one's redacted.\n",
+      "doc": "RecordHistoryMessage is what kit remembers of one record, as the Studio's data\nview shows it (GET /_app/api/former): each field's former values, newest\nfirst, by the field's JSON pointer — a secret field's without their\nvalues, a personal or special one's redacted.\n",
       "file": "framework/model/internal/core/history.go",
       "layer": "framework"
     },
@@ -30181,8 +30217,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
       "name": "RecordVersionMessage",
-      "spelled": "struct{Number uint64 \"json:\\\"number\\\"\"; At time.Time \"json:\\\"at,omitzero\\\"\"; By string \"json:\\\"by,omitempty\\\"\"; Command string \"json:\\\"command,omitempty\\\"\"; Value json.RawMessage \"json:\\\"value,omitempty\\\" kit:\\\"personal\\\"\"}",
-      "canonical": "struct{Number uint64 \"json:\\\"number\\\"\"; At time.Time \"json:\\\"at,omitzero\\\"\"; By string \"json:\\\"by,omitempty\\\"\"; Command string \"json:\\\"command,omitempty\\\"\"; Value encoding/json.RawMessage \"json:\\\"value,omitempty\\\" kit:\\\"personal\\\"\"}",
+      "spelled": "struct{Number uint64 \"json:\\\"number\\\"\"; At time.Time \"json:\\\"at,omitzero\\\"\"; By string \"json:\\\"by,omitempty\\\"\"; Command string \"json:\\\"command,omitempty\\\"\"; Value json.RawMessage \"json:\\\"value,omitempty\\\" app:\\\"personal\\\"\"}",
+      "canonical": "struct{Number uint64 \"json:\\\"number\\\"\"; At time.Time \"json:\\\"at,omitzero\\\"\"; By string \"json:\\\"by,omitempty\\\"\"; Command string \"json:\\\"command,omitempty\\\"\"; Value encoding/json.RawMessage \"json:\\\"value,omitempty\\\" app:\\\"personal\\\"\"}",
       "fields": [
         {
           "name": "Number",
@@ -30210,7 +30246,7 @@
         {
           "name": "Value",
           "type": "json.RawMessage",
-          "tag": "json:\"value,omitempty\" kit:\"personal\"",
+          "tag": "json:\"value,omitempty\" app:\"personal\"",
           "doc": "Value is the record as it was: in an export, its secret members left\nout; in the Studio, as the data browser shows a record.\n"
         }
       ],
@@ -30248,7 +30284,7 @@
           "tag": "json:\"edits,omitempty\""
         }
       ],
-      "doc": "RecordVersionsMessage is a record's versions as the Studio's data view\nshows them (GET /_kit/api/revisions): newest first, each as the data\nbrowser shows a record — a member sealed at rest sealed, a personal,\nspecial or secret one redacted —, and, when two were asked for, what\nchanged from one to the other, a value given only where the data browser\nwould show it.\n",
+      "doc": "RecordVersionsMessage is a record's versions as the Studio's data view\nshows them (GET /_app/api/revisions): newest first, each as the data\nbrowser shows a record — a member sealed at rest sealed, a personal,\nspecial or secret one redacted —, and, when two were asked for, what\nchanged from one to the other, a value given only where the data browser\nwould show it.\n",
       "file": "framework/model/internal/core/history.go",
       "layer": "framework"
     },
@@ -30735,7 +30771,7 @@
       "spelled": "untyped string",
       "canonical": "untyped string",
       "value": "\"file\"",
-      "doc": "SecretFromFile is kit's encrypted file store: KIT_SECRETS=file:<dir>,\nor .kit/secrets/dev in dev.\n",
+      "doc": "SecretFromFile is kit's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,\nor .kit/secrets/dev in dev.\n",
       "file": "framework/model/internal/core/node_info.go",
       "layer": "framework"
     },
@@ -30747,7 +30783,7 @@
       "spelled": "untyped string",
       "canonical": "untyped string",
       "value": "\"memory\"",
-      "doc": "SecretFromMemory is a store in the process's memory: a test, or\nKIT_SECRETS=memory. A generated secret is made again at every start.\n",
+      "doc": "SecretFromMemory is a store in the process's memory: a test, or\n<PRODUCT>_SECRETS=memory. A generated secret is made again at every start.\n",
       "file": "framework/model/internal/core/node_info.go",
       "layer": "framework"
     },
@@ -31041,7 +31077,7 @@
       "name": "SettingAppDev",
       "spelled": "untyped string",
       "canonical": "untyped string",
-      "value": "\"kitdev\"",
+      "value": "\"appdev\"",
       "doc": "Where a setting's value comes from.\n",
       "file": "framework/model/internal/core/runtime.go",
       "layer": "framework"
@@ -31094,7 +31130,7 @@
           "name": "Name",
           "type": "string",
           "tag": "json:\"name\"",
-          "doc": "Name is the environment variable that sets it: \"KIT_ADDR\",\n\"TODO_BASE_URL\".\n"
+          "doc": "Name is the environment variable that sets it: \"TODO_ADDR\",\n\"TODO_BASE_URL\".\n"
         },
         {
           "name": "Value",
@@ -31561,8 +31597,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
       "name": "StoreDataMessage",
-      "spelled": "struct{Store string \"json:\\\"store\\\"\"; Purpose string \"json:\\\"purpose,omitempty\\\"\"; Retention string \"json:\\\"retention,omitempty\\\"\"; Recipients []string \"json:\\\"recipients,omitempty\\\"\"; Records []json.RawMessage \"json:\\\"records\\\" kit:\\\"personal\\\"\"; Former []RecordFormerMessage \"json:\\\"former,omitempty\\\" kit:\\\"personal\\\"\"; Versions []ExportedVersionsMessage \"json:\\\"versions,omitempty\\\" kit:\\\"personal\\\"\"}",
-      "canonical": "struct{Store string \"json:\\\"store\\\"\"; Purpose string \"json:\\\"purpose,omitempty\\\"\"; Retention string \"json:\\\"retention,omitempty\\\"\"; Recipients []string \"json:\\\"recipients,omitempty\\\"\"; Records []encoding/json.RawMessage \"json:\\\"records\\\" kit:\\\"personal\\\"\"; Former []github.com/kitsunium/sdk/framework/model/internal/core.RecordFormerMessage \"json:\\\"former,omitempty\\\" kit:\\\"personal\\\"\"; Versions []github.com/kitsunium/sdk/framework/model/internal/core.ExportedVersionsMessage \"json:\\\"versions,omitempty\\\" kit:\\\"personal\\\"\"}",
+      "spelled": "struct{Store string \"json:\\\"store\\\"\"; Purpose string \"json:\\\"purpose,omitempty\\\"\"; Retention string \"json:\\\"retention,omitempty\\\"\"; Recipients []string \"json:\\\"recipients,omitempty\\\"\"; Records []json.RawMessage \"json:\\\"records\\\" app:\\\"personal\\\"\"; Former []RecordFormerMessage \"json:\\\"former,omitempty\\\" app:\\\"personal\\\"\"; Versions []ExportedVersionsMessage \"json:\\\"versions,omitempty\\\" app:\\\"personal\\\"\"}",
+      "canonical": "struct{Store string \"json:\\\"store\\\"\"; Purpose string \"json:\\\"purpose,omitempty\\\"\"; Retention string \"json:\\\"retention,omitempty\\\"\"; Recipients []string \"json:\\\"recipients,omitempty\\\"\"; Records []encoding/json.RawMessage \"json:\\\"records\\\" app:\\\"personal\\\"\"; Former []github.com/kitsunium/sdk/framework/model/internal/core.RecordFormerMessage \"json:\\\"former,omitempty\\\" app:\\\"personal\\\"\"; Versions []github.com/kitsunium/sdk/framework/model/internal/core.ExportedVersionsMessage \"json:\\\"versions,omitempty\\\" app:\\\"personal\\\"\"}",
       "fields": [
         {
           "name": "Store",
@@ -31591,19 +31627,19 @@
         {
           "name": "Records",
           "type": "[]json.RawMessage",
-          "tag": "json:\"records\" kit:\"personal\"",
+          "tag": "json:\"records\" app:\"personal\"",
           "doc": "Records are the records, their secret members left out. They hold the\nperson's data, which the Studio and the logs never show.\n"
         },
         {
           "name": "Former",
           "type": "[]RecordFormerMessage",
-          "tag": "json:\"former,omitempty\" kit:\"personal\"",
+          "tag": "json:\"former,omitempty\" app:\"personal\"",
           "doc": "Former are the former values of the records' fields that keep them\n(ADR 0007), record by record; a secret field's are left out.\n"
         },
         {
           "name": "Versions",
           "type": "[]ExportedVersionsMessage",
-          "tag": "json:\"versions,omitempty\" kit:\"personal\"",
+          "tag": "json:\"versions,omitempty\" app:\"personal\"",
           "doc": "Versions are the versions of the records a store with revisions keeps\n(ADR 0007 §3), record by record, their secret members left out.\n"
         }
       ],
@@ -31616,8 +31652,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
       "name": "StoreErasureMessage",
-      "spelled": "struct{Store string \"json:\\\"store\\\"\"; Erased []string \"json:\\\"erased,omitempty\\\" kit:\\\"personal\\\"\"; Deleted []string \"json:\\\"deleted,omitempty\\\" kit:\\\"personal\\\"\"; Held []string \"json:\\\"held,omitempty\\\" kit:\\\"personal\\\"\"}",
-      "canonical": "struct{Store string \"json:\\\"store\\\"\"; Erased []string \"json:\\\"erased,omitempty\\\" kit:\\\"personal\\\"\"; Deleted []string \"json:\\\"deleted,omitempty\\\" kit:\\\"personal\\\"\"; Held []string \"json:\\\"held,omitempty\\\" kit:\\\"personal\\\"\"}",
+      "spelled": "struct{Store string \"json:\\\"store\\\"\"; Erased []string \"json:\\\"erased,omitempty\\\" app:\\\"personal\\\"\"; Deleted []string \"json:\\\"deleted,omitempty\\\" app:\\\"personal\\\"\"; Held []string \"json:\\\"held,omitempty\\\" app:\\\"personal\\\"\"}",
+      "canonical": "struct{Store string \"json:\\\"store\\\"\"; Erased []string \"json:\\\"erased,omitempty\\\" app:\\\"personal\\\"\"; Deleted []string \"json:\\\"deleted,omitempty\\\" app:\\\"personal\\\"\"; Held []string \"json:\\\"held,omitempty\\\" app:\\\"personal\\\"\"}",
       "fields": [
         {
           "name": "Store",
@@ -31628,19 +31664,19 @@
         {
           "name": "Erased",
           "type": "[]string",
-          "tag": "json:\"erased,omitempty\" kit:\"personal\"",
+          "tag": "json:\"erased,omitempty\" app:\"personal\"",
           "doc": "Erased are the records whose personal data was cleared.\n"
         },
         {
           "name": "Deleted",
           "type": "[]string",
-          "tag": "json:\"deleted,omitempty\" kit:\"personal\"",
+          "tag": "json:\"deleted,omitempty\" app:\"personal\"",
           "doc": "Deleted are the records removed.\n"
         },
         {
           "name": "Held",
           "type": "[]string",
-          "tag": "json:\"held,omitempty\" kit:\"personal\"",
+          "tag": "json:\"held,omitempty\" app:\"personal\"",
           "doc": "Held are the records a hold keeps, untouched.\n"
         }
       ],
@@ -31892,7 +31928,7 @@
           "tag": "json:\"next,omitempty\""
         }
       ],
-      "doc": "StoreTrashMessage is a page of a store's trash as the Studio lists it (GET\n/_kit/api/trash?store=&offset=&limit=): Total records in the trash, in\nkey order, Records those from the page's offset, Next the offset of the\npage after — absent on the last. A page is bounded, 200 records unless\nthe Studio asks from 1 to 1000; an offset counts records, never quotes a\nkey.\n",
+      "doc": "StoreTrashMessage is a page of a store's trash as the Studio lists it (GET\n/_app/api/trash?store=&offset=&limit=): Total records in the trash, in\nkey order, Records those from the page's offset, Next the offset of the\npage after — absent on the last. A page is bounded, 200 records unless\nthe Studio asks from 1 to 1000; an offset counts records, never quotes a\nkey.\n",
       "file": "framework/model/internal/core/history.go",
       "layer": "framework"
     },
@@ -32282,7 +32318,7 @@
           "doc": "PurgeAt is when kit purges it: its trash's length after At, or its\nretention's instant when that comes first.\n"
         }
       ],
-      "doc": "TrashedRecordMessage is one record in a store's trash as the Studio lists\nit (GET /_kit/api/trash, ADR 0178 C4): its key, when the product deleted\nit and when kit purges it, on the app's clock — never its value. A key\nthat reads a personal, special or secret member — the subject included —\nis not given, as the data browser never shows that member: Hidden says so.\n",
+      "doc": "TrashedRecordMessage is one record in a store's trash as the Studio lists\nit (GET /_app/api/trash, ADR 0178 C4): its key, when the product deleted\nit and when kit purges it, on the app's clock — never its value. A key\nthat reads a personal, special or secret member — the subject included —\nis not given, as the data browser never shows that member: Hidden says so.\n",
       "file": "framework/model/internal/core/history.go",
       "layer": "framework"
     },
@@ -32385,8 +32421,8 @@
       "name": "VarAddr",
       "spelled": "untyped string",
       "canonical": "untyped string",
-      "value": "\"KIT_ADDR\"",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "value": "\"ADDR\"",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/internal/core/runtime.go",
       "layer": "framework"
     },
@@ -32397,8 +32433,8 @@
       "name": "VarAllowedHosts",
       "spelled": "untyped string",
       "canonical": "untyped string",
-      "value": "\"KIT_ALLOWED_HOSTS\"",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "value": "\"ALLOWED_HOSTS\"",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/internal/core/runtime.go",
       "layer": "framework"
     },
@@ -32410,7 +32446,7 @@
       "spelled": "untyped string",
       "canonical": "untyped string",
       "value": "\"KIT_ANALYZE\"",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/internal/core/runtime.go",
       "layer": "framework"
     },
@@ -32421,8 +32457,8 @@
       "name": "VarDataDir",
       "spelled": "untyped string",
       "canonical": "untyped string",
-      "value": "\"KIT_DATA_DIR\"",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "value": "\"DATA_DIR\"",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/internal/core/runtime.go",
       "layer": "framework"
     },
@@ -32445,8 +32481,8 @@
       "name": "VarEnv",
       "spelled": "untyped string",
       "canonical": "untyped string",
-      "value": "\"KIT_ENV\"",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "value": "\"ENV\"",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/internal/core/runtime.go",
       "layer": "framework"
     },
@@ -32457,8 +32493,8 @@
       "name": "VarLogLevel",
       "spelled": "untyped string",
       "canonical": "untyped string",
-      "value": "\"KIT_LOG_LEVEL\"",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "value": "\"LOG_LEVEL\"",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/internal/core/runtime.go",
       "layer": "framework"
     },
@@ -32469,7 +32505,7 @@
       "name": "VarRetention",
       "spelled": "untyped string",
       "canonical": "untyped string",
-      "value": "\"KIT_RETENTION\"",
+      "value": "\"RETENTION\"",
       "doc": "VarRetention sets what the stores' retention loops do: on, dry-run\nor off (ADR 0006).\n",
       "file": "framework/model/internal/core/runtime.go",
       "layer": "framework"
@@ -32481,8 +32517,8 @@
       "name": "VarSMTPURL",
       "spelled": "untyped string",
       "canonical": "untyped string",
-      "value": "\"KIT_SMTP_URL\"",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "value": "\"SMTP_URL\"",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/internal/core/runtime.go",
       "layer": "framework"
     },
@@ -32494,7 +32530,7 @@
       "spelled": "untyped string",
       "canonical": "untyped string",
       "value": "\"KIT_STUDIO\"",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/internal/core/runtime.go",
       "layer": "framework"
     },
@@ -32506,7 +32542,7 @@
       "spelled": "untyped string",
       "canonical": "untyped string",
       "value": "\"KIT_STUDIO_REMOTE\"",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/internal/core/runtime.go",
       "layer": "framework"
     },
@@ -32517,8 +32553,8 @@
       "name": "VarTrustProxy",
       "spelled": "untyped string",
       "canonical": "untyped string",
-      "value": "\"KIT_TRUST_PROXY\"",
-      "doc": "The settings kit reads, by the environment variable that sets each: kit's\nconfiguration reads them, the connectors and the architecture name them.\n",
+      "value": "\"TRUST_PROXY\"",
+      "doc": "The settings the framework reads, by the variable that sets each. The\nframework's own are named under the product's prefix — its name\nupper-cased, every other character an underscore —, so a constant holds\nthe name after it: VarDataDir is TODO_DATA_DIR for the product \"todo\"\n(ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are\nthe tool's, set by it and read whole by the Studio subsystem alone.\n",
       "file": "framework/model/internal/core/runtime.go",
       "layer": "framework"
     },
@@ -32530,7 +32566,7 @@
       "spelled": "int",
       "canonical": "int",
       "value": "6",
-      "doc": "Version is the schema version of every document in this package.\n\nVersion 2 adds the auth, mailer and loop kinds, the sends and wakes edges,\nthe code level of every node ([CodeResult]), the C4 context and containers\n([ArchitectureMessage]) and the daemon's own machinery ([RuntimeMessage]).\n\nVersion 3 adds the secret kind ([SecretSpec]), the uses edge, the secret\nspan operation, the rotation loop and the store origin of a setting.\n\nVersion 4 is the one bump the decisions of issue #17 share. It adds the\nport kind ([PortSpec]) and its binding, a declared edge from the port to\nwhat it calls; the endpoint that implements a port\n([EndpointSpec.Implements]), which has no method and no path; and the\nreplace mock mode ([MockReplace]). ADR 0004 adds the databases: the store's\ndatabase ([StoreSpec.Database]), the database container, the database\nconnector and its adapters, [RuntimeMessage.Databases] and [SettingMessage.Database].\nADR 0008 adds the modules the app mounts ([GraphMessage.Modules]), the module of a\nnode ([NodeEntity.Module]) and the Go module of a position outside the product's\n([SourceMessage.GoModule]); and the watch, a subscription fed by stores: its mark\nand the stores that feed it ([SubscriptionSpec.Mark],\n[SubscriptionSpec.Stores]), each drawing a declared delivers edge to it.\nADR 0005 adds the command and query kinds ([CommandSpec], [QuerySpec]),\nthe dispatches and asks edges, the endpoint that exposes one\n([EndpointSpec.Exposes]), the read model ([StoreSpec.ReadModel]), the\ndispatch, ask and handle span operations and the dispatch and ask\ncontrols.\n\nVersion 5 is the first the SDK's framework publishes (ADR 0147). It\nadds what a product is made of beyond its services: the binary\n([KindBinary]) and its process roles ([KindRole]), the short CLI command\n([KindCLI]), the listener that is not HTTP ([KindListener]), the library\nshared between components ([KindLibrary]) and the presentation\n([KindPresentation]); the edge between two roles of a product, which\ncarries a versioned contract ([EdgeContracts], [EdgeMessage.Contract]); and the\ngrammar every ID follows, written once ([IDValue], [ParseID]). It removes what\nthe Studio no longer does (D13): the respond, fail and delay mock modes,\nthe control event and its payload — a [MockMessage] is a test's replacement only.\n\nVersion 6 renames the runtime framework (ADR 0180): its packages are\nframework/app and framework/internal/app, so a source position the\ndocument gives in the framework's code names those paths, and the\nconstants of the framework's own provenance, port owner and setting\norigin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]. The\nvalues the graph spells after the framework follow with its runtime\nnames (ADR 0180 step 4).\n",
+      "doc": "Version is the schema version of every document in this package.\n\nVersion 2 adds the auth, mailer and loop kinds, the sends and wakes edges,\nthe code level of every node ([CodeResult]), the C4 context and containers\n([ArchitectureMessage]) and the daemon's own machinery ([RuntimeMessage]).\n\nVersion 3 adds the secret kind ([SecretSpec]), the uses edge, the secret\nspan operation, the rotation loop and the store origin of a setting.\n\nVersion 4 is the one bump the decisions of issue #17 share. It adds the\nport kind ([PortSpec]) and its binding, a declared edge from the port to\nwhat it calls; the endpoint that implements a port\n([EndpointSpec.Implements]), which has no method and no path; and the\nreplace mock mode ([MockReplace]). ADR 0004 adds the databases: the store's\ndatabase ([StoreSpec.Database]), the database container, the database\nconnector and its adapters, [RuntimeMessage.Databases] and [SettingMessage.Database].\nADR 0008 adds the modules the app mounts ([GraphMessage.Modules]), the module of a\nnode ([NodeEntity.Module]) and the Go module of a position outside the product's\n([SourceMessage.GoModule]); and the watch, a subscription fed by stores: its mark\nand the stores that feed it ([SubscriptionSpec.Mark],\n[SubscriptionSpec.Stores]), each drawing a declared delivers edge to it.\nADR 0005 adds the command and query kinds ([CommandSpec], [QuerySpec]),\nthe dispatches and asks edges, the endpoint that exposes one\n([EndpointSpec.Exposes]), the read model ([StoreSpec.ReadModel]), the\ndispatch, ask and handle span operations and the dispatch and ask\ncontrols.\n\nVersion 5 is the first the SDK's framework publishes (ADR 0147). It\nadds what a product is made of beyond its services: the binary\n([KindBinary]) and its process roles ([KindRole]), the short CLI command\n([KindCLI]), the listener that is not HTTP ([KindListener]), the library\nshared between components ([KindLibrary]) and the presentation\n([KindPresentation]); the edge between two roles of a product, which\ncarries a versioned contract ([EdgeContracts], [EdgeMessage.Contract]); and the\ngrammar every ID follows, written once ([IDValue], [ParseID]). It removes what\nthe Studio no longer does (D13): the respond, fail and delay mock modes,\nthe control event and its payload — a [MockMessage] is a test's replacement only.\n\nVersion 6 renames the runtime framework (ADR 0180): its packages are\nframework/app and framework/internal/app, so a source position the\ndocument gives in the framework's code names those paths, and the\nconstants of the framework's own provenance, port owner and setting\norigin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]; since\nADR 0180's step 4 their values are \"app\" and \"appdev\", the build's\nand the graph's version of the framework are their field \"app\", and\nthe variable a framework setting names carries the product's prefix.\n",
       "file": "framework/model/internal/core/model.go",
       "layer": "framework"
     },
@@ -34491,8 +34527,8 @@
       "name": "Protocol",
       "spelled": "string",
       "canonical": "string",
-      "value": "\"kit-telemetry/v1\"",
-      "doc": "Protocol names the wire this package speaks, in the handshake.\n",
+      "value": "\"app-telemetry/v1\"",
+      "doc": "Protocol names the wire this package speaks, in the handshake. Since\nADR 0180 step 4 it is app-telemetry/v1, a name the product sends; the\nwire is unchanged, and a collector accepts kit-telemetry/v1 as the\nsame for two minors.\n",
       "file": "framework/telemetry/telemetry.go",
       "layer": "framework"
     },

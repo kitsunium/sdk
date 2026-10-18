@@ -43,8 +43,12 @@ const (
 	SettingFile    string = core.SettingFile    // a configuration file of the product (Detail)
 )
 
-// The settings kit reads, by the environment variable that sets each: kit's
-// configuration reads them, the connectors and the architecture name them.
+// The settings the framework reads, by the variable that sets each. The
+// framework's own are named under the product's prefix — its name
+// upper-cased, every other character an underscore —, so a constant holds
+// the name after it: VarDataDir is TODO_DATA_DIR for the product "todo"
+// (ADR 0180 §3). VarStudio, VarStudioRemote, VarAnalyze and VarDevForced are
+// the tool's, set by it and read whole by the Studio subsystem alone.
 const (
 	VarEnv          string = core.VarEnv
 	VarAddr         string = core.VarAddr
@@ -258,7 +262,7 @@ type (
 type (
 	// Payload is the request and the response of a span, as JSON, in dev only.
 	// Every member whose name says it is a secret — password, token, secret,
-	// authorization, cookie… — or whose Go field is tagged kit:"secret" is
+	// authorization, cookie… — or whose Go field is tagged app:"secret" is
 	// replaced by "[redacted]", and each side is cut at 8 KiB.
 	Payload = core.Payload
 )

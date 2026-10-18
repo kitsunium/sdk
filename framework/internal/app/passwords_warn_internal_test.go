@@ -13,7 +13,7 @@ import (
 // passwordChange asks for an account's new password.
 type passwordChange struct {
 	ID   string `path:"id"`
-	Next string `json:"next" kit:"secret"`
+	Next string `json:"next" app:"secret"`
 }
 
 // warnedApp runs a store under a policy and four endpoints: one that sets

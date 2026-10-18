@@ -247,8 +247,8 @@ func TestADaemonWaitsForItsActivities(t *testing.T) {
 func TestACLIRunStartsOnlyWhatItsCommandReads(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	t.Setenv("KIT_ENV", "dev")
-	t.Setenv("KIT_DATA_DIR", "")
+	t.Setenv("STATUSLINE_ENV", "dev")
+	t.Setenv("STATUSLINE_DATA_DIR", "")
 	var logs bytes.Buffer
 	var a *app.App
 	var components []model.Component
@@ -392,7 +392,7 @@ type probeLine struct {
 // A daemon that keeps nothing says it runs, and says nothing of a data
 // directory it does not need; one that keeps a store still hears it.
 func TestADaemonWithoutAStoreIsNotWarnedOfMemory(t *testing.T) {
-	t.Setenv("KIT_DATA_DIR", "")
+	t.Setenv("STATUSLINE_DATA_DIR", "")
 	run := func(keeps bool) string {
 		var logs bytes.Buffer
 		svc := app.NewService("render", "Renders lines for its clients.")

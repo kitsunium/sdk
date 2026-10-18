@@ -53,7 +53,7 @@ Two packages, one API:
 | `devtools.go` | the mail statuses, `MailMessage`, `MockReplace` |
 | `profile.go` | a CPU or heap `Profile` folded onto the nodes, `Goroutines` grouped |
 | `doc.go` | `SplitDoc`: a doc comment's default text and its translations (`docTag` compiled at its first use) |
-| `history.go` | what a store remembers: `StoreHistory`, `Former`, `RecordHistory`, a record's versions (`RecordVersion`, `RecordVersions`, `Edit`), and a store's trash as the Studio lists it (`StoreTrash`, `TrashedRecord`: key — or `hidden` —, `at`, `purgeAt`, never the value; `GET /_kit/api/trash`, ADR 0178 C4 amended on 2026-10-15) |
+| `history.go` | what a store remembers: `StoreHistory`, `Former`, `RecordHistory`, a record's versions (`RecordVersion`, `RecordVersions`, `Edit`), and a store's trash as the Studio lists it (`StoreTrash`, `TrashedRecord`: key — or `hidden` —, `at`, `purgeAt`, never the value; `GET /_app/api/trash`, ADR 0178 C4 amended on 2026-10-15) |
 | `privacy.go` | `PersonalData`, `RecordFormer`, `Erasure`, the Privacy page, retention modes, the journal's operations |
 | `runtime.go` | `Runtime`, `Loop`, `Component`, live `Event`s (`LogRecord`, `MailSummary`), `Mock`, `Span` (its operations, `connect` and `cli` among them), `Trace`, `Database`, `Setting` |
 | `connector.go`, `architecture.go` | the connector table, the catalog's `Adapter`s (imports under `framework/connectors/`), the C4 `Container`s |
@@ -89,8 +89,16 @@ Two packages, one API:
   `framework/app` and `framework/internal/app`, so a source position in the
   framework's code names those paths, and `ProvenanceKit`, `PortOwnerKit`
   and `SettingKitDev` are `ProvenanceApp`, `PortOwnerApp` and
-  `SettingAppDev`; their values (`"kit"`, `"kitdev"`) are the runtime names
-  ADR 0180's step 4 renames.
+  `SettingAppDev`. Since ADR 0180's step 4, under the same version, their
+  values are `"app"` and `"appdev"`, the graph's and the build's version of
+  the framework are their field `app` (`AppMessage.App`, `BuildMessage.App`,
+  which were `Kit`), and `VarEnv`, `VarAddr`, `VarDataDir`, `VarTrustProxy`,
+  `VarAllowedHosts`, `VarLogLevel`, `VarSMTPURL` and `VarRetention` hold the
+  name after the product's prefix (`"DATA_DIR"` for `TODO_DATA_DIR`): a
+  setting's `Name` is the product's variable. `VarStudio`,
+  `VarStudioRemote`, `VarAnalyze` and `VarDevForced` are the tool's and keep
+  their whole names. The model's own fields of personal data are tagged
+  `app:"personal"`.
 - `NodeKind`, `EdgeKind` and `EventType` stay strings under
   `//ktn:wire-format`: not an exclusion, the declaration KTN-CONST-STRENUM
   provides for an enumeration that is a wire format — the graph's JSON and

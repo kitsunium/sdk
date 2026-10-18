@@ -10,13 +10,13 @@ import (
 // retrying a failure and dead-lettering a message after its last attempt.
 //
 // The transport is the SDK's mail package: SMTP when the mail connector's
-// secret smtp-url is set — KIT_SMTP_URL, smtp://user:password@host:587?tls=
+// secret smtp-url is set — <PRODUCT>_SMTP_URL, smtp://user:password@host:587?tls=
 // starttls|implicit|none — and otherwise the capture transport, which keeps
 // every message for the Studio's mailbox and for tests ([Mailer].Captured)
 // and delivers nothing. Outside dev, the capture transport is reported as a
 // warning. The URL is read again before every delivery: replacing it where
 // it lives — a new version in the store, a new file behind
-// KIT_SMTP_URL_FILE — takes effect at the next mail. The outbox and the
+// <PRODUCT>_SMTP_URL_FILE — takes effect at the next mail. The outbox and the
 // transports are the SDK's, which the mail subsystem plugs in
 // (framework/app/mail, ADR 0179 step 6).
 type Mailer = iapp.Mailer

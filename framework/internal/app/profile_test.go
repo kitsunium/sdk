@@ -20,7 +20,7 @@ func TestHeapProfileFindsTheNodeByItsCode(t *testing.T) {
 	if r := call(t, app, "POST /hoard", noBody); r.status != http.StatusNoContent {
 		t.Fatalf("hoard: %d %s", r.status, r.body)
 	}
-	r := call(t, app, "GET /_kit/api/profile/heap", noBody)
+	r := call(t, app, "GET /_app/api/profile/heap", noBody)
 	if r.status != http.StatusOK {
 		t.Fatalf("heap: %d %s", r.status, r.body)
 	}
@@ -60,7 +60,7 @@ func TestGoroutinesAreGroupedByNodeAndLoop(t *testing.T) {
 			// A fresh value each poll: decoding into the last one would keep
 			// the members this answer omits.
 			g = model.Goroutines{}
-			call(t, app, "GET /_kit/api/goroutines", noBody).json(t, &g)
+			call(t, app, "GET /_app/api/goroutines", noBody).json(t, &g)
 			for _, grp := range g.Groups {
 				if grp.Node == "bench/endpoint/Wait" && grp.Count == 3 {
 					return true

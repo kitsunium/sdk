@@ -60,7 +60,7 @@ func (a *App) onlyProblems() []model.Diagnostic {
 		}
 		for _, env := range d.only {
 			if !envNameGrammar().MatchString(env) {
-				out = append(out, diagnosticOf("error", "", a.source(&d.onlyAt), say("mount.only-name", "module", d.module.name, "env", env)))
+				out = append(out, diagnosticOf("error", "", a.source(&d.onlyAt), say("mount.only-name", "module", d.module.name, "env", env, "prefix", appPrefix(a.name))))
 			}
 		}
 		if p, ok := a.requiredOutside(&d, refused); ok {
@@ -105,10 +105,10 @@ func (a *App) where(p *pos) string {
 }
 
 // prefixProblems judges the prefix a mount gives: '/' first and last, and
-// nowhere under /_kit/.
+// nowhere under /_app/.
 func (a *App) prefixProblems(mm *mountedModule) []model.Diagnostic {
 	p := mm.prefix
-	if strings.HasPrefix(p, "/") && strings.HasSuffix(p, "/") && !strings.HasPrefix(p, "/_kit/") && !strings.ContainsAny(p, " \t?#{}") {
+	if strings.HasPrefix(p, "/") && strings.HasSuffix(p, "/") && !reservedPath(p) && !strings.ContainsAny(p, " \t?#{}") {
 		return nil
 	}
 	return []model.Diagnostic{diagnosticOf("error", "", a.source(&mm.prefixAt), say("mount.prefix", "module", mm.module.name, "prefix", p))}

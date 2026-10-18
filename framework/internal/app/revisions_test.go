@@ -27,7 +27,7 @@ type Page struct {
 	Title  string   `json:"title"`
 	Body   string   `json:"body,omitempty"`
 	Blocks []string `json:"blocks,omitempty"`
-	Token  string   `json:"token,omitempty" kit:"secret"`
+	Token  string   `json:"token,omitempty" app:"secret"`
 	State  string   `json:"state,omitempty"`
 	Views  int      `json:"views,omitempty"`
 }
@@ -64,8 +64,8 @@ var Notes = Press.Store("notes", func(n Page) string { return n.ID })
 // directory.
 func startPress(t *testing.T, opts ...app.AppConfigurer) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
-	pinDataKeyWithoutFileStore(t)
+	t.Setenv("PRESS_SMTP_URL", "")
+	pinDataKeyWithoutFileStore(t, "press")
 	a := app.NewApp("press", Press).With(append([]app.AppConfigurer{
 		app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
 	}, opts...)...)

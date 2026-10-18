@@ -60,7 +60,7 @@ func (h historyRecord) key() string { return h.Key }
 type formerEntry struct {
 	// Value is the field's value as JSON, whatever its class: a secret's is
 	// read by kit alone. At rest, a sealed field's is a box.
-	Value json.RawMessage `json:"value" kit:"personal"`
+	Value json.RawMessage `json:"value" app:"personal"`
 	// Until is when it was replaced, on the app's clock; By who replaced it.
 	Until time.Time `json:"until"`
 	By    string    `json:"by,omitempty"`

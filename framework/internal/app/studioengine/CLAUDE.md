@@ -20,7 +20,7 @@ gives (`studio_host.go` there): what the app keeps — the graph, the hub, the
 stores, the mailboxes, the roots of its source — stays beside its state in
 the core, which answers through the host as it answers any request
 (`Reply`, kit's error codes, `CodeProfileRead`). kit keeps the health probes,
-the reserved `/_kit/` outside dev, the start's warning that names this
+the reserved `/_app/` outside dev, the start's warning that names this
 package, and English — its own table, which it hands `openWords` as the
 language every catalogue falls back to. A product that does not import the
 Studio links none of this package, reads none of the tool's variables, and
@@ -31,7 +31,7 @@ speaks English alone.
 | File | Holds |
 |---|---|
 | `studioengine.go` | `Enable`, which sets `plug.Studio` (`driver`: `studioEnv`, `studioSettings`, `devForced`, `devBuildOf`, `mount`) and `plug.Words` |
-| `routes.go` | `mount`: every route in kit's order, each behind `guard` — the request's address on this machine unless the host says remote (`loopback`), its Host allowed, then the Studio's CSP, `nosniff` and `no-referrer` —; the graph, traces (`tracesShown`), one trace, instances, items; the not-found answers under `/_kit/api/` and `/_kit/` for every method kit routes but HEAD (`methods`) |
+| `routes.go` | `mount`: every route in kit's order, each behind `guard` — the request's address on this machine unless the host says remote (`loopback`), its Host allowed, then the Studio's CSP, `nosniff` and `no-referrer` —; the graph, traces (`tracesShown`), one trace, instances, items; the not-found answers under `/_app/api/` and `/_app/` for every method kit routes but HEAD (`methods`) |
 | `events.go` | `serveEvents`: the stream opened with `sse.New`, the hello (the graph's revision, the start, the phase), then every event the host streams until the client, the stream or the app stops |
 | `source.go` | `serveSource`: a name with no extension it serves (`sourceLanguages`) or not local is refused before the host is asked; the host reads the file the graph names (`StudioHost.Source`), and the answer is the window around the range (`sourceContext`, `sourceMaxLines`, `atoiOr`) as a `model.Snippet` |
 | `devtools.go` | the dev tools' routes: the process (`plug.SampleProcess`, 404 without a sampler), goroutines and the heap profile (`heap`, `goroutines`; a failure is `StudioHost.ProfileUnreadable`), logs (the query handed to the host, which judges the level and the limit), the mailbox (`limit` 1 to `maxMails`, `defaultMails` 200; every mailer's mail, newest first, the identifier breaking a tie) and one mail; on the store subsystem only (`StudioHost.Stores`), the databases, former values, versions, the trash and the Privacy page, each a read of the host |

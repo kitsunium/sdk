@@ -17,7 +17,7 @@ import (
 // privacyMember is a person, kept by a product that places its stores.
 type privacyMember struct {
 	ID    string `json:"id"`
-	Email string `json:"email" kit:"subject"`
+	Email string `json:"email" app:"subject"`
 }
 
 func (m privacyMember) key() string { return m.ID }
@@ -28,8 +28,8 @@ func (m privacyMember) key() string { return m.ID }
 // open at the next start.
 func TestKitsOwnStoresArePlacedByName(t *testing.T) {
 	needsFileStore(t)
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("LEDGER_SECRETS", "memory")
+	t.Setenv("LEDGER_DATA_KEY", "a data key of exactly 32 bytes..")
 	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
 	t.Setenv("LEDGER_VAULT_URL", verifiedURL())
 	for keeps, want := range map[bool]string{false: "", true: "vault"} {

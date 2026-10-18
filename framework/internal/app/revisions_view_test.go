@@ -50,7 +50,7 @@ func TestTheStudioShowsVersionsRedacted(t *testing.T) {
 			})
 			must(t, err)
 
-			r := call(t, a, "GET /_kit/api/revisions?store=folk/store/members&key=m1&from=1&to=2", noBody)
+			r := call(t, a, "GET /_app/api/revisions?store=folk/store/members&key=m1&from=1&to=2", noBody)
 			if r.status != http.StatusOK {
 				t.Fatalf("revisions: %d %s", r.status, r.body)
 			}
@@ -75,10 +75,10 @@ func TestTheStudioShowsVersionsRedacted(t *testing.T) {
 			}
 
 			for _, bad := range []struct{ method, path, body string }{
-				{"GET", "/_kit/api/revisions?store=folk/store/nothing&key=m1", ""},
-				{"GET", "/_kit/api/revisions?store=folk/store/members&key=nobody", ""},
-				{"GET", "/_kit/api/revisions?store=folk/store/members&key=m1&from=1", ""},
-				{"GET", "/_kit/api/revisions?store=folk/store/members&key=m1&from=1&to=9", ""},
+				{"GET", "/_app/api/revisions?store=folk/store/nothing&key=m1", ""},
+				{"GET", "/_app/api/revisions?store=folk/store/members&key=nobody", ""},
+				{"GET", "/_app/api/revisions?store=folk/store/members&key=m1&from=1", ""},
+				{"GET", "/_app/api/revisions?store=folk/store/members&key=m1&from=1&to=9", ""},
 			} {
 				if r := call(t, a, bad.method+" "+bad.path, bad.body); r.status < 400 || r.status >= 500 {
 					t.Errorf("%s %s %s answers %d %s", bad.method, bad.path, bad.body, r.status, r.body)

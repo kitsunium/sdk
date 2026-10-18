@@ -75,7 +75,7 @@ func (s *Service) Static(name, prefix string, fsys fs.FS, opts ...StaticConfigur
 		s.problem(f.decl, f.id, "static.nil", "name", name)
 		return f
 	}
-	if !strings.HasPrefix(prefix, "/") || !strings.HasSuffix(prefix, "/") || strings.HasPrefix(prefix, "/_kit/") {
+	if !strings.HasPrefix(prefix, "/") || !strings.HasSuffix(prefix, "/") || reservedPath(prefix) {
 		s.problem(f.decl, f.id, "static.prefix", "name", name, "prefix", prefix)
 		return f
 	}

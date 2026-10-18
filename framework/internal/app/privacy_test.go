@@ -24,22 +24,22 @@ var Desk = app.NewService("desk", "Notices people file, for the privacy tests.")
 // Report is a notice a person filed.
 type Report struct {
 	ID          string     `json:"id"`
-	Category    string     `json:"category" kit:"public"`
-	Explanation string     `json:"explanation" kit:"personal,moderated"`
-	Email       string     `json:"email,omitempty" kit:"subject"`
-	Name        string     `json:"name,omitempty" kit:"personal"`
-	Health      string     `json:"health,omitempty" kit:"special"`
-	TrackHash   string     `json:"trackHash,omitempty" kit:"secret"`
-	Birth       *time.Time `json:"birth,omitempty" kit:"personal"`
+	Category    string     `json:"category" app:"public"`
+	Explanation string     `json:"explanation" app:"personal,moderated"`
+	Email       string     `json:"email,omitempty" app:"subject"`
+	Name        string     `json:"name,omitempty" app:"personal"`
+	Health      string     `json:"health,omitempty" app:"special"`
+	TrackHash   string     `json:"trackHash,omitempty" app:"secret"`
+	Birth       *time.Time `json:"birth,omitempty" app:"personal"`
 	BirthYear   int        `json:"birthYear,omitempty"`
 	Notes       []Note     `json:"notes,omitempty"`
 	ClosedAt    *time.Time `json:"closedAt,omitempty"`
-	ErasedAt    *time.Time `json:"erasedAt,omitempty" kit:"erased"`
+	ErasedAt    *time.Time `json:"erasedAt,omitempty" app:"erased"`
 }
 
 // Note is a message on a report.
 type Note struct {
-	Body   string `json:"body" kit:"personal,moderated"`
+	Body   string `json:"body" app:"personal,moderated"`
 	Public string `json:"public,omitempty"`
 }
 
@@ -76,10 +76,10 @@ var People = app.NewService("people", "Customers and invoices, for the privacy t
 
 // Customer is a person's account: its key is their ID, their subject too.
 type Customer struct {
-	ID        string `json:"id" kit:"subject"`
-	Email     string `json:"email" kit:"personal"`
-	Password  string `json:"password" kit:"secret"`
-	Pseudonym string `json:"pseudonym" kit:"personal,moderated,plain"`
+	ID        string `json:"id" app:"subject"`
+	Email     string `json:"email" app:"personal"`
+	Password  string `json:"password" app:"secret"`
+	Pseudonym string `json:"pseudonym" app:"personal,moderated,plain"`
 }
 
 var Customers = People.Store("customers", func(a Customer) string { return a.ID },
@@ -88,8 +88,8 @@ var Customers = People.Store("customers", func(a Customer) string { return a.ID 
 // Invoice is kept ten years, whatever its customer asks.
 type Invoice struct {
 	ID        string    `json:"id"`
-	Customer  string    `json:"customer" kit:"subject"`
-	Address   string    `json:"address" kit:"personal"`
+	Customer  string    `json:"customer" app:"subject"`
+	Address   string    `json:"address" app:"personal"`
 	Amount    int       `json:"amount"`
 	KeepUntil time.Time `json:"keepUntil"`
 	// ContactPhone reads like personal data, and says nothing: warned of.
@@ -105,7 +105,7 @@ var Invoices = People.Store("invoices", func(i Invoice) string { return i.ID },
 
 // Identities names a person by their identities.
 type Identities struct {
-	IDs []string `json:"ids" kit:"personal"`
+	IDs []string `json:"ids" app:"personal"`
 }
 
 var (
@@ -147,8 +147,8 @@ func startPrivacy(t *testing.T, opts ...app.AppConfigurer) *app.App {
 // startPrivacyOn runs the privacy product in dev, where opts say.
 func startPrivacyOn(t *testing.T, opts ...app.AppConfigurer) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
-	pinDataKeyWithoutFileStore(t)
+	t.Setenv("VIGIE_SMTP_URL", "")
+	pinDataKeyWithoutFileStore(t, "vigie")
 	a := app.NewApp("vigie", Desk, People).With(append([]app.AppConfigurer{
 		app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
 	}, opts...)...)
@@ -196,7 +196,7 @@ func must(t *testing.T, err error) {
 // privacyOf reads the Studio's Privacy page.
 func privacyOf(t *testing.T, a *app.App) model.Privacy {
 	t.Helper()
-	r := call(t, a, "GET /_kit/api/privacy", noBody)
+	r := call(t, a, "GET /_app/api/privacy", noBody)
 	if r.status != http.StatusOK {
 		t.Fatalf("privacy: %d %s", r.status, r.body)
 	}

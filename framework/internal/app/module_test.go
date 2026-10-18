@@ -27,7 +27,7 @@ var Starring = app.NewService("ratings", "Stars given to the items.")
 // Review is moderated content of the module's own: its watch never hears it.
 type Review struct {
 	ID    string `json:"id"`
-	Text  string `json:"text" validate:"required" kit:"moderated"`
+	Text  string `json:"text" validate:"required" app:"moderated"`
 	Shown bool   `json:"shown"`
 }
 
@@ -41,7 +41,7 @@ type Verdict struct {
 type Star struct {
 	Item  string `json:"item"`
 	Count int    `json:"count"`
-	Note  string `json:"note,omitempty" kit:"moderated"`
+	Note  string `json:"note,omitempty" app:"moderated"`
 }
 
 var Reviews = Reviewing.Store("reviews", func(r Review) string { return r.ID })
@@ -134,7 +134,7 @@ func startReviews(t *testing.T, opts ...app.AppConfigurer) *app.App {
 // startRefused starts app and returns what its start refused.
 func startRefused(t *testing.T, a *app.App) *app.DiagnosticsError {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
+	t.Setenv(strings.ToUpper(a.Name())+"_SMTP_URL", "")
 	err := a.With(app.InMemory(), app.Listen("127.0.0.1:0"), app.Logs(io.Discard)).Start(t.Context())
 	var de *app.DiagnosticsError
 	if !errors.As(err, &de) {

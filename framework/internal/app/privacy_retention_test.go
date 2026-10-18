@@ -105,7 +105,7 @@ func TestRetentionHonoursHolds(t *testing.T) {
 
 // dry-run journals what the retention would do, and changes nothing.
 func TestRetentionDryRunChangesNothing(t *testing.T) {
-	t.Setenv("KIT_RETENTION", "dry-run")
+	t.Setenv("VIGIE_RETENTION", "dry-run")
 	clk := clock.NewManualClock(epoch)
 	a := startPrivacy(t, app.Clock(clk))
 	ctx := t.Context()
@@ -127,14 +127,14 @@ func TestRetentionDryRunChangesNothing(t *testing.T) {
 
 // off: no retention runs, and a start outside dev says so.
 func TestRetentionOffIsWarned(t *testing.T) {
-	t.Setenv("KIT_RETENTION", "off")
+	t.Setenv("VIGIE_RETENTION", "off")
 	a := startPrivacy(t, app.Env(app.EnvProduction))
 	found := false
 	for _, d := range a.Graph().Diagnostics {
-		found = found || (d.Severity == "warning" && strings.Contains(d.Message, "KIT_RETENTION=off"))
+		found = found || (d.Severity == "warning" && strings.Contains(d.Message, "VIGIE_RETENTION=off"))
 	}
 	if !found {
-		t.Error("KIT_RETENTION=off is not warned of")
+		t.Error("VIGIE_RETENTION=off is not warned of")
 	}
 	for _, l := range a.Graph().Runtime.Loops {
 		if l.Kind == model.LoopRetention {

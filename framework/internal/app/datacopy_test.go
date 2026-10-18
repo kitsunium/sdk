@@ -28,7 +28,7 @@ import (
 type note struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
-	Nick  string `json:"nick" kit:"history=2"`
+	Nick  string `json:"nick" app:"history=2"`
 	State string `json:"state"`
 }
 
@@ -99,8 +99,8 @@ func fillQueue(t *testing.T, dir string) {
 
 func TestDataCopyMovesTheDataDirectoryIntoTheDatabase(t *testing.T) {
 	needsFileStore(t)
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_SMTP_URL", "")
+	t.Setenv("ARCHIVE_SECRETS", "memory")
+	t.Setenv("ARCHIVE_SMTP_URL", "")
 	dir := t.TempDir()
 	ctx := t.Context()
 

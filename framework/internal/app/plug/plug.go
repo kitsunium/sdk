@@ -12,9 +12,9 @@ import (
 
 const (
 	// LabelNode is the pprof label naming the node a goroutine works for.
-	LabelNode string = "kit_node"
+	LabelNode string = "app_node"
 	// LabelLoop is the pprof label naming the loop a goroutine belongs to.
-	LabelLoop string = "kit_loop"
+	LabelLoop string = "app_loop"
 )
 
 var (

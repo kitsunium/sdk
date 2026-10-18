@@ -267,7 +267,7 @@ func closeRuns(runs []*databaseRun) error {
 // address — its stores belong to it —, declarations the start refuses.
 func (a *App) dataReady(ctx context.Context) error {
 	if a.dataDir == "" {
-		return failure(CodePrivacyData, "PRIVACY_NO_DATA", "the product keeps its data in memory: there is nothing to open; set KIT_DATA_DIR", nil)
+		return failure(CodePrivacyData, "PRIVACY_NO_DATA", "the product keeps its data in memory: there is nothing to open; set <PRODUCT>_DATA_DIR", nil)
 	}
 	if info, err := os.Stat(a.dataDir); err != nil || !info.IsDir() {
 		return failure(CodePrivacyData, "PRIVACY_NO_DATA", "the data directory holds nothing yet: there is nothing to open", err, errs.String("dir", a.dataDir))
@@ -313,6 +313,6 @@ func (a *App) startStores(ctx context.Context) ([]starter, error) {
 func (a *App) askLive(ctx context.Context) error {
 	probe, cancel := context.WithTimeout(ctx, liveProbeTimeout)
 	defer cancel()
-	_, err := health.Ask(probe, health.AskConfig{Addr: a.cfg.addr, Path: "/_kit/health/live"})
+	_, err := health.Ask(probe, health.AskConfig{Addr: a.cfg.addr, Path: healthPrefix + "live"})
 	return err
 }

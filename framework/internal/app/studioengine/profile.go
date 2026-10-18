@@ -38,7 +38,7 @@ type funcOwners struct {
 	sources map[string]*model.Source
 }
 
-// foldProfile charges every sample of p to a node — by its kit_node label
+// foldProfile charges every sample of p to a node — by its app_node label
 // for a CPU profile, by the innermost node code on its stack for the heap —
 // and answers the fold as the Studio reads it: milliseconds of CPU, bytes of
 // heap.

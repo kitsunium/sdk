@@ -75,7 +75,7 @@ func ClearCookie(ctx context.Context, name string) {
 }
 
 // ClientIP returns the address of the client of the request ctx serves: the
-// connection's peer, or — only when KIT_TRUST_PROXY=on — the last address of
+// connection's peer, or — only when <PRODUCT>_TRUST_PROXY=on — the last address of
 // X-Forwarded-For, the one the trusted proxy appended. It is "" outside an HTTP request.
 func ClientIP(ctx context.Context) string {
 	if rs := responseStateOf(ctx); rs != nil {

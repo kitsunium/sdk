@@ -21,22 +21,22 @@ import (
 
 // Where an environment keeps its secrets. The environment itself is read
 // first — the product's variables (TODO_STRIPE_KEY, or TODO_STRIPE_KEY_FILE
-// naming a file) and kit's (KIT_SMTP_URL) — and then the store it keeps,
+// naming a file) and kit's (<PRODUCT>_SMTP_URL) — and then the store it keeps,
 // where kit writes the secrets it generates and `secrets set` the ones an
-// operator gives it. KIT_SECRETS chooses that store:
+// operator gives it. <PRODUCT>_SECRETS chooses that store:
 //
 //	(unset)     the secrets follow the data: an encrypted file store beside
 //	            it, <data>/.secrets/store, and in memory when the data is
-//	            in memory. Its key is KIT_SECRETS_KEY, or the key file made
+//	            in memory. Its key is <PRODUCT>_SECRETS_KEY, or the key file made
 //	            on first use beside the store, <data>/.secrets/key
 //	env         no store: a generated secret must be pinned by its variable
 //	memory      the process's memory: a generated secret is made again at
 //	            every start
-//	file:<dir>  an encrypted file store; its key is KIT_SECRETS_KEY — 32
-//	            bytes in base64 — or the file KIT_SECRETS_KEY_FILE names,
+//	file:<dir>  an encrypted file store; its key is <PRODUCT>_SECRETS_KEY — 32
+//	            bytes in base64 — or the file <PRODUCT>_SECRETS_KEY_FILE names,
 //	            and in dev the key beside the data
 
-// The kinds of store KIT_SECRETS chooses.
+// The kinds of store <PRODUCT>_SECRETS chooses.
 const (
 	secretsEnv    = "env"
 	secretsMemory = "memory"
@@ -50,7 +50,7 @@ const (
 // they go with, and in no working tree a test or a product runs from.
 const besideData = ".secrets"
 
-// secretsConfig is KIT_SECRETS, resolved.
+// secretsConfig is <PRODUCT>_SECRETS, resolved.
 type secretsConfig struct {
 	// kind is one of the secrets constants.
 	kind string
@@ -59,7 +59,7 @@ type secretsConfig struct {
 	dir string
 	// from is where the choice came from: a model.Setting constant.
 	from string
-	// problem says what is wrong with KIT_SECRETS, or "".
+	// problem says what is wrong with <PRODUCT>_SECRETS, or "".
 	problem string
 	// store is the store the product's code gave.
 	store secret.Store
@@ -72,10 +72,11 @@ func SecretStore(store secret.Store) AppConfigurer {
 	return appOption(func(o *appOptions) { o.secrets = store })
 }
 
-// resolveSecrets reads KIT_SECRETS. An app kept in memory — a test — keeps
-// its secrets in memory too, whatever the shell exports.
-func resolveSecrets(o *appOptions, getenv func(string) string) secretsConfig {
-	raw := strings.TrimSpace(getenv("KIT_SECRETS"))
+// resolveSecrets reads <PRODUCT>_SECRETS, own reading the framework's own
+// variables by their stem. An app kept in memory — a test — keeps its
+// secrets in memory too, whatever the shell exports.
+func resolveSecrets(o *appOptions, own func(string) string) secretsConfig {
+	raw := strings.TrimSpace(own(varSecrets))
 	dir, isFile := strings.CutPrefix(raw, "file:")
 	switch {
 	case o.secrets != nil:
@@ -89,10 +90,10 @@ func resolveSecrets(o *appOptions, getenv func(string) string) secretsConfig {
 	case isFile && strings.TrimSpace(dir) != "":
 		return secretsConfig{kind: secretsFile, dir: strings.TrimSpace(dir), from: model.SettingEnv}
 	}
-	return secretsConfig{kind: secretsEnv, from: model.SettingEnv, problem: "KIT_SECRETS must be env, memory or file:<dir>"}
+	return secretsConfig{kind: secretsEnv, from: model.SettingEnv, problem: "<PRODUCT>_SECRETS must be env, memory or file:<dir>"}
 }
 
-// describe is KIT_SECRETS as the Studio shows it.
+// describe is <PRODUCT>_SECRETS as the Studio shows it.
 func (c *secretsConfig) describe(dataDir string) string {
 	switch {
 	case c.kind == secretsFile && c.dir == "" && dataDir == "":
@@ -108,8 +109,12 @@ func (c *secretsConfig) describe(dataDir string) string {
 // secretStores is where a running app finds its secrets.
 type secretStores struct {
 	// env reads the product's variables, <APP>_<NAME>; nil when the app's
-	// name makes no prefix. kitEnv reads kit's, KIT_<NAME>.
+	// name makes no prefix. kitEnv reads the framework's own under the same
+	// prefix (ADR 0180 §3) — <APP>_DATA_KEY, <APP>_SMTP_URL —, and finds
+	// nothing when the name makes none.
 	env, kitEnv secret.Store
+	// prefix is the product's variables' prefix, which its sentences name.
+	prefix string
 	// kept is the store the environment keeps, nil when it keeps none; from
 	// is one of the model.SecretFrom constants for it.
 	kept secret.Store
@@ -142,13 +147,15 @@ var errNoFileStore = explain(CodeSecretStore, "SECRETS_PLATFORM", "this platform
 // envStores reads the environment only: what describing an app that does
 // not run, or runs without a secret to find, may read.
 func envStores(app string) *secretStores {
-	st := &secretStores{}
+	st := &secretStores{prefix: appPrefix(app)}
 	if env, err := secret.NewEnv(secret.EnvConfig{Prefix: appPrefix(app)}); err == nil {
 		st.env = env
 	}
-	// A constant prefix the environment store accepts.
-	if env, err := secret.NewEnv(secret.EnvConfig{Prefix: "KIT"}); err == nil {
-		st.kitEnv = env
+	// The framework's own, under the product's prefix: a store that finds
+	// nothing when the name makes no prefix, so that no bare name is read.
+	st.kitEnv = st.env
+	if st.kitEnv == nil {
+		st.kitEnv = secret.NewMemory(secret.MemoryConfig{})
 	}
 	return st
 }
@@ -223,7 +230,7 @@ func (a *App) openFileStore(ctx context.Context, cfg *secretsConfig, st *secretS
 		// The data is in memory: so are the secrets that go with it.
 		inMemory()
 		if a.cfg.env != EnvDev && a.generatesSecrets() {
-			st.warnings = append(st.warnings, say("secrets.memory"))
+			st.warnings = append(st.warnings, say("secrets.memory", "prefix", appPrefix(a.name)))
 		}
 		return nil
 	}
@@ -240,7 +247,7 @@ func (a *App) openFileStore(ctx context.Context, cfg *secretsConfig, st *secretS
 	}
 	st.kept, st.from = kept, model.SecretFromFile
 	if besideKey && a.cfg.env != EnvDev {
-		st.warnings = append(st.warnings, say("secrets.key-beside"))
+		st.warnings = append(st.warnings, say("secrets.key-beside", "prefix", appPrefix(a.name)))
 	}
 	return nil
 }
@@ -272,10 +279,10 @@ func (a *App) openFileSecrets(ctx context.Context, cfg *secretsConfig, kitEnv se
 	return store, besideKey, nil
 }
 
-// secretsKey is the file store's key: KIT_SECRETS_KEY, or the file
-// KIT_SECRETS_KEY_FILE names — 32 bytes in base64 — and otherwise the key
+// secretsKey is the file store's key: <PRODUCT>_SECRETS_KEY, or the file
+// <PRODUCT>_SECRETS_KEY_FILE names — 32 bytes in base64 — and otherwise the key
 // file beside the store that follows the data, <data>/.secrets/key, made on
-// first use; dev's for a store KIT_SECRETS names. besideKey reports the key
+// first use; dev's for a store <PRODUCT>_SECRETS names. besideKey reports the key
 // file.
 func (a *App) secretsKey(ctx context.Context, cfg *secretsConfig, kitEnv secret.Store) (key crypto.Key, besideKey bool, err error) {
 	v, err := kitEnv.Get(ctx, "secrets-key")
@@ -284,15 +291,15 @@ func (a *App) secretsKey(ctx context.Context, cfg *secretsConfig, kitEnv secret.
 		key, err := keyFromText(v.Value.Reveal())
 		return key, false, err
 	case errors.Is(err, secret.EnvRefused):
-		return crypto.Key{}, false, explain(CodeSecretStore, "SECRETS_KEY", "set KIT_SECRETS_KEY or KIT_SECRETS_KEY_FILE, not both", err)
+		return crypto.Key{}, false, explain(CodeSecretStore, "SECRETS_KEY", "set <PRODUCT>_SECRETS_KEY or <PRODUCT>_SECRETS_KEY_FILE, not both", err, errs.String("variable", a.variable(varSecretsKey)))
 	case !errors.Is(err, secret.NotFound):
-		return crypto.Key{}, false, explain(CodeSecretStore, "SECRETS_KEY", "KIT_SECRETS_KEY_FILE names a file that cannot be read", err)
+		return crypto.Key{}, false, explain(CodeSecretStore, "SECRETS_KEY", "<PRODUCT>_SECRETS_KEY_FILE names a file that cannot be read", err, errs.String("variable", a.variable(varSecretsKey)))
 	case a.dataDir != "" && (cfg.dir == "" || a.cfg.env == EnvDev):
 		key, err := keyBeside(filepath.Join(a.dataDir, besideData))
 		return key, err == nil, err
 	default:
 		return crypto.Key{}, false, failure(CodeSecretStore, "SECRETS_KEY",
-			"KIT_SECRETS=file:<dir> needs KIT_SECRETS_KEY or KIT_SECRETS_KEY_FILE: 32 bytes in base64, openssl rand -base64 32", nil)
+			"a file store needs <PRODUCT>_SECRETS_KEY or <PRODUCT>_SECRETS_KEY_FILE: 32 bytes in base64, openssl rand -base64 32", nil, errs.String("variable", a.variable(varSecretsKey)))
 	}
 }
 
@@ -304,7 +311,7 @@ func keyFromText(text []byte) (crypto.Key, error) {
 	n, decodeErr := base64.StdEncoding.Decode(raw, trimSpace(text))
 	key, keyErr := crypto.NewKey(raw[:n])
 	if decodeErr != nil || keyErr != nil {
-		return crypto.Key{}, failure(CodeSecretStore, "SECRETS_KEY", "KIT_SECRETS_KEY must be 32 bytes in base64, as openssl rand -base64 32 writes them", nil)
+		return crypto.Key{}, failure(CodeSecretStore, "SECRETS_KEY", "<PRODUCT>_SECRETS_KEY must be 32 bytes in base64, as openssl rand -base64 32 writes them", nil)
 	}
 	return key, nil
 }
@@ -368,7 +375,7 @@ func (st *secretStores) resolve(ctx context.Context, a *App, s *Secret) (*secret
 	case s.opts.generated && st.kept != nil:
 		return &secretRun{app: a, store: st.kept, name: s.keptName(), from: st.from}, nil
 	case s.opts.generated:
-		return nil, failure(CodeSecretStore, "SECRET_NOT_KEPT", "a generated secret needs a store the framework can write: KIT_SECRETS=file:<dir> or memory, or its variable to pin it", nil,
+		return nil, failure(CodeSecretStore, "SECRET_NOT_KEPT", "a generated secret needs a writable store: <PRODUCT>_SECRETS=file:<dir> or memory, or its variable to pin it", nil,
 			errs.String("secret", s.id), errs.String("variable", variable))
 	}
 	return nil, failure(CodeSecretMissing, "SECRET_MISSING", "a provided secret is not set", nil, errs.String("secret", s.id), errs.String("variable", variable))
@@ -462,7 +469,7 @@ func (st *secretStores) find(ctx context.Context, env secret.Store, name, keptNa
 }
 
 // kitSecret returns one of kit's own secrets — the mail connector's SMTP URL
-// — as it is now: KIT_<NAME> first, then kit-<name> in the kept store. It
+// — as it is now: <APP>_<NAME> first, then kit-<name> in the kept store. It
 // reports secret.NotFound when neither holds it.
 func (a *App) kitSecret(ctx context.Context, name string) (secret.Versioned, string, error) {
 	st := a.secretsNow()

@@ -158,7 +158,7 @@ func KeepVersions(n int) SecretConfigurer {
 // With [Generated], the framework makes it: version 1 on the first start, a new version
 // on its schedule, the previous ones kept so that what they sealed or signed
 // still opens and verifies. It lives in the store the environment keeps — an
-// encrypted file store in dev, KIT_SECRETS elsewhere. Its variable pins it:
+// encrypted file store in dev, <PRODUCT>_SECRETS elsewhere. Its variable pins it:
 // the framework then uses the value as it is and does not rotate it.
 //
 // name is 1 to 63 lower-case letters, digits and dashes, starting and ending
@@ -340,7 +340,7 @@ func (s *Secret) key() string { return qualifiedKey(s.svc, s.name) }
 func (s *Secret) stored() string { return flatKey(s.key()) }
 
 // kitOwn reports whether the secret is kit's own — data-key, on kit's own
-// service —: read from KIT_<NAME>, kept as kit-<name>, like the mail
+// service —: read from <APP>_<NAME>, kept as kit-<name>, like the mail
 // connector's smtp-url.
 func (s *Secret) kitOwn() bool { return kitOwn(s.svc) }
 
@@ -362,10 +362,10 @@ func (s *Secret) keptName() string {
 }
 
 // variable is the variable that provides it, or pins it: <APP>_<NAME>, or
-// KIT_<NAME> for kit's own.
+// <APP>_<NAME> too for the framework's own (ADR 0180 §3).
 func (s *Secret) variable(a *App) string {
 	if s.kitOwn() {
-		return secretVariable("KIT", s.name)
+		return secretVariable(appPrefix(a.name), s.name)
 	}
 	return variableOf(appPrefix(a.name), s.key())
 }
@@ -702,7 +702,7 @@ func (st *secretStores) missing(s *Secret, variable string, err error) phrase {
 	case !errors.Is(err, secret.NotFound):
 		return say("secret.unreadable", "secret", s.id, "detail", errs.PublicOf(err))
 	case s.opts.generated:
-		return say("secret.generated-env", "secret", s.id, "variable", variable)
+		return say("secret.generated-env", "secret", s.id, "variable", variable, "prefix", st.prefix)
 	case st.from == model.SecretFromFile:
 		return say("secret.unset-store", "secret", s.id, "variable", variable, "name", s.key())
 	default:

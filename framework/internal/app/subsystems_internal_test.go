@@ -168,8 +168,8 @@ func TestARefusalThatMissesNoSubsystemCarriesNoCode(t *testing.T) {
 // doubleSubject is a message whose type declares two subjects: what the
 // classification refuses, whatever the program keeps.
 type doubleSubject struct {
-	A string `json:"a" kit:"subject"`
-	B string `json:"b" kit:"subject"`
+	A string `json:"a" app:"subject"`
+	B string `json:"b" app:"subject"`
 }
 
 // The classification of a type a topic carries is judged with or without the
@@ -204,7 +204,7 @@ func TestTheClassificationIsJudgedWithOrWithoutTheStores(t *testing.T) {
 
 // sealedProbe is the message of a topic whose values are sealed at rest.
 type sealedProbe struct {
-	Token string `json:"token" kit:"secret"`
+	Token string `json:"token" app:"secret"`
 }
 
 // A topic whose messages are sealed on disk needs the store subsystem — the

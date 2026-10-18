@@ -18,7 +18,7 @@ import (
 // product's source or live traffic through DNS rebinding. None of them acts
 // on the product (D13): no mock, no fault, no run, no fire, no dispatch, no
 // ask, no wake, no CPU capture. kit's core mounts them only in dev, once the
-// app serves, and reserves /_kit/ itself otherwise.
+// app serves, and reserves /_app/ itself otherwise.
 
 // studioCSP is the content security policy of the Studio. It shares the
 // product's origin and shows attacker-controllable data — titles, errors,
@@ -44,21 +44,21 @@ func mount(mux *http.ServeMux, host plug.StudioHost) {
 	api := func(pattern string, h http.HandlerFunc) {
 		mux.Handle(pattern, s.guard(h))
 	}
-	api("GET /_kit/api/graph", func(w http.ResponseWriter, r *http.Request) {
+	api("GET /_app/api/graph", func(w http.ResponseWriter, r *http.Request) {
 		answer(s, w, r, s.host.Graph(), nil)
 	})
-	api("GET /_kit/api/events", serveEvents(host))
-	api("GET /_kit/api/traces", func(w http.ResponseWriter, r *http.Request) {
+	api("GET /_app/api/events", serveEvents(host))
+	api("GET /_app/api/traces", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		answer(s, w, r, s.host.Traces(tracesShown, q.Get("root"), q.Get("node")), nil)
 	})
-	api("GET /_kit/api/traces/{id}", s.serveTrace)
-	api("GET /_kit/api/source", s.serveSource)
-	api("GET /_kit/api/instances", s.serveInstances)
-	api("GET /_kit/api/items", s.serveItems)
+	api("GET /_app/api/traces/{id}", s.serveTrace)
+	api("GET /_app/api/source", s.serveSource)
+	api("GET /_app/api/instances", s.serveInstances)
+	api("GET /_app/api/items", s.serveItems)
 	s.mountDevTools(api)
-	s.mountNotFound(api, "/_kit/api/", "no such Studio API")
-	s.mountNotFound(api, "/_kit/", "the Studio is the kit tool's, not the product's: run kit dev")
+	s.mountNotFound(api, "/_app/api/", "no such Studio API")
+	s.mountNotFound(api, "/_app/", "the Studio is the kit tool's, not the product's: run kit dev")
 }
 
 // mountNotFound answers every method but HEAD under prefix with a not found
@@ -71,7 +71,7 @@ func (s studio) mountNotFound(api func(pattern string, h http.HandlerFunc), pref
 	}
 }
 
-// serveTrace answers GET /_kit/api/traces/{id}: one trace, while the app
+// serveTrace answers GET /_app/api/traces/{id}: one trace, while the app
 // keeps it.
 func (s studio) serveTrace(w http.ResponseWriter, r *http.Request) {
 	t, ok := s.host.Trace(r.PathValue("id"))
@@ -82,7 +82,7 @@ func (s studio) serveTrace(w http.ResponseWriter, r *http.Request) {
 	answer(s, w, r, t, nil)
 }
 
-// serveInstances answers GET /_kit/api/instances?workflow=: a workflow's
+// serveInstances answers GET /_app/api/instances?workflow=: a workflow's
 // entities and where each is.
 func (s studio) serveInstances(w http.ResponseWriter, r *http.Request) {
 	list, ok := s.host.Instances(r.URL.Query().Get("workflow"))
@@ -93,7 +93,7 @@ func (s studio) serveInstances(w http.ResponseWriter, r *http.Request) {
 	answer(s, w, r, list, nil)
 }
 
-// serveItems answers GET /_kit/api/items?store=: a store's latest entities,
+// serveItems answers GET /_app/api/items?store=: a store's latest entities,
 // through the same redaction as payloads: a store of accounts holds password
 // hashes and token digests, and personal data (ADR 0006), which the Studio
 // has no reason to show.
@@ -122,7 +122,7 @@ func (s studio) guard(h http.Handler) http.Handler {
 		}
 		host = strings.ToLower(strings.Trim(host, "[]"))
 		if !s.host.AllowedHost(host) {
-			s.host.Forbid(w, "this host may not reach the Studio; add it to KIT_ALLOWED_HOSTS")
+			s.host.Forbid(w, "this host may not reach the Studio; add it to <PRODUCT>_ALLOWED_HOSTS")
 			return
 		}
 		w.Header().Set("Content-Security-Policy", studioCSP)

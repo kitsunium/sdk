@@ -38,7 +38,7 @@ const (
 // a loop of the daemon, "<store> retention", which sleeps until the next
 // record is due — an agenda kept from the store's writes, never a poll —
 // erases and deletes what is due, and folds the store so that what it
-// overwrote leaves its files. KIT_RETENTION sets what it does: on, dry-run
+// overwrote leaves its files. <PRODUCT>_RETENTION sets what it does: on, dry-run
 // (it journals what it would do and changes nothing) or off. A store whose
 // product keeps its retention itself says so (RetentionByProduct): kit runs
 // none there, and asks for none.
@@ -432,10 +432,11 @@ func (p *storePrivacy) hasRetention() bool {
 	return p != nil && (p.erase != nil || p.delete != nil)
 }
 
-// resolveRetention reads KIT_RETENTION. A value it does not know is a
-// problem the start reports, and the retention stays off meanwhile.
-func resolveRetention(getenv func(string) string) (mode string, problem bool) {
-	switch v := strings.ToLower(strings.TrimSpace(getenv(model.VarRetention))); v {
+// resolveRetention reads the variable named — <PRODUCT>_RETENTION. A value
+// it does not know is a problem the start reports, and the retention stays
+// off meanwhile.
+func resolveRetention(variable string, getenv func(string) string) (mode string, problem bool) {
+	switch v := strings.ToLower(strings.TrimSpace(getenv(variable))); v {
 	case "", model.RetentionOn:
 		return model.RetentionOn, false
 	case model.RetentionDryRun, model.RetentionOff:
@@ -444,16 +445,16 @@ func resolveRetention(getenv func(string) string) (mode string, problem bool) {
 	return model.RetentionOff, true
 }
 
-// retentionMode is the app's KIT_RETENTION, read at its start.
+// retentionMode is the app's <PRODUCT>_RETENTION, read at its start.
 func (a *App) retentionMode() string {
-	mode, _ := resolveRetention(os.Getenv)
+	mode, _ := resolveRetention(a.variable(varRetention), os.Getenv)
 	return mode
 }
 
-// retentionSetting is KIT_RETENTION as the configuration shows it.
+// retentionSetting is <PRODUCT>_RETENTION as the configuration shows it.
 func (a *App) retentionSetting() model.Setting {
-	s := model.Setting{Name: model.VarRetention, Value: a.retentionMode(), From: model.SettingDefault}
-	if os.Getenv(model.VarRetention) != "" {
+	s := model.Setting{Name: a.variable(varRetention), Value: a.retentionMode(), From: model.SettingDefault}
+	if os.Getenv(a.variable(varRetention)) != "" {
 		s.From = model.SettingEnv
 	}
 	return s
