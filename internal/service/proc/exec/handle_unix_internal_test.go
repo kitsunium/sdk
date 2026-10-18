@@ -22,12 +22,23 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// startChild spawns a shell running program and returns its handle.
+// startChild spawns a shell running program and returns its handle once the
+// shell runs its own code, past every execve the leader will make.
+//
+// Spawn returns when the child's close-on-exec pipe closes, which is inside
+// execve, not after it, and NetBSD up to 10.1 discards a signal posted while
+// the process is still in execve (PR kern/58091, fixed in 10.2 and 11.0): a
+// SIGKILL sent at once was lost, and the shell lived its 30 seconds. So the
+// shell writes a marker before program, which only code running after its
+// execve can do, and startChild waits for it. The trailing ":" keeps the
+// shell from exec'ing program's last command in place — a second execve of
+// the same pid, after the marker, would reopen the window.
 func startChild(t *testing.T, setpgid bool, program string) *handle {
 	t.Helper()
+	ready := filepath.Join(t.TempDir(), "started")
 	spec := coreproc.Spec{
 		Path:    shellPath,
-		Args:    []string{"sh", "-c", program},
+		Args:    []string{"sh", "-c", ": > '" + ready + "'; " + program + "\n:"},
 		Setpgid: setpgid,
 	}
 	sio, err := buildStdio(spec)
@@ -52,7 +63,24 @@ func startChild(t *testing.T, setpgid bool, program string) *handle {
 		}
 		sio.closeAll()
 	})
+	awaitMarker(t, ready, "the shell never ran past its execve")
 	return h
+}
+
+// awaitMarker waits for the file a child creates at path, failing with why
+// after ten seconds: a child that never gets there is a broken fixture.
+func awaitMarker(t *testing.T, path, why string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(why)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 // Test_newHandle pins the pgid decision made at construction. Without Setpgid
@@ -658,20 +686,11 @@ func startTermIgnoringChild(t *testing.T) *handle {
 	t.Helper()
 	ready := filepath.Join(t.TempDir(), "ready")
 	h := startChild(t, true, "trap '' TERM; : > '"+ready+"'; sleep 30")
-	deadline := time.Now().Add(10 * time.Second)
-	//: the shell creates the file only after its trap is in place.
-	for {
-		//: the trap is installed: SIGTERM is now ignored by the shell and by
-		//: the sleep it forks, which inherits the disposition.
-		if _, err := os.Stat(ready); err == nil {
-			return h
-		}
-		//: a child that never gets there is a broken fixture, not a pass.
-		if time.Now().After(deadline) {
-			t.Fatal("the child never reported its SIGTERM trap installed")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	//: the shell creates the file only after its trap is in place: SIGTERM
+	//: is then ignored by the shell and by the sleep it forks, which
+	//: inherits the disposition.
+	awaitMarker(t, ready, "the child never reported its SIGTERM trap installed")
+	return h
 }
 
 // Test_handle_graceOnInjectedClock pins that Stop's grace window is measured on
