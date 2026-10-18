@@ -122,9 +122,11 @@ type kitTransaction struct{}
 // writer turn.
 func (kitTransaction) Local(ctx context.Context) bool { return inLocal(ctx) }
 
-// Undo keeps restore, which a rollback of the transaction ctx carries runs.
+// Undo keeps restore, which a rollback of the transaction ctx carries runs,
+// with the entity the funnel named (undoKeyed).
 func (kitTransaction) Undo(ctx context.Context, store string, restore func(ctx context.Context) error) {
-	recordUndo(ctx, undoStep{store: store, restore: restore})
+	key, _ := ctx.Value(undoKeyOf{}).(string)
+	recordUndo(ctx, undoStep{store: store, key: key, restore: restore})
 }
 
 // AtCommit holds fn until the transaction ctx carries commits: an effect

@@ -39,9 +39,13 @@ func (p workflowPort[E, S]) Key(d plug.WorkflowEntityValue) string {
 	return p.w.store.key(as[E](d.Value))
 }
 
-// Get reads the entity key; false when the store holds none.
+// Get reads the entity key; false when the store holds none. A read outside
+// any transaction — the engine's loop checking a guard — is remembered for
+// the replacement that may follow it (Replace); one that finds nothing, or
+// fails, is not, since no replacement follows it.
 func (p workflowPort[E, S]) Get(ctx context.Context, key string) (plug.WorkflowEntityValue, bool, error) {
 	s := p.w.store
+	p.w.reads.remember(ctx, &s.storeCore, key)
 	var e E
 	var err error
 	if trace.SpanContextFromContext(ctx).IsValid() {
@@ -50,6 +54,9 @@ func (p workflowPort[E, S]) Get(ctx context.Context, key string) (plug.WorkflowE
 		e = as[E](v)
 	} else {
 		e, err = s.read(ctx, key)
+	}
+	if err != nil {
+		p.w.reads.take(key)
 	}
 	if ke, ok := errors.AsType[*Error](err); ok && ke.Code == WireNotFound {
 		return p.w.entityValue(e), false, nil
@@ -62,9 +69,15 @@ func (p workflowPort[E, S]) Insert(ctx context.Context, d plug.WorkflowEntityVal
 	return p.w.store.transitionWrite(ctx, p.w.entityOf(d), plug.WriteInsert, "")
 }
 
-// Replace writes d over an entity of its key; false when there was none.
+// Replace writes d over an entity of its key; false when there was none. A
+// transition decided on a read a rollback has since undone is refused, and
+// the engine's loop tries it again on what the store holds (loopReads).
 func (p workflowPort[E, S]) Replace(ctx context.Context, d plug.WorkflowEntityValue) (bool, error) {
-	return p.w.store.transitionWrite(ctx, p.w.entityOf(d), plug.WriteReplace, p.state)
+	v := p.w.entityOf(d)
+	if err := p.w.reads.check(ctx, &p.w.store.storeCore, p.w.store.keyOf(v)); err != nil {
+		return false, err
+	}
+	return p.w.store.transitionWrite(ctx, v, plug.WriteReplace, p.state)
 }
 
 // All yields every entity of the store.
@@ -117,8 +130,8 @@ func (s *storeCore) transitionWrite(ctx context.Context, v any, mode plug.WriteM
 		sp.end(err)
 		return false, err
 	}
-	ctx = s.outside(ctx)
 	key := s.keyOf(v)
+	ctx = undoKeyed(s.outside(ctx), key)
 	raw := s.writeTransition(ctx, eng, v, mode, state)
 	if err = s.said(raw, key, ""); err == nil {
 		s.notify(ctx, key, false)

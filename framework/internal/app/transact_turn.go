@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,6 +24,18 @@ import (
 // turnWait bounds how long a write waits for the writer turn, on the wall
 // clock: a test's manual clock would hold it forever.
 const turnWait time.Duration = 10 * time.Second
+
+const (
+	// undoneSlots is how many slots undoneCounts spreads a store's entities
+	// over: a write back counts in its entity's slot, so a read of another
+	// entity is told of it only when the two keys share one.
+	undoneSlots int = 64
+	// fnvOffset is 32-bit FNV-1a's offset basis, which slotOf hashes a key
+	// from.
+	fnvOffset uint32 = 2166136261
+	// fnvPrime is 32-bit FNV-1a's prime.
+	fnvPrime uint32 = 16777619
+)
 
 // writerTurn is the data's writer turn in one app: held by one transaction
 // alone, or shared by the writes of none.
@@ -159,6 +172,110 @@ func (t *writerTurn) wake() {
 // writes it makes on the way — its history, its journal — do not take it
 // again, which would wait behind a transaction waiting for this very write.
 type sharesTurn struct{}
+
+// undoneSlot is one count of undoneCounts: a store, and the slot of an
+// entity's key, 0 for a write back whose entity the funnel did not name.
+type undoneSlot struct {
+	store string
+	slot  int
+}
+
+// slotOf is the slot of key: FNV-1a over its bytes, never 0, which counts
+// for every entity.
+func slotOf(key string) int {
+	h := fnvOffset
+	for i := range len(key) {
+		h ^= uint32(key[i])
+		h *= fnvPrime
+	}
+	return 1 + int(h%uint32(undoneSlots))
+}
+
+// slotFor is the slot a write back of key counts in: 0 when key is "".
+func slotFor(key string) int {
+	if key == "" {
+		return 0
+	}
+	return slotOf(key)
+}
+
+// undoneCounts counts, per store and slot of an entity's key, the writes the
+// data's rollbacks wrote back. A transaction's writes land before its
+// commit, so a read outside it may see one a rollback then undoes: a reader
+// that writes what it read compares the count of its entity across its read
+// and its write (workflow_reads.go). The slots bound what it keeps, whatever
+// the number of entities.
+type undoneCounts struct {
+	mu sync.Mutex
+	// byStore maps a store's id to its counts, made at its first write back.
+	byStore map[string]*[undoneSlots + 1]atomic.Uint64
+}
+
+// counts are the counts of the store id; nil before its first write back,
+// unless create makes them.
+func (u *undoneCounts) counts(store string, create bool) *[undoneSlots + 1]atomic.Uint64 {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	c := u.byStore[store]
+	if c == nil && create {
+		if u.byStore == nil {
+			u.byStore = map[string]*[undoneSlots + 1]atomic.Uint64{}
+		}
+		c = new([undoneSlots + 1]atomic.Uint64)
+		u.byStore[store] = c
+	}
+	return c
+}
+
+// seen is the count a read of key in store compares: the writes back of its
+// slot, and those whose entity was not named.
+func (u *undoneCounts) seen(store, key string) uint64 {
+	c := u.counts(store, false)
+	if c == nil {
+		return 0
+	}
+	return c[0].Load() + c[slotOf(key)].Load()
+}
+
+// counted records that the transaction's rollback wrote a write of key in
+// store back: in a's counts, after the write back, so that a read that saw
+// the count first may have seen the write, and one that saw it after did
+// not; and in the transaction's own.
+func (t *txn) counted(a *App, store, key string) {
+	if a == nil {
+		return
+	}
+	slot := slotFor(key)
+	a.undone.counts(store, true)[slot].Add(1)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.undid == nil {
+		t.undid = map[undoneSlot]uint64{}
+	}
+	t.undid[undoneSlot{store: store, slot: slot}]++
+}
+
+// undidOf is how many of the writes back a read of key in store compares the
+// transaction's own rollbacks made.
+func (t *txn) undidOf(store, key string) uint64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.undid[undoneSlot{store: store}] + t.undid[undoneSlot{store: store, slot: slotOf(key)}]
+}
+
+// undoKeyOf carries, to the engine's call of plug.Transaction.Undo, the
+// entity a funnel writes.
+type undoKeyOf struct{}
+
+// undoKeyed is ctx for a funnel's write of key: in a local transaction,
+// marked with the key, which the write's undo step keeps (kitTransaction);
+// unchanged elsewhere, where nothing is undone.
+func undoKeyed(ctx context.Context, key string) context.Context {
+	if !inLocal(ctx) {
+		return ctx
+	}
+	return context.WithValue(ctx, undoKeyOf{}, key)
+}
 
 // writeTurn is what a local write of the store needs before it runs: in a
 // transaction, the turn for the transaction — at its first write there —;
