@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	osexec "os/exec"
 	"runtime"
 	"syscall"
 	"testing"
@@ -25,39 +26,58 @@ const absentPID int = 0x7fff_fffe
 // reported. Lowering niceness needs privilege, so a silent drop here would mean
 // a service that asked to be deprioritised quietly running at normal priority —
 // invisible until it starves something.
+//
+// Every niceness is applied to a disposable child (niceChild), never to the
+// test process: an unprivileged process cannot lower its niceness back, and a
+// target computed from the niceness read earlier became a refused LOWERING
+// once Test_applyPostStart, or the previous run of `go test -count=N`, had
+// raised it further — on Linux, where niceness is per thread, the read and the
+// write did not even reach the same thread.
 func Test_applyNice(t *testing.T) {
 	t.Parallel()
-	//: relative to the niceness the test process inherited: a runner that
-	//: starts it at nice 15 (a capped CI slice) cannot go back to 5.
-	raise := raisedNice(t, 5)
 	lower := -20
 
 	type tc struct {
-		name    string
-		pid     int
-		nice    *int
+		name string
+		// pid is the target; zero means a fresh disposable child.
+		pid int
+		// delta is the niceness asked for, relative to the child's own; nil
+		// asks for none.
+		delta   *int
 		wantErr bool
 	}
+	five := 5
 	tests := []tc{
-		{name: "a nil Nice touches nothing", pid: os.Getpid()},
-		{
-			//: raising niceness needs no privilege, so this must succeed on
-			//: any host.
-			name: "raising our own niceness",
-			pid:  os.Getpid(),
-			nice: &raise,
-		},
-		{
-			//: a pid that cannot exist fails whatever the privileges.
-			name:    "a process that does not exist",
-			pid:     absentPID,
-			nice:    &raise,
-			wantErr: true,
-		},
+		{name: "a nil Nice touches nothing"},
+		//: raising niceness needs no privilege, so this must succeed on any
+		//: host.
+		{name: "raising a child's niceness", delta: &five},
+		//: a pid that cannot exist fails whatever the privileges.
+		{name: "a process that does not exist", pid: absentPID, delta: &five, wantErr: true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		err := applyNice(c.pid, c.nice)
+		pid := c.pid
+		if pid == 0 {
+			pid = niceChild(t)
+		}
+		var nice *int
+		var before int
+		if c.delta != nil {
+			//: relative to the niceness the child inherited: a runner that
+			//: starts at nice 15 (a capped CI slice) cannot go back to 5. An
+			//: absent pid has none, so it is asked the test process's.
+			base := pid
+			if c.wantErr {
+				base = os.Getpid()
+			}
+			raised := raisedNice(t, base, *c.delta)
+			nice = &raised
+		}
+		if !c.wantErr {
+			before = niceOf(t, pid)
+		}
+		err := applyNice(pid, nice)
 		if c.wantErr {
 			if !errs.HasCode(err, coreproc.CodeRlimitFailed) {
 				t.Fatalf("applyNice(%s) = %v, want RLIMIT_FAILED", c.name, err)
@@ -72,6 +92,15 @@ func Test_applyNice(t *testing.T) {
 		if err != nil {
 			t.Fatalf("applyNice(%s) = %v, want nil", c.name, err)
 		}
+		//: the niceness the child now has is the one asked for, or the one it
+		//: had when nothing was asked.
+		want := before
+		if nice != nil {
+			want = *nice
+		}
+		if got := niceOf(t, pid); got != want {
+			t.Errorf("the child's niceness = %d, want %d", got, want)
+		}
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -82,29 +111,65 @@ func Test_applyNice(t *testing.T) {
 	//: lowering niceness from an unprivileged process is refused by the kernel,
 	//: and that refusal must be reported rather than swallowed. Where the test
 	//: DOES have the privilege the call succeeds, which is equally correct — so
-	//: the assertion is that the outcome is never a silent partial.
-	err := applyNice(os.Getpid(), &lower)
+	//: the assertion is that the outcome is never a silent partial. On a child:
+	//: a privileged run must not leave the test process at -20 either.
+	err := applyNice(niceChild(t), &lower)
 	if err != nil && !errs.HasCode(err, coreproc.CodeRlimitFailed) {
 		t.Errorf("applyNice(lower) = %v, want nil or RLIMIT_FAILED", err)
 	}
 }
 
-// raisedNice is the calling process's current niceness raised by delta,
-// capped at the kernel's 19: a value applyNice may set without privilege
-// whatever niceness the test inherited.
-func raisedNice(t *testing.T, delta int) int {
+// niceChild starts a disposable child for a test to reprioritise in place of
+// the test process, and returns its pid. The child is a shell blocked reading
+// a pipe the test holds; the cleanup closes the pipe, the shell reads EOF and
+// exits on its own, and the cleanup reaps it — no signal, so nothing depends
+// on a signal NetBSD up to 10.1 discards during execve (PR kern/58091).
+func niceChild(t *testing.T) int {
 	t.Helper()
-	prio, err := syscall.Getpriority(prioProcess, 0)
+	cmd := osexec.Command(shellPath, "-c", "read x")
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		t.Fatalf("getpriority: %v", err)
+		t.Fatalf("stdin pipe: %v", err)
 	}
-	current := prio
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting the disposable child: %v", err)
+	}
+	t.Cleanup(func() {
+		if cerr := stdin.Close(); cerr != nil {
+			t.Logf("closing the child's stdin: %v", cerr)
+		}
+		//: read fails at EOF, so the shell exits 1: only the reap matters.
+		if werr := cmd.Wait(); werr != nil {
+			var exitErr *osexec.ExitError
+			if !errors.As(werr, &exitErr) {
+				t.Errorf("reaping the disposable child: %v", werr)
+			}
+		}
+	})
+	return cmd.Process.Pid
+}
+
+// niceOf is pid's current niceness, read with getpriority(2).
+func niceOf(t *testing.T, pid int) int {
+	t.Helper()
+	prio, err := syscall.Getpriority(prioProcess, pid)
+	if err != nil {
+		t.Fatalf("getpriority(%d): %v", pid, err)
+	}
 	//: Linux's raw getpriority(2) answers 20 - nice so the value is never
 	//: negative; the BSDs and macOS answer the niceness itself.
 	if runtime.GOOS == "linux" {
-		current = 20 - prio
+		return 20 - prio
 	}
-	return min(current+delta, 19)
+	return prio
+}
+
+// raisedNice is pid's current niceness raised by delta, capped at the
+// kernel's 19: a value applyNice may set on pid without privilege whatever
+// niceness it inherited.
+func raisedNice(t *testing.T, pid, delta int) int {
+	t.Helper()
+	return min(niceOf(t, pid)+delta, 19)
 }
 
 // Test_applyOOMScoreAdj pins the same contract on the procfs write. A nil

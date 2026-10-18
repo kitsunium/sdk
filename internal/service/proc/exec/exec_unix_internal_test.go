@@ -416,26 +416,43 @@ func Test_spawnFiles(t *testing.T) {
 // the state the caller least expects.
 func Test_applyPostStart(t *testing.T) {
 	t.Parallel()
-	//: relative to the inherited niceness (raisedNice): a runner at nice 15
-	//: cannot be asked for 5.
-	nice := raisedNice(t, 5)
 	badOOM := 5000
 
 	type tc struct {
-		name    string
-		pid     int
-		spec    coreproc.Spec
+		name string
+		// pid is the target; zero means a fresh disposable child (niceChild),
+		// so no niceness is ever applied to the test process.
+		pid int
+		// nice asks for a niceness raised by 5 over the target's own.
+		nice    bool
+		oom     *int
 		wantErr bool
 	}
 	tests := []tc{
-		{name: "nothing requested", pid: os.Getpid()},
-		{name: "a niceness alone", pid: os.Getpid(), spec: coreproc.Spec{Nice: &nice}},
-		{name: "a process that does not exist", pid: absentPID, spec: coreproc.Spec{Nice: &nice}, wantErr: true},
-		{name: "an out-of-range OOM bias", pid: os.Getpid(), spec: coreproc.Spec{OOMScoreAdj: &badOOM}, wantErr: true},
+		{name: "nothing requested"},
+		{name: "a niceness alone", nice: true},
+		{name: "a process that does not exist", pid: absentPID, nice: true, wantErr: true},
+		{name: "an out-of-range OOM bias", oom: &badOOM, wantErr: true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		err := applyPostStart(c.pid, c.spec)
+		pid := c.pid
+		if pid == 0 {
+			pid = niceChild(t)
+		}
+		spec := coreproc.Spec{OOMScoreAdj: c.oom}
+		if c.nice {
+			//: relative to the target's niceness (raisedNice): a runner at
+			//: nice 15 cannot be asked for 5. An absent pid has none, so it
+			//: is asked the test process's.
+			base := pid
+			if c.wantErr {
+				base = os.Getpid()
+			}
+			nice := raisedNice(t, base, 5)
+			spec.Nice = &nice
+		}
+		err := applyPostStart(pid, spec)
 		if c.wantErr {
 			if !errs.HasCode(err, coreproc.CodeRlimitFailed) {
 				t.Fatalf("applyPostStart(%s) = %v, want RLIMIT_FAILED", c.name, err)

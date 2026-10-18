@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T00:00:00Z -->
+<!-- updated: 2026-10-18T00:00:00Z -->
 # internal/service/proc/exec
 
 The keystone spawn primitive of the process-supervision domain (ADR 0016).
@@ -263,6 +263,14 @@ shell therefore stays the leader, so a fixture without a private group runs
 `shellOnlyWait` — a read from a FIFO the test made, nothing beneath the
 shell — since its cleanup kills the leader's pid alone;
 `creds_unix_internal_test.go` pins `UnknownUser` / `UnknownGroup`.
+`Test_applyNice` and `Test_applyPostStart` apply every niceness to a
+disposable child (`niceChild`: a shell blocked on a pipe the test closes, so
+it exits without a signal) and read it back, never to the test process: an
+unprivileged process cannot lower its niceness again, and a target computed
+from the niceness read earlier became a lowering once the other test, or the
+previous run of `go test -count=N`, had raised it further (on Linux, where
+niceness is per thread, the read and the write did not even reach the same
+thread) — `RLIMIT_FAILED` from the second run on, on every OS.
 `exec_windows_test.go` covers the Windows backend (skipped where `cmd.exe` is
 not found) and `exec_other_test.go` the `UnsupportedPlatform` stub;
 `exec_windows_internal_test.go` pins the order of a confined spawn (below).
