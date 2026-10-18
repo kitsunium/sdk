@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-14T17:40:00Z -->
+<!-- updated: 2026-10-18T12:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -40,3 +40,14 @@ code: it raises the core's.
 - Publish a snapshot without `retain` after it: a cut and an install both
   keep the two newest (D7, R6-02). An install used to skip it and left three
   until the node's next cut (#304, `TestAnInstallKeepsTheTwoNewestSnapshots`).
+- Drop a snapshot trigger that falls while a cut is in flight: D7 coalesces
+  it (`snapState.pending`, `cutPending`), and the cut is made once the one in
+  flight is written. Dropped, a node that applied nothing more kept its tail
+  uncut and its log uncompacted (#375, `TestACoalescedCutIsMade`). A write
+  that fails clears the coalesced trigger with the in-flight flag
+  (`TestAFailedCutClearsTheCoalescedTrigger`).
+- Let a stopped node of a memory-network test hear what the cluster sent
+  while it was down: the network keeps those frames and delivers them at the
+  restart, which catches the node up by appends where the test meant an
+  install. Isolate it before it stops (#374,
+  `TestInstallResumesAfterACrashAtPublication`).

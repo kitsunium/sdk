@@ -1,0 +1,46 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "jobengine",
+    srcs = [
+        "clock.go",
+        "doc.go",
+        "jobengine.go",
+        "jobengine_compliance.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/internal/app/jobengine",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+    deps = [
+        "//framework/internal/app/plug",
+        "//pkg/v1/app/scheduler",
+        "//pkg/v1/clock",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":jobengine",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+)
+
+go_test(
+    name = "jobengine_test",
+    srcs = [
+        "api_gen_test.go",
+        "jobengine_internal_test.go",
+    ],
+    embed = [":jobengine"],
+    deps = [
+        "//framework/internal/app/plug",
+        "//pkg/v1/app/scheduler",
+        "//pkg/v1/clock",
+    ],
+)

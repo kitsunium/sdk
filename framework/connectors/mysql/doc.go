@@ -8,8 +8,8 @@
 //
 //	import "github.com/kitsunium/sdk/framework/connectors/mysql"
 //
-//	var App = kit.NewApp("vigie", intake.Service, desk.Service).With(
-//		kit.Database("database", mysql.Engine()),
+//	var App = app.NewApp("vigie", intake.Service, desk.Service).With(
+//		app.Database("database", mysql.Engine()),
 //	)
 //
 // The database's URL, in the variable <APP>_<NAME>_URL, is either a URL —

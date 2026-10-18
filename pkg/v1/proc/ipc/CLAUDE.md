@@ -27,7 +27,7 @@ returns the engine behind it. Every method the handle had is on the port —
 `Accept`, `Addr`, `Close`, `Path`, `Refused` — so a caller that only called
 them compiles unchanged; one that spelled the type `*ipc.Listener` writes
 `ipc.Listener` (a v0 shape change, ADR 0040). The framework's two holders
-(`framework/internal/kit`, `framework/telemetry`) moved in the same change.
+(`framework/internal/app`, `framework/telemetry`) moved in the same change.
 
 Both constructors return a NIL port with the refusal, never a nil engine
 wrapped in a non-nil interface — the trap `if ln != nil` would fall into.

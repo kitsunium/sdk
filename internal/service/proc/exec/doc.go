@@ -133,6 +133,11 @@
 // runnable by its extension, and variable names are case-insensitive ("Path"
 // is the usual spelling there).
 //
+// Package exec — the peak-RSS unit: peakKiB turns a raw ru_maxrss into the KiB
+// the port documents, passing a kilobyte figure through and converting darwin's
+// bytes rounding up. It is platform-neutral so its arithmetic is tested on every
+// GOOS.
+//
 // Package exec — peak-RSS read on a 32-bit GOARCH, where Rusage.Maxrss is int32
 // and is widened to the int64 the port expects (see maxrss_rss64_unix.go for the
 // 64-bit counterpart).
@@ -140,6 +145,14 @@
 // Package exec — peak-RSS read on a 64-bit GOARCH, where Rusage.Maxrss is
 // already int64 and needs no widening cast (see maxrss_rss32_unix.go for the
 // 32-bit counterpart).
+//
+// Package exec — darwin's ru_maxrss unit: its getrusage(2) and wait4(2) report
+// bytes, so 1024 of them make one KiB. The darwin constraint also holds for
+// GOOS=ios.
+//
+// Package exec — the ru_maxrss unit of every other Unix: Linux and the BSDs
+// report kilobytes, so the figure passes through; illumos and Solaris define it
+// in pages and leave it 0.
 //
 // Package exec — Unix procfs writer: a tiny os.WriteFile shim used to set
 // /proc/<pid>/oom_score_adj, isolated so the platform-specific path handling

@@ -7,7 +7,7 @@ A private socket between processes of one machine (ADR 0148): a listener only
 its own account — and the accounts it names — can reach, a client that refuses
 a socket another account planted, and the kernel's word on the peer where the
 kernel gives it. Public facade: `pkg/v1/proc/ipc`. Consumers: the framework's
-daemon profile and listeners (`framework/kit`), the telemetry exporter's
+daemon profile and listeners (`framework/app`), the telemetry exporter's
 socket, the statusline daemon.
 
 Stdlib only (`net`, `syscall` for `SO_PEERCRED` and `Stat_t`; on Windows

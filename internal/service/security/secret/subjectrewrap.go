@@ -20,6 +20,11 @@ type RewrapValue struct {
 	Current int
 	// Rewrapped counts the keys the pass moved to Root.
 	Rewrapped int
+	// FromFormer counts, among Rewrapped, the keys the pass moved from the
+	// root SubjectKeysConfig.Former names. A pass that returns no error and
+	// counts none left no key under it but one filed while it ran — the
+	// next pass moves those.
+	FromFormer int
 	// Skipped counts the keys destroyed, or re-wrapped by another writer,
 	// while the pass ran. They are left as they are: a re-wrap never brings
 	// back a destroyed key.
@@ -45,6 +50,8 @@ const (
 	outcomeSkipped
 	// outcomeUnreadable: did not unwrap.
 	outcomeUnreadable
+	// outcomeMoved: moved from the former root to the newest version.
+	outcomeMoved
 )
 
 // Rewrap moves every data key to the root's newest version: each key wrapped
@@ -74,6 +81,16 @@ func (s *SubjectKeys) Rewrap(ctx context.Context) (report RewrapValue, err error
 	}
 	defer view.close()
 	report.Root = view.newest
+	former, formerErr := s.formerView(ctx)
+	//: a former root that cannot be read: nothing under it can be moved now.
+	if formerErr != nil {
+		//: the former root's verdict.
+		return report, formerErr
+	}
+	//: the former root's keys are cleared with the pass.
+	if former != nil {
+		defer former.close()
+	}
 	//: every filed key, once.
 	for entry, allErr := range s.store.All(ctx) {
 		//: the store could not list its keys.
@@ -86,7 +103,7 @@ func (s *SubjectKeys) Rewrap(ctx context.Context) (report RewrapValue, err error
 			//: the context's own error.
 			return report, ctxErr
 		}
-		outcome, stepErr := s.rewrapOne(ctx, view, entry)
+		outcome, stepErr := s.rewrapOne(ctx, rewrapViews{root: view, former: former}, entry)
 		//: the store failed on a replace, or the root on a seal.
 		if stepErr != nil {
 			//: what was done, and the failure.
@@ -104,15 +121,54 @@ func (s *SubjectKeys) Rewrap(ctx context.Context) (report RewrapValue, err error
 	return report, nil
 }
 
-// rewrapOne moves one key to the view's newest version.
-func (s *SubjectKeys) rewrapOne(ctx context.Context, view *rootView, entry coresecret.SubjectKeyValue) (outcome rewrapOutcome, err error) {
+// rewrapViews are the readings one pass works with: the root's, and the
+// former root's, nil when there is none.
+type rewrapViews struct {
+	root, former *rootView
+}
+
+// formerView reads the former root once, for a pass: nil when there is none,
+// or when it keeps no version — a root renamed before anything was wrapped
+// under it.
+func (s *SubjectKeys) formerView(ctx context.Context) (view *rootView, err error) {
+	//: no former root.
+	if s.former == nil {
+		//: nothing to read.
+		return nil, nil
+	}
+	view, err = s.former.view(ctx, wrapLabel)
+	//: no version under the former name: nothing was ever wrapped under it.
+	if errs.HasCode(err, coresecret.CodeNotFound) {
+		//: nothing to move.
+		return nil, nil
+	}
+	//: the view, or the former root's verdict.
+	return view, err
+}
+
+// rewrapOne moves one key to the root's newest version: from an older one,
+// or from the former root.
+func (s *SubjectKeys) rewrapOne(ctx context.Context, views rewrapViews, entry coresecret.SubjectKeyValue) (outcome rewrapOutcome, err error) {
+	view := views.root
 	version, _, parsed := parseHeader(entry.Wrapped)
+	newer := parsed && version > view.newest && coresecret.ValidateSubject(entry.Subject) == nil
 	//: filed by a rotation newer than the one this pass read: not ours to move.
-	if parsed && version > view.newest && coresecret.ValidateSubject(entry.Subject) == nil {
+	if newer && views.former == nil {
 		//: current; the next pass opens it.
 		return outcomeCurrent, nil
 	}
 	dek, opened := unwrapIn(view, entry)
+	moved := false
+	//: a key the root does not open may be one the former root wrapped.
+	if !opened && views.former != nil {
+		dek, opened = unwrapIn(views.former, entry)
+		moved = opened
+	}
+	//: a version newer than the pass read, which no former root wrapped either.
+	if !opened && newer {
+		//: current; the next pass opens it.
+		return outcomeCurrent, nil
+	}
 	//: a subject nobody can name, a version gone, altered, or not one key.
 	if !opened {
 		//: counted; the key is left as it is.
@@ -120,7 +176,7 @@ func (s *SubjectKeys) rewrapOne(ctx context.Context, view *rootView, entry cores
 	}
 	defer clear(dek)
 	//: already where the pass is moving everything, and proven so.
-	if version == view.newest {
+	if version == view.newest && !moved {
 		//: nothing to write.
 		return outcomeCurrent, nil
 	}
@@ -140,6 +196,11 @@ func (s *SubjectKeys) rewrapOne(ctx context.Context, view *rootView, entry cores
 	if !replaced {
 		//: left alone.
 		return outcomeSkipped, nil
+	}
+	//: moved from the former root.
+	if moved {
+		//: counted twice: rewrapped, and from the former root.
+		return outcomeMoved, nil
 	}
 	//: moved.
 	return outcomeRewrapped, nil
@@ -161,6 +222,10 @@ func (r *RewrapValue) count(outcome rewrapOutcome) {
 	//: did not unwrap.
 	case outcomeUnreadable:
 		r.Unreadable++
+	//: moved from the former root.
+	case outcomeMoved:
+		r.Rewrapped++
+		r.FromFormer++
 	}
 }
 

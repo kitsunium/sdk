@@ -19,10 +19,25 @@
 import { defineCollection, z } from "astro:content";
 import { glob } from "astro/loaders";
 
+//: The releases of one build batch (scripts/build-site.mjs sets it, never a
+//: hand): each collection then reads those releases' directories alone, so the
+//: content store — which Astro holds in its heap and bundles into the server
+//: build — grows with a batch, not with every release ever cut. Unset, every
+//: release.
+const batch = (process.env.DOCS_BATCH_RELEASES ?? "")
+  .split(",")
+  .map((r) => r.trim())
+  .filter(Boolean);
+const inBatch = (pattern: string): string | string[] =>
+  batch.length === 0 ? pattern : batch.map((r) => `${r}/${pattern}`);
+
 const docs = defineCollection({
   loader: glob({
-    pattern: "**/*.md",
+    pattern: inBatch("**/*.md"),
     base: "./src/content/docs",
+    //: the pages render their HTML, never their Markdown source: keeping it
+    //: in the store would only weigh on the build's heap.
+    retainBody: false,
     //: The default glob `generateId` slugifies every path segment, which
     //: strips the dots out of a release coordinate: "0.1.5/v1/index.md"
     //: collapses to the id "015/v1/index", so Astro publishes that page at
@@ -54,7 +69,7 @@ const docs = defineCollection({
 //: lib/api.mjs's, versioned by its `format`; the schema only names it.
 const api = defineCollection({
   loader: glob({
-    pattern: "**/*.json",
+    pattern: inBatch("**/*.json"),
     base: "./src/content/api",
     generateId: ({ entry }) => entry.replace(/\.json$/, ""),
   }),
@@ -66,8 +81,9 @@ const api = defineCollection({
 //: the README's own reference and the benchmarks had. Same ids as the page.
 const bench = defineCollection({
   loader: glob({
-    pattern: "**/*.md",
+    pattern: inBatch("**/*.md"),
     base: "./src/content/bench",
+    retainBody: false,
     generateId: ({ entry }) => entry.replace(/\.md$/, ""),
   }),
   schema: z.object({}).passthrough(),

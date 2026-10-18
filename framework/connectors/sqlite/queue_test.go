@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/app"
 	"github.com/kitsunium/sdk/framework/connectors/sqlite"
-	"github.com/kitsunium/sdk/framework/kit"
 )
 
 // Kit's queues on the database that keeps their consumer (ADR 0178 C1), on
 // a real SQLite file: a topic's publication, a queued command's dispatch and
-// a watch's notice made in kit.Transact are written in the transaction, just
+// a watch's notice made in app.Transact are written in the transaction, just
 // before its commit — present and consumed once it commits, absent when it
 // rolls back, and a queue that refuses one fails the transaction. A
 // transaction on another database, or an app without one, keeps the release
@@ -29,17 +29,17 @@ import (
 // watch hears.
 type memo struct {
 	ID   string `json:"id"`
-	Text string `json:"text" kit:"moderated"`
+	Text string `json:"text" app:"moderated"`
 }
 
 // bureau is a product whose one service keeps memos, publishes them, files
 // them through a queued command and watches its own store, and what each
 // consumer heard.
 type bureau struct {
-	app   *kit.App
-	memos *kit.Store[memo]
-	sent  *kit.Topic[memo]
-	file  *kit.Command[memo, kit.Empty]
+	app   *app.App
+	memos *app.Store[memo]
+	sent  *app.Topic[memo]
+	file  *app.Command[memo, app.Empty]
 
 	mu                    sync.Mutex
 	heard, filed, noticed []string
@@ -47,37 +47,37 @@ type bureau struct {
 
 // newBureau declares the bureau afresh — a service runs in one app at a time —,
 // its data in dir, on a SQLite database unless the options say otherwise.
-func newBureau(t *testing.T, dir string, opts ...kit.AppOption) *bureau {
+func newBureau(t *testing.T, dir string, opts ...app.AppOption) *bureau {
 	t.Helper()
 	d, svc := declareBureau(t)
-	d.app = kit.NewApp("bureau", svc).With(append(bureauOptions(dir), opts...)...)
+	d.app = app.NewApp("bureau", svc).With(append(bureauOptions(dir), opts...)...)
 	return d
 }
 
 // declareBureau declares the bureau's service and its nodes.
-func declareBureau(t *testing.T) (*bureau, *kit.Service) {
+func declareBureau(t *testing.T) (*bureau, *app.Service) {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("BUREAU_SECRETS", "memory")
 	d := &bureau{}
-	svc := kit.NewService("bureau", "Memos, sent, filed and screened.")
+	svc := app.NewService("bureau", "Memos, sent, filed and screened.")
 	d.memos = svc.Store("memos", func(m memo) string { return m.ID })
 	d.sent = svc.Topic[memo]("sent")
 	svc.Subscribe("heard", d.sent, func(_ context.Context, m memo) error { return d.record(&d.heard, m.ID) })
-	d.file = svc.Command("file", func(_ context.Context, m memo) (kit.Empty, error) {
-		return kit.Empty{}, d.record(&d.filed, m.ID)
-	}, kit.Queued())
-	svc.Watch("screen", kit.Moderated, func(_ context.Context, w kit.Written) error { return d.record(&d.noticed, w.Key) }, kit.OwnStores())
+	d.file = svc.Command("file", func(_ context.Context, m memo) (app.Empty, error) {
+		return app.Empty{}, d.record(&d.filed, m.ID)
+	}, app.Queued())
+	svc.Watch("screen", app.Moderated, func(_ context.Context, w app.Written) error { return d.record(&d.noticed, w.Key) }, app.OwnStores())
 	return d, svc
 }
 
 // bureauOptions run the bureau in production, its data in dir.
-func bureauOptions(dir string) []kit.AppOption {
-	return []kit.AppOption{kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvProduction), kit.DataDir(dir), kit.Logs(io.Discard)}
+func bureauOptions(dir string) []app.AppOption {
+	return []app.AppOption{app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.DataDir(dir), app.Logs(io.Discard)}
 }
 
 // onSQLite is the bureau's one default database, a SQLite file beside its
 // data.
-func onSQLite() kit.AppOption { return kit.Database("main", sqlite.Engine()) }
+func onSQLite() app.AppOption { return app.Database("main", sqlite.Engine()) }
 
 // record notes that a consumer heard id.
 func (d *bureau) record(into *[]string, id string) error {
@@ -124,7 +124,7 @@ func (d *bureau) waitFor(t *testing.T, id string) {
 }
 
 // queueTables are the three queues' tables, as kit names them.
-var queueTables = []string{"kit_queue__bureau__heard", "kit_queue__bureau__file__command", "kit_queue__bureau__screen"}
+var queueTables = []string{"app_queue__bureau__heard", "app_queue__bureau__file__command", "app_queue__bureau__screen"}
 
 // waiting counts the messages the three queues hold.
 func waiting(t *testing.T, db *stdsql.DB) int {
@@ -157,7 +157,7 @@ func TestEffectsJoinTheTransactionOnTheirDatabase(t *testing.T) {
 		t.Fatalf("the queues are not on the database: %+v %+v", g.Node("bureau/command/file").Command, g.Node("bureau/topic/sent").Topic)
 	}
 	db := open(t, filepath.Join(dir, "main.sqlite"))
-	if err := kit.Transact(ctx, func(ctx context.Context) error {
+	if err := app.Transact(ctx, func(ctx context.Context) error {
 		return errors.Join(d.write(ctx, memo{ID: "gone", Text: "draft"}), errUndo)
 	}); !errors.Is(err, errUndo) {
 		t.Fatalf("the rolled back transaction: %v", err)
@@ -165,7 +165,7 @@ func TestEffectsJoinTheTransactionOnTheirDatabase(t *testing.T) {
 	if n := waiting(t, db); n != 0 {
 		t.Fatalf("a rolled back transaction left %d messages in the queues", n)
 	}
-	if err := kit.Transact(ctx, func(ctx context.Context) error { return d.write(ctx, memo{ID: "kept", Text: "final"}) }); err != nil {
+	if err := app.Transact(ctx, func(ctx context.Context) error { return d.write(ctx, memo{ID: "kept", Text: "final"}) }); err != nil {
 		t.Fatalf("the committed transaction: %v", err)
 	}
 	d.waitFor(t, "kept")
@@ -189,7 +189,7 @@ func TestARefusedPublicationFailsTheTransaction(t *testing.T) {
 	run(t, d.app)
 	ctx := t.Context()
 	huge := memo{ID: "huge", Text: strings.Repeat("x", 2<<20)}
-	err := kit.Transact(ctx, func(ctx context.Context) error {
+	err := app.Transact(ctx, func(ctx context.Context) error {
 		if err := d.memos.Insert(ctx, memo{ID: "before", Text: "small"}); err != nil {
 			return err
 		}
@@ -219,7 +219,7 @@ func TestARefusalAfterTheCommitLeavesTheCommitStanding(t *testing.T) {
 			run(t, d.app)
 			ctx := t.Context()
 			huge := memo{ID: "huge", Text: strings.Repeat("x", 2<<20)}
-			err := kit.Transact(ctx, func(ctx context.Context) error {
+			err := app.Transact(ctx, func(ctx context.Context) error {
 				if err := d.memos.Insert(ctx, memo{ID: "before", Text: "small"}); err != nil {
 					return err
 				}
@@ -231,7 +231,7 @@ func TestARefusalAfterTheCommitLeavesTheCommitStanding(t *testing.T) {
 			if _, err := d.memos.Get(ctx, "before"); err != nil {
 				t.Errorf("the commit did not stand: %v", err)
 			}
-			if err := kit.Transact(ctx, func(ctx context.Context) error { return d.write(ctx, memo{ID: "kept", Text: "final"}) }); err != nil {
+			if err := app.Transact(ctx, func(ctx context.Context) error { return d.write(ctx, memo{ID: "kept", Text: "final"}) }); err != nil {
 				t.Fatalf("the committed transaction: %v", err)
 			}
 			d.waitFor(t, "kept")
@@ -286,7 +286,7 @@ func TestAFileQueueLeftBehindIsSaid(t *testing.T) {
 func newBureauApart(t *testing.T, dir string) *bureau {
 	t.Helper()
 	d, svc := declareBureau(t)
-	d.app = kit.NewApp("bureau", svc).With(append(bureauOptions(dir),
-		kit.Database("main", sqlite.Engine()), kit.Database("archive", sqlite.Engine(), kit.Keeps(d.memos)))...)
+	d.app = app.NewApp("bureau", svc).With(append(bureauOptions(dir),
+		app.Database("main", sqlite.Engine()), app.Database("archive", sqlite.Engine(), app.Keeps(d.memos)))...)
 	return d
 }

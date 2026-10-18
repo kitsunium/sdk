@@ -131,7 +131,7 @@ jobs:
 
       # The framework's own suite reads its sources and asserts positions
       # relative to its module root, which a Bazel sandbox does not lay out:
-      # //framework/internal/kit:kit_test is `manual` and this is its gate (rule 12,
+      # //framework/internal/app:app_test is `manual` and this is its gate (rule 12,
       # ADR 0147). The framework's packages in the SDK module and its four
       # connector modules, `go test -race`, GOWORK=off.
       - name: framework suites (go test -race)

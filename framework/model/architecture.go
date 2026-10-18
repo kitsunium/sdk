@@ -12,15 +12,15 @@ const (
 	ContainerSPA     string = core.ContainerSPA     // a frontend: served by the process, run by a browser
 	ContainerVolume  string = core.ContainerVolume  // the data directory: store files, queue files
 	ContainerMemory  string = core.ContainerMemory  // data kept in the process's memory only
-	// ContainerDatabase is a database the app declares (kit.Database):
+	// ContainerDatabase is a database the app declares (app.Database):
 	// "container:database:<name>", drawn as a cylinder.
 	ContainerDatabase string = core.ContainerDatabase
 )
 
 const (
-	// PortOwnerKit is kit's own listener: the health probes, the Studio in
+	// PortOwnerApp is the framework's own listener: the health probes, the Studio in
 	// dev, and the product's HTTP when it declares any.
-	PortOwnerKit string = core.PortOwnerKit
+	PortOwnerApp string = core.PortOwnerApp
 )
 
 // What a port serves.

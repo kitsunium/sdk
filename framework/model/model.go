@@ -42,6 +42,15 @@ const (
 	// grammar every ID follows, written once ([ID], [ParseID]). It removes what
 	// the Studio no longer does (D13): the respond, fail and delay mock modes,
 	// the control event and its payload — a [Mock] is a test's replacement only.
+	//
+	// Version 6 renames the runtime framework (ADR 0180): its packages are
+	// framework/app and framework/internal/app, so a source position the
+	// document gives in the framework's code names those paths, and the
+	// constants of the framework's own provenance, port owner and setting
+	// origin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]; since
+	// ADR 0180's step 4 their values are "app" and "appdev", the build's
+	// and the graph's version of the framework are their field "app", and
+	// the variable a framework setting names carries the product's prefix.
 	Version int = core.Version
 )
 

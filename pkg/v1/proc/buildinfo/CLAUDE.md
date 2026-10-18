@@ -11,7 +11,7 @@ release, a commit and a local directory told apart.
 spawning children and `Self`. This package is the reading ALONE, and that is
 its only reason to exist: importing `process` initialises `runtime/metrics`
 (for `Self`) and the spawn engine, which a program that only asks what it was
-built from — the framework's `kit`, in every product — would pay for at every
+built from — the framework's `app` (`kit` then), in every product — would pay for at every
 start and never use (ADR 0172).
 
 ## Surface

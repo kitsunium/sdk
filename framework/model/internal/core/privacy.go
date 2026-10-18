@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// The modes of KIT_RETENTION.
+// The modes of <PRODUCT>_RETENTION.
 const (
 	// RetentionOn erases and deletes what is due: the default.
 	RetentionOn = "on"
@@ -21,7 +21,7 @@ const (
 
 // The gaps a register lists for a store that keeps personal data.
 const (
-	GapPurpose   = "purpose"   // no kit.Purpose
+	GapPurpose   = "purpose"   // no app.Purpose
 	GapRetention = "retention" // no retention, kit's or the product's: its personal data is kept forever
 	GapSubject   = "subject"   // no subject field: no person can have their records
 )
@@ -53,23 +53,24 @@ const SealedPlaceholder = "[sealed]"
 // The operations of the privacy journal.
 const (
 	JournalExport      = "export"       // a person's records exported
-	JournalRead        = "read"         // a record read by a module, through kit.Records
-	JournalList        = "list"         // a store's keys listed by a module that watches it, through kit.Records
+	JournalRead        = "read"         // a record read by a module, through app.Records
+	JournalList        = "list"         // a store's keys listed by a module that watches it, through app.Records
 	JournalErase       = "erase"        // a record's personal data cleared
 	JournalDelete      = "delete"       // a record removed
 	JournalEraseFields = "erase-fields" // some fields of a record cleared, by a module
 	JournalHold        = "hold"         // a hold placed on a record
 	JournalRelease     = "release"      // a hold lifted
 	JournalShred       = "shred"        // a subject's data key destroyed (ADR 0006, step 3)
+	JournalContinue    = "continue"     // a journal opened after the one before it closed, naming its last hash (ADR 0180 step 5c)
 )
 
-// Personal data (ADR 0006): what kit.Export gives a person, what kit.Erase
+// Personal data (ADR 0006): what app.Export gives a person, what app.Erase
 // did, and what a running app says of the personal data it keeps — the
 // register of processing, the legal holds and the privacy journal. The
-// Studio's Privacy page reads Privacy from GET /_kit/api/privacy, in dev;
+// Studio's Privacy page reads Privacy from GET /_app/api/privacy, in dev;
 // `<product> privacy …` prints the same.
 
-// PersonalDataMessage is a person's data as kit.Export gives it (GDPR art. 15 and
+// PersonalDataMessage is a person's data as app.Export gives it (GDPR art. 15 and
 // 20): their records, store by store, with what art. 15(1) asks beside them.
 type PersonalDataMessage struct {
 	// Stores are the stores that keep records about the person.
@@ -77,7 +78,7 @@ type PersonalDataMessage struct {
 }
 
 // StoreDataMessage is one store's records about a person.
-// It is one part of what kit.Export gives a person about themselves.
+// It is one part of what app.Export gives a person about themselves.
 type StoreDataMessage struct {
 	// Store is the store's node ID.
 	Store string `json:"store"`
@@ -90,13 +91,13 @@ type StoreDataMessage struct {
 	Recipients []string `json:"recipients,omitempty"`
 	// Records are the records, their secret members left out. They hold the
 	// person's data, which the Studio and the logs never show.
-	Records []json.RawMessage `json:"records" kit:"personal"`
+	Records []json.RawMessage `json:"records" app:"personal"`
 	// Former are the former values of the records' fields that keep them
 	// (ADR 0007), record by record; a secret field's are left out.
-	Former []RecordFormerMessage `json:"former,omitempty" kit:"personal"`
+	Former []RecordFormerMessage `json:"former,omitempty" app:"personal"`
 	// Versions are the versions of the records a store with revisions keeps
 	// (ADR 0007 §3), record by record, their secret members left out.
-	Versions []ExportedVersionsMessage `json:"versions,omitempty" kit:"personal"`
+	Versions []ExportedVersionsMessage `json:"versions,omitempty" app:"personal"`
 }
 
 // ExportedVersionsMessage are the versions of one exported record, as a
@@ -109,7 +110,7 @@ type ExportedVersionsMessage struct {
 	Versions []RecordVersionMessage `json:"versions"`
 }
 
-// ErasureMessage is what kit.Erase did, store by store.
+// ErasureMessage is what app.Erase did, store by store.
 // Stores lists, store by store, what the erasure did there.
 type ErasureMessage struct {
 	// Stores are the stores that kept records about the person.
@@ -123,18 +124,18 @@ type StoreErasureMessage struct {
 	// Store is the store's node ID.
 	Store string `json:"store"`
 	// Erased are the records whose personal data was cleared.
-	Erased []string `json:"erased,omitempty" kit:"personal"`
+	Erased []string `json:"erased,omitempty" app:"personal"`
 	// Deleted are the records removed.
-	Deleted []string `json:"deleted,omitempty" kit:"personal"`
+	Deleted []string `json:"deleted,omitempty" app:"personal"`
 	// Held are the records a hold keeps, untouched.
-	Held []string `json:"held,omitempty" kit:"personal"`
+	Held []string `json:"held,omitempty" app:"personal"`
 }
 
 // PrivacyMessage is what a running app says of the personal data it keeps.
 // It is the Privacy page's data: the register, the holds and the journal's
 // state.
 type PrivacyMessage struct {
-	// Retention is KIT_RETENTION: one of the Retention constants.
+	// Retention is <PRODUCT>_RETENTION: one of the Retention constants.
 	Retention string `json:"retention"`
 	// Register is the record of processing, as far as the code knows it.
 	Register RegisterMessage `json:"register"`
@@ -185,7 +186,7 @@ type RegisterStoreMessage struct {
 	Delete    string `json:"delete,omitempty"`
 	HeldUntil string `json:"heldUntil,omitempty"`
 	// ByProduct is point (f) when the product keeps the store's retention
-	// itself (kit.RetentionByProduct), in its own words: no retention gap,
+	// itself (app.RetentionByProduct), in its own words: no retention gap,
 	// and no subject gap either.
 	ByProduct *ProductRetentionSpec `json:"byProduct,omitempty"`
 	// Security is point (g): the measures kit takes.
@@ -222,7 +223,7 @@ type JournalEntryEvent struct {
 	// Op is one of the Journal constants.
 	Op string `json:"op"`
 	// DryRun marks what the retention would have done under
-	// KIT_RETENTION=dry-run: nothing changed.
+	// <PRODUCT>_RETENTION=dry-run: nothing changed.
 	DryRun bool `json:"dryRun,omitempty"`
 	// Store is the store's node ID.
 	Store string `json:"store,omitempty"`
@@ -232,8 +233,13 @@ type JournalEntryEvent struct {
 	// By is who: a user's ID, the node that called, "retention", "cli" or
 	// "studio".
 	By string `json:"by"`
+	// Follows is set on a JournalContinue entry alone: the hash of the
+	// last entry of the journal it continues, which closed there. Its
+	// own chain starts again from it (ADR 0180 step 5c).
+	Follows string `json:"follows,omitempty"`
 	// Hash is the entry's link in the chain: SHA-256 of the previous
-	// entry's hash and this entry.
+	// entry's hash and this entry — of nothing and this entry for a
+	// JournalContinue entry, which opens a chain.
 	Hash string `json:"hash"`
 }
 
@@ -243,8 +249,14 @@ type JournalCheckMessage struct {
 	// Entries is how many entries the journal holds.
 	Entries int `json:"entries"`
 	// BrokenAt is the sequence number where the chain breaks: an entry
-	// changed, or one removed before it. Zero when the chain holds.
+	// changed, or one removed before it, or a JournalContinue entry
+	// that does not name the hash of the entry before it. Zero when the
+	// chain holds.
 	BrokenAt int64 `json:"brokenAt,omitempty"`
+	// Closed are the last entries of the journals the journal closed,
+	// each followed by the JournalContinue entry that names its hash:
+	// the chain holds across them, journal after journal.
+	Closed []int64 `json:"closed,omitempty"`
 }
 
 // RecordFormerMessage is the former values of one exported record's fields.

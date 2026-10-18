@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "workflow",
+    srcs = ["workflow.go"],
+    importpath = "github.com/kitsunium/sdk/framework/app/workflow",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/app/store",
+        "//framework/internal/app/workflowengine",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":workflow",
+    visibility = ["//visibility:public"],
+)
