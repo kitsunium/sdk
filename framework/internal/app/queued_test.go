@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/pprof"
 	"slices"
 	"strings"
 	"testing"
@@ -246,9 +247,21 @@ func TestAQueuedCommandSurvivesARestart(t *testing.T) {
 	// on disk — the message back among the queue's waiting ones, none
 	// leased —, not for a guess at how long the nack takes.
 	eventually(t, "the first attempt", func() bool { return labFailures.Load() == 0 })
-	eventually(t, "the first attempt's nack", func() bool {
-		return queuedIn(t, dir, "ready") == 1 && queuedIn(t, dir, "inflight") == 0
-	})
+	nacked := func() bool { return queuedIn(t, dir, "ready") == 1 && queuedIn(t, dir, "inflight") == 0 }
+	deadline := time.Now().Add(5 * time.Second)
+	for !nacked() {
+		if time.Now().After(deadline) {
+			// Where every goroutine stands says what kept the nack from
+			// the disk, which the timeout alone does not.
+			var stacks strings.Builder
+			if err := pprof.Lookup("goroutine").WriteTo(&stacks, 2); err != nil {
+				t.Logf("goroutine dump: %v", err)
+			}
+			t.Fatalf("timed out waiting for the first attempt's nack: ready %d, inflight %d\n%s",
+				queuedIn(t, dir, "ready"), queuedIn(t, dir, "inflight"), stacks.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if q := first.Graph().Node("lab/command/queued").Command.Queue; q != "file" {
 		t.Errorf("the queue is %q, want file", q)
 	}
