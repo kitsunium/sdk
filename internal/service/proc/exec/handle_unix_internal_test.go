@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -67,6 +68,23 @@ func startChild(t *testing.T, setpgid bool, program string) *handle {
 	return h
 }
 
+// shellOnlyWait is a program that keeps the shell alive with no process of its
+// own beneath it: it blocks opening a FIFO nobody writes to. A fixture without
+// a private group needs one: its cleanup kills the leader's pid alone, and
+// since startChild keeps the shell as the leader, a "sleep 30" there would be
+// a child the kill never reaches, left holding the test's output for its 30
+// seconds. The FIFO is made here, before the shell starts, so no mkfifo of the
+// shell's can outlive it (syscall.Mkfifo does not exist on Solaris, so the
+// command makes it).
+func shellOnlyWait(t *testing.T) string {
+	t.Helper()
+	fifo := filepath.Join(t.TempDir(), "never-written")
+	if out, err := osexec.Command("mkfifo", fifo).CombinedOutput(); err != nil {
+		t.Fatalf("mkfifo %s: %v\n%s", fifo, err, out)
+	}
+	return "read x < '" + fifo + "'"
+}
+
 // awaitMarker waits for the file a child creates at path, failing with why
 // after ten seconds: a child that never gets there is a broken fixture.
 func awaitMarker(t *testing.T, path, why string) {
@@ -98,7 +116,11 @@ func Test_newHandle(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		h := startChild(t, c.setpgid, "sleep 30")
+		program := "sleep 30"
+		if !c.setpgid {
+			program = shellOnlyWait(t)
+		}
+		h := startChild(t, c.setpgid, program)
 
 		if h.pid <= 0 {
 			t.Fatalf("the handle records pid %d", h.pid)
@@ -321,7 +343,13 @@ func Test_handle_SignalGroup(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		h := startChild(t, c.setpgid, "sleep 30 & wait")
+		//: the grandchild a private group reaches; without one, nothing
+		//: beneath the shell, or the kill of its pid would leave it running.
+		program := "sleep 30 & wait"
+		if !c.setpgid {
+			program = shellOnlyWait(t)
+		}
+		h := startChild(t, c.setpgid, program)
 
 		if err := h.SignalGroup(coreproc.Signal(syscall.SIGKILL)); err != nil {
 			t.Fatalf("SignalGroup = %v, want nil", err)
@@ -330,8 +358,8 @@ func Test_handle_SignalGroup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Wait = %v, want nil", err)
 		}
-		//: the leader died by the signal either way; the difference is whether
-		//: the backgrounded sleep went with it, which groupTarget decides.
+		//: the leader died by the signal either way; with a private group the
+		//: backgrounded sleep went with it, which groupTarget decides.
 		if !exit.Signaled {
 			t.Errorf("the leader exited with code %d, want a signalled death", exit.Code)
 		}
@@ -539,7 +567,7 @@ func Test_handle_zombieGroupRefused(t *testing.T) {
 	darwin := runtime.GOOS == "darwin" || runtime.GOOS == "ios"
 	tests := []tc{
 		{"an ESRCH is processGone's, not this rule's", live, wrapSignal(syscall.ESRCH), false, false},
-		{"an EPERM without a private group", func(t *testing.T) *handle { return startChild(t, false, "sleep 30") }, wrapSignal(syscall.EPERM), false, false},
+		{"an EPERM without a private group", func(t *testing.T) *handle { return startChild(t, false, shellOnlyWait(t)) }, wrapSignal(syscall.EPERM), false, false},
 		{"an EPERM from a live leader stays a refusal", live, wrapSignal(syscall.EPERM), false, false},
 		{"an EPERM sent after the leader was collected stays a refusal", collected, wrapSignal(syscall.EPERM), true, false},
 		{"an EPERM that is not a signal failure", collected, wrapSpawn(syscall.EPERM), false, false},

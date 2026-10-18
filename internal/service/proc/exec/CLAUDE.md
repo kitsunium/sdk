@@ -258,7 +258,10 @@ up to 10.1 discards a signal posted to a process still in `execve` (PR
 kern/58091, fixed in 10.2 and 11.0), so a `SIGKILL` sent at once was lost
 and `Test_handle_SignalGroup` / `Test_handle_graceOnInjectedClock` waited out
 the child's 30 s on one NetBSD run in four. A caller that signals a child it
-has just started on such a kernel can lose the signal the same way;
+has just started on such a kernel can lose the signal the same way. The
+shell therefore stays the leader, so a fixture without a private group runs
+`shellOnlyWait` — a read from a FIFO the test made, nothing beneath the
+shell — since its cleanup kills the leader's pid alone;
 `creds_unix_internal_test.go` pins `UnknownUser` / `UnknownGroup`.
 `exec_windows_test.go` covers the Windows backend (skipped where `cmd.exe` is
 not found) and `exec_other_test.go` the `UnsupportedPlatform` stub;
