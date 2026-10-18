@@ -124,8 +124,9 @@ func mallocsOver(runs int, f func()) windowCount {
 	defer func() { runtime.MemProfileRate = rate }()
 	//: collection is held off for the window: a collection drains pools and
 	//: forces the next calls to miss, which would be a real allocation of f's
-	//: caused by the measurement. The previous rate is restored after it.
-	gcPercent := debug.SetGCPercent(-1)
+	//: caused by the measurement. The previous rate is restored on return —
+	//: deferred, so a t.Fatalf inside f (runtime.Goexit) restores it too.
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	//: one forced cycle publishes the heap profile up to here, so the diff below
 	//: holds only what happened from now on; it runs BEFORE the warm-up call so
 	//: the pools it ages are refilled by that call, not by the window.
@@ -138,9 +139,9 @@ func mallocsOver(runs int, f func()) windowCount {
 	runtime.ReadMemStats(&msBefore)
 	allocWindow(runs, f)
 	runtime.ReadMemStats(&msAfter)
-	debug.SetGCPercent(gcPercent)
 	//: the heap profile is published by a completed cycle; one is forced
-	//: OUTSIDE the window, where what it allocates is not on allocWindow's stack.
+	//: OUTSIDE the window, where what it allocates is not on allocWindow's stack
+	//: (runtime.GC runs a cycle even while the collector is off).
 	runtime.GC()
 	after := profileByStack()
 	//: Mallocs is cumulative and monotonic, so the difference is the total.
