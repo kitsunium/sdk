@@ -793,6 +793,8 @@ jobs:
       # and its suites build their fixtures with git itself: a guest without
       # it cannot run them. The images ship none, so the guest's own package
       # manager installs it — the suite then runs on this kernel's git.
+      # NetBSD's `git` is a meta-package that pulls perl and 28 others (29 MB,
+      # 138 s); `git-base` is the git binary alone.
       - name: git in the ${{ matrix.os }} guest
         timeout-minutes: 5
         shell: cpa.sh {0} --sync-files none
@@ -802,7 +804,7 @@ jobs:
             case "$(uname -s)" in
               FreeBSD) sudo env ASSUME_ALWAYS_YES=yes pkg install -y git ;;
               OpenBSD) sudo pkg_add git ;;
-              NetBSD) sudo pkgin -y install git ;;
+              NetBSD) sudo pkgin -y install git-base ;;
             esac
           fi
           git --version
