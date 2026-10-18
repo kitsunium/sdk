@@ -265,6 +265,9 @@ func refsBoxes(t *testing.T, raw string) map[string][]string {
 				}
 			}
 		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
 		if err := rows.Close(); err != nil {
 			t.Fatal(err)
 		}
@@ -287,6 +290,9 @@ func refsNames(t *testing.T, raw, query string) []string {
 			t.Fatal(err)
 		}
 		out = append(out, string(name))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	return out
 }
@@ -322,6 +328,11 @@ func TestFormerReferencesOnMySQLAreSealedAgainAndReadAsTheyWere(t *testing.T) {
 	index, err := store.Get(t.Context(), "app-index-key")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if c, ok := store.(io.Closer); ok {
+		if err := c.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	ikm := index.Value.Reveal()
 	formerRef := func(who string) string {
