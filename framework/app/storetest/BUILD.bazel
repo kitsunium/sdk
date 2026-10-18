@@ -1,0 +1,46 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "storetest",
+    srcs = [
+        "codes_gen.go",
+        "doc.go",
+        "storetest.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/app/storetest",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/app",
+        "//framework/app/queue",
+        "//framework/app/workflow",
+        "//pkg/v1/clock",
+        "//pkg/v1/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":storetest",
+    visibility = ["//visibility:public"],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit: it declares CodeRolledBack, in the 0.4.4.* range codeRangeOwners
+# gives it.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
+
+go_test(
+    name = "storetest_test",
+    srcs = ["api_gen_test.go"],
+    deps = [
+        ":storetest",
+        "//framework/app",
+        "//pkg/v1/errs",
+    ],
+)

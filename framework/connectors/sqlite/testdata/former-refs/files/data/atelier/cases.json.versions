@@ -1,0 +1,162 @@
+{
+  "c-ann": {
+    "former": [
+      {
+        "at": "2026-10-18T04:57:19.358707764Z",
+        "doc": {
+          "id": "c-ann",
+          "email": "sealed:v1:ASJyOjdhYTkwOTZmOTc0N2U1YzQwYzU0NTAyNjA1MTc5NDhjTz1C8_FrjlMBAVYVKxZ-4PrYQ33xcNWRTM54-YKHVx3odKvMfbMnJrFvUAZxDsMe56b7Ldb_f-WdL76nfkfn_LWiSv1skQ",
+          "note": "sealed:v1:ASJyOjdhYTkwOTZmOTc0N2U1YzQwYzU0NTAyNjA1MTc5NDhjTz1C8_FrjlMBARa44Uyle8CUHklLhWlFvQlM_9TH1YDhRxr-_ciocuucsOY7X7I5Js7adzkQHCcUIPbJIX2KoBvVqUUdcw",
+          "stage": 2
+        },
+        "number": 2
+      },
+      {
+        "at": "2026-10-18T04:57:19.352669329Z",
+        "doc": {
+          "id": "c-ann",
+          "email": "sealed:v1:ASJyOjdhYTkwOTZmOTc0N2U1YzQwYzU0NTAyNjA1MTc5NDhjTz1C8_FrjlMBAbwtuk4FBWtwUE78pgVoawh_xoTHB4gHk_Wk6R-ZGXuIjsfyi-SWRVE8XJ5TUzQio_ZN7UuoeTTbhMS2Nw",
+          "note": "sealed:v1:ASJyOjdhYTkwOTZmOTc0N2U1YzQwYzU0NTAyNjA1MTc5NDhjTz1C8_FrjlMBAajxoV2s4EZMoapgelTDdcCKJUJzp7OL6N6ys27Qd9pUFkPfidrkvoaM1rDCNwZGqhEZJwJsvXL3Bv1MhQ",
+          "stage": 1
+        },
+        "number": 1
+      }
+    ],
+    "current": {
+      "at": "2026-10-18T04:57:19.364903461Z",
+      "number": 3
+    }
+  },
+  "c-bob": {
+    "trashed": {
+      "at": "2026-10-18T04:57:19.374219364Z",
+      "doc": {
+        "id": "c-bob",
+        "email": "sealed:v1:ASJzOjIwZWQ2ZGFhOGMzYWYzOTE4OTRiNjZlZWE4NWM1ZGE1Md6g66HdbAABASwtroauTIH7KrZwWOKau4JqyMn8S9gLMAwQpMKSsKOxYLGCp2suo1e3fhZBux-jQmVA2e1YvcHSVYu7vQ",
+        "note": "sealed:v1:ASJzOjIwZWQ2ZGFhOGMzYWYzOTE4OTRiNjZlZWE4NWM1ZGE1Md6g66HdbAABAcnmkBWsdf9k23zkUKgRdWlTnU4ip5HRvKIW_LNtDvfTAmRMAYLoD3sA57XVIZ_391WrkG5Qoi21Qe3EXw",
+        "stage": 1
+      }
+    },
+    "current": {
+      "at": "2026-10-18T04:57:19.371169218Z",
+      "number": 1
+    }
+  },
+  "c-cy": {
+    "former": [
+      {
+        "at": "2026-10-18T04:57:19.380246367Z",
+        "doc": {
+          "id": "c-cy",
+          "email": "",
+          "note": "",
+          "stage": 1
+        },
+        "number": 1
+      }
+    ],
+    "current": {
+      "at": "2026-10-18T04:57:19.400696095Z",
+      "meta": {
+        "command": "atelier/command/forget"
+      },
+      "number": 2
+    }
+  },
+  "c-dan": {
+    "current": {
+      "at": "2026-10-18T04:57:19.386295001Z",
+      "number": 1
+    }
+  },
+  "c-eve": {
+    "former": [
+      {
+        "at": "2026-10-18T09:19:10.735263161Z",
+        "doc": {
+          "id": "c-eve",
+          "email": "sealed:v1:ASJyOjNlNGJiYmJjYTkwYzJkMjUzYzVkMTQ0MzczNDgxZTlk0BChluuULxoBAW--SA605aOK8EDNd7SGECQT7OELNZ1Q7tQkpz9ArvPPfQB3X1e-DvBIEEByhkqwk7mKlGSQVhDO_wPYJQ",
+          "note": "sealed:v1:ASJyOjNlNGJiYmJjYTkwYzJkMjUzYzVkMTQ0MzczNDgxZTlk0BChluuULxoBAZoqNAtlCWAJXVKOrYf2nK_Qio9ybsjUnviMX1Rrotrhd40kzv1RYECTAhv9-_tm2jXU3NDlbwSI1buH5Q",
+          "stage": 1
+        },
+        "number": 1
+      }
+    ],
+    "current": {
+      "at": "2026-10-18T09:19:10.746760291Z",
+      "number": 2
+    }
+  },
+  "c-fay": {
+    "former": [
+      {
+        "at": "2026-10-18T09:19:10.764057623Z",
+        "doc": {
+          "id": "c-fay",
+          "email": "",
+          "note": "",
+          "stage": 1
+        },
+        "number": 1
+      }
+    ],
+    "current": {
+      "at": "2026-10-18T09:19:10.771773248Z",
+      "meta": {
+        "command": "atelier/command/forget"
+      },
+      "number": 2
+    }
+  },
+  "c-ivy": {
+    "former": [
+      {
+        "at": "2026-10-18T10:45:36.716534794Z",
+        "doc": {
+          "id": "c-ivy",
+          "email": "sealed:v1:ASJzOjI3NjhiYjEwNTFhNzY1NzYzMjRkZDI3MWU5Mjg2ZjgwrcAODllD6RIBAbeo3FXx55QYakoGRy0vnwCaJpmu7fbpBm6_Ci8YIHAjhi6vzmp38_8Cg8PnEl0RHQ2Shye2NB6R_Uy0MQ",
+          "note": "sealed:v1:ASJzOjI3NjhiYjEwNTFhNzY1NzYzMjRkZDI3MWU5Mjg2ZjgwrcAODllD6RIBAbi2czA0AucYU-UWdxmGw0dqLze25dBzfM9YLsBESpAqs3Hwx8P69cGKnOHmaMAiijrbIRAkjtULtqfUAA",
+          "stage": 1
+        },
+        "number": 1
+      }
+    ],
+    "current": {
+      "at": "2026-10-18T10:45:36.725751032Z",
+      "number": 2
+    }
+  },
+  "c-kim": {
+    "former": [
+      {
+        "at": "2026-10-18T10:45:36.732230057Z",
+        "doc": {
+          "id": "c-kim",
+          "email": "sealed:v1:ASJyOjQ5OWMyNjRkMzY3Yzc2NWIyMWY2ZmNhYTdhNzJjNmIyLdUnOeEaqcsBAZM-TVG9Vd8-xHnWjRMGN_3HdH-DI78U3jX8bzi4ExI38U3_UKuu_lcfzGjxn_AUGjLfEulVD5YwRRjOjA",
+          "note": "sealed:v1:ASJyOjQ5OWMyNjRkMzY3Yzc2NWIyMWY2ZmNhYTdhNzJjNmIyLdUnOeEaqcsBAXiIEEhTRiVbvXrfcz0xu_shAAthtA7WfWa4tNK2xRwanyk20_BsMY6jiAfnA0kRGS787kFOjYLTdK_VeA",
+          "stage": 1
+        },
+        "number": 1
+      }
+    ],
+    "current": {
+      "at": "2026-10-18T10:45:36.760614818Z",
+      "number": 2
+    }
+  },
+  "c-leo": {
+    "trashed": {
+      "at": "2026-10-18T10:45:36.769942062Z",
+      "doc": {
+        "id": "c-leo",
+        "email": "sealed:v1:ASJzOmRmMmYzNzlmZTQ2ZTc0YWM4ZDYwMTk1YmNmNWY5ODBkP7DEPFtGmX0BAasIwS9sqJa4XUTD5JTxn5w2OyJbl3d0lYDnGfKFbLgOUtl4vnXKRgxqJAnPUgYMXNW8p20iwULK3c4leA",
+        "note": "sealed:v1:ASJzOmRmMmYzNzlmZTQ2ZTc0YWM4ZDYwMTk1YmNmNWY5ODBkP7DEPFtGmX0BAbNDow89EsDI1r7GQJP0I2H1gOEHpD9EJtcgGZlF4hB2Xuh5V22I3EQUoZA2UQt8F17TBIeoei5nqjkOfQ",
+        "stage": 1
+      }
+    },
+    "current": {
+      "at": "2026-10-18T10:45:36.766682898Z",
+      "number": 1
+    }
+  }
+}

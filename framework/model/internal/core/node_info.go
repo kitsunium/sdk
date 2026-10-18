@@ -19,10 +19,10 @@ const (
 // How an exposure says it is open on purpose, when its operation declares
 // no permission and no rule (EndpointInfo.Access).
 const (
-	// AccessAnyone is kit.Anyone(): whoever reaches the route may run the
+	// AccessAnyone is app.Anyone(): whoever reaches the route may run the
 	// operation.
 	AccessAnyone = "anyone"
-	// AccessAnyUser is kit.AnyUser(): any signed-in user may run it — the
+	// AccessAnyUser is app.AnyUser(): any signed-in user may run it — the
 	// operation asks for one.
 	AccessAnyUser = "any-user"
 )
@@ -51,17 +51,17 @@ const (
 	TriggerCreate = "create"
 )
 
-// How the start chose what a port calls: kit.Bind, else the one
+// How the start chose what a port calls: app.Bind, else the one
 // Service.Implement among the services the app mounts, else the port's
 // fallback — or a test replaced the port.
 const (
-	// ViaBind is the app's kit.Bind.
+	// ViaBind is the app's app.Bind.
 	ViaBind = "bind"
 	// ViaImplement is the one Service.Implement among the mounted services.
 	ViaImplement = "implement"
-	// ViaFallback is the port's own kit.Fallback.
+	// ViaFallback is the port's own app.Fallback.
 	ViaFallback = "fallback"
-	// ViaReplace is a test's kit.Replace: a function answers in place of
+	// ViaReplace is a test's app.Replace: a function answers in place of
 	// whatever the port would call, and nothing is bound.
 	ViaReplace = "replace"
 )
@@ -71,7 +71,7 @@ const (
 	// ModeSync is handled on its caller's goroutine: Dispatch returns the
 	// handler's result.
 	ModeSync = "sync"
-	// ModeQueued is sent to the background (kit.Queued): Dispatch returns
+	// ModeQueued is sent to the background (app.Queued): Dispatch returns
 	// once the command's own queue accepted it, and a consumer handles it,
 	// retried and dead-lettered.
 	ModeQueued = "queued"
@@ -100,11 +100,11 @@ const (
 	// SecretFromEnv is the environment: the variable, or the file its _FILE
 	// form names.
 	SecretFromEnv = "env"
-	// SecretFromFile is kit's encrypted file store: KIT_SECRETS=file:<dir>,
-	// or .kit/secrets/dev in dev.
+	// SecretFromFile is the framework's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,
+	// or the data directory's .secrets in dev.
 	SecretFromFile = "file"
 	// SecretFromMemory is a store in the process's memory: a test, or
-	// KIT_SECRETS=memory. A generated secret is made again at every start.
+	// <PRODUCT>_SECRETS=memory. A generated secret is made again at every start.
 	SecretFromMemory = "memory"
 	// SecretFromStore is a store the product's code gave kit.
 	SecretFromStore = "store"
@@ -140,7 +140,7 @@ const (
 	SelectDefault = "default" // the default case: the select never blocks
 )
 
-// What a field holds: the classes of a kit tag (ADR 0006).
+// What a field holds: the classes of an app tag (ADR 0006).
 const (
 	// ClassPublic holds nothing personal and nothing secret: the question
 	// was asked.
@@ -199,7 +199,7 @@ type PortSpec struct {
 	// Response is the type it answers.
 	Response *SchemaMessage `json:"response,omitempty"`
 	// Fallback is the node ID of the operation the port declares for when
-	// the app binds nothing else (kit.Fallback).
+	// the app binds nothing else (app.Fallback).
 	Fallback string `json:"fallback,omitempty"`
 	// Bound is the node ID of the operation the port calls, as the start
 	// chose it — on a static graph, as the analysis reads the same rule;
@@ -291,7 +291,7 @@ type StoreSpec struct {
 	// directory.
 	Location string `json:"location,omitempty"`
 	// Database names the database that keeps the store, as the app declares
-	// it (kit.Database, kit.Keeps) — present even while the store's data
+	// it (app.Database, app.Keeps) — present even while the store's data
 	// stays in the data directory, in dev without the database's URL. Its
 	// container is "container:database:<name>".
 	Database string `json:"database,omitempty"`
@@ -313,7 +313,7 @@ type StoreSpec struct {
 	// fields that keep their former values, its password policies. Absent
 	// when it remembers nothing and has no policy.
 	History *StoreHistoryMessage `json:"history,omitempty"`
-	// ReadModel is set on a store derived from others (kit.ReadModel):
+	// ReadModel is set on a store derived from others (app.ReadModel):
 	// written by projections — subscriptions —, read by queries.
 	ReadModel bool `json:"readModel,omitempty"`
 }
@@ -324,24 +324,24 @@ type StorePrivacyMessage struct {
 	// Subject is the JSON pointer of the field that says whom each record is
 	// about: "/email". Empty when the entity has no subject field.
 	Subject string `json:"subject,omitempty"`
-	// Purpose is why the store keeps its records, as kit.Purpose says it.
+	// Purpose is why the store keeps its records, as app.Purpose says it.
 	Purpose string `json:"purpose,omitempty"`
 	// Erase says when kit clears a record's personal data; Delete when it
 	// removes the record.
 	Erase  *RetentionSpec `json:"erase,omitempty"`
 	Delete *RetentionSpec `json:"delete,omitempty"`
 	// ByProduct is set when the product keeps the store's retention itself
-	// (kit.RetentionByProduct): kit runs none — Erase and Delete are then
+	// (app.RetentionByProduct): kit runs none — Erase and Delete are then
 	// absent — and asks for neither a retention nor a subject.
 	ByProduct *ProductRetentionSpec `json:"byProduct,omitempty"`
 	// HeldUntil holds each record until an instant it carries: the law's
-	// own retention (kit.HeldUntil).
+	// own retention (app.HeldUntil).
 	HeldUntil *HeldUntilSpec `json:"heldUntil,omitempty"`
 	// Anonymise locates the function that says what an erased record keeps,
-	// generalised (kit.Anonymise).
+	// generalised (app.Anonymise).
 	Anonymise *SourceMessage `json:"anonymise,omitempty"`
 	// DeleteOnErasure: a person's erasure deletes the record instead of
-	// clearing it (kit.DeleteOnErasure).
+	// clearing it (app.DeleteOnErasure).
 	DeleteOnErasure bool `json:"deleteOnErasure,omitempty"`
 
 	// Held is how many records a hold keeps, on a runtime graph.
@@ -424,7 +424,7 @@ type SubscriptionSpec struct {
 	// "moderated", ADR 0006's marks. Empty for a subscription.
 	Mark string `json:"mark,omitempty"`
 	// OwnStores: the watch hears its own module's stores too — the
-	// product's own, for a watch of the product's (kit.OwnStores) —, never
+	// product's own, for a watch of the product's (app.OwnStores) —, never
 	// the writes its own handler makes.
 	OwnStores bool `json:"ownStores,omitempty"`
 	// Stores are the node IDs of the stores that feed a watch, sorted: those
@@ -526,7 +526,7 @@ type AuthSpec struct {
 	// cookie:"…" or header:"…".
 	Credentials *SchemaMessage `json:"credentials,omitempty"`
 	// Data is the type of what the handler says about the caller, which
-	// endpoints read with kit.AuthData.
+	// endpoints read with app.AuthData.
 	Data *SchemaMessage `json:"data,omitempty"`
 	// Endpoints counts the endpoints that ask for authentication.
 	Endpoints int `json:"endpoints"`
@@ -574,7 +574,7 @@ type SecretSpec struct {
 	// Keep is how many versions a rotation leaves, the new one included.
 	Keep int `json:"keep,omitempty"`
 	// Optional: a provided secret the product can do without
-	// (kit.Optional) — found nowhere, it is absent, and the start goes on.
+	// (app.Optional) — found nowhere, it is absent, and the start goes on.
 	Optional bool `json:"optional,omitempty"`
 
 	// From is where the running app found it: one of the SecretFrom
@@ -702,7 +702,7 @@ type FieldMessage struct {
 	// Doc is the field's comment, when the analyzer found one.
 	Doc string `json:"doc,omitempty"`
 
-	// Class is what the field holds, as its kit tag says (ADR 0006): one of
+	// Class is what the field holds, as its app tag says (ADR 0006): one of
 	// the Class constants, or empty when the field is unclassified. A
 	// subject field is personal unless it is special.
 	Class string `json:"class,omitempty"`

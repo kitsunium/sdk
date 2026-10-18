@@ -1,0 +1,50 @@
+{
+  "c-ann": {
+    "key": "c-ann",
+    "fields": {
+      "/note": [
+        {
+          "value": "sealed:v1:ASJyOjdhYTkwOTZmOTc0N2U1YzQwYzU0NTAyNjA1MTc5NDhjTz1C8_FrjlMBAfzDG_HJcoiaxXEdtWMpC__c6WLwZAfkiwJaHsIit8SFdKXkcaIrV0GbIdO58WV62lF_vDIJp28y99FJ-w",
+          "until": "2026-10-18T04:57:19.361793244Z"
+        },
+        {
+          "value": "sealed:v1:ASJyOjdhYTkwOTZmOTc0N2U1YzQwYzU0NTAyNjA1MTc5NDhjTz1C8_FrjlMBAcRFahKNatliX3zCIOlZQgZiRtLYBlWYoScS6T4D-uEAUEMrjnHUKDzPM0TZ6U1SkaEN6FK6VoxGr9vIdA",
+          "until": "2026-10-18T04:57:19.355820391Z"
+        }
+      ]
+    }
+  },
+  "c-eve": {
+    "key": "c-eve",
+    "fields": {
+      "/note": [
+        {
+          "value": "sealed:v1:ASJyOjNlNGJiYmJjYTkwYzJkMjUzYzVkMTQ0MzczNDgxZTlk0BChluuULxoBAXKAWcWIJ6xFRA0LVu6CiYPFtH1CsoBC3AYpgsouCBLHN8X3F4ZveTsLCbRH8qCvjAbmu0HW_6ulKOkScQ",
+          "until": "2026-10-18T09:19:10.739609788Z"
+        }
+      ]
+    }
+  },
+  "c-ivy": {
+    "key": "c-ivy",
+    "fields": {
+      "/note": [
+        {
+          "value": "sealed:v1:ASJzOjI3NjhiYjEwNTFhNzY1NzYzMjRkZDI3MWU5Mjg2ZjgwrcAODllD6RIBARunBpQ4XH498XsyinX9kvkvCS5ELLPFpqSn9bfHDYe9j03zh_h8oZp2OlDX7ICJV9Q-YeXxxgu0e-D4PQ",
+          "until": "2026-10-18T10:45:36.719508568Z"
+        }
+      ]
+    }
+  },
+  "c-kim": {
+    "key": "c-kim",
+    "fields": {
+      "/note": [
+        {
+          "value": "sealed:v1:ASJyOjQ5OWMyNjRkMzY3Yzc2NWIyMWY2ZmNhYTdhNzJjNmIyLdUnOeEaqcsBAWUXN0KpQAEy9scqzgiEEqGCJUWbt4PtH4QWn5Tpans7kdbFfAsseXAp7OxuzHBrVp3_j_lqReKlpi6qPA",
+          "until": "2026-10-18T10:45:36.757388446Z"
+        }
+      ]
+    }
+  }
+}

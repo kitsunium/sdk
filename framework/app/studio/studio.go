@@ -1,0 +1,39 @@
+// Package studio serves, in dev, the read-only API the kit tool's Studio
+// reads: the graph and its event stream, traces, instances and items, the
+// source, the dev tools — the process, the databases, goroutines, the heap
+// profile, logs, the mailbox, former values. A server imports it to be seen
+// by the Studio:
+//
+//	import _ "github.com/kitsunium/sdk/framework/app/studio"
+//
+// It also brings kit's sentences in the languages after English — French
+// today —, which only the Studio shows, in its reader's language: with it a
+// diagnostic of the graph carries its text in each of them, without it in
+// English alone. The terminal, the logs and an error read English either
+// way (ADR 0179 step 8, Q6). And it reads the variables the kit tool sets —
+// what kit dev built and set for a launch, whether the Studio is served, to
+// whom, and with the static analysis (ADR 0180 step 1).
+//
+// Without it a product links none of those routes, their handlers, the event
+// stream, the profiler, the catalogues after English or the SDK's i18n, and
+// reads none of the tool's variables; in dev the start warns that the Studio
+// was asked for. The health probes are the product's either way.
+package studio
+
+import (
+	iapp "github.com/kitsunium/sdk/framework/internal/app"
+	"github.com/kitsunium/sdk/framework/internal/app/studioengine"
+)
+
+// Importing the package mounts the Studio's API: a blank package-level value
+// rather than an init, the SDK's convention.
+var _ = enable()
+
+// enable plugs the Studio in — the tool's variables for every app, the
+// Studio's routes for every serving app in dev, and kit's sentences in the
+// languages after English for every app.
+func enable() bool {
+	studioengine.Enable()
+	iapp.EnableStudio()
+	return true
+}

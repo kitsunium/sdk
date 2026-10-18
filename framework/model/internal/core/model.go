@@ -39,7 +39,16 @@ import "time"
 // grammar every ID follows, written once ([IDValue], [ParseID]). It removes what
 // the Studio no longer does (D13): the respond, fail and delay mock modes,
 // the control event and its payload — a [MockMessage] is a test's replacement only.
-const Version int = 5
+//
+// Version 6 renames the runtime framework (ADR 0180): its packages are
+// framework/app and framework/internal/app, so a source position the
+// document gives in the framework's code names those paths, and the
+// constants of the framework's own provenance, port owner and setting
+// origin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]; since
+// ADR 0180's step 4 their values are "app" and "appdev", the build's
+// and the graph's version of the framework are their field "app", and
+// the variable a framework setting names carries the product's prefix.
+const Version int = 6
 
 // ExternalID is the id of the node standing for the outside world.
 const ExternalID = "external"
@@ -84,7 +93,7 @@ type GraphMessage struct {
 // It names the module, the environment and the build the graph was taken
 // from.
 type AppMessage struct {
-	// Name is the product name given to kit.NewApp.
+	// Name is the product name given to app.NewApp.
 	Name string `json:"name"`
 	// Module is the Go module path of the product.
 	Module string `json:"module,omitempty"`
@@ -94,14 +103,14 @@ type AppMessage struct {
 	Root string `json:"root,omitempty"`
 	// Env is "dev" or "production".
 	Env string `json:"env,omitempty"`
-	// Kit is the kit version that produced the graph.
-	Kit string `json:"kit,omitempty"`
+	// App is the version of the framework that produced the graph.
+	App string `json:"app,omitempty"`
 	// Go is the Go version the product was built with.
 	Go string `json:"go,omitempty"`
 	// StartedAt is when the process started, for a runtime graph.
 	StartedAt *time.Time `json:"startedAt,omitempty"`
-	// Build says what the binary was built from: the product, kit and the
-	// SDK kit depends on.
+	// Build says what the binary was built from: the product, the framework
+	// and the SDK the framework depends on.
 	Build *BuildMessage `json:"build,omitempty"`
 }
 
@@ -111,10 +120,10 @@ type AppMessage struct {
 type BuildMessage struct {
 	// Product is the product's own module.
 	Product ModuleVersionMessage `json:"product"`
-	// Kit is the framework: since ADR 0162 the SDK module,
+	// App is the framework: since ADR 0162 the SDK module,
 	// github.com/kitsunium/sdk, which holds it.
-	Kit ModuleVersionMessage `json:"kit"`
-	// SDK is the SDK the framework is built on — the same module as Kit
+	App ModuleVersionMessage `json:"app"`
+	// SDK is the SDK the framework is built on — the same module as App
 	// since ADR 0162, so the two say the same version.
 	SDK ModuleVersionMessage `json:"sdk"`
 }
@@ -206,7 +215,7 @@ type DiagnosticMessage struct {
 	// Message says what is wrong and how to fix it, in English.
 	Message string `json:"message"`
 	// Texts is the message in each language kit speaks, by language: "en",
-	// and "fr" when the program imports framework/kit/studio. The Studio
+	// and "fr" when the program imports framework/app/studio. The Studio
 	// shows its reader's.
 	Texts map[string]string `json:"texts,omitempty"`
 	// Node is the node concerned, when there is one.

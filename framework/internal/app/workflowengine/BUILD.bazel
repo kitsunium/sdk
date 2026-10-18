@@ -1,0 +1,40 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "workflowengine",
+    srcs = [
+        "clock.go",
+        "doc.go",
+        "engine.go",
+        "workflowengine.go",
+        "workflowengine_compliance.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/internal/app/workflowengine",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+    deps = [
+        "//framework/internal/app/plug",
+        "//pkg/v1/app/resilience",
+        "//pkg/v1/app/statemachine",
+        "//pkg/v1/clock",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":workflowengine",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+)
+
+go_test(
+    name = "workflowengine_test",
+    srcs = ["api_gen_test.go"],
+    deps = [":workflowengine"],
+)

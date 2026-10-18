@@ -21,8 +21,8 @@ packages:
 
       	import "github.com/kitsunium/sdk/framework/connectors/postgres"
 
-      	var App = kit.NewApp("vigie", intake.Service, desk.Service).With(
-      		kit.Database("database", postgres.Engine()),
+      	var App = app.NewApp("vigie", intake.Service, desk.Service).With(
+      		app.Database("database", postgres.Engine()),
       	)
 
       The database's URL is libpq's, as pgx reads it —
@@ -34,11 +34,11 @@ packages:
       private network. The engine reads the URL again before each new
       connection, so a password rotated where it lives is used by the next one.
     functions:
-      - doc: Engine is the PostgreSQL engine, for kit.Database.
+      - doc: Engine is the PostgreSQL engine, for app.Database.
         name: Engine
         out:
-          - type: kit.Engine
+          - type: app.Engine
     imports:
       errs: github.com/kitsunium/sdk/pkg/v1/errs
-      kit: github.com/kitsunium/sdk/framework/kit
+      app: github.com/kitsunium/sdk/framework/app
     path: github.com/kitsunium/sdk/framework/connectors/postgres

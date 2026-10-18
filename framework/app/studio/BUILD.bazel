@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "studio",
+    srcs = ["studio.go"],
+    importpath = "github.com/kitsunium/sdk/framework/app/studio",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/internal/app",
+        "//framework/internal/app/studioengine",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":studio",
+    visibility = ["//visibility:public"],
+)

@@ -1,0 +1,80 @@
+package app_test
+
+import (
+	"context"
+	"io"
+	"maps"
+	"testing"
+	"time"
+
+	"github.com/kitsunium/sdk/framework/internal/app"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
+)
+
+// kit's own service in an app (ADR 0006, ADR 0004): where its stores are
+// kept, and a copy of an app mounting its own.
+
+// privacyMember is a person, kept by a product that places its stores.
+type privacyMember struct {
+	ID    string `json:"id"`
+	Email string `json:"email" app:"subject"`
+}
+
+func (m privacyMember) key() string { return m.ID }
+
+// kit's own stores are placed by name only: the default database never
+// takes them, and app.Keeps(app.Privacy) places them like any service. The
+// secrets live in memory: data-key is pinned, so that the sealed members
+// open at the next start.
+func TestKitsOwnStoresArePlacedByName(t *testing.T) {
+	needsFileStore(t)
+	t.Setenv("LEDGER_SECRETS", "memory")
+	t.Setenv("LEDGER_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
+	t.Setenv("LEDGER_VAULT_URL", verifiedURL())
+	for keeps, want := range map[bool]string{false: "", true: "vault"} {
+		people := app.NewService("people", "People.")
+		people.Store("members", privacyMember.key)
+		opts := []app.AppConfigurer{
+			app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.DataDir(t.TempDir()), app.Logs(io.Discard),
+			app.Database("database", app.NewFakeDB(sql.DialectPostgres).Engine()),
+		}
+		if keeps {
+			opts = append(opts, app.Database("vault", app.NewFakeDB(sql.DialectPostgres).Engine(), app.Keeps(app.Privacy)))
+		}
+		a := app.NewApp("ledger", people).With(opts...)
+		run(t, a)
+		g := a.Graph()
+		got := map[string]string{}
+		for _, id := range []string{"people/store/members", "app.privacy/store/keys", "app.privacy/store/holds", "app.privacy/store/journal"} {
+			got[id] = g.Node(id).Store.Database
+		}
+		exp := map[string]string{"people/store/members": "database", "app.privacy/store/keys": want, "app.privacy/store/holds": want, "app.privacy/store/journal": want}
+		if !maps.Equal(got, exp) {
+			t.Errorf("Keeps(app.Privacy) %v: %v, want %v", keeps, got, exp)
+		}
+	}
+}
+
+// A copy of an app (With) that kept personal data mounts kit's own service
+// anew, once: the original's copy stays the original's.
+func TestACopyOfAnAppMountsItsOwnPrivacy(t *testing.T) {
+	a := startPrivacy(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	must(t, a.Stop(ctx))
+	cp := a.With(app.Logs(io.Discard))
+	must(t, cp.Start(t.Context()))
+	mounted := 0
+	for _, n := range cp.Graph().Nodes {
+		if n.ID == "app.privacy" {
+			mounted++
+		}
+	}
+	must(t, cp.Stop(ctx))
+	if mounted != 1 {
+		t.Errorf("the copy mounts app.privacy %d times", mounted)
+	}
+	// The original runs again, for its cleanup to stop it.
+	must(t, a.Start(t.Context()))
+}

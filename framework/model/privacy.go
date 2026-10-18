@@ -7,7 +7,7 @@ import (
 	"github.com/kitsunium/sdk/framework/model/internal/core"
 )
 
-// The modes of KIT_RETENTION.
+// The modes of <PRODUCT>_RETENTION.
 const (
 	// RetentionOn erases and deletes what is due: the default.
 	RetentionOn string = core.RetentionOn
@@ -20,7 +20,7 @@ const (
 
 // The gaps a register lists for a store that keeps personal data.
 const (
-	GapPurpose   string = core.GapPurpose   // no kit.Purpose
+	GapPurpose   string = core.GapPurpose   // no app.Purpose
 	GapRetention string = core.GapRetention // no retention, kit's or the product's: its personal data is kept forever
 	GapSubject   string = core.GapSubject   // no subject field: no person can have their records
 )
@@ -52,30 +52,31 @@ const SealedPlaceholder string = core.SealedPlaceholder
 // The operations of the privacy journal.
 const (
 	JournalExport      string = core.JournalExport      // a person's records exported
-	JournalRead        string = core.JournalRead        // a record read by a module, through kit.Records
-	JournalList        string = core.JournalList        // a store's keys listed by a module that watches it, through kit.Records
+	JournalRead        string = core.JournalRead        // a record read by a module, through app.Records
+	JournalList        string = core.JournalList        // a store's keys listed by a module that watches it, through app.Records
 	JournalErase       string = core.JournalErase       // a record's personal data cleared
 	JournalDelete      string = core.JournalDelete      // a record removed
 	JournalEraseFields string = core.JournalEraseFields // some fields of a record cleared, by a module
 	JournalHold        string = core.JournalHold        // a hold placed on a record
 	JournalRelease     string = core.JournalRelease     // a hold lifted
 	JournalShred       string = core.JournalShred       // a subject's data key destroyed (ADR 0006, step 3)
+	JournalContinue    string = core.JournalContinue    // a journal opened after the one before it closed, naming its last hash (ADR 0180 step 5c)
 )
 
 type (
-	// PersonalData is a person's data as kit.Export gives it (GDPR art. 15 and
+	// PersonalData is a person's data as app.Export gives it (GDPR art. 15 and
 	// 20): their records, store by store, with what art. 15(1) asks beside them.
 	PersonalData = core.PersonalDataMessage
 )
 
 type (
 	// StoreData is one store's records about a person.
-	// It is one part of what kit.Export gives a person about themselves.
+	// It is one part of what app.Export gives a person about themselves.
 	StoreData = core.StoreDataMessage
 )
 
 type (
-	// Erasure is what kit.Erase did, store by store.
+	// Erasure is what app.Erase did, store by store.
 	// Stores lists, store by store, what the erasure did there.
 	Erasure = core.ErasureMessage
 )

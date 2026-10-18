@@ -1,0 +1,51 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "storeengine",
+    srcs = [
+        "database.go",
+        "doc.go",
+        "document.go",
+        "file.go",
+        "refusal.go",
+        "rename.go",
+        "sql.go",
+        "storeengine.go",
+        "storeengine_compliance.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/internal/app/storeengine",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+    deps = [
+        "//framework/internal/app/plug",
+        "//framework/model",
+        "//pkg/v1/clock",
+        "//pkg/v1/data/docstore",
+        "//pkg/v1/data/sql",
+        "//pkg/v1/data/vfs",
+        "//pkg/v1/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":storeengine",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+)
+
+go_test(
+    name = "storeengine_test",
+    srcs = ["api_gen_test.go"],
+    deps = [
+        ":storeengine",
+        "//framework/internal/app/plug",
+        "//pkg/v1/data/sql",
+    ],
+)

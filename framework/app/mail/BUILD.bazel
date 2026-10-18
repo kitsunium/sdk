@@ -1,0 +1,21 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "mail",
+    srcs = ["mail.go"],
+    importpath = "github.com/kitsunium/sdk/framework/app/mail",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/app/queue",
+        "//framework/app/store",
+        "//framework/internal/app/mailengine",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":mail",
+    visibility = ["//visibility:public"],
+)

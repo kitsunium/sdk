@@ -46,3 +46,14 @@ code: it raises the core's.
   under exponential backoff, and an election waited 15 s for it
   (`TestTCPFrameOnALinkThatDiedQuietlyIsDelivered`). The snapshot and JOIN
   lanes stay unbounded: a receiver writing a snapshot may stop reading.
+- Drop a snapshot trigger that falls while a cut is in flight: D7 coalesces
+  it (`snapState.pending`, `cutPending`), and the cut is made once the one in
+  flight is written. Dropped, a node that applied nothing more kept its tail
+  uncut and its log uncompacted (#375, `TestACoalescedCutIsMade`). A write
+  that fails clears the coalesced trigger with the in-flight flag
+  (`TestAFailedCutClearsTheCoalescedTrigger`).
+- Let a stopped node of a memory-network test hear what the cluster sent
+  while it was down: the network keeps those frames and delivers them at the
+  restart, which catches the node up by appends where the test meant an
+  install. Isolate it before it stops (#374,
+  `TestInstallResumesAfterACrashAtPublication`).

@@ -10,7 +10,7 @@ import (
 
 // History (ADR 0007): what a store remembers of its records — the former
 // values of the fields tagged history=N, and the password policies that
-// read them — and a field's former values, as Store.Former and kit.Export
+// read them — and a field's former values, as Store.Former and app.Export
 // give them.
 
 // StoreHistoryMessage is what a store remembers of its records.
@@ -18,7 +18,7 @@ import (
 // them, and Versions, Trashed and VersionBytes weigh its records' versions.
 type StoreHistoryMessage struct {
 	// Revisions is how many former versions each record keeps
-	// (kit.Revisions, ADR 0007 §3); zero when it keeps none.
+	// (app.Revisions, ADR 0007 §3); zero when it keeps none.
 	Revisions int `json:"revisions,omitempty"`
 	// Fields are the JSON pointers of the fields that keep their former
 	// values: tagged history=N — the schema's Field.History says how many —
@@ -50,7 +50,7 @@ type PasswordPolicyMessage struct {
 	// NotReused is how many former passwords it refuses; zero when it
 	// refuses none.
 	NotReused int `json:"notReused,omitempty"`
-	// NotCommon says it refuses the most common passwords (kit.NotCommon),
+	// NotCommon says it refuses the most common passwords (app.NotCommon),
 	// as every policy does.
 	NotCommon bool `json:"notCommon,omitempty"`
 	// Source is where the policy is declared.
@@ -62,16 +62,16 @@ type PasswordPolicyMessage struct {
 type FormerMessage struct {
 	// Value is the field's value then, as JSON; absent for a secret field,
 	// whose former values are never given.
-	Value json.RawMessage `json:"value,omitempty" kit:"personal"`
+	Value json.RawMessage `json:"value,omitempty" app:"personal"`
 	// Until is when it was replaced, on the app's clock.
 	Until time.Time `json:"until"`
-	// By is the user who replaced it — kit.UserID —, empty for a write
+	// By is the user who replaced it — app.UserID —, empty for a write
 	// with no user: a job's, a loop's, kit's own.
 	By string `json:"by,omitempty"`
 }
 
 // RecordHistoryMessage is what kit remembers of one record, as the Studio's data
-// view shows it (GET /_kit/api/former): each field's former values, newest
+// view shows it (GET /_app/api/former): each field's former values, newest
 // first, by the field's JSON pointer — a secret field's without their
 // values, a personal or special one's redacted.
 type RecordHistoryMessage struct {
@@ -87,7 +87,7 @@ type RecordVersionMessage struct {
 	Number uint64 `json:"number"`
 	// At is when the write that made it ran, on the app's clock.
 	At time.Time `json:"at,omitzero"`
-	// By is the user who made it — kit.UserID —, empty for a write with no
+	// By is the user who made it — app.UserID —, empty for a write with no
 	// user.
 	By string `json:"by,omitempty"`
 	// Command is the node ID of the command that made it, empty outside
@@ -95,7 +95,7 @@ type RecordVersionMessage struct {
 	Command string `json:"command,omitempty"`
 	// Value is the record as it was: in an export, its secret members left
 	// out; in the Studio, as the data browser shows a record.
-	Value json.RawMessage `json:"value,omitempty" kit:"personal"`
+	Value json.RawMessage `json:"value,omitempty" app:"personal"`
 }
 
 // EditMessage is one change between two versions of a record, in RFC 6902's
@@ -107,12 +107,12 @@ type RecordVersionMessage struct {
 type EditMessage struct {
 	Op   string          `json:"op"`
 	Path string          `json:"path"`
-	From json.RawMessage `json:"from,omitempty" kit:"personal"`
-	To   json.RawMessage `json:"to,omitempty" kit:"personal"`
+	From json.RawMessage `json:"from,omitempty" app:"personal"`
+	To   json.RawMessage `json:"to,omitempty" app:"personal"`
 }
 
 // RecordVersionsMessage is a record's versions as the Studio's data view
-// shows them (GET /_kit/api/revisions): newest first, each as the data
+// shows them (GET /_app/api/revisions): newest first, each as the data
 // browser shows a record — a member sealed at rest sealed, a personal,
 // special or secret one redacted —, and, when two were asked for, what
 // changed from one to the other, a value given only where the data browser
@@ -127,7 +127,7 @@ type RecordVersionsMessage struct {
 }
 
 // TrashedRecordMessage is one record in a store's trash as the Studio lists
-// it (GET /_kit/api/trash, ADR 0178 C4): its key, when the product deleted
+// it (GET /_app/api/trash, ADR 0178 C4): its key, when the product deleted
 // it and when kit purges it, on the app's clock — never its value. A key
 // that reads a personal, special or secret member — the subject included —
 // is not given, as the data browser never shows that member: Hidden says so.
@@ -145,7 +145,7 @@ type TrashedRecordMessage struct {
 }
 
 // StoreTrashMessage is a page of a store's trash as the Studio lists it (GET
-// /_kit/api/trash?store=&offset=&limit=): Total records in the trash, in
+// /_app/api/trash?store=&offset=&limit=): Total records in the trash, in
 // key order, Records those from the page's offset, Next the offset of the
 // page after — absent on the last. A page is bounded, 200 records unless
 // the Studio asks from 1 to 1000; an offset counts records, never quotes a

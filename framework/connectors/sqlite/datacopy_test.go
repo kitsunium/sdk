@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/app"
 	"github.com/kitsunium/sdk/framework/connectors/sqlite"
-	"github.com/kitsunium/sdk/framework/kit"
 	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 )
 
@@ -34,8 +34,8 @@ import (
 // rests.
 type dossier struct {
 	ID     string `json:"id"`
-	Holder string `json:"holder" kit:"subject"`
-	Name   string `json:"name" kit:"personal"`
+	Holder string `json:"holder" app:"subject"`
+	Name   string `json:"name" app:"personal"`
 	Status string `json:"status"`
 }
 
@@ -46,27 +46,27 @@ const outboxMail = `{"to":"holder@registry.test","subject":"Your dossier"}`
 // registry is a product that keeps dossiers, posts them and mails about
 // them, declared afresh for each run.
 type registry struct {
-	app      *kit.App
-	dossiers *kit.Store[dossier]
+	app      *app.App
+	dossiers *app.Store[dossier]
 }
 
 // newRegistry declares the registry, its data in dir, on SQLite when lite.
 func newRegistry(t *testing.T, dir string, logs io.Writer, lite bool) *registry {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
-	t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")
-	svc := kit.NewService("registry", "Dossiers, kept, posted and mailed.")
+	t.Setenv("REGISTRY_SECRETS", "memory")
+	t.Setenv("REGISTRY_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("REGISTRY_INDEX_KEY", "an index key of more than 16 bytes")
+	svc := app.NewService("registry", "Dossiers, kept, posted and mailed.")
 	r := &registry{}
-	r.dossiers = svc.Store("dossiers", func(d dossier) string { return d.ID }, kit.Revisions(2), kit.Purpose("Keep the dossiers"))
+	r.dossiers = svc.Store("dossiers", func(d dossier) string { return d.ID }, app.Revisions(2), app.Purpose("Keep the dossiers"))
 	posted := svc.Topic[dossier]("posted")
 	svc.Subscribe("filed", posted, func(context.Context, dossier) error { return nil })
-	svc.Mailer("notify", kit.From("Registry", "registry@example.com"), kit.MailAttempts(1))
-	opts := []kit.AppOption{kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvProduction), kit.DataDir(dir), kit.Logs(logs)}
+	svc.Mailer("notify", app.From("Registry", "registry@example.com"), app.MailAttempts(1))
+	opts := []app.AppOption{app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.DataDir(dir), app.Logs(logs)}
 	if lite {
-		opts = append(opts, kit.Database("main", sqlite.Engine()))
+		opts = append(opts, app.Database("main", sqlite.Engine()))
 	}
-	r.app = kit.NewApp("registry", svc).With(opts...)
+	r.app = app.NewApp("registry", svc).With(opts...)
 	return r
 }
 
@@ -84,7 +84,7 @@ func fileQueue(t *testing.T, dir string) queue.Broker {
 func TestDataCopyIntoSQLite(t *testing.T) {
 	needsFileStore(t)
 	dir := t.TempDir()
-	ctx := kit.WithUser(t.Context(), "clerk", struct{}{})
+	ctx := app.WithUser(t.Context(), "clerk", struct{}{})
 
 	// The product as it was: its data in the directory.
 	before := newRegistry(t, dir, io.Discard, false)
@@ -153,18 +153,18 @@ func TestDataCopyIntoSQLite(t *testing.T) {
 	if n := count("registry__dossiers"); n != 2 {
 		t.Errorf("the dossiers' table holds %d rows, want 2", n)
 	}
-	if n := count("kit_queue__registry__filed"); n != 3 {
+	if n := count("app_queue__registry__filed"); n != 3 {
 		t.Errorf("the subscription's table holds %d messages, want 3", n)
 	}
 	var box []byte
-	if err := db.QueryRowContext(t.Context(), `SELECT payload FROM "kit_queue__registry__notify__outbox"`).Scan(&box); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT payload FROM "app_queue__registry__notify__outbox"`).Scan(&box); err != nil {
 		t.Fatalf("the outbox's table: %v", err)
 	}
 	if bytes.Contains(box, []byte("holder@registry.test")) {
 		t.Errorf("the mail rests in clear in the outbox's table: %s", box)
 	}
 	var deliveries int
-	if err := db.QueryRowContext(t.Context(), `SELECT deliveries FROM "kit_queue__registry__filed" WHERE payload = ?`, []byte(`"retried"`)).Scan(&deliveries); err != nil || deliveries != 3 {
+	if err := db.QueryRowContext(t.Context(), `SELECT deliveries FROM "app_queue__registry__filed" WHERE payload = ?`, []byte(`"retried"`)).Scan(&deliveries); err != nil || deliveries != 3 {
 		t.Errorf("the retried message's count on the table = %d, %v; want 3", deliveries, err)
 	}
 	for _, q := range []string{filepath.Join("registry", "queues", "filed"), filepath.Join("registry", "outbox", "notify")} {

@@ -1,0 +1,34 @@
+// Package store plugs kit's stores in: the stores a service declares, the
+// databases a product keeps them in and their migrations, app.Transact on a
+// database, sealing at rest, history, revisions, trash, retention, holds,
+// the privacy journal, Records and `data copy` — the engines the SDK's
+// document store and sql run them on. A product that declares a store or a
+// database imports it:
+//
+//	import _ "github.com/kitsunium/sdk/framework/app/store"
+//
+// A product that declares none does not, and links none of those engines; a
+// program that declares one without it is refused at the start, the refusal
+// naming this import (CodeSubsystemMissing). A connector —
+// framework/connectors/postgres, …/mysql, …/sqlite — imports it itself;
+// framework/app does not (ADR 0179 step 10): kit gen writes the line for a
+// designed product, and a hand-written one writes it.
+package store
+
+import (
+	iapp "github.com/kitsunium/sdk/framework/internal/app"
+	"github.com/kitsunium/sdk/framework/internal/app/storeengine"
+)
+
+// Importing the package plugs the stores in: a blank package-level value
+// rather than an init, the SDK's convention.
+var _ = enable()
+
+// enable plugs the stores' engines, kit's scope on a database and the
+// migrations of kit's tables into every app, and makes kit's own store code
+// reachable: what kit mounts, starts and answers for the stores.
+func enable() bool {
+	storeengine.Enable()
+	iapp.EnableStores()
+	return true
+}

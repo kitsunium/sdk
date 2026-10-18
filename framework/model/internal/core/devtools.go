@@ -11,7 +11,7 @@ const (
 	MailDead     = "dead"     // abandoned after its last attempt
 )
 
-// MockReplace is the one mode a [MockMessage] has: a test's kit.Replace, a typed
+// MockReplace is the one mode a [MockMessage] has: a test's app.Replace, a typed
 // function run in place of an operation's handler — or of what a port calls —
 // while the rest of its pipeline still runs. The Studio sets none (D13): it
 // shows the application, it does not act on it, so the respond, fail and

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/app"
 	"github.com/kitsunium/sdk/framework/connectors/sqlite"
-	"github.com/kitsunium/sdk/framework/kit"
 )
 
 // promptly is what a write that makes a data key may take: far below the
@@ -15,19 +15,19 @@ import (
 // sits out before it fails.
 const promptly time.Duration = 2 * time.Second
 
-// kit.Privacy on a SQLite file (ADR 0004, ADR 0006): its holds and its
+// app.Privacy on a SQLite file (ADR 0004, ADR 0006): its holds and its
 // journal live there, beside the product's stores, and its data keys stay
 // in the data directory. A SQLite file has one writer, and a data key is
 // written apart from every transaction: on the file, it would wait for the
 // writer the very write that needs it holds — the store's own transaction
-// around an update, kit.Transact's on the file —, the busy timeout long,
+// around an update, app.Transact's on the file —, the busy timeout long,
 // then fail.
 
 // deskCase is a person's case, sealed where it rests.
 type deskCase struct {
 	ID    string `json:"id"`
-	Email string `json:"email" kit:"subject"`
-	Note  string `json:"note" kit:"personal"`
+	Email string `json:"email" app:"subject"`
+	Note  string `json:"note" app:"personal"`
 }
 
 // tallyRow is a public count: nothing of it is sealed.
@@ -39,58 +39,58 @@ type tallyRow struct {
 // deskLetter is a message about a person: sealed under their data key in
 // its subscription's queue.
 type deskLetter struct {
-	To   string `json:"to" kit:"subject"`
-	Body string `json:"body" kit:"personal"`
+	To   string `json:"to" app:"subject"`
+	Body string `json:"body" app:"personal"`
 }
 
 // deskReminder is a queued command's input about a person: sealed under
 // their data key in the command's queue.
 type deskReminder struct {
-	Email string `json:"email" kit:"subject"`
-	Text  string `json:"text" kit:"personal"`
+	Email string `json:"email" app:"subject"`
+	Text  string `json:"text" app:"personal"`
 }
 
-// desk is a product that keeps its tally on its SQLite file, kit.Privacy
+// desk is a product that keeps its tally on its SQLite file, app.Privacy
 // beside it — and its cases there too, or in the data directory —, and
 // posts letters and reminders.
 type desk struct {
-	app     *kit.App
-	cases   *kit.Store[deskCase]
-	tally   *kit.Store[tallyRow]
-	letters *kit.Topic[deskLetter]
-	remind  *kit.Command[deskReminder, kit.Empty]
+	app     *app.App
+	cases   *app.Store[deskCase]
+	tally   *app.Store[tallyRow]
+	letters *app.Topic[deskLetter]
+	remind  *app.Command[deskReminder, app.Empty]
 	// posted and reminded are the letters and reminders delivered, opened.
 	posted   chan deskLetter
 	reminded chan deskReminder
 }
 
 // startDesk runs a desk in production, its data in a directory of its own,
-// its tally and kit.Privacy on the SQLite database main, and its cases
+// its tally and app.Privacy on the SQLite database main, and its cases
 // there too when casesOnTheFile.
 func startDesk(t *testing.T, casesOnTheFile bool) *desk {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
-	t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")
-	svc := kit.NewService("desk", "Cases, letters and reminders, sealed; kit.Privacy on SQLite.")
+	t.Setenv("DESK_SECRETS", "memory")
+	t.Setenv("DESK_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("DESK_INDEX_KEY", "an index key of more than 16 bytes")
+	svc := app.NewService("desk", "Cases, letters and reminders, sealed; app.Privacy on SQLite.")
 	d := &desk{posted: make(chan deskLetter, 8), reminded: make(chan deskReminder, 8)}
-	d.cases = svc.Store("cases", func(c deskCase) string { return c.ID }, kit.Purpose("Handle the cases"))
+	d.cases = svc.Store("cases", func(c deskCase) string { return c.ID }, app.Purpose("Handle the cases"))
 	d.tally = svc.Store("tally", func(r tallyRow) string { return r.ID })
 	d.letters = svc.Topic[deskLetter]("letters")
 	svc.Subscribe("post", d.letters, func(_ context.Context, l deskLetter) error {
 		d.posted <- l
 		return nil
 	})
-	d.remind = svc.Command("remind", func(_ context.Context, r deskReminder) (kit.Empty, error) {
+	d.remind = svc.Command("remind", func(_ context.Context, r deskReminder) (app.Empty, error) {
 		d.reminded <- r
-		return kit.Empty{}, nil
-	}, kit.Queued())
-	keeps := []kit.Keepable{kit.Privacy, d.tally}
+		return app.Empty{}, nil
+	}, app.Queued())
+	keeps := []app.Keepable{app.Privacy, d.tally}
 	if casesOnTheFile {
 		keeps = append(keeps, d.cases)
 	}
-	d.app = kit.NewApp("desk", svc).With(kit.Database("main", sqlite.Engine(), kit.Keeps(keeps...)),
-		kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvProduction), kit.DataDir(t.TempDir()), kit.Logs(io.Discard))
+	d.app = app.NewApp("desk", svc).With(app.Database("main", sqlite.Engine(), app.Keeps(keeps...)),
+		app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.DataDir(t.TempDir()), app.Logs(io.Discard))
 	run(t, d.app)
 	return d
 }
@@ -121,14 +121,14 @@ func received[T any](t *testing.T, what string, ch <-chan T) T {
 	return zero
 }
 
-// Where kit.Privacy's stores live on a SQLite database: the holds and the
+// Where app.Privacy's stores live on a SQLite database: the holds and the
 // journal on the file, the data keys in the data directory.
 func TestTheDataKeysStayOffTheFile(t *testing.T) {
 	needsFileStore(t)
 	g := startDesk(t, true).app.Graph()
 	for id, want := range map[string]string{
-		"kit.privacy/store/keys": "file", "kit.privacy/store/holds": "sqlite",
-		"kit.privacy/store/journal": "sqlite", "desk/store/cases": "sqlite",
+		"app.privacy/store/keys": "file", "app.privacy/store/holds": "sqlite",
+		"app.privacy/store/journal": "sqlite", "desk/store/cases": "sqlite",
 	} {
 		if n := g.Node(id); n == nil || n.Store.Backend != want {
 			t.Errorf("%s: %+v, want the backend %s", id, n, want)
@@ -161,12 +161,12 @@ func TestAHoldOnSQLiteMakesItsKeysWithoutWaiting(t *testing.T) {
 	}
 }
 
-// Inside kit.Transact on the file — its transaction holds the file's writer
+// Inside app.Transact on the file — its transaction holds the file's writer
 // from its first call there —, what seals under a data key not made yet
 // makes it without waiting: a case written and held, a hold of kit's own, a
 // letter published, a reminder dispatched. What is delivered after the
 // commit opens. The cases in the data directory are how a product kept
-// kit.Privacy on SQLite before its keys left the file.
+// app.Privacy on SQLite before its keys left the file.
 func TestATransactionOnSQLiteMakesDataKeysWithoutWaiting(t *testing.T) {
 	needsFileStore(t)
 	for _, onFile := range []bool{false, true} {
@@ -182,7 +182,7 @@ func TestATransactionOnSQLiteMakesDataKeysWithoutWaiting(t *testing.T) {
 				t.Helper()
 				n++
 				timed(t, what, func() error {
-					return kit.Transact(ctx, func(ctx context.Context) error {
+					return app.Transact(ctx, func(ctx context.Context) error {
 						if err := d.tally.Put(ctx, tallyRow{ID: "t", N: n}); err != nil {
 							return err
 						}

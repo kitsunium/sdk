@@ -24,7 +24,7 @@ So that `pkg/v1/data/codec/strictjson` links no `net/http`. `DecodeRequest`
 lived there until a program decoding documents that are not request bodies was
 found carrying an HTTP stack for one function. It moved here, a child of
 `strictjson` that links it — the reverse is never true (ADR 0155). The move
-broke the import path while v0 (ADR 0155 §4); `framework/internal/kit` moved
+broke the import path while v0 (ADR 0155 §4); `framework/internal/app` moved
 with it.
 
 ## Do NOT

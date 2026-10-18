@@ -1,0 +1,72 @@
+{
+  "c-ann": {
+    "former": [
+      {
+        "at": "2026-10-18T04:57:19.358707764Z",
+        "doc": {
+          "id": "c-ann",
+          "email": "sealed:v1:ASJyOjdhYTkwOTZmOTc0N2U1YzQwYzU0NTAyNjA1MTc5NDhjTz1C8_FrjlMBAVYVKxZ-4PrYQ33xcNWRTM54-YKHVx3odKvMfbMnJrFvUAZxDsMe56b7Ldb_f-WdL76nfkfn_LWiSv1skQ",
+          "note": "sealed:v1:ASJyOjdhYTkwOTZmOTc0N2U1YzQwYzU0NTAyNjA1MTc5NDhjTz1C8_FrjlMBARa44Uyle8CUHklLhWlFvQlM_9TH1YDhRxr-_ciocuucsOY7X7I5Js7adzkQHCcUIPbJIX2KoBvVqUUdcw",
+          "stage": 2
+        },
+        "number": 2
+      },
+      {
+        "at": "2026-10-18T04:57:19.352669329Z",
+        "doc": {
+          "id": "c-ann",
+          "email": "sealed:v1:ASJyOjdhYTkwOTZmOTc0N2U1YzQwYzU0NTAyNjA1MTc5NDhjTz1C8_FrjlMBAbwtuk4FBWtwUE78pgVoawh_xoTHB4gHk_Wk6R-ZGXuIjsfyi-SWRVE8XJ5TUzQio_ZN7UuoeTTbhMS2Nw",
+          "note": "sealed:v1:ASJyOjdhYTkwOTZmOTc0N2U1YzQwYzU0NTAyNjA1MTc5NDhjTz1C8_FrjlMBAajxoV2s4EZMoapgelTDdcCKJUJzp7OL6N6ys27Qd9pUFkPfidrkvoaM1rDCNwZGqhEZJwJsvXL3Bv1MhQ",
+          "stage": 1
+        },
+        "number": 1
+      }
+    ],
+    "current": {
+      "at": "2026-10-18T04:57:19.364903461Z",
+      "number": 3
+    }
+  },
+  "c-bob": {
+    "trashed": {
+      "at": "2026-10-18T04:57:19.374219364Z",
+      "doc": {
+        "id": "c-bob",
+        "email": "sealed:v1:ASJzOjIwZWQ2ZGFhOGMzYWYzOTE4OTRiNjZlZWE4NWM1ZGE1Md6g66HdbAABASwtroauTIH7KrZwWOKau4JqyMn8S9gLMAwQpMKSsKOxYLGCp2suo1e3fhZBux-jQmVA2e1YvcHSVYu7vQ",
+        "note": "sealed:v1:ASJzOjIwZWQ2ZGFhOGMzYWYzOTE4OTRiNjZlZWE4NWM1ZGE1Md6g66HdbAABAcnmkBWsdf9k23zkUKgRdWlTnU4ip5HRvKIW_LNtDvfTAmRMAYLoD3sA57XVIZ_391WrkG5Qoi21Qe3EXw",
+        "stage": 1
+      }
+    },
+    "current": {
+      "at": "2026-10-18T04:57:19.371169218Z",
+      "number": 1
+    }
+  },
+  "c-cy": {
+    "former": [
+      {
+        "at": "2026-10-18T04:57:19.380246367Z",
+        "doc": {
+          "id": "c-cy",
+          "email": "",
+          "note": "",
+          "stage": 1
+        },
+        "number": 1
+      }
+    ],
+    "current": {
+      "at": "2026-10-18T04:57:19.400696095Z",
+      "meta": {
+        "command": "atelier/command/forget"
+      },
+      "number": 2
+    }
+  },
+  "c-dan": {
+    "current": {
+      "at": "2026-10-18T04:57:19.386295001Z",
+      "number": 1
+    }
+  }
+}

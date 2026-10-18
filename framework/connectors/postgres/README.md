@@ -13,8 +13,8 @@ Package postgres is kit's PostgreSQL engine (ADR 0004): the one module a kit pro
 ```
 import "github.com/kitsunium/sdk/framework/connectors/postgres"
 
-var App = kit.NewApp("vigie", intake.Service, desk.Service).With(
-	kit.Database("database", postgres.Engine()),
+var App = app.NewApp("vigie", intake.Service, desk.Service).With(
+	app.Database("database", postgres.Engine()),
 )
 ```
 
@@ -23,7 +23,7 @@ The database's URL is libpq's, as pgx reads it — postgres://user:password@host
 ## Index
 
 - [Constants](<#constants>)
-- [func Engine\(\) kit.Engine](<#Engine>)
+- [func Engine\(\) app.Engine](<#Engine>)
 
 ## Constants
 
@@ -40,9 +40,9 @@ Code `0.4.16.1`
 ## func [Engine](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/postgres/postgres.go>)
 
 ```go
-func Engine() kit.Engine
+func Engine() app.Engine
 ```
 
-Engine is the PostgreSQL engine, for kit.Database.
+Engine is the PostgreSQL engine, for app.Database.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

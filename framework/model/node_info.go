@@ -21,10 +21,10 @@ const (
 // How an exposure says it is open on purpose, when its operation declares
 // no permission and no rule (EndpointInfo.Access).
 const (
-	// AccessAnyone is kit.Anyone(): whoever reaches the route may run the
+	// AccessAnyone is app.Anyone(): whoever reaches the route may run the
 	// operation.
 	AccessAnyone string = core.AccessAnyone
-	// AccessAnyUser is kit.AnyUser(): any signed-in user may run it — the
+	// AccessAnyUser is app.AnyUser(): any signed-in user may run it — the
 	// operation asks for one.
 	AccessAnyUser string = core.AccessAnyUser
 )
@@ -53,17 +53,17 @@ const (
 	TriggerCreate string = core.TriggerCreate
 )
 
-// How the start chose what a port calls: kit.Bind, else the one
+// How the start chose what a port calls: app.Bind, else the one
 // Service.Implement among the services the app mounts, else the port's
 // fallback — or a test replaced the port.
 const (
-	// ViaBind is the app's kit.Bind.
+	// ViaBind is the app's app.Bind.
 	ViaBind string = core.ViaBind
 	// ViaImplement is the one Service.Implement among the mounted services.
 	ViaImplement string = core.ViaImplement
-	// ViaFallback is the port's own kit.Fallback.
+	// ViaFallback is the port's own app.Fallback.
 	ViaFallback string = core.ViaFallback
-	// ViaReplace is a test's kit.Replace: a function answers in place of
+	// ViaReplace is a test's app.Replace: a function answers in place of
 	// whatever the port would call, and nothing is bound.
 	ViaReplace string = core.ViaReplace
 )
@@ -73,7 +73,7 @@ const (
 	// ModeSync is handled on its caller's goroutine: Dispatch returns the
 	// handler's result.
 	ModeSync string = core.ModeSync
-	// ModeQueued is sent to the background (kit.Queued): Dispatch returns
+	// ModeQueued is sent to the background (app.Queued): Dispatch returns
 	// once the command's own queue accepted it, and a consumer handles it,
 	// retried and dead-lettered.
 	ModeQueued string = core.ModeQueued
@@ -102,11 +102,11 @@ const (
 	// SecretFromEnv is the environment: the variable, or the file its _FILE
 	// form names.
 	SecretFromEnv string = core.SecretFromEnv
-	// SecretFromFile is kit's encrypted file store: KIT_SECRETS=file:<dir>,
-	// or .kit/secrets/dev in dev.
+	// SecretFromFile is the framework's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,
+	// or the data directory's .secrets in dev.
 	SecretFromFile string = core.SecretFromFile
 	// SecretFromMemory is a store in the process's memory: a test, or
-	// KIT_SECRETS=memory. A generated secret is made again at every start.
+	// <PRODUCT>_SECRETS=memory. A generated secret is made again at every start.
 	SecretFromMemory string = core.SecretFromMemory
 	// SecretFromStore is a store the product's code gave kit.
 	SecretFromStore string = core.SecretFromStore
@@ -142,7 +142,7 @@ const (
 	SelectDefault string = core.SelectDefault // the default case: the select never blocks
 )
 
-// What a field holds: the classes of a kit tag (ADR 0006).
+// What a field holds: the classes of an app tag (ADR 0006).
 const (
 	// ClassPublic holds nothing personal and nothing secret: the question
 	// was asked.

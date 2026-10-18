@@ -21,7 +21,11 @@ export async function GET(context) {
     title: "Documentation feed",
     description: "Latest pages in the documentation portal.",
     site: context.site,
-    items: entries.map((entry) => {
+    //: getCollection's order is not guaranteed, and an item carries no date:
+    //: sorted by link, the feed is the same bytes for the same pages
+    //: (scripts/lib/batches.mjs mergeRss sorts the batches' union alike).
+    items: entries
+      .map((entry) => {
       //: served at its directory: "<release>/<major>/adr/index" is …/adr/.
       const segments = pagePath(entry.id).split("/");
       const major = segments[0];
@@ -33,7 +37,8 @@ export async function GET(context) {
         description: entry.data?.description ?? "",
         link: `/${major}/${release}/${slug}`,
       };
-    }),
+    })
+      .sort((a, b) => (a.link < b.link ? -1 : a.link > b.link ? 1 : 0)),
     customData: `<language>en</language>`,
   });
 }

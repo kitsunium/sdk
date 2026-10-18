@@ -15,23 +15,23 @@ Package sqlite is kit's SQLite engine (ADR 0004): the one module a kit product i
 ```
 import "github.com/kitsunium/sdk/framework/connectors/sqlite"
 
-var App = kit.NewApp("vigie", intake.Service, audit.Service).With(
-	kit.Database("archive", sqlite.Engine(), kit.Keeps(audit.Service)),
+var App = app.NewApp("vigie", intake.Service, audit.Service).With(
+	app.Database("archive", sqlite.Engine(), app.Keeps(audit.Service)),
 )
 ```
 
-Its URL, in the variable \<APP>\_\<NAME>\_URL, is the file's path — or a file: URI, with the driver's parameters —; without one, kit keeps the database in \<data>/\<name>.sqlite. The engine opens the file in WAL mode with a busy timeout, and its transactions take the write lock when they begin (\_txlock=immediate), so two writers queue rather than fail; a parameter the URL writes itself wins. It is a kit.LockWaiter: kit gives it a busy timeout under \<name>-timeout, T − max(250ms, T/10), and refuses at start a T under 500ms or a URL whose own busy timeout reaches T.
+Its URL, in the variable \<APP>\_\<NAME>\_URL, is the file's path — or a file: URI, with the driver's parameters —; without one, kit keeps the database in \<data>/\<name>.sqlite. The engine opens the file in WAL mode with a busy timeout, and its transactions take the write lock when they begin (\_txlock=immediate), so two writers queue rather than fail; a parameter the URL writes itself wins. It is an app.LockWaiter: kit gives it a busy timeout under \<name>-timeout, T − max(250ms, T/10), and refuses at start a T under 500ms or a URL whose own busy timeout reaches T.
 
 On dragonfly, illumos and solaris, which modernc.org/sqlite does not port to, the module builds and Open refuses with proc.UnsupportedPlatform.
 
 Its migrations — kit's own, which make the tables of the stores it keeps, then the product's and the modules' — run under the database file's own write lock, one transaction per run (the SDK's ADR 0140).
 
-kit.Keeps(kit.Privacy) on the file keeps kit's legal holds and privacy journal there, in the product's transactions, and kit's data keys in the data directory: a data key is written apart from every transaction, and the file's one writer may be held by the transaction of the very write that needs the key.
+app.Keeps(app.Privacy) on the file keeps kit's legal holds and privacy journal there, in the product's transactions, and kit's data keys in the data directory: a data key is written apart from every transaction, and the file's one writer may be held by the transaction of the very write that needs the key.
 
 ## Index
 
 - [Constants](<#constants>)
-- [func Engine\(\) kit.Engine](<#Engine>)
+- [func Engine\(\) app.Engine](<#Engine>)
 
 ## Constants
 
@@ -48,9 +48,9 @@ Code `0.4.18.1`
 ## func [Engine](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/sqlite/sqlite.go>)
 
 ```go
-func Engine() kit.Engine
+func Engine() app.Engine
 ```
 
-Engine is the SQLite engine, for kit.Database.
+Engine is the SQLite engine, for app.Database.
 
 Generated from [docs/api](<https://github.com/kitsunium/sdk/blob/main/docs/api>) by tools/genindex.

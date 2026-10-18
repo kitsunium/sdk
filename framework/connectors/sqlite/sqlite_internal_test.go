@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kitsunium/sdk/framework/kit"
+	"github.com/kitsunium/sdk/framework/app"
 )
 
 // The engine waits for the file's write lock as long as kit says.
-var _ kit.LockWaiter = engine{}
+var _ app.LockWaiter = engine{}
 
 // The engine's defaults fill what the URL leaves out, and a parameter the
 // URL writes wins — under either spelling the driver reads. The busy
