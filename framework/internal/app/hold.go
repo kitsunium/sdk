@@ -168,6 +168,11 @@ func (s *storeCore) holdKey(ctx context.Context, a *App, key, reason string) err
 	if err := holds.write(ctx, h, plug.WriteUpsert); err != nil {
 		return err
 	}
+	// A hold a former release placed on it is replaced, never kept beside
+	// (ADR 0180 step 5c).
+	if err := a.dropFormerHold(ctx, s.id, key); err != nil {
+		return err
+	}
 	s.reschedule(key)
 	// Held, the record rests under a data key of its own from now on: its
 	// person's erasure leaves it readable (seal.go).
@@ -181,18 +186,21 @@ func (s *storeCore) release(ctx context.Context, a *App, key string) error {
 	if holds == nil {
 		return noPrivacy()
 	}
+	_, held, err := a.holdOf(ctx, s.id, key)
+	switch {
+	case err != nil:
+		return err
+	case !held:
+		return NotFound(fmt.Sprintf("%s: no hold keeps the record %q", s.name, clip(key)))
+	}
 	keys, err := a.referenceKeys(ctx)
 	if err != nil {
 		return err
 	}
-	h, err := holds.read(ctx, keys.recordRef(s.id, key))
-	if isNotFound(err) {
-		return NotFound(fmt.Sprintf("%s: no hold keeps the record %q", s.name, clip(key)))
-	}
-	if err != nil {
+	if err := holds.remove(ctx, keys.recordRef(s.id, key)); err != nil && !isNotFound(err) {
 		return err
 	}
-	if err := holds.remove(ctx, h.ID); err != nil {
+	if err := a.dropFormerHold(ctx, s.id, key); err != nil {
 		return err
 	}
 	s.reschedule(key)
@@ -235,15 +243,19 @@ func (a *App) holdOf(ctx context.Context, store, key string) (holdRecord, bool, 
 	if holds.engine() == nil {
 		return holdRecord{}, false, notRunning(&holds.nodeBase)
 	}
-	keys, err := a.referenceKeys(ctx)
+	keys, err := a.derivedKeys(ctx)
 	if err != nil {
 		return holdRecord{}, false, err
 	}
-	h, err := holds.read(ctx, keys.recordRef(store, key))
-	if isNotFound(err) {
-		return holdRecord{}, false, nil
+	// Under the record's present reference, then the one a former release
+	// filed it under (ADR 0180 step 5c).
+	for _, id := range distinct(keys.present.recordRef(store, key), keys.former.recordRef(store, key)) {
+		h, err := holds.read(ctx, id)
+		if !isNotFound(err) {
+			return h, err == nil, err
+		}
 	}
-	return h, err == nil, err
+	return holdRecord{}, false, nil
 }
 
 // holdRefusal is the Conflict a held record answers to what would erase or
@@ -350,7 +362,11 @@ func (a *App) allHolds(ctx context.Context) ([]holdRecord, error) {
 	if holds.engine() == nil {
 		return nil, notRunning(&holds.nodeBase)
 	}
-	return holds.all(ctx)
+	all, err := holds.all(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return a.presentHolds(ctx, all)
 }
 
 // holdList is every hold, newest first, as the model says it: references

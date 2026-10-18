@@ -86,6 +86,7 @@ go_test(
         "former_keys_move_test.go",
         "former_keys_test.go",
         "former_move_test.go",
+        "former_refs_test.go",
         "former_test.go",
         "keys_test.go",
         "mail_test.go",

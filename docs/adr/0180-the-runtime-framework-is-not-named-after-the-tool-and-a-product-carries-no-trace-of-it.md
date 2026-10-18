@@ -311,7 +311,7 @@ nothing.
 | 2 | platform | `kit dev` injects the hook by overlay; the generator stops writing `dev_gen.go`; `kit check` refuses a product's import of the Studio subsystem; the todo deletes `kitdev.go`, moderation its import |
 | 3 | SDK | The rename of §1, a design edit first (ADR 0163, 0167, 0168): `design/framework/app.yaml`, `kit gen`, `make api`, `make docs-readme`; the facade's and implementation's paths; `model` `Version` 6; the scripts, `BUILD.bazel`, `//:audit_sources`, `tools/alloc-lane-targets.txt` and `codes.ranges` owners re-pointed; the three database connectors follow; the texts of §2 reworded — done (2026-10-18, §Step 3, done) |
 | 4 | SDK | The runtime names of §3: the prefix, the routes, the tag key, the graph values, the telemetry name; the refusals of an old name at the start (§3, Q12) — done (2026-10-18, §Step 4, done) |
-| 5 | SDK | The names at rest (Q5, Q6): the tables, the migration set, the secret prefix, the dev data directory — renamed by a framework migration —, the domain-separation labels re-sealed under new ones, the old ones removed in a later minor (Q6) — split in three: 5a done (2026-10-18, §Step 5a, done): the tables, the migration set, the dev data directory and the privacy service moved; 5b done (2026-10-18, §Step 5b, done): the secret prefix, every data key re-wrapped under `app-data-key`, and the label of a box sealed under data-key itself; 5c split in two on the owner's decision of 2026-10-18 (§Decision of 18 October): 5c-1 done (2026-10-18, §Step 5c-1, done): the privacy journal a former release kept closed as it is and continued under the new labels; 5c-2 to come: the references at rest and the privacy service's ids re-sealed under the new labels, and the module name `kit` released |
+| 5 | SDK | The names at rest (Q5, Q6): the tables, the migration set, the secret prefix, the dev data directory — renamed by a framework migration —, the domain-separation labels re-sealed under new ones, the old ones removed in a later minor (Q6) — split in three: 5a done (2026-10-18, §Step 5a, done): the tables, the migration set, the dev data directory and the privacy service moved; 5b done (2026-10-18, §Step 5b, done): the secret prefix, every data key re-wrapped under `app-data-key`, and the label of a box sealed under data-key itself; 5c split in two on the owner's decision of 2026-10-18 (§Decision of 18 October): 5c-1 done (2026-10-18, §Step 5c-1, done): the privacy journal a former release kept closed as it is and continued under the new labels; 5c-2 done (2026-10-18, §Step 5c-2, done): the references at rest and the privacy service's ids re-sealed under the new labels; the module name `kit` stays reserved, for the reasons that section gives |
 | 6 | SDK | `TestAProductCarriesNoTraceOfTheTool`, with an empty allow-list; it can land earlier with an allow-list shrinking step by step, as ADR 0179's `stillInCore` did |
 | 7 | platform | Its ADR for §5: the header, the digest line, the skeletons, the seed variable, the design's `apiVersion`, the lock, the version pin; the analyzer and `subsystem.Table` on the new paths; `internal/modelts` regenerated for `Version` 6; the Studio's client on the new prefix; the reference regenerated, and its guard |
 | 8 | products | todo, moderation, statusline: the import path and `kit.` → `app.` (a rewrite of the import path and the package qualifier, then the 14 shadowing files by hand), the struct tags (moderation's 174), the variables in Dockerfiles, compose files and CI, `.gitignore` |
@@ -1005,6 +1005,122 @@ connector modules (`postgres` and `mysql` also against servers in Docker),
 `scripts/pre-commit/`, `make guard`, `make doclinks`, `gofumpt -l` and
 `make lint-ktn-check`.
 
+### Step 5c-2, done (2026-10-18)
+
+The second half of §Decision of 18 October: every reference the framework
+makes is made under the `app/v1` labels, what the privacy service's own
+stores seal is bound to their own ids, and what a former release kept under
+the `kit/v1` labels and `kit.privacy`'s ids is sealed again by a pass —
+resumable, idempotent, every interruption leaving everything readable —,
+read under both meanwhile, written under the present ones alone.
+
+| Was | Is |
+|---|---|
+| a person's data key `s:` + their `kit/v1 subject reference`; a record's own `r:` + its `kit/v1 record reference` (of `kit.privacy/store/…` for the privacy service's stores) | `s:`/`r:` + the `app/v1` reference (of `app.privacy/store/…`); a box names the key it is under, so one a former release sealed opens under the former key |
+| the subject index `kit:subject`, its keys `kit/v1` references | `app:subject`, rebuilt from the records when a store opens |
+| a database's index rows hashed under the `kit/v1 database index key`, fingerprinted `kit:fingerprint` | under the `app/v1 database index key`, fingerprinted `app:fingerprint`: the fingerprint changed, so the rows are filed again when the store opens |
+| a hold filed under its record's `kit/v1` reference, its subject's `kit/v1` reference, sealed bound to `kit.privacy/store/holds` | filed under the `app/v1` ones, sealed bound to `app.privacy/store/holds`; a hold looked up under the present reference, then the former |
+| a box of the privacy service's stores bound to `kit.privacy/…` | bound to `app.privacy/…`; one bound to `kit.privacy/…` read after (`openMember`) |
+| an erasure destroying a person's key, a record gone its own | both of a person's keys, both of a record's own (`personRefs`, `ownRefs`), under every stripe involved at once (`sealer.alone`) |
+
+**The pass** (`framework/internal/app/renamed_refs.go`). A component after
+the stores, so at every start of the product — never in a command: the
+holds first, each filed again under its record's present reference, its
+subject's present reference with it when the record still names one, the new
+one written before the former is removed with its own data keys, so that the
+record is held all along; then each store's records: a record a box of which
+names its person's former key or its own former one is written again — an
+`Update` that changes nothing, which seals it under the present key, as
+`privacy seal` does —, and its former values and versions are opened and
+sealed again from each former key to the present key of the same kind. The
+stripes of every key involved are held shared while a record moves: an
+erasure that would destroy one waits, then destroys what the move made —
+never the other way round, so no key is made again for a person once theirs
+are destroyed: the move seals under a key only what it opened. The mark of
+the progress is what rests — a box names its key, a hold its filing —: a
+record whose boxes name present keys is not written, a hold filed under its
+present reference not touched, and a second pass moves nothing. A pass
+refused at any of its writes leaves everything readable; the next — at
+once, or the next start — ends where an uninterrupted one does. What it
+could not move is said on the app's log, and the start goes on.
+
+**What the pass leaves where it lies, and why the former keys stay.** A
+message kept in a queue or a dead letter (the brokers rewrite no message); the
+versions of a record in the trash (the SDK's `RewriteVersions` refuses a
+deleted document's: they read where they lie until the record is restored
+and written, or purged with the trash's age); a former value or version
+sealed under the former key of a person the record no longer names — whose
+identity nothing says any more. Each reads by the key its box names, so the
+former keys stay — never written under, rotated under `app-data-key` with
+every other, so a backup of the store of keys is bounded as ADR 0142 bounds
+it —, and each is destroyed with its person, or with its record. A hold
+restored from a backup taken before the pass, whose own key the pass has
+destroyed since, keeps its filing and holds its record: the pass leaves it
+filed where it is.
+
+**What the former names are still for.** `formerLabels` derive the former
+keys an erasure destroys, the former filing a hold is looked up under, and the
+former key a record still under one is moved from: the minor that ends Q12's
+window may drop them only once no box and no hold names a former reference —
+it must refuse to start, never read as erased, while one does (a queued
+message, a trashed version, a former value under a person the record no
+longer names). The module name `kit` and the id `kit.privacy` are **not
+released**: step 5a's move still meets `kit.privacy` and the `kit_*` tables
+of a database not yet started, and what `kit.privacy`'s stores sealed — the
+former journal, a hold from a backup — is read bound to its ids. They go
+with the other former names in the minor that ends the window; the former
+journal's binding stays as long as a former journal is kept (§Step 5c-1,
+done).
+
+**Measured.** On the internal test's three cards — one held, one whose
+subject changed — and one hold, the first pass writes 18 times: three
+records, their former values and versions moved key by key, the hold filed
+again and the former removed; the second writes nothing. The cost of a first
+start is that, per record a former release sealed; the read before each
+record (its boxes, its history, its versions) is the cost of every later
+start. Not measured: a store of many thousands of records.
+
+**Held by** — on a former release's data: `framework/connectors/sqlite/
+testdata/former-refs`, written on 2026-10-18 by the release before this step
+(5c-1's fixture migrated by that release, then a case whose subject changed —
+ivy's former note under ivy's key —, a case held then written again, a case
+in the trash, a letter kept), on SQLite and in the data directory alone,
+with what that release read of it. `former_refs_test.go`: the commands read
+the holds and the journal as that release printed them; the start reads the
+cases, versions, former values, trash and every person's export as it did,
+the kept letters and notice delivered; no box at rest — every file, every
+table — names a key a former release named but ivy's former note and
+version and the versions of the two trashed cases; `privacy holds` lists the
+holds under their present references; a second start the same; an erasure
+after it — dan, ivy, leo; kim, held, kept — reads as one now and from a
+backup of the data taken before or after the pass restored beside the keys,
+the two keys of each destroyed and no key made again. The PostgreSQL and
+MySQL suites (`former_refs_test.go`, servers in Docker) copy the fixture's
+data directory onto the database with `data copy`, which moves boxes as they
+are, then hold the same. `renamed_refs_internal_test.go`: a pass refused at
+each of its 18 writes, resumed at once and after a restart, reads as before
+the pass and ends where an uninterrupted one does; a hold filed twice — the
+pass stopped between its two writes — is listed once and holds its record;
+an erasure running during the pass leaves no key of the person (ten rounds,
+under the race detector). The 5a, 5b and 5c-1 fixtures read as before: their
+`privacy holds` after the start lists the present references. Seen red
+before green: with an erasure destroying the present key alone, the former
+keys outlive it and ivy's and leo's notes, and dan's from a backup, read
+again; without the pass, every former key still seals what it sealed; with
+the former hold removed before the new one is written, a pass interrupted
+between the two loses the hold; with a hold whose key no longer opens filed
+again, a backup taken before the pass and restored after it makes keys
+again for the held. Not
+seen red: the shared stripes during a move (the race the erasure test runs is
+not reproduced without them).
+
+**Verified.** `GOWORK=off go test -race ./...` in the root module, in
+`internal`'s security packages and `pkg/v1/security`, and in the four
+connector modules (`postgres` and `mysql` also against servers in Docker),
+`kit gen -check`, genindex `-check-api -markers -digests`, the guards of
+`scripts/pre-commit/`, `make guard`, `make doclinks`, `gofumpt -l` and
+`make lint-ktn-check`.
+
 ### Impact
 
 - **The SDK.** Under `framework/`, 694 Go files mention the word (7 012
@@ -1050,7 +1166,7 @@ changes only by a migration the framework runs: the tables, the migration
 set, the secret prefix and the dev data directory renamed (Q5), the sealed
 data re-sealed under the new labels (Q6) — data-key's re-wrapped in step 5b,
 the privacy journal closed and continued under the new labels in step 5c-1,
-the references' in step 5c-2.
+the references at rest re-sealed in step 5c-2.
 
 **Step 3, landed (2026-10-18).** `framework/kit` and everything beneath it
 are gone, with no alias (Q2); `framework/internal/kit`'s engines are renamed;
@@ -1221,6 +1337,28 @@ connector module (`release:minor`).
   the first operation that journals, or accept that the release before
   journals nothing while it runs.
 
+**Step 5c-2, landed (2026-10-18).** The references at rest, under the same
+v0 licence: a minor of the root module and of each connector module
+(`release:minor`); no exported symbol changes.
+
+- *The first start of a product that ran a release before this one* files
+  every hold again under its record's present reference and writes again
+  every record a former release sealed — one `Update` per record, its former
+  values and versions rewritten —, once, saying on its log how many moved;
+  a database's index rows are filed again as the stores open (their
+  fingerprint changed). A product with many sealed records takes that much
+  longer to start the first time; a start stopped half-way is resumed by the
+  next. Commands do not run the pass.
+- *A reader of the holds*: `privacy holds` lists each hold under its
+  record's present reference and its subject's — new references for the
+  same holds, which the new journal already used since step 5c-1.
+- *Going back* to the release before this one is not supported once this one
+  has started: that release looks the holds up under their former
+  references, which no longer file them, and cannot open what this release
+  sealed bound to `app.privacy/…`. Go back only by restoring the data
+  directory and the databases from a backup taken before the first start of
+  this release (not exercised by a test).
+
 ## Alternatives considered
 
 - **Keep the name (ADR 0147 §1).** Refused by the owner.
@@ -1356,6 +1494,7 @@ journal closed and the new one chained), 5c-2 (the references re-sealed).
 | Accepted, step 5a done | 2026-10-18 | The migration table splits step 5 and marks 5a done; §Step 5a, done records the names at rest moved, never copied and never replacing — `kit_migrations` (its history taken by `app_migrations`, the set `app`), `kit_tables`, `kit_queue__…`, `kit_privacy__…` (with their derived tables and PostgreSQL's indexes) to `app_…` by a migration of `kit_migrations` under its lock, `.kit/data` to `.app/data`, `kit.privacy` to `app.privacy` with its directory —, the refusals (`CodeRenameTarget` 0.4.2.86, `CodeRenameFailed` 0.4.2.87), why the secret prefix and the labels are 5b's (the keyring binds the secret's name; a sealed value binds its store's node id), the module name `kit` kept reserved, and what holds it, a former release's data in `connectors/sqlite/testdata/former`; §Breaking changes says what the first start does and how to go back. No decision changed |
 | Accepted, step 5b done | 2026-10-18 | The migration table splits step 5 in three and marks 5b done; §Step 5b, done records why the re-seal is two changes (what a keyring wraps is bound to the secret's name and moves by a re-wrap; what a reference names re-keys every data key and every box, and the journal's chain records the references: 5c), the secrets `kit-index-key` and `kit-smtp-url` copied to `app-…` once (`CodeRenameTarget` for two index keys, `CodeRenameFailed` for a refused copy — no new code), `app-data-key` made and every data key re-wrapped under it through the SDK's new `SubjectKeysConfig.Former` (`RewrapReport.FromFormer`), the wrapped key itself as the durable mark of the progress, a box under data-key itself sealed under `app/v1 sealed at rest` and read under both labels, `app-` reserved beside `kit-`, `privacy rewrap [-back]`, an erasure unreadable at once under both roots and `kit-data-key` retired on the schedule its rotation would have pruned it on (ADR 0142's bound for a copy outside the store), what 5c and the minor that ends the window do, the measure, and what holds it (`connectors/sqlite/testdata/former-keys`, written by the release before); §Breaking changes says what the first start does, its cost, and the way back. No decision changed |
 | Accepted, step 5c-1 done | 2026-10-18 | §Decision of 18 October records the owner's answer for step 5c — new labels for the future, the journal closed and chained, never rewritten, step 5c split in two —; the migration table splits step 5c and marks 5c-1 done; §Step 5c-1, done records the journal a former release kept closed as it is by a `continue` entry naming its last hash (`model.JournalContinue`, `JournalEntry.Follows`) and starting a chain of its own, every later entry's references under the `app/v1` labels (`refs`) and its reason bound to `app.privacy/store/journal`, the former's read where it was sealed, `verifyChain`'s link and `JournalCheck.Closed`, why the former journal needs its binding and not its labels, when the former names can go, the references at rest, the privacy service's other ids and the module name `kit` left to 5c-2, and what holds it (`connectors/sqlite/testdata/former-journal`, written by the release before); §Breaking changes says what the first journaled entry does and what going back costs. No decision of 17 October changed |
+| Accepted, step 5c-2 done | 2026-10-18 | The migration table marks 5c-2 done; §Step 5c-2, done records every reference made under the `app/v1` labels — data keys, `app:subject`, a database's index rows (`app:fingerprint`), the holds' filing and subject — and the privacy service's stores sealing bound to `app.privacy/…`; the pass at every start (`renamed_refs.go`) filing the holds again and moving each record, its former values and versions from the former keys to the present ones under shared stripes, the mark of progress what rests; what it leaves where it lies (queued messages, a trashed record's versions, a former value under a person the record no longer names) and why the former keys stay, destroyed with their person or record; an erasure destroying both keys; what the former names are still for and why `kit` and `kit.privacy` are not released; the measure; what holds it (`connectors/sqlite/testdata/former-refs`, written by the release before, and the PostgreSQL and MySQL suites through `data copy`); §Breaking changes says what the first start does and that going back needs a backup. No decision changed |
 | Accepted, step 3 done | 2026-10-18 | The migration table marks step 3 done; §Step 3, done records the rename — `framework/app`, `apptest`, `framework/internal/app` and its engines `storeengine`, `queueengine`, `workflowengine`, `mailengine`, `jobengine`, `serverengine`, `studioengine`, `design/framework/app.yaml`, the codes at their values under re-pointed owners, `model.Version` 6 with `ProvenanceApp`, `PortOwnerApp` and `SettingAppDev` —, the texts of §2 and what they leave to steps 4 and 5; §Breaking changes gives a product's migration, a rewrite of the import path and the qualifier then the shadowing files; §4 records what the platform found at step 2, `kit dev` building with a `go.mod` outside the tree (`-modfile`). No decision changed |
 
 ## Deferred

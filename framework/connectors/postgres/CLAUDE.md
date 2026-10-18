@@ -50,4 +50,8 @@ suite (`app/storetest`). ADR 0180's steps on a former release's layout:
 5c-1: a former journal written into app.privacy's table, its chain
 computed as the journal documents it, closed as it is by the next entry,
 `privacy journal -verify` holding across the two and breaking where a
-former entry is changed).
+former entry is changed), and `former_refs_test.go` (step 5c-2: the SQLite
+suite's `testdata/former-refs`, as it rests in the data directory, copied
+onto the database by `data copy`, then sealed again by the start, read as
+the former release read it, and an erasure destroying both of a person's
+keys).

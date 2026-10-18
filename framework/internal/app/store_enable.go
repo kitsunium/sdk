@@ -29,9 +29,10 @@ type storeHooks struct {
 	// mountPrivacy mounts kit's own service when the app keeps personal
 	// data or seals what it keeps.
 	mountPrivacy func(a *App)
-	// addDatabases, addRetention and addTrash register the components of
-	// the databases, the stores' retention and their trash.
-	addDatabases, addRetention, addTrash func(a *App) error
+	// addDatabases, addRetention, addTrash and addRelabel register the
+	// components of the databases, the stores' retention, their trash, and
+	// the pass that re-seals what a former release sealed (ADR 0180 step 5c).
+	addDatabases, addRetention, addTrash, addRelabel func(a *App) error
 	// journal appends an entry to the privacy journal.
 	journal func(a *App, ctx context.Context, l *journalLine) error
 	// problems are what the stores, their sealing, kit's index key and
@@ -59,6 +60,7 @@ func EnableStores() {
 		addDatabases:    (*App).addDatabaseComponents,
 		addRetention:    (*App).addRetentionComponent,
 		addTrash:        (*App).addTrashComponent,
+		addRelabel:      (*App).addRelabelComponent,
 		journal:         (*App).appendToJournal,
 		problems:        (*App).storeCodeProblems,
 		privacyProblems: (*App).privacyProblems,
@@ -108,6 +110,15 @@ func (a *App) addRetention() error {
 func (a *App) addTrash() error {
 	if h := stores(); h != nil {
 		return h.addTrash(a)
+	}
+	return nil
+}
+
+// addRelabel registers the pass that re-seals what a former release sealed
+// under its references (renamed_refs.go); none without the store subsystem.
+func (a *App) addRelabel() error {
+	if h := stores(); h != nil {
+		return h.addRelabel(a)
 	}
 	return nil
 }

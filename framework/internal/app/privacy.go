@@ -125,6 +125,7 @@ type privacyStore interface {
 	heldCount(a *App) int
 	fold(ctx context.Context) error
 	records() recordsPort
+	relabel(ctx context.Context) (int, error)
 }
 
 // withActor returns ctx acting for who.

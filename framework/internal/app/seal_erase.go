@@ -36,18 +36,17 @@ func (a *App) shredPeople(ctx context.Context, ids []string, refs map[string]boo
 		return err
 	}
 	ctx, sp := a.beginPrivacy(ctx, keys.id, model.EdgeWrites, "shred", "Shred")
+	// A person has two data keys while what a former release sealed is read
+	// (ADR 0180 step 5c): both go, and the journal says it once.
 	people := map[string]string{}
 	for _, id := range ids {
-		ref := z.refs.personRef(id)
-		people[ref], refs[ref] = id, true
+		for _, ref := range z.dual.personRefs(id) {
+			people[ref], refs[ref] = id, true
+		}
 	}
-	var failed []error
-	shredded := false
-	for _, ref := range slices.Sorted(maps.Keys(refs)) {
-		done, err := a.destroyKey(ctx, z, ref)
-		failed = append(failed, err)
-		shredded = shredded || done
-		if id, person := people[ref]; person && done {
+	shredded, gone, failed := a.destroyKeys(ctx, z, refs, people)
+	for _, id := range ids {
+		if gone[id] {
 			failed = append(failed, a.journal(ctx, &journalLine{op: model.JournalShred, store: keys.id, subject: id}))
 		}
 	}
@@ -57,6 +56,22 @@ func (a *App) shredPeople(ctx context.Context, ids []string, refs map[string]boo
 	err = errors.Join(failed...)
 	sp.end(err)
 	return err
+}
+
+// destroyKeys destroys every data key refs name, each under its stripe
+// alone: whether one was held, the people — by the references people maps
+// to them — one of whose keys was, and what failed.
+func (a *App) destroyKeys(ctx context.Context, z *sealer, refs map[string]bool, people map[string]string) (shredded bool, gone map[string]bool, failed []error) {
+	gone = map[string]bool{}
+	for _, ref := range slices.Sorted(maps.Keys(refs)) {
+		done, err := a.destroyKey(ctx, z, ref)
+		failed = append(failed, err)
+		shredded = shredded || done
+		if id, person := people[ref]; person && done {
+			gone[id] = true
+		}
+	}
+	return shredded, gone, failed
 }
 
 // shredIfLast destroys the data key of identity once nothing kit keeps
@@ -75,8 +90,8 @@ func (a *App) shredIfLast(ctx context.Context, identity string) error {
 	if err != nil {
 		return err
 	}
-	ref := z.refs.personRef(identity)
-	release, err := z.alone(ctx, ref)
+	refs := z.dual.personRefs(identity)
+	release, err := z.alone(ctx, refs...)
 	if err != nil {
 		return err
 	}
@@ -86,7 +101,13 @@ func (a *App) shredIfLast(ctx context.Context, identity string) error {
 		return err
 	}
 	sctx, sp := a.beginPrivacy(ctx, keys.id, model.EdgeWrites, "shred", "Shred")
-	done, err := z.destroy(sctx, ref)
+	done := false
+	var failed []error
+	for _, ref := range refs {
+		gone, err := z.destroy(sctx, ref)
+		done, failed = done || gone, append(failed, err)
+	}
+	err = errors.Join(failed...)
 	// The stripe is released before the journal, which seals under keys of
 	// its own.
 	release()
@@ -112,21 +133,34 @@ func (a *App) lastOf(ctx context.Context, z *sealer, identity string) (bool, err
 			return false, err
 		}
 	}
+	if held, err := a.holdNames(ctx, z.dual.subjectRefs(identity)); err != nil || held {
+		return false, err
+	}
+	kept, err := a.sealsUnderAny(ctx, z.dual.personRefs(identity))
+	return !kept && err == nil, err
+}
+
+// sealsUnderAny reports whether a store of the product keeps, in its former
+// values or its versions, a value sealed under one of the data keys refs.
+func (a *App) sealsUnderAny(ctx context.Context, refs []string) (bool, error) {
+	for _, ref := range refs {
+		for _, st := range a.productStores() {
+			if kept, err := st.sealsUnder(ctx, ref); err != nil || kept {
+				return kept, err
+			}
+		}
+	}
+	return false, nil
+}
+
+// holdNames reports whether a hold names one of subjects — a person's two
+// references (ADR 0180 step 5c).
+func (a *App) holdNames(ctx context.Context, subjects []string) (bool, error) {
 	all, err := a.allHolds(ctx)
 	if err != nil {
 		return false, err
 	}
-	subject := z.refs.subjectRef(identity)
-	if slices.ContainsFunc(all, func(h holdRecord) bool { return h.Subject == subject }) {
-		return false, nil
-	}
-	ref := z.refs.personRef(identity)
-	for _, st := range a.productStores() {
-		if kept, err := st.sealsUnder(ctx, ref); err != nil || kept {
-			return false, err
-		}
-	}
-	return true, nil
+	return slices.ContainsFunc(all, func(h holdRecord) bool { return slices.Contains(subjects, h.Subject) }), nil
 }
 
 // destroyKey destroys the data key ref under its stripe alone, and reports

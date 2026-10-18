@@ -227,8 +227,10 @@ func TestAFormerJournalIsClosedAsItWasAndContinued(t *testing.T) {
 					t.Errorf("privacy journal -verify does not say %q:\n%s", line, out)
 				}
 			}
-			if status, got := mainOf(t, newKeyed(t, dir, onSQLite, false).atelier, "privacy", "holds"); status != 0 || !bytes.Equal(got, wantHolds) {
-				t.Errorf("privacy holds once closed: %d\n got %s\nwant %s", status, got, wantHolds)
+			// The holds, filed again under their records' present references
+			// by the start (ADR 0180 step 5c-2), say the same.
+			if status, got := mainOf(t, newKeyed(t, dir, onSQLite, false).atelier, "privacy", "holds"); status != 0 || !bytes.Equal(got, relabeled(t, ikm, wantHolds)) {
+				t.Errorf("privacy holds once closed: %d\n got %s\nwant %s", status, got, relabeled(t, ikm, wantHolds))
 			}
 		})
 	}

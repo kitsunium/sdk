@@ -309,7 +309,7 @@ func (h *historied) toHistory(ctx context.Context, key, pointer, ref string, raw
 	if ref == "" || !h.s.plan().sealedAt(pointer) {
 		return raw, nil
 	}
-	return h.seal.z.seal(ctx, ref, raw, sealedAs(h.s.id), key, pointer, formerBinding)
+	return h.seal.z.seal(ctx, ref, raw, h.s.id, key, pointer, formerBinding)
 }
 
 // fromHistory is a former value the history kept, as it was: opened when it
@@ -322,7 +322,7 @@ func (h *historied) fromHistory(ctx context.Context, key, pointer string, raw js
 	if h.seal == nil {
 		return nil, errErased // no key to open it with: gone as surely
 	}
-	return h.seal.z.open(ctx, raw, sealedAs(h.s.id), key, pointer, formerBinding)
+	return h.seal.z.open(ctx, raw, h.s.id, key, pointer, formerBinding)
 }
 
 // sealedAt reports whether kit seals the field at pointer, or a field it

@@ -132,4 +132,24 @@ where a former entry or the link is changed; a second start closes nothing;
 a close the disk refuses changes nothing and the next entry completes it;
 and an erasure stays one across the close — cy and fay erased before, dan
 after, ann's held case kept —, no data key filed under an `app/v1`
-reference.
+reference by the close (the holds' references are the present ones once
+step 5c-2's pass filed them again, `relabeled`).
+`testdata/former-refs` was written on 2026-10-18 by the release before ADR
+0180 step 5c-2 — `testdata/former-journal` migrated by it, then ivy's case
+whose subject became jay (ivy's former note and version under ivy's key),
+kim's held then written again (under its own key), leo's in the trash, a
+letter to kim kept —: every data key named under the `kit/v1` labels, the
+holds filed under `kit/v1` record references and bound to
+`kit.privacy/store/holds`, with what it read (`dump.json` — `dumpRefs`, every
+case's versions and former notes, the trash and every person's export —,
+`journal.txt`, `holds.txt`, `names.json`); never regenerate it with this
+release. `former_refs_test.go` holds the re-seal: the commands read the
+holds and the journal as before; the start reads everything as that release
+did, the kept letters and notice delivered, and leaves no box under a key a
+former release named but ivy's former note and version and the versions of
+bob's and leo's trashed cases (`leftUnder`), the holds listed under their
+present references (`relabeled`), a second start the same; an erasure after
+it — dan, ivy, leo; kim held — reads as one now and from a backup taken
+before or after the pass restored beside the keys, their two data keys
+destroyed and no key made again (`boxRefs` reads every box at rest, files
+and tables).

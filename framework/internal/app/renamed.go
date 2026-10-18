@@ -27,8 +27,8 @@ const (
 	// formerName is the name it said before ADR 0180 step 4, and the name
 	// its data rested under before step 5. A module may not take it while
 	// that data may still be met under it: its tables, its privacy
-	// service's directory, and the labels sealed values are bound to, which
-	// a later minor re-seals (ADR 0180 Q6).
+	// service's directory, and the ids what its privacy service sealed is
+	// bound to — read, never written, since step 5c (ADR 0180 Q6).
 	formerName = "kit"
 	// tagKey is the struct tag key the framework reads: app:"personal".
 	tagKey = frameworkName
@@ -64,8 +64,8 @@ const (
 	formerDevDataDir = "." + formerName + "/data"
 	// formerPrivacyService is the framework's own service's name before ADR
 	// 0180 step 5: its directory in the data directory, its tables'
-	// prefix, and — until a later minor re-seals them (Q6) — what its
-	// stores' sealed values are bound to.
+	// prefix, and what its stores' sealed values were bound to — read, never
+	// written, since step 5c (Q6).
 	formerPrivacyService = formerName + ".privacy"
 	// formerSetTable is the version table of the framework's own set before
 	// ADR 0180 step 5.

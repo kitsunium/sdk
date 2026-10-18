@@ -24,7 +24,7 @@ const (
 	// subjectIndex is the index kit adds to a store whose entity has a
 	// subject: its keys are subject references. No index a product declares
 	// can have a colon in its name.
-	subjectIndex = "kit:subject"
+	subjectIndex = frameworkName + ":subject"
 	// indexSecret is kit's generated secret the references are keyed by:
 	// <PRODUCT>_INDEX_KEY, or app-index-key in the environment's store. It is
 	// never rotated.
@@ -44,33 +44,23 @@ type referenceKeys struct {
 	subject, record, index mac.Key
 }
 
-// derivedKeys are the reference keys a run derives from index-key: those the
-// references it keeps at rest are made with, and those the privacy journal
-// records its references with (ADR 0180 step 5c).
+// derivedKeys are the reference keys a run derives from index-key: those
+// every reference is made with, under presentLabels, and those a former
+// release made them with, under formerLabels — read, never written, for the
+// window of ADR 0180 Q12 (renamed_refs.go).
 type derivedKeys struct {
-	rest, journal *referenceKeys
+	present, former *referenceKeys
 }
 
-// referenceKeys are the reference keys the references the app keeps at rest
-// are made with: the data keys, the subject index, the holds, a database's
-// index rows (restLabels).
+// referenceKeys are the reference keys every reference the app makes is made
+// with: the data keys, the subject index, the holds, a database's index
+// rows, the journal's references (presentLabels).
 func (a *App) referenceKeys(ctx context.Context) (*referenceKeys, error) {
 	k, err := a.derivedKeys(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return k.rest, nil
-}
-
-// journalKeys are the reference keys the privacy journal records a record's
-// and a subject's references with: presentLabels, since the journal a former
-// release kept is closed (ADR 0180 step 5c).
-func (a *App) journalKeys(ctx context.Context) (*referenceKeys, error) {
-	k, err := a.derivedKeys(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return k.journal, nil
+	return k.present, nil
 }
 
 // derivedKeys derives the subkeys of index-key once per run: <PRODUCT>_INDEX_KEY
@@ -100,8 +90,8 @@ func (a *App) deriveKeys(ctx context.Context) (_ *derivedKeys, made bool, _ erro
 	}
 	defer clear(ikm)
 	k := &derivedKeys{}
-	if k.rest, err = subkeysOf(ikm, restLabels); err == nil {
-		k.journal, err = subkeysOf(ikm, presentLabels)
+	if k.present, err = subkeysOf(ikm, presentLabels); err == nil {
+		k.former, err = subkeysOf(ikm, formerLabels)
 	}
 	if err != nil {
 		return nil, made, failure(CodePrivacyKey, "INDEX_KEY_DERIVE", "the framework's index key could not be derived", err)
@@ -225,7 +215,7 @@ func (k *referenceKeys) indexKey(index, key string) []byte {
 // indexKeyID names the index subkey without saying it: what a store's index
 // rows were filed with, which kit files again when it changes.
 func (k *referenceKeys) indexKeyID() string {
-	return hex.EncodeToString(k.indexKey("kit:fingerprint", "kit/v1")[:8])
+	return hex.EncodeToString(k.indexKey(frameworkName+":fingerprint", frameworkName+"/v1")[:8])
 }
 
 // ref is the reference of text under key: a truncated HMAC that names it
