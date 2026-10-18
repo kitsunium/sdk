@@ -39,12 +39,29 @@ const feed = (items) =>
     .map((i) => `<item><title>${i}</title></item>`)
     .join("")}</channel></rss>`;
 
-test("rss: the first channel, every batch's items in batch order", () => {
+const linked = (links) =>
+  `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>T</title><link>https://x/</link>${links
+    .map((l) => `<item><title>${l}</title><link>https://x/${l}/</link></item>`)
+    .join("")}</channel></rss>`;
+
+test("rss: the first channel, every batch's items", () => {
   assert.equal(
     mergeRss([feed(["a", "b"]), feed([]), feed(["c"])]),
     feed(["a", "b", "c"]),
   );
   assert.equal(mergeRss([feed([]), feed(["c"])]), feed(["c"]));
+});
+
+test("rss: the items sorted by link, whatever the batches' order", () => {
+  const want = linked(["0.1.0/v1", "0.2.0/v1/a", "local/v1", "local/v1/b"]);
+  assert.equal(
+    mergeRss([linked(["local/v1/b", "local/v1"]), linked(["0.2.0/v1/a", "0.1.0/v1"])]),
+    want,
+  );
+  assert.equal(
+    mergeRss([linked(["0.1.0/v1", "local/v1"]), linked(["local/v1/b", "0.2.0/v1/a"])]),
+    want,
+  );
 });
 
 const urlset = (locs) =>

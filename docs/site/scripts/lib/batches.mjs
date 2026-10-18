@@ -42,9 +42,19 @@ export function batchReleases({ releases, order = [], first = [], size }) {
 
 const ITEM = /<item>[\s\S]*?<\/item>/g;
 
+const ITEM_LINK = /<link>([\s\S]*?)<\/link>/;
+const byLink = (a, b) => {
+  const la = a.match(ITEM_LINK)?.[1] ?? "";
+  const lb = b.match(ITEM_LINK)?.[1] ?? "";
+  if (la !== lb) return la < lb ? -1 : 1;
+  return a < b ? -1 : a > b ? 1 : 0;
+};
+
 /**
- * One rss.xml from the batches': the first's channel, every batch's items in
- * batch order.
+ * One rss.xml from the batches': the first's channel, and every batch's items
+ * sorted by link — as src/pages/rss.xml.js sorts one build's (an item carries
+ * no date, and getCollection's order is not guaranteed), so the same pages
+ * give the same bytes, however they were batched.
  *
  * @param {string[]} feeds
  * @returns {string}
@@ -56,7 +66,7 @@ export function mergeRss(feeds) {
   const open = head.search(/<item>/);
   if (close < 0) throw new Error("mergeRss: the first feed has no </channel>");
   const prefix = head.slice(0, open >= 0 ? open : close);
-  const items = feeds.flatMap((f) => f.match(ITEM) ?? []);
+  const items = feeds.flatMap((f) => f.match(ITEM) ?? []).sort(byLink);
   return prefix + items.join("") + head.slice(close);
 }
 

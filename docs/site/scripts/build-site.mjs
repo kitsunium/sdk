@@ -29,7 +29,8 @@
 //     redirect pages and public/ are the same in every batch — or the build
 //     fails, naming the file;
 //   - rss.xml and the sitemap list every page, so their entries are the union
-//     of every batch's, in batch order.
+//     of every batch's: the feed's sorted by link, as one build's is, the
+//     sitemap's in batch order.
 // With every release in one batch (DOCS_RELEASES=local, as `make docs-check`
 // builds), this is the plain content sync + `astro build` into dist/.
 
