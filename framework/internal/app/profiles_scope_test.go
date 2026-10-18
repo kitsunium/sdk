@@ -132,6 +132,7 @@ func TestAScopeKeyFollowsItsValues(t *testing.T) {
 // A singleton per scope refuses a second process with the same values and
 // lets one with other values run.
 func TestASingletonPerScopeKeepsOneProcessPerValue(t *testing.T) {
+	needsFileLock(t)
 	dir := shortDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", dir)
 	t.Setenv("RUNTIME_DIRECTORY", "")
@@ -286,6 +287,7 @@ func TestACLIRunStartsOnlyWhatItsCommandReads(t *testing.T) {
 // `<binary> daemon status` is useful exactly then —; a second daemon is still
 // refused.
 func TestACLICommandDoesNotTakeTheSingleton(t *testing.T) {
+	needsFileLock(t)
 	dir := shortDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", dir)
 	t.Setenv("RUNTIME_DIRECTORY", "")

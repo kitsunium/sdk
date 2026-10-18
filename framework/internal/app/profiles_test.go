@@ -10,15 +10,35 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/app"
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/lock"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
+	"github.com/kitsunium/sdk/pkg/v1/proc"
 	"github.com/kitsunium/sdk/pkg/v1/proc/ipc"
 )
+
+// needsFileLock skips t where a singleton cannot be held, after asserting
+// why: the singleton is the SDK's file locker, which illumos and Solaris
+// refuse — they have no flock(2), ADR 0144 —, so an app declaring one
+// cannot start there. The two are spelled out rather than probed, so that a
+// refusal on another Unix fails the case instead of skipping it.
+func needsFileLock(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "illumos" && runtime.GOOS != "solaris" {
+		return
+	}
+	locker, err := lock.NewFileLocker(lock.FileConfig{Dir: t.TempDir()})
+	if !errors.Is(err, proc.UnsupportedPlatform) || locker != nil {
+		t.Fatalf("lock.NewFileLocker on %s = (%v, %v), want (nil, UNSUPPORTED_PLATFORM)", runtime.GOOS, locker, err)
+	}
+	t.Skipf("a singleton is a file lock, which %s refuses (ADR 0144); the refusal is asserted above", runtime.GOOS)
+}
 
 // shortDir is a private directory short enough for a socket path (macOS's
 // sun_path is the shortest, ADR 0094).
@@ -178,6 +198,7 @@ func TestADaemonStopsWhenIdle(t *testing.T) {
 // A second process of a singleton app refuses to start, and the first one's
 // stop lets a third start.
 func TestASingletonRefusesASecondProcess(t *testing.T) {
+	needsFileLock(t)
 	dir := shortDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", dir)
 	t.Setenv("RUNTIME_DIRECTORY", "")
