@@ -1,0 +1,17 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "jobs",
+    srcs = ["jobs.go"],
+    importpath = "github.com/kitsunium/sdk/framework/app/jobs",
+    visibility = ["//visibility:public"],
+    deps = ["//framework/internal/app/jobengine"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":jobs",
+    visibility = ["//visibility:public"],
+)

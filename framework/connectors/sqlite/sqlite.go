@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kitsunium/sdk/framework/kit"
-	_ "github.com/kitsunium/sdk/framework/kit/store" // the stores a database keeps (ADR 0179 §4)
+	"github.com/kitsunium/sdk/framework/app"
+	_ "github.com/kitsunium/sdk/framework/app/store" // the stores a database keeps (ADR 0179 §4)
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/proc"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
@@ -39,23 +39,23 @@ var (
 	}
 )
 
-// engine is the connector kit.Database drives; it holds nothing.
+// engine is the connector app.Database drives; it holds nothing.
 type engine struct{}
 
-// Engine is the SQLite engine, for kit.Database.
-func Engine() kit.Engine { return engine{} }
+// Engine is the SQLite engine, for app.Database.
+func Engine() app.Engine { return engine{} }
 
 // Dialect is the SQL the database speaks.
-func (engine) Dialect() kit.Dialect { return kit.DialectSQLite }
+func (engine) Dialect() app.Dialect { return app.DialectSQLite }
 
 // Describe says which file the URL names. There is no network to cross, no
 // user and no password.
-func (engine) Describe(u secret.Value) (kit.DatabaseURL, error) {
+func (engine) Describe(u secret.Value) (app.DatabaseURL, error) {
 	path, _, err := split(u.RevealString())
 	if err != nil {
-		return kit.DatabaseURL{}, err
+		return app.DatabaseURL{}, err
 	}
-	return kit.DatabaseURL{Driver: driver, Database: path}, nil
+	return app.DatabaseURL{Driver: driver, Database: path}, nil
 }
 
 // Open opens the file, creating it if need be, with the engine's defaults —

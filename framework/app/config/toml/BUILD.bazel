@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "toml",
+    srcs = ["toml.go"],
+    importpath = "github.com/kitsunium/sdk/framework/app/config/toml",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/internal/app",
+        "//pkg/v1/data/codec/toml",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":toml",
+    visibility = ["//visibility:public"],
+)

@@ -39,7 +39,15 @@ import "time"
 // grammar every ID follows, written once ([IDValue], [ParseID]). It removes what
 // the Studio no longer does (D13): the respond, fail and delay mock modes,
 // the control event and its payload — a [MockMessage] is a test's replacement only.
-const Version int = 5
+//
+// Version 6 renames the runtime framework (ADR 0180): its packages are
+// framework/app and framework/internal/app, so a source position the
+// document gives in the framework's code names those paths, and the
+// constants of the framework's own provenance, port owner and setting
+// origin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]. The
+// values the graph spells after the framework follow with its runtime
+// names (ADR 0180 step 4).
+const Version int = 6
 
 // ExternalID is the id of the node standing for the outside world.
 const ExternalID = "external"
@@ -84,7 +92,7 @@ type GraphMessage struct {
 // It names the module, the environment and the build the graph was taken
 // from.
 type AppMessage struct {
-	// Name is the product name given to kit.NewApp.
+	// Name is the product name given to app.NewApp.
 	Name string `json:"name"`
 	// Module is the Go module path of the product.
 	Module string `json:"module,omitempty"`
@@ -206,7 +214,7 @@ type DiagnosticMessage struct {
 	// Message says what is wrong and how to fix it, in English.
 	Message string `json:"message"`
 	// Texts is the message in each language kit speaks, by language: "en",
-	// and "fr" when the program imports framework/kit/studio. The Studio
+	// and "fr" when the program imports framework/app/studio. The Studio
 	// shows its reader's.
 	Texts map[string]string `json:"texts,omitempty"`
 	// Node is the node concerned, when there is one.

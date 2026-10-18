@@ -1,0 +1,44 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "serverengine",
+    srcs = [
+        "doc.go",
+        "sampler.go",
+        "serverengine.go",
+        "serverengine_compliance.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/internal/app/serverengine",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+    deps = [
+        "//framework/internal/app/plug",
+        "//framework/model",
+        "//pkg/v1/net/server",
+        "//pkg/v1/net/static",
+        "//pkg/v1/proc/process",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":serverengine",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+)
+
+go_test(
+    name = "serverengine_test",
+    srcs = [
+        "api_gen_test.go",
+        "sampler_internal_test.go",
+    ],
+    embed = [":serverengine"],
+    deps = ["//framework/internal/app/plug"],
+)

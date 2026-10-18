@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "mailprobe_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/kitsunium/sdk/framework/app/testdata/mailprobe",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/app/mail",
+        "//framework/internal/app",
+    ],
+)
+
+go_binary(
+    name = "mailprobe",
+    embed = [":mailprobe_lib"],
+    visibility = ["//visibility:public"],
+)

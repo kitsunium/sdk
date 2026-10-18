@@ -21,8 +21,8 @@ packages:
 
       	import "github.com/kitsunium/sdk/framework/connectors/mysql"
 
-      	var App = kit.NewApp("vigie", intake.Service, desk.Service).With(
-      		kit.Database("database", mysql.Engine()),
+      	var App = app.NewApp("vigie", intake.Service, desk.Service).With(
+      		app.Database("database", mysql.Engine()),
       	)
 
       The database's URL, in the variable <APP>_<NAME>_URL, is either a URL —
@@ -38,11 +38,11 @@ packages:
       statements whose second fails leaves the first applied. Write one per
       migration (ADR 0055 D8 of the SDK).
     functions:
-      - doc: Engine is the MySQL engine, for kit.Database.
+      - doc: Engine is the MySQL engine, for app.Database.
         name: Engine
         out:
-          - type: kit.Engine
+          - type: app.Engine
     imports:
       errs: github.com/kitsunium/sdk/pkg/v1/errs
-      kit: github.com/kitsunium/sdk/framework/kit
+      app: github.com/kitsunium/sdk/framework/app
     path: github.com/kitsunium/sdk/framework/connectors/mysql

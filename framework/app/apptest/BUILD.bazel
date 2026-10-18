@@ -1,0 +1,38 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "apptest",
+    srcs = [
+        "apptest.go",
+        "doc.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/app/apptest",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/app",
+        "//pkg/v1/data/vfs",
+        "//pkg/v1/proc",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":apptest",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "apptest_test",
+    srcs = [
+        "api_gen_test.go",
+        "apptest_external_test.go",
+    ],
+    deps = [
+        ":apptest",
+        "//framework/app",
+        "//framework/app/server",
+        "//framework/app/store",
+    ],
+)

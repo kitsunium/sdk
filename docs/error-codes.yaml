@@ -2776,339 +2776,339 @@ codes:
   - code: "0.4.2.1"
     const: CodeStoreDecode
     hex: "0x00_04_02_01"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.2"
     const: CodeStoreEncode
     hex: "0x00_04_02_02"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.3"
     const: CodeStorePersist
     hex: "0x00_04_02_03"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.4"
     const: CodeStoreLoad
     hex: "0x00_04_02_04"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.5"
     const: CodeStoreIndex
     hex: "0x00_04_02_05"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.6"
     const: CodeTopicEncode
     hex: "0x00_04_02_06"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.7"
     const: CodeTopicPublish
     hex: "0x00_04_02_07"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.8"
     const: CodeQueueOpen
     hex: "0x00_04_02_08"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.9"
     const: CodeUndecodable
     hex: "0x00_04_02_09"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.10"
     const: CodeHandlerPanic
     hex: "0x00_04_02_0A"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.11"
     const: CodeNotMounted
     hex: "0x00_04_02_0B"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.12"
     const: CodeWorkflowLoad
     hex: "0x00_04_02_0C"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.13"
     const: CodeWorkflowHookPanic
     hex: "0x00_04_02_0D"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.14"
     const: CodeWorkflowHookChange
     hex: "0x00_04_02_0E"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.15"
     const: CodeWorkflowReentrant
     hex: "0x00_04_02_0F"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.16"
     const: CodeAppConfig
     hex: "0x00_04_02_10"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.17"
     const: CodeAppRunning
     hex: "0x00_04_02_11"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.18"
     const: CodeAppListen
     hex: "0x00_04_02_12"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.19"
     const: CodeMailConfig
     hex: "0x00_04_02_13"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.20"
     const: CodeMailEncode
     hex: "0x00_04_02_14"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.21"
     const: CodeMailQueue
     hex: "0x00_04_02_15"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.22"
     const: CodeMailUndecodable
     hex: "0x00_04_02_16"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.23"
     const: CodeMailPanic
     hex: "0x00_04_02_17"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.24"
     const: CodeLoopPanic
     hex: "0x00_04_02_18"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.25"
     const: CodeLoopNotMounted
     hex: "0x00_04_02_19"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.26"
     const: CodeLoopStart
     hex: "0x00_04_02_1A"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.27"
     const: CodeSecretStore
     hex: "0x00_04_02_1B"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.28"
     const: CodeSecretMissing
     hex: "0x00_04_02_1C"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.29"
     const: CodeSecretRead
     hex: "0x00_04_02_1D"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.30"
     const: CodeSecretRotate
     hex: "0x00_04_02_1E"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.31"
     const: CodeDatabaseOpen
     hex: "0x00_04_02_1F"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.32"
     const: CodeDatabaseMigrate
     hex: "0x00_04_02_20"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.33"
     const: CodeDatabaseUnavailable
     hex: "0x00_04_02_21"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.34"
     const: CodeDatabaseConfig
     hex: "0x00_04_02_22"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.35"
     const: CodePrivacyKey
     hex: "0x00_04_02_23"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.36"
     const: CodePrivacyErase
     hex: "0x00_04_02_24"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.37"
     const: CodePrivacyJournal
     hex: "0x00_04_02_25"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.38"
     const: CodePrivacyData
     hex: "0x00_04_02_26"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.39"
     const: CodeHistoryLoad
     hex: "0x00_04_02_27"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.40"
     const: CodeHistoryWrite
     hex: "0x00_04_02_28"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.41"
     const: CodeHistoryRead
     hex: "0x00_04_02_29"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.42"
     const: CodePasswordHash
     hex: "0x00_04_02_2A"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.43"
     const: CodeCommandReentrant
     hex: "0x00_04_02_2B"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.44"
     const: CodeCommandKey
     hex: "0x00_04_02_2C"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.45"
     const: CodeCommandQueue
     hex: "0x00_04_02_2D"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.46"
     const: CodeCommandEncode
     hex: "0x00_04_02_2E"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.47"
     const: CodeWatchQueue
     hex: "0x00_04_02_2F"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.48"
     const: CodeProfileRead
     hex: "0x00_04_02_30"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.49"
     const: CodeJobOverlapped
     hex: "0x00_04_02_31"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.50"
     const: CodeHistoryMoved
     hex: "0x00_04_02_32"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.51"
     const: CodeNotSource
     hex: "0x00_04_02_33"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.52"
     const: CodePasswordMoved
     hex: "0x00_04_02_34"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.53"
     const: CodeNothingToErase
     hex: "0x00_04_02_35"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.54"
     const: CodeKeyRekeyed
     hex: "0x00_04_02_36"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.55"
     const: CodeMigrateRefused
     hex: "0x00_04_02_37"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.56"
     const: CodeCatalogue
     hex: "0x00_04_02_38"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.57"
     const: CodeRetentionPanic
     hex: "0x00_04_02_39"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.58"
     const: CodeSingletonHeld
     hex: "0x00_04_02_3A"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.59"
     const: CodeCLIFailed
     hex: "0x00_04_02_3B"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.60"
     const: CodeScopeUnknown
     hex: "0x00_04_02_3C"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.61"
     const: CodeSealKey
     hex: "0x00_04_02_3D"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.62"
     const: CodeSealWrite
     hex: "0x00_04_02_3E"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.63"
     const: CodeSealOpen
     hex: "0x00_04_02_3F"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.64"
     const: CodeSealRewrap
     hex: "0x00_04_02_40"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.65"
     const: CodeSealShred
     hex: "0x00_04_02_41"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.66"
     const: CodeTransactionSpan
     hex: "0x00_04_02_42"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.67"
     const: CodeRevisionRead
     hex: "0x00_04_02_43"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.68"
     const: CodeRevisionWrite
     hex: "0x00_04_02_44"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.69"
     const: CodeRevisionDecode
     hex: "0x00_04_02_45"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.70"
     const: CodeSealErased
     hex: "0x00_04_02_46"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.71"
     const: CodeSealKeyMoved
     hex: "0x00_04_02_47"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.72"
     const: CodeResealInPlace
     hex: "0x00_04_02_48"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.73"
     const: CodeResealMoved
     hex: "0x00_04_02_49"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.74"
     const: CodeWorkflowNotInPlace
     hex: "0x00_04_02_4A"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.75"
     const: CodeTransactionPanic
     hex: "0x00_04_02_4B"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.76"
     const: CodeDatabaseVersion
     hex: "0x00_04_02_4C"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.77"
     const: CodeRecordsKeys
     hex: "0x00_04_02_4D"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.78"
     const: CodeTrash
     hex: "0x00_04_02_4E"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.79"
     const: CodeDataCopy
     hex: "0x00_04_02_4F"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.80"
     const: CodeDataCopyDiverged
     hex: "0x00_04_02_50"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.81"
     const: CodeWatchReplay
     hex: "0x00_04_02_51"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.82"
     const: CodeTrashList
     hex: "0x00_04_02_52"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.83"
     const: CodeSubsystemMissing
     hex: "0x00_04_02_53"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.2.84"
     const: CodeMigrationIrreversible
     hex: "0x00_04_02_54"
-    package: framework/internal/kit
+    package: framework/internal/app
   - code: "0.4.3.1"
     const: CodeMisconfigured
     hex: "0x00_04_03_01"
@@ -3120,7 +3120,7 @@ codes:
   - code: "0.4.4.1"
     const: CodeRolledBack
     hex: "0x00_04_04_01"
-    package: framework/kit/storetest
+    package: framework/app/storetest
   - code: "0.4.16.1"
     const: CodeURLMalformed
     hex: "0x00_04_10_01"

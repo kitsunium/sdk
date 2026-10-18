@@ -17,8 +17,8 @@ go_library(
     ],
     importpath = "github.com/kitsunium/sdk/framework/connectors/mysql",
     deps = [
-        "//framework/kit",
-        "//framework/kit/store",
+        "//framework/app",
+        "//framework/app/store",
         "//pkg/v1/errs",
         "//pkg/v1/security/secret",
         "@com_github_go_sql_driver_mysql//:mysql",
@@ -43,9 +43,9 @@ go_test(
     ],
     deps = [
         ":mysql",
-        "//framework/kit",
-        "//framework/kit/server",
-        "//framework/kit/storetest",
+        "//framework/app",
+        "//framework/app/server",
+        "//framework/app/storetest",
         "//framework/model",
         "//pkg/v1/errs",
         "//pkg/v1/security/secret",

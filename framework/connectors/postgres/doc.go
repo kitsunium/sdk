@@ -8,8 +8,8 @@
 //
 //	import "github.com/kitsunium/sdk/framework/connectors/postgres"
 //
-//	var App = kit.NewApp("vigie", intake.Service, desk.Service).With(
-//		kit.Database("database", postgres.Engine()),
+//	var App = app.NewApp("vigie", intake.Service, desk.Service).With(
+//		app.Database("database", postgres.Engine()),
 //	)
 //
 // The database's URL is libpq's, as pgx reads it —
