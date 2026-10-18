@@ -68,7 +68,7 @@ func handledTrace(t *testing.T, a *app.App) model.Trace {
 	t.Helper()
 	var traces []model.Trace
 	eventually(t, "the handling's span", func() bool {
-		call(t, a, "GET /_kit/api/traces?node=lab/command/queued", noBody).json(t, &traces)
+		call(t, a, "GET /_app/api/traces?node=lab/command/queued", noBody).json(t, &traces)
 		return len(traces) == 1 && len(traces[0].Spans) == 3
 	})
 	return traces[0]
@@ -168,7 +168,7 @@ func TestAQueuedKeyIsNotQueuedTwice(t *testing.T) {
 		t.Errorf("handled %d times, want once per key", len(got))
 	}
 	var traces []model.Trace
-	call(t, a, "GET /_kit/api/traces?node=lab/command/queued", noBody).json(t, &traces)
+	call(t, a, "GET /_app/api/traces?node=lab/command/queued", noBody).json(t, &traces)
 	deduplicated := 0
 	for _, tr := range traces {
 		for _, s := range tr.Spans {

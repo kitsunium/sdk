@@ -165,7 +165,7 @@ type State int
 // the reviews module's watch hears it (watch_test.go).
 type Item struct {
 	ID      string     `json:"id"`
-	Name    string     `json:"name" kit:"moderated"`
+	Name    string     `json:"name" app:"moderated"`
 	Price   int32      `json:"price"`
 	Stock   int        `json:"stock"`
 	State   State      `json:"state"`
@@ -596,7 +596,7 @@ func WhoIs(ctx context.Context, _ app.EmptyValue) (Profile, error) {
 // tests: a test never sends a real mail.
 func start(t *testing.T, opts ...app.AppConfigurer) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
+	t.Setenv("SHOP_SMTP_URL", "")
 	a := app.NewApp("shop", Shop, Audit, Members).With(append([]app.AppConfigurer{
 		app.InMemory(), app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
 	}, opts...)...)

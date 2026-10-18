@@ -31,7 +31,7 @@ type Disk struct {
 
 // NewDisk returns a new data directory for t. The secrets the framework makes — its
 // data-key and its index key, what the product generates — are kept beside
-// the data, as production keeps them unless KIT_SECRETS says otherwise, so
+// the data, as production keeps them unless <PRODUCT>_SECRETS says otherwise, so
 // an app started again on the same Disk opens what the first sealed.
 //
 // It skips t where the platform keeps no data directory: the SDK's disk

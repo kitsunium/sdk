@@ -300,7 +300,7 @@ func (s *storeCore) retainOnce(ctx context.Context, a *App, mode string) (erased
 func (s *storeCore) retains() bool { return s.privacy.hasRetention() }
 
 // addRetentionComponent registers the component that runs the stores' retention
-// loops, as KIT_RETENTION says: on, dry-run, or not at all.
+// loops, as <PRODUCT>_RETENTION says: on, dry-run, or not at all.
 func (a *App) addRetentionComponent() error {
 	var stores []privacyStore
 	for _, st := range a.productStores() {

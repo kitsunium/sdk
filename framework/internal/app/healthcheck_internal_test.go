@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// healthcheck answers 0 when the product on KIT_ADDR is ready, and 1 with
+// healthcheck answers 0 when the product on PROBED_ADDR is ready, and 1 with
 // the reason on stderr when nothing listens there — an unspecified host
 // dials this machine.
 func TestTheHealthcheckAsksTheRunningProduct(t *testing.T) {
@@ -30,9 +30,9 @@ func TestTheHealthcheckAsksTheRunningProduct(t *testing.T) {
 	probe := NewApp("probed", NewService("probed", ""))
 	var stderr strings.Builder
 	for _, addr := range []string{u.Host, ":" + port, "0.0.0.0:" + port} {
-		t.Setenv("KIT_ADDR", addr)
+		t.Setenv("PROBED_ADDR", addr)
 		if code := probe.healthcheck(t.Context(), &stderr); code != 0 {
-			t.Errorf("KIT_ADDR=%s: healthcheck = %d: %s", addr, code, stderr.String())
+			t.Errorf("PROBED_ADDR=%s: healthcheck = %d: %s", addr, code, stderr.String())
 		}
 	}
 
@@ -43,7 +43,7 @@ func TestTheHealthcheckAsksTheRunningProduct(t *testing.T) {
 	gone := closed.Addr().String()
 	closed.Close()
 	stderr.Reset()
-	t.Setenv("KIT_ADDR", gone)
+	t.Setenv("PROBED_ADDR", gone)
 	if code := probe.healthcheck(t.Context(), &stderr); code != 1 || !strings.HasPrefix(stderr.String(), "probed is not ready: ") || len(stderr.String()) < len("probed is not ready: x") {
 		t.Errorf("nothing listening: healthcheck = %d, stderr %q", code, stderr.String())
 	}

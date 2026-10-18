@@ -77,8 +77,8 @@ func TestLinksCarryTheirConnectors(t *testing.T) {
 	if volume == nil || !slices.Equal(volume.Connectors, []string{model.ConnectorMail, model.ConnectorQueue, model.ConnectorStore}) {
 		t.Errorf("process → data directory carries %+v", volume)
 	}
-	if vol := containerOf(arch, model.ContainerVolume); vol == nil || !slices.Equal(vol.Settings, []string{model.VarDataDir}) {
-		t.Errorf("the data directory owns KIT_DATA_DIR: %+v", vol)
+	if vol := containerOf(arch, model.ContainerVolume); vol == nil || !slices.Equal(vol.Settings, []string{"WEB_DATA_DIR"}) {
+		t.Errorf("the data directory owns WEB_DATA_DIR: %+v", vol)
 	}
 	memory := linkOf(arch, "container:process", "container:memory")
 	if memory == nil || !slices.Equal(memory.Connectors, []string{model.ConnectorStore}) || !slices.Equal(memory.Nodes, []string{"cache/store/entries"}) {
@@ -95,7 +95,7 @@ func TestLinksCarryTheirConnectors(t *testing.T) {
 func TestAMalformedSMTPURLLeaksNothing(t *testing.T) {
 	const sentinel = "s3ntinel-pw-7c1d"
 	var logs syncBuffer
-	t.Setenv("KIT_SMTP_URL", "smtp://postmaster:"+sentinel+"@relay.example:notaport")
+	t.Setenv("MAIL_SMTP_URL", "smtp://postmaster:"+sentinel+"@relay.example:notaport")
 	a := app.NewApp("mail", Members).With(app.InMemory(), app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(&logs))
 	err := a.Start(t.Context())
 	if err == nil {

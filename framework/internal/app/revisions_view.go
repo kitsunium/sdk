@@ -110,7 +110,7 @@ func matchSegs(pattern, segs []string) bool {
 
 // studioRevisions are a record's versions, and what changed between two of
 // them, as the Studio's data view shows them
-// (GET /_kit/api/revisions?store=&key=[&from=&to=]).
+// (GET /_app/api/revisions?store=&key=[&from=&to=]).
 func (a *App) studioRevisions(ctx context.Context, store, key, fromText, toText string) (model.RecordVersions, error) {
 	st, ok := a.findNode(store).(revisionsSource)
 	if !ok {

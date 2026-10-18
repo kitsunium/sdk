@@ -28,20 +28,20 @@ var Clinic = app.NewService("clinic", "Patients, letters and reminders, for the 
 // does not.
 type Patient struct {
 	ID       string            `json:"id"`
-	Email    string            `json:"email" kit:"subject"`
-	Name     string            `json:"name" kit:"personal"`
-	Nick     string            `json:"nick,omitempty" kit:"personal,plain"`
-	Blood    string            `json:"blood,omitempty" kit:"special"`
-	Pregnant bool              `json:"pregnant" kit:"special"`
-	Age      int               `json:"age" kit:"personal"`
-	Born     *time.Time        `json:"born,omitempty" kit:"personal"`
-	Token    string            `json:"token,omitempty" kit:"secret"`
-	Home     Home              `json:"home" kit:"personal"`
+	Email    string            `json:"email" app:"subject"`
+	Name     string            `json:"name" app:"personal"`
+	Nick     string            `json:"nick,omitempty" app:"personal,plain"`
+	Blood    string            `json:"blood,omitempty" app:"special"`
+	Pregnant bool              `json:"pregnant" app:"special"`
+	Age      int               `json:"age" app:"personal"`
+	Born     *time.Time        `json:"born,omitempty" app:"personal"`
+	Token    string            `json:"token,omitempty" app:"secret"`
+	Home     Home              `json:"home" app:"personal"`
 	Visits   []Visit           `json:"visits,omitempty"`
-	Tags     map[string]string `json:"tags,omitempty" kit:"personal"`
-	Ward     string            `json:"ward" kit:"public"`
-	Notes    string            `json:"notes,omitempty" kit:"personal,history=3"`
-	ErasedAt *time.Time        `json:"erasedAt,omitempty" kit:"erased"`
+	Tags     map[string]string `json:"tags,omitempty" app:"personal"`
+	Ward     string            `json:"ward" app:"public"`
+	Notes    string            `json:"notes,omitempty" app:"personal,history=3"`
+	ErasedAt *time.Time        `json:"erasedAt,omitempty" app:"erased"`
 }
 
 // Home is where a patient lives.
@@ -53,7 +53,7 @@ type Home struct {
 // Visit is one of a patient's visits: its note is personal, its day is not.
 type Visit struct {
 	Day  string `json:"day"`
-	Note string `json:"note" kit:"personal"`
+	Note string `json:"note" app:"personal"`
 }
 
 func (p Patient) key() string { return p.ID }
@@ -66,9 +66,9 @@ var Patients = Clinic.Store("patients", Patient.key,
 // ClinicAccount is keyed by its subject: its key reads a member kit seals,
 // which stays in clear.
 type ClinicAccount struct {
-	ID       string `json:"id" kit:"subject"`
-	Password string `json:"password" kit:"secret"`
-	Bio      string `json:"bio" kit:"personal"`
+	ID       string `json:"id" app:"subject"`
+	Password string `json:"password" app:"secret"`
+	Bio      string `json:"bio" app:"personal"`
 }
 
 var ClinicAccounts = Clinic.Store("accounts", func(a ClinicAccount) string { return a.ID }, app.DeleteOnErasure())
@@ -76,15 +76,15 @@ var ClinicAccounts = Clinic.Store("accounts", func(a ClinicAccount) string { ret
 // Memo is about nobody: sealed under a data key of its own.
 type Memo struct {
 	ID   string `json:"id"`
-	Body string `json:"body" kit:"personal"`
+	Body string `json:"body" app:"personal"`
 }
 
 var Memos = Clinic.Store("memos", func(m Memo) string { return m.ID })
 
 // Letter is a message about a person: sealed under their key.
 type Letter struct {
-	To   string `json:"to" kit:"subject"`
-	Body string `json:"body" kit:"personal"`
+	To   string `json:"to" app:"subject"`
+	Body string `json:"body" app:"personal"`
 	Kind string `json:"kind"`
 }
 
@@ -92,20 +92,20 @@ var Letters = Clinic.Topic[Letter]("letters")
 
 // Notice is a message about nobody: sealed under data-key itself.
 type Notice struct {
-	Body string `json:"body" kit:"personal"`
+	Body string `json:"body" app:"personal"`
 }
 
 var Notices = Clinic.Topic[Notice]("notices")
 
 // Reminder is queued: sealed under the key of who dispatched it.
 type Reminder struct {
-	Text string `json:"text" kit:"personal"`
+	Text string `json:"text" app:"personal"`
 	Day  string `json:"day"`
 }
 
 // Forgetting names a person's identities.
 type Forgetting struct {
-	IDs []string `json:"ids" kit:"personal"`
+	IDs []string `json:"ids" app:"personal"`
 }
 
 // ClinicForget erases a person, as app.Erase does.
@@ -155,19 +155,19 @@ func remind(ctx context.Context, r Reminder) (app.EmptyValue, error) {
 // pinDataKeyWithoutFileStore pins data-key where the SDK keeps no protected
 // file store — Windows, Plan 9 —: the secrets live in memory there, and kit
 // refuses a store sealed on disk whose data-key would be made again at the
-// next start.
-func pinDataKeyWithoutFileStore(t *testing.T) {
+// next start. The key is the product named name's: <NAME>_DATA_KEY.
+func pinDataKeyWithoutFileStore(t *testing.T, name string) {
 	t.Helper()
 	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
-		t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
+		t.Setenv(strings.ToUpper(strings.ReplaceAll(name, "-", "_"))+"_DATA_KEY", "a data key of exactly 32 bytes..")
 	}
 }
 
 // startClinic runs the clinic on the data in dir, in dev.
 func startClinic(t *testing.T, dir string, opts ...app.AppConfigurer) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
-	pinDataKeyWithoutFileStore(t)
+	t.Setenv("CLINIC_SMTP_URL", "")
+	pinDataKeyWithoutFileStore(t, "clinic")
 	received.Lock()
 	received.letters, received.notices, received.reminders = nil, nil, nil
 	received.Unlock()
@@ -426,14 +426,14 @@ func TestTheStudioShowsSealedMembersSealed(t *testing.T) {
 	must(t, Patients.Insert(ctx, ann()))
 	_, err := Patients.Update(ctx, "p1", func(p *Patient) error { p.Notes = "second notes"; return nil })
 	must(t, err)
-	items := call(t, a, "GET /_kit/api/items?store=clinic/store/patients", noBody)
+	items := call(t, a, "GET /_app/api/items?store=clinic/store/patients", noBody)
 	var rows []map[string]any
 	items.json(t, &rows)
 	if len(rows) != 1 || rows[0]["name"] != model.SealedPlaceholder || rows[0]["home"] != model.SealedPlaceholder ||
 		rows[0]["ward"] != "ward-east" || rows[0]["nick"] != "[redacted]" {
 		t.Errorf("the data browser: %s", items.body)
 	}
-	former := call(t, a, "GET /_kit/api/former?store=clinic/store/patients&key=p1", noBody)
+	former := call(t, a, "GET /_app/api/former?store=clinic/store/patients&key=p1", noBody)
 	if !strings.Contains(string(former.body), model.SealedPlaceholder) {
 		t.Errorf("a former value sealed at rest: %s", former.body)
 	}
@@ -518,6 +518,6 @@ func TestDataKeyRotationRewrapsTheKeys(t *testing.T) {
 // Holding is a record data-key's rotation keeps readable.
 type Holding struct {
 	ID    string `json:"id"`
-	Owner string `json:"owner,omitempty" kit:"subject"`
-	Note  string `json:"note" kit:"personal"`
+	Owner string `json:"owner,omitempty" app:"subject"`
+	Note  string `json:"note" app:"personal"`
 }

@@ -452,7 +452,7 @@ func TestSourcesPointAtTheDeclarations(t *testing.T) {
 	// its Store.Passwords (ADR 0007).
 	type key struct {
 		ID   string `json:"id"`
-		Hash string `json:"hash" kit:"secret"`
+		Hash string `json:"hash" app:"secret"`
 	}
 	keys := app.NewService("sources-keys", "Keeps a password's hash.")
 	store := keys.Store("keys", func(k key) string { return k.ID })
@@ -498,7 +498,7 @@ func TestTracesFollowTheAsyncHop(t *testing.T) {
 		_, err := Log.Get(context.Background(), it.ID+".create")
 		return err == nil
 	})
-	r := call(t, a, "GET /_kit/api/traces", noBody)
+	r := call(t, a, "GET /_app/api/traces", noBody)
 	var traces []model.Trace
 	r.json(t, &traces)
 	var tr *model.Trace
@@ -519,7 +519,7 @@ func TestTracesFollowTheAsyncHop(t *testing.T) {
 			t.Errorf("the trace does not reach %s: %+v", want, tr.Spans)
 		}
 	}
-	one := call(t, a, "GET /_kit/api/traces/"+tr.TraceID, noBody)
+	one := call(t, a, "GET /_app/api/traces/"+tr.TraceID, noBody)
 	if one.status != http.StatusOK {
 		t.Errorf("trace by id: %d", one.status)
 	}
@@ -529,7 +529,7 @@ func TestTracesFollowTheAsyncHop(t *testing.T) {
 // and closes it when the stream ends — the test's context ends the request.
 func TestLiveEvents(t *testing.T) {
 	a := start(t)
-	req, reqErr := http.NewRequestWithContext(t.Context(), "GET", a.URL()+"/_kit/api/events", nil)
+	req, reqErr := http.NewRequestWithContext(t.Context(), "GET", a.URL()+"/_app/api/events", nil)
 	if reqErr != nil {
 		t.Fatal(reqErr)
 	}
@@ -618,7 +618,7 @@ func TestStopDoesNotWaitForTheStudio(t *testing.T) {
 	if err := a.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	resp, respErr := http.Get(a.URL() + "/_kit/api/events")
+	resp, respErr := http.Get(a.URL() + "/_app/api/events")
 	if respErr != nil {
 		t.Fatal(respErr)
 	}
@@ -652,7 +652,7 @@ func TestAFailedTransitionUndoesItsHooks(t *testing.T) {
 	}
 	var inst []model.Instance
 	eventually(t, "the workflow reads the entity again", func() bool {
-		call(t, a, "GET /_kit/api/instances?workflow=shop/workflow/lifecycle", noBody).json(t, &inst)
+		call(t, a, "GET /_app/api/instances?workflow=shop/workflow/lifecycle", noBody).json(t, &inst)
 		return slices.ContainsFunc(inst, func(i model.Instance) bool { return i.ID == it.ID && i.State == Draft.String() })
 	})
 }
@@ -695,13 +695,13 @@ func TestTraceparentIsHonouredAndEchoed(t *testing.T) {
 	if r.status != http.StatusOK || !strings.HasPrefix(echoed, "00-4bf92f3577b34da6a3ce929d0e0e4736-") || echoed == parent {
 		t.Fatalf("status %d, traceparent %q", r.status, echoed)
 	}
-	r = call(t, a, "GET /_kit/api/traces?root=shop/endpoint/CreateItem", noBody)
+	r = call(t, a, "GET /_app/api/traces?root=shop/endpoint/CreateItem", noBody)
 	var traces []model.Trace
 	r.json(t, &traces)
 	if len(traces) != 1 || traces[0].TraceID != "4bf92f3577b34da6a3ce929d0e0e4736" {
 		t.Fatalf("traces rooted at the endpoint: %s", r.body)
 	}
-	if r := call(t, a, "GET /_kit/api/traces?root=nowhere", noBody); string(r.body) != "[]\n" {
+	if r := call(t, a, "GET /_app/api/traces?root=nowhere", noBody); string(r.body) != "[]\n" {
 		t.Errorf("a root with no trace: %s", r.body)
 	}
 }
@@ -749,7 +749,7 @@ func TestTracesAreKeptPerEntry(t *testing.T) {
 	for range 300 {
 		call(t, a, "GET /search?q=x", noBody)
 	}
-	r := call(t, a, "GET /_kit/api/traces?root=shop/endpoint/CreateItem", noBody)
+	r := call(t, a, "GET /_app/api/traces?root=shop/endpoint/CreateItem", noBody)
 	var traces []model.Trace
 	r.json(t, &traces)
 	if len(traces) != 1 {
@@ -762,12 +762,12 @@ func TestTracesAreKeptPerEntry(t *testing.T) {
 	if !nodes["audit/subscription/record"] {
 		t.Error("the delivery is not part of the publisher's trace")
 	}
-	r = call(t, a, "GET /_kit/api/traces?root=shop/endpoint/Search", noBody)
+	r = call(t, a, "GET /_app/api/traces?root=shop/endpoint/Search", noBody)
 	r.json(t, &traces)
 	if len(traces) != 50 {
 		t.Errorf("an entry keeps its last 50 traces, got %d", len(traces))
 	}
-	r = call(t, a, "GET /_kit/api/traces?root=audit/subscription/record", noBody)
+	r = call(t, a, "GET /_app/api/traces?root=audit/subscription/record", noBody)
 	r.json(t, &traces)
 	if len(traces) != 0 {
 		t.Errorf("a delivery is not an entry of its own: %d traces", len(traces))
@@ -782,7 +782,7 @@ func TestARefusalIsNotAFailure(t *testing.T) {
 	if r := call(t, a, "GET /items/missing", noBody); r.status != http.StatusNotFound {
 		t.Fatalf("GET /items/missing answered %d %s", r.status, r.body)
 	}
-	r := call(t, a, "GET /_kit/api/traces?root=shop/endpoint/GetItem", noBody)
+	r := call(t, a, "GET /_app/api/traces?root=shop/endpoint/GetItem", noBody)
 	var traces []model.Trace
 	r.json(t, &traces)
 	if len(traces) != 1 {
@@ -821,7 +821,7 @@ func TestASpanKnowsTheLineThatMadeItsCall(t *testing.T) {
 			want = i + 1
 		}
 	}
-	r := call(t, a, "GET /_kit/api/traces?root=shop/endpoint/GetItem", noBody)
+	r := call(t, a, "GET /_app/api/traces?root=shop/endpoint/GetItem", noBody)
 	var traces []model.Trace
 	r.json(t, &traces)
 	if len(traces) != 1 {

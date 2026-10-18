@@ -69,7 +69,7 @@ const defaultMailAttempts int = 6
 // spool reports.
 //
 // Credentials never leave the mailer. The SMTP URL is the mail connector's
-// secret, smtp-url: KIT_SMTP_URL, or the file KIT_SMTP_URL_FILE names, or
+// secret, smtp-url: <PRODUCT>_SMTP_URL, or the file <PRODUCT>_SMTP_URL_FILE names, or
 // kit-smtp-url in the environment's store (secretstore.go). It is parsed where
 // the transport is built and nowhere else; the graph, the Studio and the logs
 // see the relay's host and port, the TLS mode and the sender — never the user
@@ -81,13 +81,13 @@ const defaultMailAttempts int = 6
 // retrying a failure and dead-lettering a message after its last attempt.
 //
 // The transport is the SDK's mail package: SMTP when the mail connector's
-// secret smtp-url is set — KIT_SMTP_URL, smtp://user:password@host:587?tls=
+// secret smtp-url is set — <PRODUCT>_SMTP_URL, smtp://user:password@host:587?tls=
 // starttls|implicit|none — and otherwise the capture transport, which keeps
 // every message for the Studio's mailbox and for tests ([Mailer.Captured])
 // and delivers nothing. Outside dev, the capture transport is reported as a
 // warning. The URL is read again before every delivery: replacing it where
 // it lives — a new version in the store, a new file behind
-// KIT_SMTP_URL_FILE — takes effect at the next mail. The outbox and the
+// <PRODUCT>_SMTP_URL_FILE — takes effect at the next mail. The outbox and the
 // transports are the SDK's, which the mail subsystem plugs in
 // (framework/app/mail, ADR 0179 step 6).
 type Mailer struct {
@@ -562,14 +562,14 @@ func (m *Mailer) openTransport(ctx context.Context, a *App) (transport plug.Mail
 		full, _ = c.(plug.MailCaptureSource)
 		return c, full, smtpRelay{}, nil
 	case errors.Is(err, secret.EnvRefused):
-		return nil, nil, smtpRelay{}, explain(CodeMailConfig, "MAIL_CONFIG", "set KIT_SMTP_URL or KIT_SMTP_URL_FILE, not both", err, errs.String("mailer", m.id))
+		return nil, nil, smtpRelay{}, explain(CodeMailConfig, "MAIL_CONFIG", "set <PRODUCT>_SMTP_URL or <PRODUCT>_SMTP_URL_FILE, not both", err, errs.String("mailer", m.id))
 	case err != nil:
-		return nil, nil, smtpRelay{}, explain(CodeMailConfig, "MAIL_CONFIG", "the SMTP URL cannot be read: KIT_SMTP_URL_FILE, or kit-smtp-url in the secret store", err, errs.String("mailer", m.id))
+		return nil, nil, smtpRelay{}, explain(CodeMailConfig, "MAIL_CONFIG", "the SMTP URL cannot be read: <PRODUCT>_SMTP_URL_FILE, or kit-smtp-url in the secret store", err, errs.String("mailer", m.id))
 	}
 	t, relay, problem, err := smtpTransport(v.Value)
 	relay.url = v.Value
 	if !problem.empty() {
-		return nil, nil, smtpRelay{}, failure(CodeMailConfig, "MAIL_CONFIG", "KIT_SMTP_URL is not a usable SMTP URL", err,
+		return nil, nil, smtpRelay{}, failure(CodeMailConfig, "MAIL_CONFIG", "<PRODUCT>_SMTP_URL is not a usable SMTP URL", err,
 			errs.String("mailer", m.id), errs.String("problem", problem.String()))
 	}
 	return t, nil, relay, nil
@@ -845,7 +845,7 @@ func headersOf(msg *mail.Message) map[string]string {
 		}
 	}
 	if len(msg.Attachments) > 0 {
-		h["X-Kit-Attachments"] = attachmentsText(msg.Attachments)
+		h["X-Attachments"] = attachmentsText(msg.Attachments)
 	}
 	return h
 }
@@ -934,9 +934,9 @@ func (a *App) mailerProblems() []model.Diagnostic {
 		}
 		switch {
 		case !set && a.cfg.env != EnvDev:
-			out = append(out, diagnosticOf("warning", m.id, a.source(&m.decl), say("mailer.capture", "mailer", m.id)))
+			out = append(out, diagnosticOf("warning", m.id, a.source(&m.decl), say("mailer.capture", "mailer", m.id, "prefix", appPrefix(a.name))))
 		case !problem.empty():
-			out = append(out, diagnosticOf("error", m.id, a.source(&m.decl), say("mailer.smtp", "mailer", m.id, "problem", problem)))
+			out = append(out, diagnosticOf("error", m.id, a.source(&m.decl), say("mailer.smtp", "mailer", m.id, "problem", problem, "prefix", appPrefix(a.name))))
 		}
 	}
 	return out

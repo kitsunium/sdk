@@ -78,30 +78,30 @@ func TestTheKitTagRefuses(t *testing.T) {
 }
 
 type classifiedAddress struct {
-	Street string `json:"street" kit:"personal"`
+	Street string `json:"street" app:"personal"`
 	City   string `json:"city"`
 }
 
 type classifiedComment struct {
-	Body    string              `json:"body" kit:"personal,moderated"`
+	Body    string              `json:"body" app:"personal,moderated"`
 	Replies []classifiedComment `json:"replies,omitempty"`
 }
 
 type classifiedEmbedded struct {
-	Phone string `json:"phone" kit:"personal"`
+	Phone string `json:"phone" app:"personal"`
 }
 
 type classifiedEntity struct {
 	ID      string                       `json:"id"`
-	Owner   string                       `json:"owner" kit:"subject"`
+	Owner   string                       `json:"owner" app:"subject"`
 	Home    classifiedAddress            `json:"home"`
 	Work    *classifiedAddress           `json:"work,omitempty"`
 	Tags    map[string]classifiedAddress `json:"tags,omitempty"`
 	Thread  []classifiedComment          `json:"thread,omitempty"`
-	Secret  string                       `json:"secret" kit:"secret"`
-	Erased  *time.Time                   `json:"erased,omitempty" kit:"erased"`
+	Secret  string                       `json:"secret" app:"secret"`
+	Erased  *time.Time                   `json:"erased,omitempty" app:"erased"`
 	Kept    int                          `json:"kept"`
-	Created time.Time                    `json:"created" kit:"public"`
+	Created time.Time                    `json:"created" app:"public"`
 	*classifiedEmbedded
 }
 
@@ -173,26 +173,26 @@ func TestAMemberIsClearedByItsPointer(t *testing.T) {
 }
 
 type twoSubjects struct {
-	A string `json:"a" kit:"subject"`
-	B string `json:"b" kit:"subject"`
+	A string `json:"a" app:"subject"`
+	B string `json:"b" app:"subject"`
 }
 
 type listedSubject struct {
 	People []struct {
-		Email string `json:"email" kit:"subject"`
+		Email string `json:"email" app:"subject"`
 	} `json:"people"`
 }
 
 type badSubject struct {
-	Who  []string `json:"who" kit:"subject"`
-	When string   `json:"when" kit:"erased"`
+	Who  []string `json:"who" app:"subject"`
+	When string   `json:"when" app:"erased"`
 }
 
 // listedHistory keeps the former values of every element of a list: an
 // element has no identity from one version to the next (ADR 0007).
 type listedHistory struct {
 	Replies []struct {
-		Body string `json:"body" kit:"personal,history=2"`
+		Body string `json:"body" app:"personal,history=2"`
 	} `json:"replies"`
 }
 
@@ -232,14 +232,14 @@ func saysAll(t *testing.T, typ reflect.Type, where string, problems []phrase, wa
 
 // listedPerson is a record about one person, as a store keeps it.
 type listedPerson struct {
-	Email string `json:"email" kit:"subject"`
-	Name  string `json:"name" kit:"personal"`
+	Email string `json:"email" app:"subject"`
+	Name  string `json:"name" app:"personal"`
 }
 
 // listedPage is what a list answers: the records of several people, and
 // the one person who asked.
 type listedPage struct {
-	Asker  string         `json:"asker" kit:"subject"`
+	Asker  string         `json:"asker" app:"subject"`
 	People []listedPerson `json:"people"`
 	Others []listedPerson `json:"others"`
 }
@@ -311,11 +311,11 @@ func TestASubjectInAListIsRefusedOnlyWhereKitReadsAnIdentity(t *testing.T) {
 }
 
 type redactedByClass struct {
-	Name     string `json:"name" kit:"personal"`
-	Health   string `json:"health" kit:"special"`
-	Who      string `json:"who" kit:"subject"`
-	Other    string `json:"other" kit:"other,personal"`
-	Category string `json:"category" kit:"public"`
+	Name     string `json:"name" app:"personal"`
+	Health   string `json:"health" app:"special"`
+	Who      string `json:"who" app:"subject"`
+	Other    string `json:"other" app:"other,personal"`
+	Category string `json:"category" app:"public"`
 	Plain    string `json:"plain"`
 }
 

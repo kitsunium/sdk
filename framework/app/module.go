@@ -14,7 +14,7 @@ type Module = iapp.Module
 type ModulePart = iapp.ModuleConfigurer
 
 // NewModule declares a module named name — lower-case letters, digits and
-// dashes, starting with a letter; "kit", "external" and "schema" are the framework's — that doc
+// dashes, starting with a letter; "app", "kit", "external" and "schema" are the framework's — that doc
 // describes, made of parts: its services, which it adopts, the modules it
 // requires ([Requires]), and the migrations of the data it keeps outside
 // the framework's stores ([Migrations]), run on the database that keeps it. Declare it

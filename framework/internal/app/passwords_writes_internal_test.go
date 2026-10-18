@@ -45,7 +45,8 @@ func TestALegacyValueIsLeftAsItWas(t *testing.T) {
 	dir := t.TempDir()
 	before := NewService("locks-legacy", "")
 	plain := before.Store("accounts", func(a lockAccount) string { return a.ID })
-	pinDataKeyWithoutFileStore(t)
+	pinDataKeyWithoutFileStore(t, "legacy")
+	pinDataKeyWithoutFileStore(t, "locks-legacy")
 	app := NewApp("legacy", before).With(DataDir(dir), Listen("127.0.0.1:0"), Env(EnvDev), Analyze(false), Logs(io.Discard))
 	must(t, app.Start(t.Context()))
 	must(t, plain.Insert(t.Context(), lockAccount{ID: "a1", Password: "legacy"}))
@@ -66,9 +67,9 @@ func TestABadPolicyRefusesTheStart(t *testing.T) {
 	type twoFields struct {
 		ID     string `json:"id"`
 		Plain  string `json:"plain"`
-		Hash   string `json:"hash" kit:"secret,history=1"`
+		Hash   string `json:"hash" app:"secret,history=1"`
 		Nested struct {
-			Hash string `json:"hash" kit:"secret"`
+			Hash string `json:"hash" app:"secret"`
 		} `json:"nested"`
 	}
 	svc := NewService("locks-bad", "")

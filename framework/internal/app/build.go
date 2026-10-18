@@ -72,7 +72,7 @@ func cloneBuild(b *model.Build) *model.Build {
 		return nil
 	}
 	out := *b
-	out.Product, out.Kit, out.SDK = cloneVersion(b.Product), cloneVersion(b.Kit), cloneVersion(b.SDK)
+	out.Product, out.App, out.SDK = cloneVersion(b.Product), cloneVersion(b.App), cloneVersion(b.SDK)
 	return &out
 }
 
@@ -106,17 +106,17 @@ func buildOf(bi *debug.BuildInfo, head gitHead) *model.Build {
 	info := buildinfo.ParseBuild(bi)
 	b := &model.Build{
 		Product: versionOf(&info.Main, nil),
-		Kit:     model.ModuleVersion{Module: sdkModule},
+		App:     model.ModuleVersion{Module: sdkModule},
 	}
 	// A product is always built from its own tree: its commit says where.
 	b.Product.Local = false
 	if info.Main.Path == sdkModule {
-		b.Kit = b.Product
+		b.App = b.Product
 	} else if m, ok := info.Module(sdkModule); ok {
-		b.Kit = versionOf(&m, head)
+		b.App = versionOf(&m, head)
 	}
 	// Its own copy: a caller that edits one of the two edits only that one.
-	b.SDK = cloneVersion(b.Kit)
+	b.SDK = cloneVersion(b.App)
 	return b
 }
 

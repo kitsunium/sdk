@@ -17,15 +17,15 @@ import (
 // on framework/telemetry's port (ADR 0149) — a no-op unless the app was
 // started with an exporter, which only EMITS, on a private socket a tool
 // attaches to (`kit attach`). It is configured at the start and never after:
-// KIT_TELEMETRY names the socket ("on" is <runtime dir>/telemetry.sock, or
+// <PRODUCT>_TELEMETRY names the socket ("on" is <runtime dir>/telemetry.sock, or
 // <runtime dir of the binary>/<app>.telemetry.sock for a role of one),
-// KIT_TELEMETRY_GIDS the groups admitted besides the product's account — the
+// <PRODUCT>_TELEMETRY_GIDS the groups admitted besides the product's account — the
 // on-call group a deployment declares. [Telemetry] does the same in code. A
 // CLI run never exports.
 
 // Telemetry exports the app's telemetry on the private socket at path —
 // absolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the
-// product's own account. It wins over KIT_TELEMETRY.
+// product's own account. It wins over <PRODUCT>_TELEMETRY.
 func Telemetry(path string, gids ...int) AppConfigurer {
 	return appOption(func(o *appOptions) { o.telemetry, o.telemetryGIDs = &path, gids })
 }
@@ -38,7 +38,7 @@ func DesignDigest(digest string) AppConfigurer {
 	return appOption(func(o *appOptions) { o.digest = digest })
 }
 
-// telemetrySocket is where KIT_TELEMETRY=on puts the socket.
+// telemetrySocket is where <PRODUCT>_TELEMETRY=on puts the socket.
 func (a *App) telemetrySocket() string {
 	if a.binary != nil {
 		// Two roles of a binary share its directory: each its own socket.
@@ -50,14 +50,14 @@ func (a *App) telemetrySocket() string {
 // telemetryConfig is where the exporter listens and whom it admits; "" when
 // the app exports nothing.
 func (a *App) telemetryConfig() (path string, gids []int, err error) {
-	path = os.Getenv("KIT_TELEMETRY")
+	path = os.Getenv(a.variable(varTelemetry))
 	if a.opts.telemetry != nil {
 		path, gids = *a.opts.telemetry, a.opts.telemetryGIDs
-	} else if raw := os.Getenv("KIT_TELEMETRY_GIDS"); raw != "" {
+	} else if raw := os.Getenv(a.variable(varTelemetryGIDs)); raw != "" {
 		for f := range strings.SplitSeq(raw, ",") {
 			gid, convErr := strconv.Atoi(strings.TrimSpace(f))
 			if convErr != nil || gid < 0 {
-				return "", nil, failure(CodeAppConfig, "TELEMETRY_INVALID", "KIT_TELEMETRY_GIDS is a comma-separated list of group IDs", nil)
+				return "", nil, failure(CodeAppConfig, "TELEMETRY_INVALID", "<PRODUCT>_TELEMETRY_GIDS is a comma-separated list of group IDs", nil, errs.String("variable", a.variable(varTelemetryGIDs)))
 			}
 			gids = append(gids, gid)
 		}
@@ -69,7 +69,7 @@ func (a *App) telemetryConfig() (path string, gids []int, err error) {
 		path = a.telemetrySocket()
 	}
 	if !filepath.IsAbs(path) {
-		return "", nil, failure(CodeAppConfig, "TELEMETRY_INVALID", "KIT_TELEMETRY is on, off or an absolute socket path", nil)
+		return "", nil, failure(CodeAppConfig, "TELEMETRY_INVALID", "<PRODUCT>_TELEMETRY is on, off or an absolute socket path", nil, errs.String("variable", a.variable(varTelemetry)))
 	}
 	return path, gids, nil
 }

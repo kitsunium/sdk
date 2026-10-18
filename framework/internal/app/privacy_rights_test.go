@@ -243,21 +243,21 @@ func TestARecordKeyedByPersonalDataIsDeleted(t *testing.T) {
 func TestALostIndexKeyRebuildsTheIndex(t *testing.T) {
 	needsFileStore(t)
 	dir := t.TempDir()
-	t.Setenv("KIT_INDEX_KEY", "the first index key, long enough")
+	t.Setenv("VIGIE_INDEX_KEY", "the first index key, long enough")
 	a := startPrivacyOn(t, app.DataDir(dir))
 	seed(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	must(t, a.Stop(ctx))
-	t.Setenv("KIT_INDEX_KEY", "another index key, as long as it")
+	t.Setenv("VIGIE_INDEX_KEY", "another index key, as long as it")
 	must(t, a.Start(t.Context()))
 	data, err := DeskExport.Ask(t.Context(), Identities{IDs: []string{"ann@x.dev", "u-ann"}})
 	if err != nil || len(data.Stores) != 3 {
 		t.Fatalf("after a new index key: %+v, %v", data, err)
 	}
-	t.Setenv("KIT_INDEX_KEY", "short")
+	t.Setenv("VIGIE_INDEX_KEY", "short")
 	must(t, a.Stop(ctx))
-	if err := a.Start(t.Context()); err == nil || !strings.Contains(err.Error(), "internal error") && !strings.Contains(err.Error(), "KIT_INDEX_KEY") {
+	if err := a.Start(t.Context()); err == nil || !strings.Contains(err.Error(), "internal error") && !strings.Contains(err.Error(), "_INDEX_KEY") {
 		t.Errorf("a short index key: %v", err)
 	}
 }

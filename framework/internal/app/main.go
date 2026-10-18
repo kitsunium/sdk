@@ -17,27 +17,39 @@ import (
 // variables' prefix.
 const environmentFormat string = `
 Environment:
-  KIT_ENV=dev        serve the Studio at /_kit/ (default: production, no Studio)
-  KIT_ADDR, PORT     where to listen (dev: 127.0.0.1:4000, production: :4000)
-  KIT_DATA_DIR       where stores and queues persist (dev: .kit/data)
-  KIT_SMTP_URL       where mailers deliver: smtp://user:password@host:587?tls=starttls,
-                     or KIT_SMTP_URL_FILE naming a file that holds it
-                     (unset: mail is captured for the Studio, not delivered)
-  %[1]s_<NAME>        a setting or a secret the product declares;
-                     a secret also %[1]s_<NAME>_FILE naming a file that holds it
-  %[1]s_<DB>_URL      the URL of the database <db> (app.Database), or %[1]s_<DB>_URL_FILE
-  KIT_SECRETS        where the environment keeps its secrets: env, memory or file:<dir>
-                     (unset: an encrypted store beside the data, or memory without data)
-  KIT_SECRETS_KEY    the key of a file store: 32 bytes in base64 (openssl rand -base64 32),
-                     or KIT_SECRETS_KEY_FILE naming a file that holds it
-                     (unset: a key file beside the store, made on first use)
-  KIT_TRUST_PROXY    on: app.ClientIP reads the last X-Forwarded-For address
-  KIT_RETENTION      what the stores' retention does: on (default), dry-run or off
-  KIT_INDEX_KEY      pins the framework's index key, which references a person's records
-                     (unset: made on first use and kept with the secrets; kept in memory
-                     while the data persists, it is warned of at every start)
-  KIT_DATA_KEY       pins the framework's data-key, which wraps the keys personal data is sealed under
-                     at rest: 32 bytes (unset: made on first use, kept with the secrets, rotated)
+  %[1]s_ENV=dev
+      serve the Studio at /_app/ (default: production, no Studio)
+  %[1]s_ADDR, PORT
+      where to listen (dev: 127.0.0.1:4000, production: :4000)
+  %[1]s_DATA_DIR
+      where stores and queues persist (dev: .kit/data)
+  %[1]s_SMTP_URL
+      where mailers deliver: smtp://user:password@host:587?tls=starttls,
+      or %[1]s_SMTP_URL_FILE naming a file that holds it
+      (unset: mail is captured for the Studio, not delivered)
+  %[1]s_<NAME>
+      a setting or a secret the product declares;
+      a secret also %[1]s_<NAME>_FILE naming a file that holds it
+  %[1]s_<DB>_URL
+      the URL of the database <db> (app.Database), or %[1]s_<DB>_URL_FILE
+  %[1]s_SECRETS
+      where the environment keeps its secrets: env, memory or file:<dir>
+      (unset: an encrypted store beside the data, or memory without data)
+  %[1]s_SECRETS_KEY
+      the key of a file store: 32 bytes in base64 (openssl rand -base64 32),
+      or %[1]s_SECRETS_KEY_FILE naming a file that holds it
+      (unset: a key file beside the store, made on first use)
+  %[1]s_TRUST_PROXY
+      on: app.ClientIP reads the last X-Forwarded-For address
+  %[1]s_RETENTION
+      what the stores' retention does: on (default), dry-run or off
+  %[1]s_INDEX_KEY
+      pins the framework's index key, which references a person's records
+      (unset: made on first use and kept with the secrets; kept in memory
+      while the data persists, it is warned of at every start)
+  %[1]s_DATA_KEY
+      pins the framework's data-key, which wraps the keys personal data is sealed under
+      at rest: 32 bytes (unset: made on first use, kept with the secrets, rotated)
 `
 
 // usageFormat is Main's usage; %[1]s is the product's name.
@@ -74,7 +86,7 @@ Usage:
 //
 //	serve        run the product (the default)
 //	graph        print the product graph: -format json|mermaid
-//	healthcheck  exit 0 when the product running on KIT_ADDR is ready
+//	healthcheck  exit 0 when the product running on <PRODUCT>_ADDR is ready
 //	config       every setting: its value, never a secret's, and its origin
 //	secrets      list the secrets, set one from standard input, rotate one
 //	migrate      the databases' migrations: status, up, down SET VERSION
@@ -225,8 +237,12 @@ func writeGraph(w io.Writer, g *model.Graph, format string) error {
 // this machine's loopback — within three seconds, and a product that is not
 // ready says why on stderr: unreachable, too slow, or the status it answered.
 func (a *App) healthcheck(ctx context.Context, stderr io.Writer) int {
-	cfg := resolveConfig(&a.opts, os.Getenv)
-	if _, err := health.Ask(ctx, health.AskConfig{Addr: cfg.addr, Path: "/_kit/health/ready"}); err != nil {
+	if err := renamedRefusal(renamedVariables(a.name, os.Getenv)); err != nil {
+		fmt.Fprintln(stderr, err)
+		return exitConfig
+	}
+	cfg := resolveConfig(&a.opts, a.name, os.Getenv)
+	if _, err := health.Ask(ctx, health.AskConfig{Addr: cfg.addr, Path: healthPrefix + "ready"}); err != nil {
 		fmt.Fprintf(stderr, "%s is not ready: %s\n", a.name, errs.PublicOf(err))
 		return 1
 	}

@@ -46,7 +46,7 @@ func TestAPortCarriesItsCallersUser(t *testing.T) {
 		t.Fatalf("a member's quote: %+v %v", q, err)
 	}
 	var traces []model.Trace
-	call(t, a, "GET /_kit/api/traces?node=members/endpoint/MemberPrice", noBody).json(t, &traces)
+	call(t, a, "GET /_app/api/traces?node=members/endpoint/MemberPrice", noBody).json(t, &traces)
 	for _, tr := range traces {
 		if carries(tr, "u-ann", "shop/port/quote", "members/endpoint/MemberPrice") {
 			return

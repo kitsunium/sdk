@@ -21,14 +21,14 @@ func TestConfigIsClosedByDefault(t *testing.T) {
 		{"unset is production", map[string]string{}, ":4000", false, false, true},
 		{"production ignores KIT_STUDIO", map[string]string{"KIT_STUDIO": "on", "KIT_STUDIO_REMOTE": "on"}, ":4000", false, false, true},
 		{"production honours PORT on every interface", map[string]string{"PORT": "8080"}, ":8080", false, false, true},
-		{"dev binds loopback", map[string]string{"KIT_ENV": "dev"}, "127.0.0.1:4000", true, false, false},
-		{"dev keeps PORT on loopback", map[string]string{"KIT_ENV": "dev", "PORT": "8080"}, "127.0.0.1:8080", true, false, false},
-		{"dev with an explicit address", map[string]string{"KIT_ENV": "dev", "KIT_ADDR": "0.0.0.0:9"}, "0.0.0.0:9", true, false, false},
-		{"dev opts in to remote clients", map[string]string{"KIT_ENV": "dev", "KIT_STUDIO_REMOTE": "on"}, "127.0.0.1:4000", true, true, false},
-		{"dev without the Studio", map[string]string{"KIT_ENV": "dev", "KIT_STUDIO": "off", "KIT_STUDIO_REMOTE": "on"}, "127.0.0.1:4000", false, false, false},
+		{"dev binds loopback", map[string]string{"TODO_ENV": "dev"}, "127.0.0.1:4000", true, false, false},
+		{"dev keeps PORT on loopback", map[string]string{"TODO_ENV": "dev", "PORT": "8080"}, "127.0.0.1:8080", true, false, false},
+		{"dev with an explicit address", map[string]string{"TODO_ENV": "dev", "TODO_ADDR": "0.0.0.0:9"}, "0.0.0.0:9", true, false, false},
+		{"dev opts in to remote clients", map[string]string{"TODO_ENV": "dev", "KIT_STUDIO_REMOTE": "on"}, "127.0.0.1:4000", true, true, false},
+		{"dev without the Studio", map[string]string{"TODO_ENV": "dev", "KIT_STUDIO": "off", "KIT_STUDIO_REMOTE": "on"}, "127.0.0.1:4000", false, false, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			cfg := resolveConfig(&appOptions{}, env(c.vars))
+			cfg := resolveConfig(&appOptions{}, "todo", env(c.vars))
 			if cfg.addr != c.addr || cfg.studio.on != c.studio || cfg.studio.remote != c.remote || (cfg.dataDir == "") != c.memory {
 				t.Errorf("addr %q studio %v remote %v dataDir %q", cfg.addr, cfg.studio.on, cfg.studio.remote, cfg.dataDir)
 			}
@@ -37,9 +37,9 @@ func TestConfigIsClosedByDefault(t *testing.T) {
 }
 
 func TestSettingsSayWhereEachValueComesFrom(t *testing.T) {
-	env := map[string]string{"PORT": "8080", "KIT_SMTP_URL": "smtp://mailer:hunter2@smtp.example.com:587"}
+	env := map[string]string{"PORT": "8080", "TODO_SMTP_URL": "smtp://mailer:hunter2@smtp.example.com:587"}
 	getenv := func(k string) string { return env[k] }
-	set := settings(&appOptions{}, getenv, new(resolveConfig(&appOptions{}, getenv)))
+	set := settings(&appOptions{}, "todo", getenv, new(resolveConfig(&appOptions{}, "todo", getenv)))
 	by := map[string]model.Setting{}
 	for _, s := range set {
 		by[s.Name] = s
@@ -47,18 +47,18 @@ func TestSettingsSayWhereEachValueComesFrom(t *testing.T) {
 			t.Fatalf("a setting shows the password: %+v", s)
 		}
 	}
-	if s := by["KIT_ADDR"]; s.Value != ":8080" || s.From != model.SettingEnv {
+	if s := by["TODO_ADDR"]; s.Value != ":8080" || s.From != model.SettingEnv {
 		t.Errorf("KIT_ADDR from PORT: %+v", s)
 	}
-	if s := by["KIT_ENV"]; s.Value != EnvProduction || s.From != model.SettingDefault {
+	if s := by["TODO_ENV"]; s.Value != EnvProduction || s.From != model.SettingDefault {
 		t.Errorf("KIT_ENV by default: %+v", s)
 	}
 	// The SMTP URL is a secret: where it is found is said once the app has
 	// opened the environment's stores, never here (boot_test.go).
-	if s, ok := by["KIT_SMTP_URL"]; ok {
+	if s, ok := by["TODO_SMTP_URL"]; ok {
 		t.Errorf("KIT_SMTP_URL is read from the secret stores, not the settings: %+v", s)
 	}
-	if s := by["KIT_DATA_DIR"]; s.Value != "memory" || s.From != model.SettingDefault {
+	if s := by["TODO_DATA_DIR"]; s.Value != "memory" || s.From != model.SettingDefault {
 		t.Errorf("no data directory in production: %+v", s)
 	}
 }
@@ -68,37 +68,37 @@ func TestSettingsSayWhereEachValueComesFrom(t *testing.T) {
 // wins over it, a name it could not have set is dropped, and no value moves.
 func TestKitDevLabelsOnlyWhatItForced(t *testing.T) {
 	env := map[string]string{
-		model.VarEnv: "dev", model.VarAddr: "127.0.0.1:4000", model.VarDataDir: "/srv/app/.kit/data", model.VarLogLevel: "debug",
-		model.VarDevForced: "KIT_ENV, KIT_ADDR,KIT_DATA_DIR,KIT_LOG_LEVEL,PATH",
+		"TODO_ENV": "dev", "TODO_ADDR": "127.0.0.1:4000", "TODO_DATA_DIR": "/srv/app/.kit/data", "TODO_LOG_LEVEL": "debug",
+		model.VarDevForced: "TODO_ENV, TODO_ADDR,TODO_DATA_DIR,TODO_LOG_LEVEL,PATH,KIT_ENV",
 	}
 	getenv := func(k string) string { return env[k] }
 	by := func(o appOptions) map[string]model.Setting {
 		out := map[string]model.Setting{}
-		for _, s := range settings(&o, getenv, new(resolveConfig(&o, getenv))) {
+		for _, s := range settings(&o, "todo", getenv, new(resolveConfig(&o, "todo", getenv))) {
 			out[s.Name] = s
 		}
 		return out
 	}
 	got := by(appOptions{})
-	for _, name := range []string{model.VarEnv, model.VarAddr, model.VarDataDir} {
-		if got[name].From != model.SettingAppDev || got[name].Value != env[name] && name != model.VarEnv {
+	for _, name := range []string{"TODO_ENV", "TODO_ADDR", "TODO_DATA_DIR"} {
+		if got[name].From != model.SettingAppDev || got[name].Value != env[name] && name != "TODO_ENV" {
 			t.Errorf("%s: %+v, want kit dev and the value unchanged", name, got[name])
 		}
 	}
-	if got[model.VarLogLevel].From != model.SettingEnv {
-		t.Errorf("KIT_LOG_LEVEL is not a name kit dev sets: %+v", got[model.VarLogLevel])
+	if got["TODO_LOG_LEVEL"].From != model.SettingEnv {
+		t.Errorf("TODO_LOG_LEVEL is not a name kit dev sets: %+v", got["TODO_LOG_LEVEL"])
 	}
-	if s := got[model.VarAddr]; s.Option != "app.Listen" || s.Flag != "-addr" {
+	if s := got["TODO_ADDR"]; s.Option != "app.Listen" || s.Flag != "-addr" {
 		t.Errorf("KIT_ADDR says how to change it: %+v", s)
 	}
-	if s := by(appOptions{addr: new("127.0.0.1:0")})[model.VarAddr]; s.From != model.SettingOption {
+	if s := by(appOptions{addr: new("127.0.0.1:0")})["TODO_ADDR"]; s.From != model.SettingOption {
 		t.Errorf("the code wins over kit dev: %+v", s)
 	}
-	if s := by(appOptions{memory: true})[model.VarDataDir]; s.From != model.SettingOption || s.Option != "app.InMemory" {
+	if s := by(appOptions{memory: true})["TODO_DATA_DIR"]; s.From != model.SettingOption || s.Option != "app.InMemory" {
 		t.Errorf("app.InMemory wins and is named: %+v", s)
 	}
 	delete(env, model.VarDevForced)
-	if s := by(appOptions{})[model.VarAddr]; s.From != model.SettingEnv {
+	if s := by(appOptions{})["TODO_ADDR"]; s.From != model.SettingEnv {
 		t.Errorf("without kit dev's list, the environment is the environment: %+v", s)
 	}
 }

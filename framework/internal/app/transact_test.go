@@ -114,8 +114,8 @@ func eachBackend(t *testing.T, test func(t *testing.T, tl *till, a *app.App)) {
 // runTill runs the till in dev, its mail captured, until the test ends.
 func runTill(t *testing.T, tl *till, opts ...app.AppConfigurer) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
-	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("TILL_SMTP_URL", "")
+	t.Setenv("TILL_SECRETS", "memory")
 	a := app.NewApp("till", tl.svc).With(append([]app.AppConfigurer{
 		app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
 	}, opts...)...)
@@ -440,7 +440,7 @@ func TestATransactionIsDrawn(t *testing.T) {
 	}
 	var traces []model.Trace
 	eventually(t, "the two runs", func() bool {
-		call(t, a, "GET /_kit/api/traces?node=till/command/move", noBody).json(t, &traces)
+		call(t, a, "GET /_app/api/traces?node=till/command/move", noBody).json(t, &traces)
 		return len(traces) == 2
 	})
 	var outcomes []string

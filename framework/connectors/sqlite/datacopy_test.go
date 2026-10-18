@@ -34,8 +34,8 @@ import (
 // rests.
 type dossier struct {
 	ID     string `json:"id"`
-	Holder string `json:"holder" kit:"subject"`
-	Name   string `json:"name" kit:"personal"`
+	Holder string `json:"holder" app:"subject"`
+	Name   string `json:"name" app:"personal"`
 	Status string `json:"status"`
 }
 
@@ -53,9 +53,9 @@ type registry struct {
 // newRegistry declares the registry, its data in dir, on SQLite when lite.
 func newRegistry(t *testing.T, dir string, logs io.Writer, lite bool) *registry {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
-	t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")
+	t.Setenv("REGISTRY_SECRETS", "memory")
+	t.Setenv("REGISTRY_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("REGISTRY_INDEX_KEY", "an index key of more than 16 bytes")
 	svc := app.NewService("registry", "Dossiers, kept, posted and mailed.")
 	r := &registry{}
 	r.dossiers = svc.Store("dossiers", func(d dossier) string { return d.ID }, app.Revisions(2), app.Purpose("Keep the dossiers"))

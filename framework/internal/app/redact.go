@@ -12,7 +12,7 @@ import (
 // the terminal's log lines write, never carries a secret or a person's data.
 // The SDK's redact does the work (ADR 0001); kit says what to hide — a member
 // named like a secret (password, token, secret, authorization, cookie,
-// session, API key), a Go field whose kit tag classifies it personal,
+// session, API key), a Go field whose app tag classifies it personal,
 // special or secret, or names it the subject (ADR 0006), a field read from a
 // cookie, or from a header named like a secret — and renders an error by
 // what kit would say of it on the wire.
@@ -25,7 +25,7 @@ var (
 	// redactor is the one redactor the Studio's views go through. It caches
 	// what it learns about each Go type for the life of the process.
 	redactor = redact.New(redact.Config{
-		Tag:   "kit",
+		Tag:   tagKey,
 		Field: boundSecret,
 		Error: func(err error) string {
 			_, body := describe(err)
@@ -35,12 +35,12 @@ var (
 )
 
 // boundSecret reports whether a field is hidden by declaration beyond the
-// SDK's own reading of kit:"secret": its kit tag classifies it personal or
+// SDK's own reading of app:"secret": its app tag classifies it personal or
 // special, or names it the subject — by the comma rule, whatever else the
 // tag says — or it is a request field bound to a cookie, or to a header
 // named like a secret, which holds a credential whatever its JSON name.
 func boundSecret(f reflect.StructField) bool {
-	if redactedByTag(f.Tag.Get("kit")) {
+	if redactedByTag(f.Tag.Get(tagKey)) {
 		return true
 	}
 	if _, ok := f.Tag.Lookup("cookie"); ok {

@@ -24,13 +24,13 @@ var Bench = app.NewService("bench", "Dev tools under test.")
 type BenchProfile struct {
 	Name     string `json:"name"`
 	APIKey   string `json:"apiKey"`
-	Recovery string `json:"recovery" kit:"secret"`
+	Recovery string `json:"recovery" app:"secret"`
 }
 
 type SignupInput struct {
 	Email    string       `json:"email"`
 	Password string       `json:"password"`
-	Hint     string       `json:"hint" kit:"secret"`
+	Hint     string       `json:"hint" app:"secret"`
 	Profile  BenchProfile `json:"profile"`
 	Bio      string       `json:"bio"`
 	Agent    string       `header:"Authorization"`
@@ -49,7 +49,7 @@ type HelloInput struct {
 
 type BenchCredentials struct {
 	User string `json:"user"`
-	Key  string `json:"key" kit:"secret"`
+	Key  string `json:"key" app:"secret"`
 }
 
 type BurnOutput struct {
@@ -185,7 +185,7 @@ func startBench(t *testing.T, opts ...app.AppConfigurer) *app.App {
 // and closes it when the stream ends — the test's context ends the request.
 func subscribe(t *testing.T, a *app.App) <-chan model.Event {
 	t.Helper()
-	req, reqErr := http.NewRequestWithContext(t.Context(), "GET", a.URL()+"/_kit/api/events", nil)
+	req, reqErr := http.NewRequestWithContext(t.Context(), "GET", a.URL()+"/_app/api/events", nil)
 	if reqErr != nil {
 		t.Fatal(reqErr)
 	}
@@ -248,7 +248,7 @@ func traceOf(t *testing.T, a *app.App, r response) model.Trace {
 	}
 	var tr model.Trace
 	eventually(t, "the trace", func() bool {
-		got := call(t, a, "GET /_kit/api/traces/"+parts[1], noBody)
+		got := call(t, a, "GET /_app/api/traces/"+parts[1], noBody)
 		if got.status != http.StatusOK {
 			return false
 		}

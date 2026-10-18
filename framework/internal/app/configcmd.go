@@ -37,7 +37,7 @@ func (a *App) configCommand(ctx context.Context, args []string, stdout, stderr i
 	a.mu.Lock()
 	a.settingProblems = resolved.problems
 	a.mu.Unlock()
-	all := slices.Concat(settings(&a.opts, os.Getenv, &a.cfg), a.secretSettings(ctx), resolved.shown)
+	all := slices.Concat(settings(&a.opts, a.name, os.Getenv, &a.cfg), a.secretSettings(ctx), resolved.shown)
 	if err := printSettings(stdout, all); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -93,14 +93,15 @@ func settingOrigin(s *model.Setting) string {
 	}
 }
 
-// settingOwner is who declares a setting: a service, a database, or kit.
+// settingOwner is who declares a setting: a service, a database, or the
+// framework.
 func settingOwner(s *model.Setting) string {
 	switch {
 	case s.Service != "":
 		return s.Service + " · " + s.Key
 	case s.Database != "":
-		return "kit · database " + s.Database
+		return frameworkName + " · database " + s.Database
 	default:
-		return "kit"
+		return frameworkName
 	}
 }

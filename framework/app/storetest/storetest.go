@@ -176,8 +176,8 @@ func Run(t *testing.T, b BackendConfig) {
 // subscription, a workflow — and runs it on b until the test ends.
 func open(t *testing.T, b BackendConfig, name string, clocked bool) *suite {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
-	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("STORETEST_SMTP_URL", "")
+	t.Setenv("STORETEST_SECRETS", "memory")
 	t.Setenv("STORETEST_DATABASE_TIMEOUT", "1m")
 	svc := app.NewService("st-"+name, "A case of the framework's store conformance suite.")
 	docs := svc.Store("docs", doc.key,

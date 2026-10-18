@@ -13,8 +13,8 @@ import (
 // them.
 type legacyPage struct {
 	ID    string `json:"id"`
-	Owner string `json:"owner" kit:"subject"`
-	Body  string `json:"body" kit:"personal"`
+	Owner string `json:"owner" app:"subject"`
+	Body  string `json:"body" app:"personal"`
 }
 
 var legacyPagesSvc = NewService("legacy-pages", "Pages whose versions were written before the framework sealed them, for the revisions tests.")
@@ -26,7 +26,7 @@ var legacyPages = legacyPagesSvc.Store("pages", func(p legacyPage) string { retu
 // read back as they were (ADR 0007 §4).
 func TestPrivacySealSealsTheVersions(t *testing.T) {
 	needsFileStore(t)
-	pinDataKeyWithoutFileStore(t)
+	pinDataKeyWithoutFileStore(t, "legacy-pages")
 	dir := t.TempDir()
 	must(t, os.MkdirAll(filepath.Join(dir, "legacy-pages"), 0o700))
 	for file, content := range map[string]string{

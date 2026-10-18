@@ -59,7 +59,7 @@ func TestStudioAnswersThisMachineOnly(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		s := studio{host: &fakeHost{remote: c.opt, hosts: []string{"localhost", "127.0.0.1", "::1"}}}
-		req := httptest.NewRequest("GET", "http://"+c.host+"/_kit/api/graph", nil)
+		req := httptest.NewRequest("GET", "http://"+c.host+"/_app/api/graph", nil)
 		req.RemoteAddr = c.remote
 		rec := httptest.NewRecorder()
 		s.guard(ok).ServeHTTP(rec, req)
@@ -89,9 +89,9 @@ func TestNoSamplerNoProcess(t *testing.T) {
 	plug.SampleProcess.Store(nil)
 	t.Cleanup(func() { plug.SampleProcess.Store(sample) })
 	rec := httptest.NewRecorder()
-	studio{host: &fakeHost{}}.serveProcess(rec, httptest.NewRequest(http.MethodGet, "/_kit/api/process", nil))
+	studio{host: &fakeHost{}}.serveProcess(rec, httptest.NewRequest(http.MethodGet, "/_app/api/process", nil))
 	if rec.Code != http.StatusNotFound {
-		t.Errorf("GET /_kit/api/process without a sampler: %d", rec.Code)
+		t.Errorf("GET /_app/api/process without a sampler: %d", rec.Code)
 	}
 }
 
@@ -105,7 +105,7 @@ func TestTheMailboxListsNewestFirst(t *testing.T) {
 	s := studio{host: h}
 	get := func(query string) (int, []model.MailSummary) {
 		rec := httptest.NewRecorder()
-		s.serveMails(rec, httptest.NewRequest(http.MethodGet, "/_kit/api/mail"+query, nil))
+		s.serveMails(rec, httptest.NewRequest(http.MethodGet, "/_app/api/mail"+query, nil))
 		var out []model.MailSummary
 		if rec.Code == http.StatusOK {
 			if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
@@ -138,7 +138,7 @@ func TestTheSourceEndpointRefusesBeforeReading(t *testing.T) {
 	runCase := func(t *testing.T, query string) {
 		t.Helper()
 		rec := httptest.NewRecorder()
-		studio{host: &fakeHost{}}.serveSource(rec, httptest.NewRequest(http.MethodGet, "/_kit/api/source"+query, nil))
+		studio{host: &fakeHost{}}.serveSource(rec, httptest.NewRequest(http.MethodGet, "/_app/api/source"+query, nil))
 		if rec.Code != http.StatusNotFound {
 			t.Errorf("%q: %d", query, rec.Code)
 		}

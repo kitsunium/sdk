@@ -184,7 +184,7 @@ func TestIndexesInTheGraph(t *testing.T) {
 	if _, err := Accounts.Filter(ctx, func(Account) bool { return true }); err != nil {
 		t.Fatal(err)
 	}
-	r := call(t, a, "GET /_kit/api/traces?root=members/store/accounts", noBody)
+	r := call(t, a, "GET /_app/api/traces?root=members/store/accounts", noBody)
 	var traces []model.Trace
 	r.json(t, &traces)
 	names := map[string]string{}
@@ -209,7 +209,7 @@ func TestIndexesInTheGraph(t *testing.T) {
 // index refuses to start rather than answer lies.
 func TestIndexesAreRebuiltOnLoad(t *testing.T) {
 	needsFileStore(t)
-	t.Setenv("KIT_SMTP_URL", "")
+	t.Setenv("MEMBERS_SMTP_URL", "")
 	dir := t.TempDir()
 	run := func(during func()) error {
 		prod := app.NewApp("members", Members).With(app.DataDir(dir), app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.Logs(io.Discard))

@@ -18,7 +18,7 @@ import (
 // port, in dev.
 func startApp(t *testing.T, services []*app.Service, opts ...app.AppConfigurer) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
+	t.Setenv("SHOP_SMTP_URL", "")
 	a := app.NewApp("shop", services...).With(append([]app.AppConfigurer{
 		app.InMemory(), app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
 	}, opts...)...)

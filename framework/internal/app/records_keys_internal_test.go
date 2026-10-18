@@ -27,8 +27,8 @@ import (
 // keysPost is a forum post: its author is personal, its body moderated.
 type keysPost struct {
 	ID     string `json:"id"`
-	Author string `json:"author" kit:"personal"`
-	Body   string `json:"body" kit:"moderated"`
+	Author string `json:"author" app:"personal"`
+	Body   string `json:"body" app:"moderated"`
 }
 
 // keysWorld is the forum, the two modules, and what the watch heard.
@@ -74,8 +74,8 @@ func (w *keysWorld) markOf(p keysPlace) string {
 func newKeysWorld(t *testing.T, place keysPlace) *keysWorld {
 	t.Helper()
 	needsFileStore(t)
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("FORUM_SECRETS", "memory")
+	t.Setenv("FORUM_DATA_KEY", "a data key of exactly 32 bytes..")
 	t.Setenv("FORUM_DATABASE_URL", "fake://forum:pw@db.internal:5432/forum?tls=verify-full")
 	w := &keysWorld{}
 	forum := NewService("forum", "Posts: an author, personal, and a body, moderated.")

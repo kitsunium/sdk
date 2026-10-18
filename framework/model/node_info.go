@@ -102,11 +102,11 @@ const (
 	// SecretFromEnv is the environment: the variable, or the file its _FILE
 	// form names.
 	SecretFromEnv string = core.SecretFromEnv
-	// SecretFromFile is kit's encrypted file store: KIT_SECRETS=file:<dir>,
+	// SecretFromFile is kit's encrypted file store: <PRODUCT>_SECRETS=file:<dir>,
 	// or .kit/secrets/dev in dev.
 	SecretFromFile string = core.SecretFromFile
 	// SecretFromMemory is a store in the process's memory: a test, or
-	// KIT_SECRETS=memory. A generated secret is made again at every start.
+	// <PRODUCT>_SECRETS=memory. A generated secret is made again at every start.
 	SecretFromMemory string = core.SecretFromMemory
 	// SecretFromStore is a store the product's code gave kit.
 	SecretFromStore string = core.SecretFromStore
@@ -142,7 +142,7 @@ const (
 	SelectDefault string = core.SelectDefault // the default case: the select never blocks
 )
 
-// What a field holds: the classes of a kit tag (ADR 0006).
+// What a field holds: the classes of an app tag (ADR 0006).
 const (
 	// ClassPublic holds nothing personal and nothing secret: the question
 	// was asked.

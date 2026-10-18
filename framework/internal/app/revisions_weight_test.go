@@ -57,8 +57,8 @@ func TestTheModelSaysWhatTheVersionsWeigh(t *testing.T) {
 		}},
 	} {
 		t.Run(b.name, func(t *testing.T) {
-			t.Setenv("KIT_SMTP_URL", "")
-			t.Setenv("KIT_SECRETS", "memory")
+			t.Setenv("SCALES_SMTP_URL", "")
+			t.Setenv("SCALES_SECRETS", "memory")
 			svc := app.NewService("scales", "Drafts that keep two former versions, for the weight of the versions.")
 			drafts := svc.Store("drafts", draft.key, app.Revisions(2))
 			svc.Store("notes", draft.key)

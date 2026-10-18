@@ -66,7 +66,7 @@ func TestAMySQLServerBelowTheFloorRefusesTheStart(t *testing.T) {
 // is reached.
 func floorApp(t *testing.T, logs *syncBuffer, opts ...app.AppConfigurer) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("LEDGER_SECRETS", "memory")
 	l := newLedger()
 	return app.NewApp("ledger", l.books, l.audit).With(append([]app.AppConfigurer{
 		app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.Logs(logs),

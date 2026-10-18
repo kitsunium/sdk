@@ -52,7 +52,7 @@ func TestInDevADatabaseWithoutURLLeavesItsStoresInFiles(t *testing.T) {
 	if err := l.entries.Put(t.Context(), entry{ID: "e1"}); err != nil {
 		t.Errorf("a store of a database without a URL: %v", err)
 	}
-	if r := call(t, a, "GET /_kit/health/ready", noBody); r.status != http.StatusOK {
+	if r := call(t, a, "GET /_app/health/ready", noBody); r.status != http.StatusOK {
 		t.Errorf("ready: %d %s", r.status, r.body)
 	}
 }

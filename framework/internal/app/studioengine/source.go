@@ -22,7 +22,7 @@ var sourceLanguages = map[string]string{
 	".html": "xml", ".css": "css", ".json": "json",
 }
 
-// serveSource answers GET /_kit/api/source?file=&module=&line=&end=: lines
+// serveSource answers GET /_app/api/source?file=&module=&line=&end=: lines
 // of a source file around a range. It serves only files the graph itself
 // points at — never a path the request makes up —, as the host reads them:
 // a regular file within its root, never a link (StudioHost.Source). So no

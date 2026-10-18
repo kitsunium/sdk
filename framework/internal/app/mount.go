@@ -86,7 +86,7 @@ func (p *prefixOption) mountConfigure(d *mountDecl) { d.prefix, d.prefixAt = p.p
 // Prefix serves a module's routes under prefix — "/trust/" — instead of
 // "/<module>/"; "/" shares the product's route space, where a route both
 // declare is refused as any two are. A prefix starts and ends with '/', and
-// never lies under /_kit/.
+// never lies under /_app/, nor under /_kit/ while its probes answer there.
 //
 //go:noinline
 func Prefix(prefix string) MountConfigurer { return &prefixOption{prefix: prefix, at: callerPos()} }
@@ -106,7 +106,7 @@ func (o *onlyOption) mountConfigure(d *mountDecl) {
 }
 
 // Only makes a mount hold in the environments envs names alone — the name
-// KIT_ENV or [Env] gives, lower-cased, "production" when neither does:
+// <PRODUCT>_ENV or [Env] gives, lower-cased, "production" when neither does:
 //
 //	a := app.NewApp("vigie", identity.Service).
 //		With(app.Mount(debugbar.Module, app.Only("dev", "staging")))
@@ -159,9 +159,10 @@ func mountsIn(decls []mountDecl, env string) []mountDecl {
 }
 
 // mountEnv is the environment's name the mounts are resolved for: app.Env's,
-// else KIT_ENV's, as resolveConfig reads them.
-func mountEnv(o *appOptions, getenv func(string) string) string {
-	env := getenv("KIT_ENV")
+// else <PRODUCT>_ENV's for the product named name, as resolveConfig reads
+// them.
+func mountEnv(o *appOptions, product string, getenv func(string) string) string {
+	env := ownEnv(product, getenv)(varEnv)
 	if o.env != nil {
 		env = *o.env
 	}

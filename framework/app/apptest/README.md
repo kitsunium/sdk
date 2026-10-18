@@ -36,7 +36,7 @@ A Disk is an AppOption: app.DataDir(disk.Dir), which wins over a app.InMemory gi
 func NewDisk(t testing.TB) *Disk
 ```
 
-NewDisk returns a new data directory for t. The secrets the framework makes — its data-key and its index key, what the product generates — are kept beside the data, as production keeps them unless KIT\_SECRETS says otherwise, so an app started again on the same Disk opens what the first sealed.
+NewDisk returns a new data directory for t. The secrets the framework makes — its data-key and its index key, what the product generates — are kept beside the data, as production keeps them unless \<PRODUCT>\_SECRETS says otherwise, so an app started again on the same Disk opens what the first sealed.
 
 It skips t where the platform keeps no data directory: the SDK's disk file system is Linux's, macOS's and the BSDs', and refuses Windows.
 

@@ -50,11 +50,11 @@ type holdRecord struct {
 	// Store is the store's node ID.
 	Store string `json:"store"`
 	// Key is the record's key, to find it again. A key may be personal.
-	Key string `json:"key" kit:"personal"`
+	Key string `json:"key" app:"personal"`
 	// Subject is the reference of the person the record is about.
 	Subject string `json:"subject,omitempty"`
 	// Reason is why, as the caller said it.
-	Reason string `json:"reason" kit:"secret"`
+	Reason string `json:"reason" app:"secret"`
 	// By is who placed it, and At when.
 	By string    `json:"by"`
 	At time.Time `json:"at"`

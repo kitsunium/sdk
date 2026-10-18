@@ -187,7 +187,7 @@ func TestPersonalDataIsRedactedEverywhere(t *testing.T) {
 			t.Errorf("a payload shows personal data: %s %s", s.Payload.Request, s.Payload.Response)
 		}
 	}
-	logs := string(call(t, a, "GET /_kit/api/logs", noBody).body)
+	logs := string(call(t, a, "GET /_app/api/logs", noBody).body)
 	if len(mentions(logs, "zoe@x.dev", "hunter2")) > 0 || !strings.Contains(logs, "[redacted]") {
 		t.Errorf("the log ring: %s", logs)
 	}
@@ -196,25 +196,25 @@ func TestPersonalDataIsRedactedEverywhere(t *testing.T) {
 	if len(mentions(line, "zoe@x.dev", "Zoé", "hunter2")) > 0 || len(mentions(line, "[redacted]", "spam")) != 2 {
 		t.Errorf("the terminal: %s", line)
 	}
-	if items := call(t, a, "GET /_kit/api/items?store=desk/store/reports", noBody); bytes.Contains(items.body, []byte("zoe@x.dev")) {
+	if items := call(t, a, "GET /_app/api/items?store=desk/store/reports", noBody); bytes.Contains(items.body, []byte("zoe@x.dev")) {
 		t.Errorf("the data browser shows personal data: %s", items.body)
 	}
 }
 
 type badTags struct {
 	ID string `json:"id"`
-	A  string `json:"a" kit:"privat"`
-	B  string `json:"b" kit:"personal,secret"`
-	C  string `json:"c" kit:"special,plain"`
-	D  string `json:"d" kit:"secret,moderated"`
-	E  string `json:"e" kit:"subject"`
-	F  string `json:"f" kit:"subject"`
-	G  string `json:"g" kit:"erased"`
-	H  string `json:"h" kit:"history=0"`
+	A  string `json:"a" app:"privat"`
+	B  string `json:"b" app:"personal,secret"`
+	C  string `json:"c" app:"special,plain"`
+	D  string `json:"d" app:"secret,moderated"`
+	E  string `json:"e" app:"subject"`
+	F  string `json:"f" app:"subject"`
+	G  string `json:"g" app:"erased"`
+	H  string `json:"h" app:"history=0"`
 }
 
 type badRequest struct {
-	Who string `json:"who" kit:"public,subject"`
+	Who string `json:"who" app:"public,subject"`
 }
 
 // Every refusal of the grammar and of the options is a declaration problem

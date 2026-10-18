@@ -46,7 +46,7 @@ func TestTheTerminalIsRedacted(t *testing.T) {
 
 // secretThread is a recursive type with a secret at every depth.
 type secretThread struct {
-	Token   string                  `json:"token" kit:"secret"`
+	Token   string                  `json:"token" app:"secret"`
 	Amount  float64                 `json:"amount"`
 	Replies []secretThread          `json:"replies,omitempty"`
 	ByName  map[string]secretThread `json:"byName,omitempty"`

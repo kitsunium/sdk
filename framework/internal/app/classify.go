@@ -8,9 +8,9 @@ import (
 	"github.com/kitsunium/sdk/framework/model"
 )
 
-// Classification (ADR 0006). A field says what it holds with its kit tag,
+// Classification (ADR 0006). A field says what it holds with its app tag,
 //
-//	kit:"[class][,option]..."
+//	app:"[class][,option]..."
 //
 // and kit keeps what the class promises: it redacts wherever it shows a
 // value — the Studio, the spans, the logs, the terminal — and, for what a
@@ -23,7 +23,7 @@ import (
 // modules). Declaring never fails: what a tag gets wrong is a problem the
 // start reports, all at once, at the declaration that uses the type.
 
-// The words of a kit tag besides the classes (model.Class constants).
+// The words of an app tag besides the classes (model.Class constants).
 const (
 	optSubject   = "subject"
 	optModerated = "moderated"
@@ -34,7 +34,7 @@ const (
 	historyLimit int = 100
 )
 
-// The marks a kit tag may write.
+// The marks an app tag may write.
 const (
 	// markSubject is "subject": the field identifies the person the record
 	// is about.
@@ -48,13 +48,13 @@ const (
 	markErased
 )
 
-// tagMarks are the words of a kit tag besides the class, as bits.
+// tagMarks are the words of an app tag besides the class, as bits.
 type tagMarks uint8
 
-// markWords are the words of a kit tag that set a mark.
+// markWords are the words of an app tag that set a mark.
 var markWords = map[string]tagMarks{optSubject: markSubject, optModerated: markModerated, optPlain: markPlain, optErased: markErased}
 
-// fieldTag is what one field's kit tag says.
+// fieldTag is what one field's app tag says.
 type fieldTag struct {
 	// raw is the tag as written, for the messages.
 	raw string
@@ -78,7 +78,7 @@ func isClass(word string) bool {
 	return false
 }
 
-// parseTag reads a kit tag. An empty word is skipped, and every word is
+// parseTag reads an app tag. An empty word is skipped, and every word is
 // read: a tag with several mistakes reports each.
 func parseTag(raw string) fieldTag {
 	t := fieldTag{raw: raw}
@@ -189,10 +189,10 @@ func (t *fieldTag) sealedAtRest() bool {
 	return t.sensitive() && (!t.marks.has(markPlain) || t.class == model.ClassSpecial)
 }
 
-// redactedByTag reports whether a kit tag makes its field redacted wherever
+// redactedByTag reports whether an app tag makes its field redacted wherever
 // kit shows it: a sensitive class or the subject option among its words,
 // whatever else the tag says — the redactor's comma rule, so that
-// kit:"other,personal" redacts even though the start refuses "other".
+// app:"other,personal" redacts even though the start refuses "other".
 func redactedByTag(raw string) bool {
 	for word := range strings.SplitSeq(raw, ",") {
 		switch strings.TrimSpace(word) {
@@ -203,11 +203,11 @@ func redactedByTag(raw string) bool {
 	return false
 }
 
-// classify fills a schema field with what its kit tag says. sealed says the
+// classify fills a schema field with what its app tag says. sealed says the
 // schema is of what kit keeps sealed at rest — a store's entity on disk, a
 // message in a queue on disk —: a field is marked sealed only there.
 func classify(field *model.Field, tag reflect.StructTag, sealed bool) {
-	t := parseTag(tag.Get("kit"))
+	t := parseTag(tag.Get(tagKey))
 	field.Class = t.effective()
 	field.Subject = t.marks.has(markSubject)
 	field.Moderated = t.marks.has(markModerated)

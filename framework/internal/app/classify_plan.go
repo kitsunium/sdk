@@ -31,7 +31,7 @@ var (
 // A type's classification ----------------------------------------------------
 
 // rules is what kit knows of a Go type's classified members, for a walk
-// over its values: a struct's fields that carry a kit tag or lead to one,
+// over its values: a struct's fields that carry an app tag or lead to one,
 // or the elements of a slice, an array or a map. A recursive type shares its
 // own rules, so a walk over a value follows it as deep as the value goes.
 type rules struct {
@@ -46,6 +46,9 @@ type rules struct {
 	// name and type read like personal data and whose tag gives no class —
 	// or gives secret, a credential's.
 	warnings []fieldWarning
+	// renamed are the fields of this struct still tagged kit:"…", which the
+	// start refuses (ADR 0180 §3, Q12).
+	renamed []fieldRenamed
 }
 
 // field is the field whose JSON name is name, or nil.
@@ -107,6 +110,9 @@ type classPlan struct {
 	// command's input: a subject inside a list or a map (ADR 0178, C5).
 	resting  []phrase
 	warnings []fieldWarning
+	// renamed are its fields still tagged kit:"…", each declared field
+	// once: each is also one of problems.
+	renamed []fieldRenamed
 }
 
 // flattener lists a plan's members and gathers the warnings of the structs
@@ -115,6 +121,7 @@ type flattener struct {
 	stack    map[*rules]bool
 	members  []member
 	warnings []fieldWarning
+	renamed  []fieldRenamed
 }
 
 // planOf returns the plan of t, read once.
@@ -145,7 +152,10 @@ func buildPlan(t reflect.Type) *classPlan {
 	f.flatten(p.rules, "", nil)
 	// A field met twice — in a struct used twice side by side, or promoted
 	// into several — is warned of once.
-	p.members, p.warnings = f.members, uniqueWarnings(f.warnings)
+	p.members, p.warnings, p.renamed = f.members, uniqueWarnings(f.warnings), uniqueRenamed(f.renamed)
+	for _, r := range p.renamed {
+		p.problems = append(p.problems, r.said)
+	}
 	subjects := p.judgeMembers()
 	switch {
 	case len(subjects) > 1:
@@ -276,7 +286,7 @@ func elemRules(t reflect.Type, seen map[reflect.Type]*rules) *rules {
 	return nil
 }
 
-// structRules are a struct's rules: its fields that carry a kit tag or lead
+// structRules are a struct's rules: its fields that carry an app tag or lead
 // to one. The struct's rules are shared before its fields are read, so a
 // recursive type's rules hold themselves.
 func structRules(t reflect.Type, seen map[reflect.Type]*rules) *rules {
@@ -287,7 +297,10 @@ func structRules(t reflect.Type, seen map[reflect.Type]*rules) *rules {
 	seen[t] = r
 	for _, f := range jsonshape.Of(t).Fields {
 		sf := t.FieldByIndex(f.Index)
-		tag := parseTag(f.Tag.Get("kit"))
+		if old, ok := renamedTag(t, sf); ok {
+			r.renamed = append(r.renamed, old)
+		}
+		tag := parseTag(f.Tag.Get(tagKey))
 		if w, ok := nameWarning(t, sf.Type, tag, f); ok {
 			r.warnings = append(r.warnings, w)
 		}
@@ -326,6 +339,7 @@ func (f *flattener) flatten(r *rules, prefix string, path []step) {
 	f.stack[r] = true
 	defer delete(f.stack, r)
 	f.warnings = append(f.warnings, r.warnings...)
+	f.renamed = append(f.renamed, r.renamed...)
 	if r.elem != nil {
 		f.flatten(r.elem, prefix+"/*", append(slices.Clone(path), step{each: true}))
 	}

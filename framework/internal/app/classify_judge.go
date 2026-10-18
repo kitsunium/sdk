@@ -71,7 +71,7 @@ func (q *Query[Q, R]) dataTypes() []dataType {
 	return passing(reflect.TypeFor[Q](), reflect.TypeFor[R]())
 }
 
-// classificationProblems judges the kit tags of every type the app's
+// classificationProblems judges the app tags of every type the app's
 // declarations show or keep, each type once, at the first declaration that
 // uses it: what a tag gets wrong is an error the start refuses. What is
 // wrong only where kit reads an identity — a subject in a list — is said

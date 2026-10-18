@@ -49,8 +49,8 @@ func TestTheToolsVariablesAskTheStudio(t *testing.T) {
 			t.Errorf("%v: %+v, want %+v", c.vars, got, c.want)
 		}
 	}
-	forced := devForced(env(map[string]string{model.VarDevForced: " KIT_ENV , ,KIT_ADDR,"}))
-	if !slices.Equal(forced, []string{model.VarEnv, model.VarAddr}) {
+	forced := devForced(env(map[string]string{model.VarDevForced: " TODO_ENV , ,TODO_ADDR,"}))
+	if !slices.Equal(forced, []string{"TODO_ENV", "TODO_ADDR"}) {
 		t.Errorf("forced: %q", forced)
 	}
 }

@@ -26,8 +26,8 @@ const promptly time.Duration = 2 * time.Second
 // deskCase is a person's case, sealed where it rests.
 type deskCase struct {
 	ID    string `json:"id"`
-	Email string `json:"email" kit:"subject"`
-	Note  string `json:"note" kit:"personal"`
+	Email string `json:"email" app:"subject"`
+	Note  string `json:"note" app:"personal"`
 }
 
 // tallyRow is a public count: nothing of it is sealed.
@@ -39,15 +39,15 @@ type tallyRow struct {
 // deskLetter is a message about a person: sealed under their data key in
 // its subscription's queue.
 type deskLetter struct {
-	To   string `json:"to" kit:"subject"`
-	Body string `json:"body" kit:"personal"`
+	To   string `json:"to" app:"subject"`
+	Body string `json:"body" app:"personal"`
 }
 
 // deskReminder is a queued command's input about a person: sealed under
 // their data key in the command's queue.
 type deskReminder struct {
-	Email string `json:"email" kit:"subject"`
-	Text  string `json:"text" kit:"personal"`
+	Email string `json:"email" app:"subject"`
+	Text  string `json:"text" app:"personal"`
 }
 
 // desk is a product that keeps its tally on its SQLite file, app.Privacy
@@ -69,9 +69,9 @@ type desk struct {
 // there too when casesOnTheFile.
 func startDesk(t *testing.T, casesOnTheFile bool) *desk {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
-	t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")
+	t.Setenv("DESK_SECRETS", "memory")
+	t.Setenv("DESK_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("DESK_INDEX_KEY", "an index key of more than 16 bytes")
 	svc := app.NewService("desk", "Cases, letters and reminders, sealed; app.Privacy on SQLite.")
 	d := &desk{posted: make(chan deskLetter, 8), reminded: make(chan deskReminder, 8)}
 	d.cases = svc.Store("cases", func(c deskCase) string { return c.ID }, app.Purpose("Handle the cases"))

@@ -135,7 +135,7 @@ func TestDeclaredLoopWakes(t *testing.T) {
 	digestRan(t, a, 6)
 	g := a.Graph()
 	loop := loopNamed(g, "members/loop/digest")
-	if loop == nil || loop.Kind != model.LoopWake || loop.Provenance != model.ProvenanceApp || loop.Library != "kit" ||
+	if loop == nil || loop.Kind != model.LoopWake || loop.Provenance != model.ProvenanceApp || loop.Library != "app" ||
 		loop.State != model.LoopWaiting || loop.LastWake != model.WakeInterval || loop.Runs != 6 || loop.Errors != 0 ||
 		loop.NextRun == nil || !loop.NextRun.Equal(clk.Now().Add(time.Hour)) {
 		t.Errorf("the loop entry %+v", loop)
@@ -154,7 +154,7 @@ func TestDeclaredLoopWakes(t *testing.T) {
 	if e := g.Edge("members/loop/digest|reads|members/store/accounts"); e == nil || e.Observed == nil {
 		t.Error("what the loop reads is not drawn from it")
 	}
-	r := call(t, a, "GET /_kit/api/traces?root=members/loop/digest", noBody)
+	r := call(t, a, "GET /_app/api/traces?root=members/loop/digest", noBody)
 	var traces []model.Trace
 	r.json(t, &traces)
 	if len(traces) != 6 {
@@ -242,7 +242,7 @@ func TestLoopFailuresBackOff(t *testing.T) {
 	if loop == nil || loop.Runs != 5 || loop.Errors != 3 || loop.LastError != "" && strings.Contains(loop.LastError, "do-not-leak") {
 		t.Errorf("the loop entry %+v", loop)
 	}
-	r := call(t, a, "GET /_kit/api/traces?root=members/loop/digest", noBody)
+	r := call(t, a, "GET /_app/api/traces?root=members/loop/digest", noBody)
 	if strings.Contains(string(r.body), "do-not-leak") {
 		t.Error("the panic reached a span")
 	}

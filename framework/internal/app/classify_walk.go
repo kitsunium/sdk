@@ -253,7 +253,7 @@ func jsonElems(v any) []any {
 }
 
 // redacted is one of the store's entities as the Studio may show it: read
-// as its type, so that its kit tags redact — personal, special and secret
+// as its type, so that its app tags redact — personal, special and secret
 // members, and the subject — as well as the names the redactor knows. A
 // member sealed at rest is shown sealed: the Studio never opens it (ADR
 // 0006 §9).

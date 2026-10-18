@@ -21,7 +21,7 @@ import (
 // The environments.
 const (
 	// EnvDev serves the Studio, analyzes the source and binds loopback. Only
-	// `kit dev` or an explicit KIT_ENV=dev turns it on.
+	// `kit dev` or an explicit <PRODUCT>_ENV=dev turns it on.
 	EnvDev = "dev"
 	// EnvProduction is the default: no Studio, no source, no analysis.
 	EnvProduction = "production"
@@ -29,7 +29,7 @@ const (
 
 var (
 	// loopbackHosts are the names every app answers as, besides the ones
-	// KIT_ALLOWED_HOSTS adds.
+	// <PRODUCT>_ALLOWED_HOSTS adds.
 	loopbackHosts = []string{"localhost", "127.0.0.1", "::1"}
 
 	// devForcible are the variables kit dev may set itself for a launch; only
@@ -47,7 +47,7 @@ type studioConfig struct {
 // config is the resolved configuration of a running app.
 type config struct {
 	env string
-	// envName is KIT_ENV as written, lower-cased — production when it is
+	// envName is <PRODUCT>_ENV as written, lower-cased — production when it is
 	// unset: it names the environment's configuration file, where env only
 	// says dev or not.
 	envName string
@@ -63,9 +63,9 @@ type config struct {
 	logs         io.Writer
 	clock        clock.Timed
 	warnings     []phrase
-	// trustProxy lets app.ClientIP read X-Forwarded-For (KIT_TRUST_PROXY=on).
+	// trustProxy lets app.ClientIP read X-Forwarded-For (<PRODUCT>_TRUST_PROXY=on).
 	trustProxy bool
-	// secrets is KIT_SECRETS: where the environment keeps its secrets.
+	// secrets is <PRODUCT>_SECRETS: where the environment keeps its secrets.
 	secrets secretsConfig
 }
 
@@ -138,14 +138,14 @@ func (o appOptions) clone() appOptions {
 // appConfigure sets the option on what it configures.
 func (f appOption) appConfigure(o *appOptions) { f(o) }
 
-// Env selects the environment, instead of KIT_ENV.
+// Env selects the environment, instead of <PRODUCT>_ENV.
 func Env(env string) AppConfigurer { return appOption(func(o *appOptions) { o.env = &env }) }
 
-// Listen sets the listening address, instead of KIT_ADDR or PORT. ":0" picks
+// Listen sets the listening address, instead of <PRODUCT>_ADDR or PORT. ":0" picks
 // a free port; App.URL tells which.
 func Listen(addr string) AppConfigurer { return appOption(func(o *appOptions) { o.addr = &addr }) }
 
-// DataDir sets where stores and queues persist, instead of KIT_DATA_DIR.
+// DataDir sets where stores and queues persist, instead of <PRODUCT>_DATA_DIR.
 // Given to an app after [InMemory], it wins: the last of the two says where
 // the data is — so a test helper that runs the product in memory runs it
 // on disk with the one option its test gives (apptest.NewDisk).
@@ -174,7 +174,7 @@ func (memoryOption) storeConfigure(o *storeOptions) { o.inMemory = true }
 func (memoryOption) appConfigure(o *appOptions) { o.memory = true }
 
 // InMemory keeps data in memory. On an app, it overrides the data directory
-// for every store and queue — KIT_DATA_DIR, and a [DataDir] given before it:
+// for every store and queue — <PRODUCT>_DATA_DIR, and a [DataDir] given before it:
 // what a test wants. On a store, it keeps that store in memory even when the
 // app has a data directory.
 func InMemory() interface {
@@ -185,28 +185,29 @@ func InMemory() interface {
 }
 
 // resolveConfig merges options over the environment over the defaults. It is
-// closed by default: without KIT_ENV=dev, nothing but the product and its
+// closed by default: without <PRODUCT>_ENV=dev, nothing but the product and its
 // health probes is served.
-func resolveConfig(o *appOptions, getenv func(string) string) config {
-	cfg := config{logs: o.logs, clock: o.clock, logLevel: strings.ToLower(getenv("KIT_LOG_LEVEL"))}
+func resolveConfig(o *appOptions, name string, getenv func(string) string) config {
+	own := ownEnv(name, getenv)
+	cfg := config{logs: o.logs, clock: o.clock, logLevel: strings.ToLower(own(varLogLevel))}
 	cfg.defaultOutputs()
-	env := getenv("KIT_ENV")
+	env := own(varEnv)
 	if o.env != nil {
 		env = *o.env
 	}
 	cfg.env, cfg.envName = resolveEnv(env)
 	dev := cfg.env == EnvDev
-	cfg.addr = resolveAddr(o, getenv, dev)
-	cfg.dataDir, cfg.memoryData = resolveDataDir(o, getenv, dev)
+	cfg.addr = resolveAddr(o, own, getenv, dev)
+	cfg.dataDir, cfg.memoryData = resolveDataDir(o, own, dev)
 	studio := studioEnv(getenv)
 	cfg.studio = resolveStudio(o, studio, dev)
 	if !dev && studioAsked(o, studio) {
 		cfg.warnings = append(cfg.warnings, say("config.studio-production"))
 	}
-	cfg.trustProxy = getenv("KIT_TRUST_PROXY") == "on"
-	cfg.secrets = resolveSecrets(o, getenv)
+	cfg.trustProxy = own(varTrustProxy) == "on"
+	cfg.secrets = resolveSecrets(o, own)
 	cfg.allowedHosts = slices.Clone(loopbackHosts)
-	for h := range strings.SplitSeq(getenv("KIT_ALLOWED_HOSTS"), ",") {
+	for h := range strings.SplitSeq(own(varAllowedHosts), ",") {
 		if h = strings.TrimSpace(h); h != "" {
 			cfg.allowedHosts = append(cfg.allowedHosts, strings.ToLower(h))
 		}
@@ -214,9 +215,16 @@ func resolveConfig(o *appOptions, getenv func(string) string) config {
 	return cfg
 }
 
-// resolveEnv is the environment KIT_ENV names — dev or production — and the
-// name its configuration file takes: as KIT_ENV is written, config/local.yaml
-// for local.
+// ownEnv reads the framework's own variables of the product named name, by
+// their stem: own(varDataDir) is TODO_DATA_DIR's value for "todo".
+func ownEnv(name string, getenv func(string) string) func(stem string) string {
+	prefix := appPrefix(name)
+	return func(stem string) string { return getenv(prefix + "_" + stem) }
+}
+
+// resolveEnv is the environment <PRODUCT>_ENV names — dev or production —
+// and the name its configuration file takes: as <PRODUCT>_ENV is written,
+// config/local.yaml for local.
 func resolveEnv(env string) (kind, name string) {
 	switch name = strings.ToLower(strings.TrimSpace(env)); name {
 	case "dev", "development", "local":
@@ -228,15 +236,16 @@ func resolveEnv(env string) (kind, name string) {
 	}
 }
 
-// resolveAddr is where the app listens: its option, KIT_ADDR, the platform's
-// PORT — on loopback in dev, where the Studio stays —, or port 4000.
-func resolveAddr(o *appOptions, getenv func(string) string, dev bool) string {
+// resolveAddr is where the app listens: its option, <PRODUCT>_ADDR, the
+// platform's PORT — on loopback in dev, where the Studio stays —, or port
+// 4000.
+func resolveAddr(o *appOptions, own, getenv func(string) string, dev bool) string {
 	port := getenv("PORT")
 	switch {
 	case o.addr != nil:
 		return *o.addr
-	case getenv("KIT_ADDR") != "":
-		return getenv("KIT_ADDR")
+	case own(varAddr) != "":
+		return own(varAddr)
 	case port != "" && dev:
 		return "127.0.0.1:" + port
 	case port != "":
@@ -250,14 +259,14 @@ func resolveAddr(o *appOptions, getenv func(string) string, dev bool) string {
 
 // resolveDataDir is where the app keeps its data — "" for memory — and
 // whether it keeps it in memory for want of a directory, which is said.
-func resolveDataDir(o *appOptions, getenv func(string) string, dev bool) (dir string, warn bool) {
+func resolveDataDir(o *appOptions, own func(string) string, dev bool) (dir string, warn bool) {
 	switch {
 	case o.memory:
 		return "", false
 	case o.dataDir != nil:
 		return *o.dataDir, false
-	case getenv("KIT_DATA_DIR") != "":
-		return getenv("KIT_DATA_DIR"), false
+	case own(varDataDir) != "":
+		return own(varDataDir), false
 	case dev:
 		return ".kit/data", false
 	default:
@@ -314,14 +323,14 @@ func resolveStudio(o *appOptions, env plug.StudioEnvValue, dev bool) studioConfi
 // Studio subsystem reads them (plug.StudioDriverConfig.Forced): a label and
 // nothing else — a name kit does not let kit dev set is dropped, and it
 // never changes a value. None without framework/app/studio.
-func devForced(getenv func(string) string) map[string]bool {
+func devForced(product string, getenv func(string) string) map[string]bool {
 	out := map[string]bool{}
 	d := plug.Studio.Load()
 	if d == nil {
 		return out
 	}
 	for _, name := range d.Forced(getenv) {
-		if slices.Contains(devForcible, name) {
+		if slices.ContainsFunc(devForcible, func(stem string) bool { return name == productVariable(product, stem) }) {
 			out[name] = true
 		}
 	}
@@ -346,20 +355,22 @@ func studioSettings(o *appOptions, getenv func(string) string, c *config) []mode
 // code (an AppOption, which wins), kit dev for this launch, the environment,
 // or kit's default — and the facts to change it: its AppOption and its
 // kit dev flag, when it has them.
-func settings(o *appOptions, getenv func(string) string, c *config) []model.Setting {
-	src := settingSources{getenv: getenv, forced: devForced(getenv)}
+func settings(o *appOptions, name string, getenv func(string) string, c *config) []model.Setting {
+	src := settingSources{getenv: getenv, forced: devForced(name, getenv)}
 	dataOption := "app.DataDir"
 	if o.memory {
 		dataOption = "app.InMemory"
 	}
+	env, addr, data := productVariable(name, varEnv), productVariable(name, varAddr), productVariable(name, varDataDir)
+	trust, hosts, level := productVariable(name, varTrustProxy), productVariable(name, varAllowedHosts), productVariable(name, varLogLevel)
 	return slices.Concat([]model.Setting{
-		{Name: model.VarEnv, Value: c.env, From: src.from(o.env != nil, model.VarEnv), Option: "app.Env"},
-		{Name: model.VarAddr, Value: c.addr, From: src.from(o.addr != nil, model.VarAddr, "PORT"), Option: "app.Listen", Flag: "-addr"},
-		{Name: model.VarDataDir, Value: cmp.Or(c.dataDir, "memory"), From: src.from(o.memory || o.dataDir != nil, model.VarDataDir), Option: dataOption, Flag: "-data"},
+		{Name: env, Value: c.env, From: src.from(o.env != nil, env), Option: "app.Env"},
+		{Name: addr, Value: c.addr, From: src.from(o.addr != nil, addr, "PORT"), Option: "app.Listen", Flag: "-addr"},
+		{Name: data, Value: cmp.Or(c.dataDir, "memory"), From: src.from(o.memory || o.dataDir != nil, data), Option: dataOption, Flag: "-data"},
 	}, studioSettings(o, getenv, c), []model.Setting{
-		{Name: model.VarTrustProxy, Value: onOff(c.trustProxy), From: src.from(false, model.VarTrustProxy)},
-		{Name: model.VarAllowedHosts, Value: strings.Join(c.allowedHosts, ","), From: src.from(false, model.VarAllowedHosts)},
-		{Name: model.VarLogLevel, Value: cmp.Or(c.logLevel, "info"), From: src.from(false, model.VarLogLevel)},
+		{Name: trust, Value: onOff(c.trustProxy), From: src.from(false, trust)},
+		{Name: hosts, Value: strings.Join(c.allowedHosts, ","), From: src.from(false, hosts)},
+		{Name: level, Value: cmp.Or(c.logLevel, "info"), From: src.from(false, level)},
 	})
 }
 
@@ -392,22 +403,24 @@ func onOff(b bool) string {
 // URL is set and where, and for a database its URL's — never a value.
 func (a *App) secretSettings(ctx context.Context) []model.Setting {
 	out := slices.Concat(a.secretStoreSettings(ctx), a.smtpSettings(ctx), a.databaseSecretSettings(ctx))
-	// Those of the personal data it keeps: KIT_RETENTION, KIT_INDEX_KEY.
+	// Those of the personal data it keeps: <PRODUCT>_RETENTION and
+	// <PRODUCT>_INDEX_KEY.
 	return append(out, a.privacySettings(ctx)...)
 }
 
-// secretStoreSettings are KIT_SECRETS, and for a file store its key: whether
-// the environment gives it, or where the key file beside the data is.
+// secretStoreSettings are <PRODUCT>_SECRETS, and for a file store its key:
+// whether the environment gives it, or where the key file beside the data
+// is.
 func (a *App) secretStoreSettings(ctx context.Context) []model.Setting {
 	if a.secrets.Load() == nil {
 		return nil
 	}
 	c := a.cfg.secrets
-	out := []model.Setting{{Name: "KIT_SECRETS", Value: c.describe(a.dataDir), From: c.from}}
+	out := []model.Setting{{Name: a.variable(varSecrets), Value: c.describe(a.dataDir), From: c.from}}
 	if c.kind != secretsFile {
 		return out
 	}
-	key := model.Setting{Name: "KIT_SECRETS_KEY", Secret: true, From: model.SettingDefault}
+	key := model.Setting{Name: a.variable(varSecretsKey), Secret: true, From: model.SettingDefault}
 	switch _, err := a.secretsNow().kitEnv.Get(ctx, "secrets-key"); {
 	case err == nil:
 		key.From = model.SettingEnv
@@ -418,8 +431,8 @@ func (a *App) secretStoreSettings(ctx context.Context) []model.Setting {
 	return append(out, key)
 }
 
-// smtpSettings is KIT_SMTP_URL, when a mailer reads it. A password lives in
-// it: whether it is set, and where, is all that shows.
+// smtpSettings is <PRODUCT>_SMTP_URL, when a mailer reads it. A password
+// lives in it: whether it is set, and where, is all that shows.
 func (a *App) smtpSettings(ctx context.Context) []model.Setting {
 	if !a.hasMailer() {
 		return nil
@@ -428,5 +441,5 @@ func (a *App) smtpSettings(ctx context.Context) []model.Setting {
 	if err != nil {
 		from = ""
 	}
-	return []model.Setting{{Name: "KIT_SMTP_URL", Secret: true, From: settingFrom(from)}}
+	return []model.Setting{{Name: a.variable(varSMTPURL), Secret: true, From: settingFrom(from)}}
 }

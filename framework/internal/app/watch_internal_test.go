@@ -10,7 +10,7 @@ import (
 type (
 	forumPost struct {
 		ID   string `json:"id"`
-		Body string `json:"body" kit:"moderated"`
+		Body string `json:"body" app:"moderated"`
 	}
 	forumDraft struct {
 		ID   string `json:"id"`

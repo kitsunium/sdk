@@ -24,12 +24,12 @@ import (
 // not.
 type benchPatient struct {
 	ID    string `json:"id"`
-	Email string `json:"email" kit:"subject"`
-	Name  string `json:"name" kit:"personal"`
-	Phone string `json:"phone" kit:"personal"`
-	Notes string `json:"notes" kit:"personal"`
-	Token string `json:"token" kit:"secret"`
-	Ward  string `json:"ward" kit:"public"`
+	Email string `json:"email" app:"subject"`
+	Name  string `json:"name" app:"personal"`
+	Phone string `json:"phone" app:"personal"`
+	Notes string `json:"notes" app:"personal"`
+	Token string `json:"token" app:"secret"`
+	Ward  string `json:"ward" app:"public"`
 	Age   int    `json:"age"`
 	Visit string `json:"visit"`
 }
@@ -49,7 +49,7 @@ func benchRecord(i int) benchPatient {
 // it.
 func benchEngines(b *testing.B) (st *StoreService[benchPatient], plain, sealed plug.StoreEngine) {
 	b.Helper()
-	pinDataKeyWithoutFileStore(b)
+	pinDataKeyWithoutFileStore(b, "bench")
 	svc := NewService("bench", "Records a benchmark seals.")
 	st = svc.Store("patients", func(p benchPatient) string { return p.ID })
 	app := NewApp("bench", svc).With(DataDir(b.TempDir()), Listen("127.0.0.1:0"), Env(EnvProduction), Logs(io.Discard))

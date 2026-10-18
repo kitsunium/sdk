@@ -25,7 +25,7 @@ func TestTheDaemonDescribesItself(t *testing.T) {
 		call(t, a, "GET /search?q=x", noBody)
 	}
 	var g model.Graph
-	call(t, a, "GET /_kit/api/graph", noBody).json(t, &g)
+	call(t, a, "GET /_app/api/graph", noBody).json(t, &g)
 	rt := g.Runtime
 	if rt == nil {
 		t.Fatal("no runtime")
@@ -57,7 +57,7 @@ func TestTheDaemonDescribesItself(t *testing.T) {
 	}
 	runtime.GC()
 	var polled model.Process
-	if r := call(t, a, "GET /_kit/api/process", noBody); r.status != http.StatusOK {
+	if r := call(t, a, "GET /_app/api/process", noBody); r.status != http.StatusOK {
 		t.Fatalf("process route: %d", r.status)
 	} else {
 		r.json(t, &polled)

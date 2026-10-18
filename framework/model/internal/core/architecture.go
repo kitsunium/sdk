@@ -17,7 +17,7 @@ const (
 const (
 	// PortOwnerApp is the framework's own listener: the health probes, the Studio in
 	// dev, and the product's HTTP when it declares any.
-	PortOwnerApp = "kit"
+	PortOwnerApp = "app"
 )
 
 // What a port serves.
@@ -101,7 +101,7 @@ type ContainerMessage struct {
 	Nodes []string `json:"nodes,omitempty"`
 	// Ports are what the process listens on, and whose each port is.
 	Ports []PortMessage `json:"ports,omitempty"`
-	// Settings are the settings that configure it: KIT_DATA_DIR for the
+	// Settings are the settings that configure it: TODO_DATA_DIR for the
 	// data directory; a database's URL and tuning variables for a database.
 	Settings []string `json:"settings,omitempty"`
 	// Engine is a database's engine: "postgres", "mysql", "sqlite".

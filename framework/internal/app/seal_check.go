@@ -13,7 +13,7 @@ import (
 // sealingProblems judges data-key, and where kit keeps the data keys
 // against the data they seal:
 //
-//   - KIT_DATA_KEY must hold exactly the 32 bytes of a keyring's version;
+//   - <PRODUCT>_DATA_KEY must hold exactly the 32 bytes of a keyring's version;
 //   - a store kept on disk whose data keys would be kept in memory — kit's
 //     own store of them, or data-key itself, made again at every start — is
 //     refused, in every environment: its next start could not open it;
@@ -27,7 +27,7 @@ func (a *App) sealingProblems() []model.Diagnostic {
 		return nil
 	}
 	var out []model.Diagnostic
-	variable := secretVariable("KIT", dataKeySecret)
+	variable := a.variable(varDataKeyStem)
 	if n, pinned := a.pinnedDataKey(); pinned && n != dataKeyBytes {
 		out = append(out, diagnosticOf("error", "", nil, say("seal.data-key-size", "variable", variable, "bytes", dataKeyBytes)))
 	}
@@ -42,7 +42,7 @@ func (a *App) sealingProblems() []model.Diagnostic {
 	}
 	if a.dataKeyInMemory() {
 		out = append(out, diagnosticOf("error", first.id, a.source(&first.decl),
-			say("seal.data-key-memory", "store", first.id, "variable", variable)))
+			say("seal.data-key-memory", "store", first.id, "variable", variable, "prefix", appPrefix(a.name))))
 	}
 	if kept.db == nil {
 		return out
@@ -74,7 +74,7 @@ func (a *App) keysBeside(sealed []placementSource, db *database) []model.Diagnos
 	return out
 }
 
-// pinnedDataKey is how many bytes KIT_DATA_KEY holds, and whether it is
+// pinnedDataKey is how many bytes <PRODUCT>_DATA_KEY holds, and whether it is
 // set: a keyring's version is 32 bytes, no more, no less.
 func (a *App) pinnedDataKey() (int, bool) {
 	st := a.secrets.Load()
@@ -91,7 +91,7 @@ func (a *App) pinnedDataKey() (int, bool) {
 }
 
 // dataKeyInMemory reports whether data-key lives in the process's memory,
-// unpinned: the environment keeps its secrets there, and KIT_DATA_KEY is not
+// unpinned: the environment keeps its secrets there, and <PRODUCT>_DATA_KEY is not
 // set. Known once the start opened the secrets' stores.
 func (a *App) dataKeyInMemory() bool {
 	st := a.secrets.Load()

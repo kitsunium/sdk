@@ -34,7 +34,7 @@ func daemonOf(t *testing.T, a *app.App) daemon {
 		d.loops = append(d.loops, l.Name)
 	}
 	var gs model.Goroutines
-	call(t, a, "GET /_kit/api/goroutines", noBody).json(t, &gs)
+	call(t, a, "GET /_app/api/goroutines", noBody).json(t, &gs)
 	for _, grp := range gs.Groups {
 		if grp.Loop != "" && grp.Loop != "http" {
 			d.goroutines += grp.Count

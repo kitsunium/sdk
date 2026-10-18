@@ -136,7 +136,7 @@ func (d *desk) issueOne(ctx context.Context, f dossier) (app.EmptyValue, error) 
 // till, so the backends' database variable names its database.
 func runDesk(t *testing.T, d *desk, opts ...app.AppConfigurer) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("TILL_SECRETS", "memory")
 	a := app.NewApp("till", d.svc).With(append([]app.AppConfigurer{
 		app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
 	}, opts...)...)

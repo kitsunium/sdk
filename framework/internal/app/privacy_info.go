@@ -58,8 +58,8 @@ func (s *storeCore) describeRun(a *App, info *model.StorePrivacy) {
 	}
 }
 
-// privacyProblems judges what the app does with personal data: the kit tags
-// of every type it shows or keeps (errors), KIT_RETENTION, and — when kit
+// privacyProblems judges what the app does with personal data: the app tags
+// of every type it shows or keeps (errors), <PRODUCT>_RETENTION, and — when kit
 // explains — a store that keeps personal data with no retention or no
 // subject, unless the product keeps its retention, and fields whose names
 // read like personal data (warnings).
@@ -74,14 +74,14 @@ func (a *App) privacyProblems() []model.Diagnostic {
 	return out
 }
 
-// retentionProblems judges KIT_RETENTION: a value kit does not know refuses
-// the start; off is warned of outside dev.
+// retentionProblems judges <PRODUCT>_RETENTION: a value the framework does
+// not know refuses the start; off is warned of outside dev.
 func (a *App) retentionProblems() []model.Diagnostic {
-	if _, bad := resolveRetention(os.Getenv); bad {
-		return []model.Diagnostic{diagnosticOf("error", "", nil, say("retention.invalid", "variable", model.VarRetention))}
+	if _, bad := resolveRetention(a.variable(varRetention), os.Getenv); bad {
+		return []model.Diagnostic{diagnosticOf("error", "", nil, say("retention.invalid", "variable", a.variable(varRetention)))}
 	}
 	if a.retentionMode() == model.RetentionOff && a.cfg.env != EnvDev && a.keepsPersonalData() {
-		return []model.Diagnostic{diagnosticOf("warning", "", nil, say("retention.off", "variable", model.VarRetention))}
+		return []model.Diagnostic{diagnosticOf("warning", "", nil, say("retention.off", "variable", a.variable(varRetention)))}
 	}
 	return nil
 }

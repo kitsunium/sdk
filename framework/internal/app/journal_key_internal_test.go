@@ -45,7 +45,7 @@ func TestAJournalKeyIsTheMonthInUTC(t *testing.T) {
 // journalApp runs a store of cards on the data in dir, on clk.
 func journalApp(t *testing.T, dir string, clk clock.Timed) (*App, *StoreService[card]) {
 	t.Helper()
-	pinDataKeyWithoutFileStore(t)
+	pinDataKeyWithoutFileStore(t, "journalkeys")
 	svc := NewService("journalkeys", "Cards whose journal is sealed, for the journal key tests.")
 	cards := svc.Store("cards", func(c card) string { return c.ID })
 	app := NewApp("journalkeys", svc).With(DataDir(dir), Listen("127.0.0.1:0"), Env(EnvDev), Analyze(false), Logs(io.Discard), Clock(clk))

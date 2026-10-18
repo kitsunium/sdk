@@ -198,7 +198,7 @@ func servesOnlyWhatTheGraphNames(t *testing.T, app *App, mod, file string) {
 	t.Helper()
 	get := func(module, file string) (int, model.Snippet) {
 		q := url.Values{"module": {module}, "file": {file}, "line": {"1"}}
-		resp, respErr := http.Get(app.URL() + "/_kit/api/source?" + q.Encode())
+		resp, respErr := http.Get(app.URL() + "/_app/api/source?" + q.Encode())
 		if respErr != nil {
 			t.Fatal(respErr)
 		}

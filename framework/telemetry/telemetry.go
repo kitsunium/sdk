@@ -60,8 +60,11 @@ const RecordSize int = 64
 // recordVersion is the first byte of every record.
 const recordVersion byte = 1
 
-// Protocol names the wire this package speaks, in the handshake.
-const Protocol string = "kit-telemetry/v1"
+// Protocol names the wire this package speaks, in the handshake. Since
+// ADR 0180 step 4 it is app-telemetry/v1, a name the product sends; the
+// wire is unchanged, and a collector accepts kit-telemetry/v1 as the
+// same for two minors.
+const Protocol string = "app-telemetry/v1"
 
 // The ring's bounds and default, in events.
 const (

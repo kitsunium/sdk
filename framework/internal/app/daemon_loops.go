@@ -45,7 +45,7 @@ func provenanceOf(kind string) (provenance, library string) {
 	case model.LoopTimer:
 		return model.ProvenanceLibrary, "sdk/v1/app/statemachine"
 	case model.LoopWake:
-		return model.ProvenanceApp, "kit"
+		return model.ProvenanceApp, frameworkName
 	case model.LoopRoutine:
 		return model.ProvenanceProduct, ""
 	case model.LoopRotation:

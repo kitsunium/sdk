@@ -17,13 +17,13 @@ import (
 
 func TestStudioIsOffInProduction(t *testing.T) {
 	a := start(t, app.Env(app.EnvProduction))
-	for _, path := range []string{"/_kit/", "/_kit/api/graph", "/_kit/api/events", "/_kit/api/source?file=framework/internal/app/product_test.go&line=1"} {
+	for _, path := range []string{"/_app/", "/_app/api/graph", "/_app/api/events", "/_app/api/source?file=framework/internal/app/product_test.go&line=1"} {
 		if r := call(t, a, "GET"+" "+path, noBody); r.status != http.StatusNotFound {
 			t.Errorf("production serves %s: %d", path, r.status)
 		}
 	}
 	for _, probe := range []string{"live", "ready", "startup"} {
-		if r := call(t, a, "GET /_kit/health/"+probe, noBody); r.status != http.StatusOK {
+		if r := call(t, a, "GET /_app/health/"+probe, noBody); r.status != http.StatusOK {
 			t.Errorf("probe %s: %d %s", probe, r.status, r.body)
 		}
 	}
@@ -35,7 +35,7 @@ func TestStudioIsOffInProduction(t *testing.T) {
 func TestStudioChecksTheHost(t *testing.T) {
 	a := start(t)
 	for _, host := range []string{"evil.example", "localhost.evil.example", "127.0.0.1.nip.io", "[::2]"} {
-		req, reqErr := http.NewRequestWithContext(t.Context(), "GET", a.URL()+"/_kit/api/graph", nil)
+		req, reqErr := http.NewRequestWithContext(t.Context(), "GET", a.URL()+"/_app/api/graph", nil)
 		if reqErr != nil {
 			t.Fatal(reqErr)
 		}
@@ -49,7 +49,7 @@ func TestStudioChecksTheHost(t *testing.T) {
 			t.Errorf("Host %q reached the Studio: %d", host, resp.StatusCode)
 		}
 	}
-	req, reqErr := http.NewRequestWithContext(t.Context(), "GET", a.URL()+"/_kit/health/ready", nil)
+	req, reqErr := http.NewRequestWithContext(t.Context(), "GET", a.URL()+"/_app/health/ready", nil)
 	if reqErr != nil {
 		t.Fatal(reqErr)
 	}
@@ -64,7 +64,7 @@ func TestStudioChecksTheHost(t *testing.T) {
 	}
 	// The Studio's pages are the kit tool's (ADR 0147 §1): the product serves
 	// its API only, and still under the Studio's policy.
-	r := call(t, a, "GET /_kit/", noBody)
+	r := call(t, a, "GET /_app/", noBody)
 	if r.status != http.StatusNotFound || !strings.Contains(r.header.Get("Content-Security-Policy"), "default-src 'self'") {
 		t.Errorf("the Studio page: %d, CSP %q", r.status, r.header.Get("Content-Security-Policy"))
 	}
@@ -75,7 +75,7 @@ func TestStudioChecksTheHost(t *testing.T) {
 
 func TestSourceServesOnlyTheGraphsFiles(t *testing.T) {
 	a := start(t)
-	r := call(t, a, "GET /_kit/api/source?file=framework/internal/app/product_test.go&line=30&end=32", noBody)
+	r := call(t, a, "GET /_app/api/source?file=framework/internal/app/product_test.go&line=30&end=32", noBody)
 	var sn model.Snippet
 	r.json(t, &sn)
 	if r.status != http.StatusOK || sn.Focus != 30 || sn.FocusEnd != 32 || sn.Language != "go" || sn.StartLine != 18 {
@@ -88,12 +88,12 @@ func TestSourceServesOnlyTheGraphsFiles(t *testing.T) {
 		"../../../../etc/passwd", "/etc/passwd", "go.mod", ".git/config", ".kit/data/shop/items.json",
 		"framework/internal/app/app.go", "framework/internal/app/product_test.go\x00", "framework/internal/app/../app/product_test.go", `framework\internal\app\product_test.go`,
 	} {
-		r := call(t, a, "GET /_kit/api/source?file="+urlEscape(file)+"&line=1", noBody)
+		r := call(t, a, "GET /_app/api/source?file="+urlEscape(file)+"&line=1", noBody)
 		if r.status != http.StatusNotFound {
 			t.Errorf("file %q answered %d", file, r.status)
 		}
 	}
-	r = call(t, a, "GET /_kit/api/source?file=framework/internal/app/product_test.go&line=-4&end=999999999", noBody)
+	r = call(t, a, "GET /_app/api/source?file=framework/internal/app/product_test.go&line=-4&end=999999999", noBody)
 	r.json(t, &sn)
 	if r.status != http.StatusOK || sn.Focus != 1 || len(sn.Lines) > 400+2*12 {
 		t.Errorf("the range is not clamped: focus %d, %d lines", sn.Focus, len(sn.Lines))
@@ -107,7 +107,7 @@ func urlEscape(s string) string {
 func TestStudioBrowsesInstancesAndItems(t *testing.T) {
 	a := start(t)
 	it := create(t, a, "browse", 1)
-	r := call(t, a, "GET /_kit/api/instances?workflow=shop/workflow/lifecycle", noBody)
+	r := call(t, a, "GET /_app/api/instances?workflow=shop/workflow/lifecycle", noBody)
 	var inst []model.Instance
 	r.json(t, &inst)
 	if len(inst) != 1 || inst[0].ID != it.ID || inst[0].State != "draft" || len(inst[0].History) != 1 {
@@ -116,13 +116,13 @@ func TestStudioBrowsesInstancesAndItems(t *testing.T) {
 	if inst[0].History[0].Caller != "shop/endpoint/CreateItem" {
 		t.Errorf("the history does not name who fired: %+v", inst[0].History[0])
 	}
-	r = call(t, a, "GET /_kit/api/items?store=shop/store/items", noBody)
+	r = call(t, a, "GET /_app/api/items?store=shop/store/items", noBody)
 	var items []Item
 	r.json(t, &items)
 	if len(items) != 1 || items[0].Name != "browse" {
 		t.Fatalf("items %s", r.body)
 	}
-	for _, path := range []string{"/_kit/api/items?store=nope", "/_kit/api/instances?workflow=shop/store/items", "/_kit/api/nothing"} {
+	for _, path := range []string{"/_app/api/items?store=nope", "/_app/api/instances?workflow=shop/store/items", "/_app/api/nothing"} {
 		if r := call(t, a, "GET"+" "+path, noBody); r.status != http.StatusNotFound {
 			t.Errorf("%s: %d", path, r.status)
 		}
@@ -135,7 +135,7 @@ func TestDeclarationProblemsAreReportedTogether(t *testing.T) {
 	broken := app.NewService("Broken_Name", "")
 	broken.Endpoint("get /x", func(context.Context, app.EmptyValue) (app.EmptyValue, error) { return app.EmptyValue{}, nil })
 	broken.Endpoint("GET /y/{id}", func(context.Context, app.EmptyValue) (app.EmptyValue, error) { return app.EmptyValue{}, nil })
-	broken.Endpoint("GET /_kit/steal", func(context.Context, app.EmptyValue) (app.EmptyValue, error) { return app.EmptyValue{}, nil })
+	broken.Endpoint("GET /_app/steal", func(context.Context, app.EmptyValue) (app.EmptyValue, error) { return app.EmptyValue{}, nil })
 	broken.Endpoint("OPTIONS /preflight", func(context.Context, app.EmptyValue) (app.EmptyValue, error) { return app.EmptyValue{}, nil })
 	broken.Store("s", (func(Item) string)(nil))
 	broken.Store("s", func(i Item) string { return i.ID })
@@ -150,7 +150,7 @@ func TestDeclarationProblemsAreReportedTogether(t *testing.T) {
 	}
 	text := err.Error()
 	for _, want := range []string{
-		"service name", "must start with an HTTP method", `route "OPTIONS /preflight"`, "wildcard {id} is not bound", "/_kit/",
+		"service name", "must start with an HTTP method", `route "OPTIONS /preflight"`, "wildcard {id} is not bound", "/_app/",
 		"nil key function", "already declares a store", "no initial state", "period must be positive", "cron expression",
 	} {
 		if !strings.Contains(text, want) {
@@ -240,34 +240,34 @@ func captureStdout(t *testing.T, fn func()) string {
 // devRoutes are the dev tools' routes, with a body that would pass. They
 // read: none acts on the product (ADR 0010, D13).
 var devRoutes = []struct{ method, path, body string }{
-	{"GET", "/_kit/api/process", ""},
-	{"GET", "/_kit/api/databases", ""},
-	{"GET", "/_kit/api/goroutines", ""},
-	{"GET", "/_kit/api/profile/heap", ""},
-	{"GET", "/_kit/api/logs", ""},
-	{"GET", "/_kit/api/mail", ""},
-	{"GET", "/_kit/api/mail/m1", ""},
-	{"GET", "/_kit/api/former?store=shop/store/items&key=x", ""},
-	{"GET", "/_kit/api/revisions?store=shop/store/items&key=x", ""},
-	{"GET", "/_kit/api/privacy", ""},
+	{"GET", "/_app/api/process", ""},
+	{"GET", "/_app/api/databases", ""},
+	{"GET", "/_app/api/goroutines", ""},
+	{"GET", "/_app/api/profile/heap", ""},
+	{"GET", "/_app/api/logs", ""},
+	{"GET", "/_app/api/mail", ""},
+	{"GET", "/_app/api/mail/m1", ""},
+	{"GET", "/_app/api/former?store=shop/store/items&key=x", ""},
+	{"GET", "/_app/api/revisions?store=shop/store/items&key=x", ""},
+	{"GET", "/_app/api/privacy", ""},
 }
 
 // actionRoutes are the Studio's former controls (D13, ADR 0147 §8): none of
 // them exists, in dev either.
 var actionRoutes = []struct{ method, path, body string }{
-	{"POST", "/_kit/api/profile/cpu", `{"seconds":1}`},
-	{"GET", "/_kit/api/mocks", ""},
-	{"POST", "/_kit/api/mocks", `{"node":"shop/endpoint/Search","mode":"fail"}`},
-	{"DELETE", "/_kit/api/mocks", ""},
-	{"POST", "/_kit/api/jobs/run", `{"job":"audit/job/tally"}`},
-	{"POST", "/_kit/api/workflows/fire", `{"workflow":"shop/workflow/lifecycle","instance":"x","event":"publish"}`},
-	{"POST", "/_kit/api/loops/wake", `{"loop":"bench/loop/tick"}`},
-	{"POST", "/_kit/api/revisions/restore", `{"store":"shop/store/items","key":"x","number":1}`},
-	{"POST", "/_kit/api/commands/dispatch", `{"command":"bench/command/none","input":{}}`},
-	{"POST", "/_kit/api/queries/ask", `{"query":"bench/query/none"}`},
-	{"POST", "/_kit/api/privacy/retention", `{}`},
-	{"POST", "/_kit/api/privacy/export", `{"ids":["ann@x.dev"]}`},
-	{"POST", "/_kit/api/privacy/erase", `{"ids":["ann@x.dev"],"reason":"asked"}`},
+	{"POST", "/_app/api/profile/cpu", `{"seconds":1}`},
+	{"GET", "/_app/api/mocks", ""},
+	{"POST", "/_app/api/mocks", `{"node":"shop/endpoint/Search","mode":"fail"}`},
+	{"DELETE", "/_app/api/mocks", ""},
+	{"POST", "/_app/api/jobs/run", `{"job":"audit/job/tally"}`},
+	{"POST", "/_app/api/workflows/fire", `{"workflow":"shop/workflow/lifecycle","instance":"x","event":"publish"}`},
+	{"POST", "/_app/api/loops/wake", `{"loop":"bench/loop/tick"}`},
+	{"POST", "/_app/api/revisions/restore", `{"store":"shop/store/items","key":"x","number":1}`},
+	{"POST", "/_app/api/commands/dispatch", `{"command":"bench/command/none","input":{}}`},
+	{"POST", "/_app/api/queries/ask", `{"query":"bench/query/none"}`},
+	{"POST", "/_app/api/privacy/retention", `{}`},
+	{"POST", "/_app/api/privacy/export", `{"ids":["ann@x.dev"]}`},
+	{"POST", "/_app/api/privacy/erase", `{"ids":["ann@x.dev"],"reason":"asked"}`},
 }
 
 // The Studio does not act on the product (D13): its former controls answer
@@ -303,8 +303,8 @@ func TestDevToolsAreAbsentInProduction(t *testing.T) {
 		}
 	}
 	for _, method := range []string{"PUT", "PATCH", "DELETE", "POST"} {
-		if r := call(t, a, method+" /_kit/api/anything", noBody); r.status != http.StatusNotFound {
-			t.Errorf("production answers %s under /_kit/: %d", method, r.status)
+		if r := call(t, a, method+" /_app/api/anything", noBody); r.status != http.StatusNotFound {
+			t.Errorf("production answers %s under /_app/: %d", method, r.status)
 		}
 	}
 }
@@ -345,7 +345,7 @@ func TestDevToolsRefuseStrangers(t *testing.T) {
 func TestStoreItemsAreRedacted(t *testing.T) {
 	a := start(t)
 	token := signIn(t, a, "acc_red", "red@x.dev", "Red")
-	r := call(t, a, "GET /_kit/api/items?store=members/store/sessions", noBody)
+	r := call(t, a, "GET /_app/api/items?store=members/store/sessions", noBody)
 	if r.status != http.StatusOK {
 		t.Fatalf("items: %d %s", r.status, r.body)
 	}

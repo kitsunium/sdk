@@ -17,7 +17,7 @@ type draft struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
 	Body  string `json:"body"`
-	Token string `json:"token,omitempty" kit:"secret"`
+	Token string `json:"token,omitempty" app:"secret"`
 }
 
 var cmdRevisionsSvc = NewService("cmd-revisions", "Drafts, for the revisions command's tests.")

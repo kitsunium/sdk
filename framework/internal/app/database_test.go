@@ -71,7 +71,7 @@ func verifiedURL() string { return fakeURL("ledger", "pw", "tls=verify-full") }
 // test's, its secrets in memory.
 func ledgerApp(t *testing.T, l ledger, logs *syncBuffer, opts ...app.AppConfigurer) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("LEDGER_SECRETS", "memory")
 	return app.NewApp("ledger", l.books, l.audit).With(append([]app.AppConfigurer{
 		app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.DataDir(t.TempDir()), app.Logs(logs),
 	}, opts...)...)
@@ -214,7 +214,7 @@ func TestADatabaseStartsBeforeItsStores(t *testing.T) {
 	if !before(order, "database:database", "store:books/store/entries") {
 		t.Errorf("components %v", order)
 	}
-	if r := call(t, o.app, "GET /_kit/health/ready", noBody); r.status != http.StatusOK {
+	if r := call(t, o.app, "GET /_app/health/ready", noBody); r.status != http.StatusOK {
 		t.Errorf("ready: %d %s", r.status, r.body)
 	}
 	if strings.Contains(o.logs.String(), "pw@") {
@@ -301,17 +301,17 @@ func TestReadinessFollowsTheDatabase(t *testing.T) {
 	run(t, a)
 	db.SetDown(true)
 	db.Retire()
-	if r := call(t, a, "GET /_kit/health/ready", noBody); r.status != http.StatusServiceUnavailable {
+	if r := call(t, a, "GET /_app/health/ready", noBody); r.status != http.StatusServiceUnavailable {
 		t.Errorf("ready while the database is down: %d", r.status)
 	}
-	if r := call(t, a, "GET /_kit/health/live", noBody); r.status != http.StatusOK {
+	if r := call(t, a, "GET /_app/health/live", noBody); r.status != http.StatusOK {
 		t.Errorf("live while the database is down: %d", r.status)
 	}
 	if d := databaseOf(t, a.Graph(), "database"); d.Ready || d.Problem == "" {
 		t.Errorf("runtime while down %+v", d)
 	}
 	db.SetDown(false)
-	if r := call(t, a, "GET /_kit/health/ready", noBody); r.status != http.StatusOK {
+	if r := call(t, a, "GET /_app/health/ready", noBody); r.status != http.StatusOK {
 		t.Errorf("ready once the database answers: %d %s", r.status, r.body)
 	}
 	if d := databaseOf(t, a.Graph(), "database"); !d.Ready || d.Problem != "" {

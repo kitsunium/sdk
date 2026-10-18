@@ -10,7 +10,7 @@ import (
 // The start is recorded as it ran: the Studio draws it as the daemon's boot
 // sequence, and shows the configuration it read.
 func TestTheStartIsRecordedStepByStep(t *testing.T) {
-	t.Setenv("KIT_TRUST_PROXY", "on")
+	t.Setenv("SHOP_TRUST_PROXY", "on")
 	app := start(t)
 	rt := app.Graph().Runtime
 	if rt == nil {
@@ -62,16 +62,16 @@ func TestTheStartIsRecordedStepByStep(t *testing.T) {
 		t.Fatalf("no setting %s", name)
 		return model.Setting{}
 	}
-	if s := setting("KIT_ENV"); s.Value != "dev" || s.From != model.SettingOption {
+	if s := setting("SHOP_ENV"); s.Value != "dev" || s.From != model.SettingOption {
 		t.Errorf("KIT_ENV: %+v", s)
 	}
-	if s := setting("KIT_DATA_DIR"); s.Value != "memory" || s.From != model.SettingOption {
+	if s := setting("SHOP_DATA_DIR"); s.Value != "memory" || s.From != model.SettingOption {
 		t.Errorf("KIT_DATA_DIR: %+v", s)
 	}
-	if s := setting("KIT_TRUST_PROXY"); s.Value != "on" || s.From != model.SettingEnv {
+	if s := setting("SHOP_TRUST_PROXY"); s.Value != "on" || s.From != model.SettingEnv {
 		t.Errorf("KIT_TRUST_PROXY: %+v", s)
 	}
-	if s := setting("KIT_SMTP_URL"); !s.Secret || s.Value != "" {
+	if s := setting("SHOP_SMTP_URL"); !s.Secret || s.Value != "" {
 		t.Errorf("KIT_SMTP_URL is a secret: %+v", s)
 	}
 }

@@ -2,11 +2,9 @@ package app
 
 import (
 	"slices"
-	"strings"
 
 	"github.com/kitsunium/sdk/framework/internal/app/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
 // A subsystem is in a program if and only if the program imports its
@@ -187,18 +185,4 @@ func (a *App) missingPackages() []string {
 	}
 	slices.Sort(pkgs)
 	return slices.Compact(pkgs)
-}
-
-// Unwrap is what the refusal is, when the framework has a code for it: with
-// packages in Missing, an error carrying [CodeSubsystemMissing] (ADR
-// 0179 §6), which errs.HasCode reads through the refusal; nil
-// otherwise.
-func (e *DiagnosticsError) Unwrap() error {
-	if len(e.Missing) == 0 {
-		return nil
-	}
-	list := strings.Join(e.Missing, ", ")
-	return errs.New(CodeSubsystemMissing, "SUBSYSTEM_NOT_IMPORTED", subsystemPublic,
-		"app: the product declares what needs a subsystem whose registration package the program does not import: "+list,
-		errs.String("packages", list))
 }

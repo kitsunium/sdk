@@ -310,7 +310,7 @@ nothing.
 | 1 | SDK | The Studio's routes, handlers, capture view and tool variables move from the core into the Studio subsystem; the core keeps the probes (non-breaking: a product that imports `framework/kit/studio` keeps its Studio) — done (2026-10-17, §Step 1, done) |
 | 2 | platform | `kit dev` injects the hook by overlay; the generator stops writing `dev_gen.go`; `kit check` refuses a product's import of the Studio subsystem; the todo deletes `kitdev.go`, moderation its import |
 | 3 | SDK | The rename of §1, a design edit first (ADR 0163, 0167, 0168): `design/framework/app.yaml`, `kit gen`, `make api`, `make docs-readme`; the facade's and implementation's paths; `model` `Version` 6; the scripts, `BUILD.bazel`, `//:audit_sources`, `tools/alloc-lane-targets.txt` and `codes.ranges` owners re-pointed; the three database connectors follow; the texts of §2 reworded — done (2026-10-18, §Step 3, done) |
-| 4 | SDK | The runtime names of §3: the prefix, the routes, the tag key, the graph values, the telemetry name; the refusals of an old name at the start (§3, Q12) |
+| 4 | SDK | The runtime names of §3: the prefix, the routes, the tag key, the graph values, the telemetry name; the refusals of an old name at the start (§3, Q12) — done (2026-10-18, §Step 4, done) |
 | 5 | SDK | The names at rest (Q5, Q6): the tables, the migration set, the secret prefix, the dev data directory — renamed by a framework migration —, the domain-separation labels re-sealed under new ones, the old ones removed in a later minor (Q6) |
 | 6 | SDK | `TestAProductCarriesNoTraceOfTheTool`, with an empty allow-list; it can land earlier with an allow-list shrinking step by step, as ADR 0179's `stillInCore` did |
 | 7 | platform | Its ADR for §5: the header, the digest line, the skeletons, the seed variable, the design's `apiVersion`, the lock, the version pin; the analyzer and `subsystem.Table` on the new paths; `internal/modelts` regenerated for `Version` 6; the Studio's client on the new prefix; the reference regenerated, and its guard |
@@ -493,6 +493,96 @@ Docker), `kit gen -check`, genindex `-check-api -markers -digests`, the
 guards of `scripts/pre-commit/`, `make guard`, `make doclinks`, `gofumpt -l`
 and `make lint-ktn-check`.
 
+### Step 4, done (2026-10-18)
+
+The runtime names of §3, in `framework/internal/app/renamed.go` and the code
+that reads each name; the design first for what is exported
+(`design/framework/{app,model,telemetry}.yaml`, `kit gen` rc.9, `make api`,
+`make docs-readme`).
+
+| Was | Is |
+|---|---|
+| the 16 operator variables `KIT_ADDR`, `KIT_ALLOWED_HOSTS`, `KIT_DATA_DIR`, `KIT_DATA_KEY`, `KIT_ENV`, `KIT_INDEX_KEY`, `KIT_LOG_LEVEL`, `KIT_RETENTION`, `KIT_SECRETS`, `KIT_SECRETS_KEY`, `KIT_SECRETS_KEY_FILE`, `KIT_SMTP_URL`, `KIT_SMTP_URL_FILE`, `KIT_TELEMETRY`, `KIT_TELEMETRY_GIDS`, `KIT_TRUST_PROXY` (and the `_FILE` twins of the two keys, `KIT_DATA_KEY_FILE`, `KIT_INDEX_KEY_FILE`) | `<PRODUCT>_ADDR`… — the product's prefix as its settings and secrets already had it (`appPrefix`: the name upper-cased, every other character `_`, `TODO` for "todo", `MY_APP` for "my-app") |
+| `/_kit/health/{live,ready,startup}`, the reserved `/_kit/` | `/_app/health/{live,ready,startup}`, the reserved `/_app/` |
+| the Studio's reads `/_kit/api/*`, its not-found answers under `/_kit/api/` and `/_kit/`, the host guard "only `/_kit/`" | `/_app/api/*`, `/_app/api/`, `/_app/`, "only `/_app/`" — in `studioengine`, which a release binary does not link (step 1) |
+| the struct tag key `kit:"…"` | `app:"…"`, the model's own fields included |
+| `model.ProvenanceApp`, `PortOwnerApp` = `"kit"`; `SettingAppDev` = `"kitdev"` | `"app"`; `"appdev"` |
+| the graph's `app.kit` (`AppMessage.Kit`) and `app.build.kit` (`BuildMessage.Kit`) | `app.app` and `app.build.app` (`AppMessage.App`, `BuildMessage.App`), under `Version` 6 as the migration table says |
+| `model.VarEnv`… = `"KIT_ENV"`… | the name after the product's prefix: `VarEnv` = `"ENV"`, `VarAddr` = `"ADDR"`, `VarDataDir` = `"DATA_DIR"`, `VarTrustProxy`, `VarAllowedHosts`, `VarLogLevel`, `VarSMTPURL`, `VarRetention` likewise; a setting's `Name` in the graph is the product's variable, `TODO_DATA_DIR` |
+| the readiness and liveness checks named `kit`; the loops' library `kit`; the `config` command's owner column `kit`; the `secrets` command's "made by" `kit`; the privacy journal's actor when no node acts, `kit` | `app` |
+| the pprof labels `kit_node`, `kit_loop` (`plug.LabelNode`, `plug.LabelLoop`) | `app_node`, `app_loop` |
+| a captured mail's header `X-Kit-Attachments` | `X-Attachments` |
+| `telemetry.Protocol` = `kit-telemetry/v1` | `app-telemetry/v1`; the wire is unchanged |
+| the help's `KIT_*` lines | `<PRODUCT>_*`, the product's own prefix printed, each name on a line of its own |
+
+**What keeps the tool's name, by §3.** The nine tool variables —
+`KIT_DEV_BUILT_AT`, `KIT_DEV_BUILD_MS`, `KIT_DEV_REBUILDS`,
+`KIT_DEV_CHANGED`, `KIT_DEV_CHANGED_MORE`, `KIT_DEV_FORCED`, `KIT_STUDIO`,
+`KIT_STUDIO_REMOTE`, `KIT_ANALYZE` — are the tool's: §3 does not rename them,
+`studioengine` alone reads them since step 1, and a release binary links none.
+`model.VarStudio`, `VarStudioRemote`, `VarAnalyze` and `VarDevForced` keep
+their whole names. `KIT_DEV_FORCED` now lists the product's variables the
+tool set (`TODO_ENV,TODO_ADDR,TODO_DATA_DIR`): only those three are labelled
+`appdev`.
+
+**What stays for step 5, and why.** The names at rest: the `kit_*` tables, the
+`kit` migration set, the `kit-` secret prefix (`kit-smtp-url`,
+`kit-data-key`, `kit-index-key`), `.kit/data`, the `kit/v1` and `kit:`
+labels. One graph value of §3 is among them: the framework's own service
+`kit.privacy`, whose stores rest under its name (`kit.privacy/keys.json` in
+the data directory, `kit_privacy_*` tables on a database) — renamed without
+step 5's migration, a product would start without its data keys and lose the
+personal data they seal. The service keeps its name until step 5, and so does
+the reservation of the module name `kit`, which would otherwise let a
+module's service take a name under `kit.`; `app` is reserved beside it.
+
+**An old name met at the start is refused** (Q12), every one at once, with
+`CodeRenamed` (`0.4.2.85`, allocated after `0.4.2.84` in
+`design/framework/app.yaml`, re-exported by `framework/app`; reason
+`OLD_NAME`, public "a name the framework no longer reads was met at the start:
+use the name that replaces it"): the `DiagnosticsError` gains `Renamed`, each
+entry `"<old> -> <new>"`, sorted, and its `Unwrap` carries `CodeRenamed` —
+joined with `CodeSubsystemMissing` when the start found both.
+
+- *A variable.* A `KIT_<STEM>` of the 18 above set non-empty in the
+  environment is refused before anything is read or opened (`resolve`, so the
+  start and every command that reads the configuration — `config`, `graph`,
+  `secrets`, `migrate`, `privacy`, `watch`, `revisions`, `data copy` —, and
+  the healthcheck, which would probe a wrong address), naming
+  `<PRODUCT>_<STEM>`: "KIT_DATA_DIR is set, but the framework no longer reads
+  it: it reads TODO_DATA_DIR — rename it where the product is deployed". A
+  product whose prefix is `KIT` reads them as its own and is not refused.
+- *A tag.* A field still tagged `kit:"…"`, in any type a declaration shows or
+  keeps, nested ones included, is refused at the start with the declaration
+  problems, every field at once, like `CodeSubsystemMissing`:
+  `shop.Report.Email is tagged kit:"personal", which the framework no longer
+  reads: tag it app:"personal"`.
+- *A probe path.* The former `/_kit/health/{live,ready,startup}` answer as the
+  new ones; the first request of the run to each is logged at warning level,
+  "a probe asked a deprecated path, which answers for two minors more: probe
+  the new one", with the path asked and the one to use. The rest of `/_kit/`
+  stays reserved — a product route under it is refused, a request there
+  answers 404 — over the same window.
+
+**The product's namespace.** Since the framework's own variables now share the
+product's prefix, they are reserved in it, as Q3 says: a setting, a secret or a
+database URL of the product read from one of them (`app.Database("smtp", …)`,
+whose URL would be `TODO_SMTP_URL`; a setting `log-level`) is refused at the
+start (`setting.reserved`, `secret.reserved`), and none of them is warned of
+as a stray variable.
+
+**Texts.** A sentence the start or a command says names the product's variable
+itself (`TODO_DATA_DIR`); a Public text, a literal by rule 4, writes
+`<PRODUCT>_SECRETS_KEY` and carries the variable's name in a field
+(`variable`).
+
+**Verified.** `GOWORK=off go test -race ./...` in the root module and in the
+four connector modules, `kit gen -check`, genindex `-check-api -markers
+-digests`, the guards of `scripts/pre-commit/`, `make guard`, `make
+doclinks`, `gofumpt -l` and `make lint-ktn-check`. The refusals were seen red
+before green: with the two checks stubbed out, the tests of the variables and
+of the tags fail where they should.
+
 ### Impact
 
 - **The SDK.** Under `framework/`, 694 Go files mention the word (7 012
@@ -567,6 +657,39 @@ files of the three products are step 8's. A product that names
 one that compares a graph's version with 5 reads 6. The runtime names do not
 move at this step: the variables, the probes' paths, the struct tag key, the
 tables and what is sealed stay as they are until steps 4 and 5.
+
+**Step 4, landed (2026-10-18).** The runtime names change, under the same v0
+licence: a minor of the root module and of each connector module
+(`release:minor`). What an operator and a product change:
+
+- *The variables*, in every Dockerfile, compose file, Nomad or Kubernetes
+  manifest, systemd unit and CI job: `KIT_<STEM>` → `<PRODUCT>_<STEM>`, the
+  product's own prefix — for the todo, `KIT_DATA_DIR` → `TODO_DATA_DIR`,
+  `KIT_ADDR` → `TODO_ADDR`, `KIT_ENV` → `TODO_ENV`, `KIT_SMTP_URL` →
+  `TODO_SMTP_URL`, `KIT_TRUST_PROXY` → `TODO_TRUST_PROXY`. A variable left
+  under its old name is refused at the start, naming the new one, so a
+  forgotten one is found at the first deployment, not lost. The tool's own
+  (`KIT_DEV_*`, `KIT_STUDIO*`, `KIT_ANALYZE`, and `KIT_SEED` on the platform's
+  side) keep their names.
+- *The probes*, in every orchestrator's liveness, readiness and startup check
+  and every HTTP health check: `/_kit/health/<probe>` → `/_app/health/<probe>`.
+  The old paths keep answering, logged as deprecated, for two minors; a
+  `HEALTHCHECK` that runs `<binary> healthcheck` needs nothing.
+- *The struct tags*: `kit:"…"` → `app:"…"`, whatever the words —
+  `grep -rlZ --include='*.go' ' kit:"' . | xargs -0 sed -i 's/ kit:"/ app:"/g'`
+  —; a field left under the old key is refused at the start.
+- *A setting, secret or database* whose variable is one of the framework's
+  (`<PRODUCT>_ADDR`, `_DATA_DIR`, `_SMTP_URL`, `_LOG_LEVEL`…) takes another
+  name.
+- *A reader of the graph*: `app.kit` and `app.build.kit` are `app.app` and
+  `app.build.app`; a provenance or port owner `"kit"` is `"app"`, a setting's
+  origin `"kitdev"` is `"appdev"`; a setting's name is the product's variable;
+  `model.VarEnv` and its siblings hold the name after the prefix. The
+  platform's `kit dev` must set the product's variables (and list them in
+  `KIT_DEV_FORCED`) and its Studio read `/_app/api/`: a `kit dev` that still
+  sets `KIT_ENV` is refused by a product on this release (step 7).
+- *A telemetry collector* reads the handshake `app-telemetry/v1`, the wire
+  unchanged.
 
 ## Alternatives considered
 
@@ -675,6 +798,7 @@ clear, and accepting both keeps the old names longer.
 | Proposed | 2026-10-17 | The design, the measured inventory, twelve questions for the owner |
 | Accepted | the owner's decision, 2026-10-17 | Q1 answered `framework/app`, the recommendation of Q2 to Q12 retained as written; each question replaced by its *Decision* line; the status, the header (*Accepted*, *Amends*), the placeholder name replaced by `app`, and the passages that depended on an open question (§1's table, §4's hook, §5, migration step 0 and 5, the cost, §Breaking changes, §Deferred) updated. No other text changed |
 | Accepted, step 1 done | 2026-10-17 | The migration table marks step 1 done; §Step 1, done records the Studio's routes, guard and handlers in `studiokit` behind `plug.Studio` (`StudioDriverConfig`: `Env`, `Settings`, `Forced`, `DevBuild`, `Mount`), reading the app through `plug.StudioHost`, which the core implements and only `EnableStudio` reaches; the event stream and the profiler `studiokit`'s own, their hooks gone; the tool's nine variables read by `studiokit` alone; the probes, the reserved `/_kit/`, the captured mail's header (shared with `Mailer.Captured`) and the dev announcement kept in the core for step 4; the initgraph test's `studioCode` and `toolVariables`; and the measure — the smallest product 2.1 kB of code and 4.0 kB of file less, none of the tool's names, and §Context's "compiled into every production binary" corrected: the handlers were already unlinked without the Studio. No decision changed |
+| Accepted, step 4 done | 2026-10-18 | The migration table marks step 4 done; §Step 4, done records the runtime names — the operator's variables under the product's prefix and reserved in its namespace, `/_app/health/*` and `/_app/api/*`, `app:"…"`, the graph's `"app"` values and its `app` fields, the checks, loops, owner column and actor named `app`, `app_node`/`app_loop`, `X-Attachments`, `app-telemetry/v1`, `model.VarEnv` and its siblings holding the name after the prefix —, what keeps the tool's name (its nine variables, §3) and what waits for step 5 (the names at rest, and `kit.privacy`, whose stores rest under its name), the refusals of Q12 (`CodeRenamed` 0.4.2.85, `DiagnosticsError.Renamed`: a variable, a tag; a former probe path answering, logged as deprecated); §Breaking changes says what an operator and a product change. No decision changed |
 | Accepted, step 3 done | 2026-10-18 | The migration table marks step 3 done; §Step 3, done records the rename — `framework/app`, `apptest`, `framework/internal/app` and its engines `storeengine`, `queueengine`, `workflowengine`, `mailengine`, `jobengine`, `serverengine`, `studioengine`, `design/framework/app.yaml`, the codes at their values under re-pointed owners, `model.Version` 6 with `ProvenanceApp`, `PortOwnerApp` and `SettingAppDev` —, the texts of §2 and what they leave to steps 4 and 5; §Breaking changes gives a product's migration, a rewrite of the import path and the qualifier then the shadowing files; §4 records what the platform found at step 2, `kit dev` building with a `go.mod` outside the tree (`-modfile`). No decision changed |
 
 ## Deferred

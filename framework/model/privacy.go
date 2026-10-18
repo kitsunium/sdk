@@ -7,7 +7,7 @@ import (
 	"github.com/kitsunium/sdk/framework/model/internal/core"
 )
 
-// The modes of KIT_RETENTION.
+// The modes of <PRODUCT>_RETENTION.
 const (
 	// RetentionOn erases and deletes what is due: the default.
 	RetentionOn string = core.RetentionOn

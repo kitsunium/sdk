@@ -5,12 +5,14 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"sync"
 	"sync/atomic"
 
 	"github.com/kitsunium/sdk/framework/internal/app/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/health"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // studioPackage is the package a product imports to serve the Studio's API.
@@ -32,27 +34,56 @@ var (
 	studioMount atomic.Pointer[func(a *App, mux *http.ServeMux)]
 )
 
-// mountHealth serves the three probes, always — production included, and
-// whatever the Host header says: an orchestrator probes by IP. It also
-// reserves the rest of /_kit/: without the Studio, a path there answers 404
-// rather than falling through to a frontend's index.html.
+// mountHealth serves the three probes under /_app/health/, always —
+// production included, and whatever the Host header says: an orchestrator
+// probes by IP —, and on their former paths under /_app/health/, which
+// answer the same and log, once a run each, that they are deprecated (ADR
+// 0180 §3, Q12): an orchestrator still probing the old path keeps a live
+// process alive, and its operator reads which path to probe. It also
+// reserves the rest of /_app/ — without the Studio — and of /_app/: a path
+// there answers 404 rather than falling through to a frontend's index.html.
 func (a *App) mountHealth(mux *http.ServeMux) {
 	cfg := health.HandlerConfig{Detail: a.cfg.env == EnvDev}
-	mux.Handle("GET /_kit/health/live", health.NewLivenessHandler(a.health, cfg))
-	mux.Handle("GET /_kit/health/ready", health.NewReadinessHandler(a.health, cfg))
-	mux.Handle("GET /_kit/health/startup", health.NewStartupHandler(a.health, cfg))
-	if !a.cfg.studio.on {
-		// Every method kit routes answers 404: a write to a dev tool's route
-		// is refused like a read, not with a 405 that says it exists.
-		notFound := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			a.replyError(r.Context(), w, NotFound("the Studio is only served in dev (KIT_ENV=dev)"))
-		})
-		for _, method := range httpMethods {
-			if method != http.MethodHead {
-				mux.Handle(method+" /_kit/", notFound)
-			}
+	probes := []struct {
+		name    string
+		handler http.Handler
+	}{
+		{"live", health.NewLivenessHandler(a.health, cfg)},
+		{"ready", health.NewReadinessHandler(a.health, cfg)},
+		{"startup", health.NewStartupHandler(a.health, cfg)},
+	}
+	for _, p := range probes {
+		mux.Handle("GET "+healthPrefix+p.name, p.handler)
+		mux.Handle("GET "+formerReserved+"health/"+p.name, a.deprecatedProbe(healthPrefix+p.name, p.handler))
+	}
+	// Every method the framework routes answers 404: a write to a dev tool's
+	// route is refused like a read, not with a 405 that says it exists.
+	notFound := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		a.replyError(r.Context(), w, NotFound("the Studio is only served in dev ("+a.variable(varEnv)+"=dev)"))
+	})
+	for _, method := range httpMethods {
+		if method == http.MethodHead {
+			continue
+		}
+		mux.Handle(method+" "+formerReserved, notFound)
+		if !a.cfg.studio.on {
+			mux.Handle(method+" "+reservedPrefix, notFound)
 		}
 	}
+}
+
+// deprecatedProbe answers a probe on its former path as on its own, and
+// logs the first request of the run that it asked a deprecated path,
+// naming the path to probe.
+func (a *App) deprecatedProbe(path string, h http.Handler) http.Handler {
+	var once sync.Once
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() {
+			logger.Warn(r.Context(), a.log, "a probe asked a deprecated path, which answers for two minors more: probe the new one",
+				logger.String("path", r.URL.Path), logger.String("use", path))
+		})
+		h.ServeHTTP(w, r)
+	})
 }
 
 // EnableStudio makes a serving app in dev mount the Studio's routes, which

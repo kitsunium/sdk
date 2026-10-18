@@ -14,7 +14,7 @@ import (
 )
 
 // What the Studio sees of a store's trash (ADR 0178 C4, amended on
-// 2026-10-15): GET /_kit/api/trash lists what the product deleted — each
+// 2026-10-15): GET /_app/api/trash lists what the product deleted — each
 // record's key, when it was deleted and when kit purges it, never its
 // value —, a page at a time; a key that reads a personal, special or secret
 // member is hidden, as the data browser hides that member.
@@ -24,7 +24,7 @@ var Bin = app.NewService("bin", "Passes deleted into a trash, for the Studio's t
 // Pass is keyed by its holder's email, the subject: its key is personal
 // data.
 type Pass struct {
-	Email string `json:"email" kit:"subject"`
+	Email string `json:"email" app:"subject"`
 	Label string `json:"label"`
 }
 
@@ -42,18 +42,18 @@ var (
 // startBin runs the passes in memory, in dev, on clk.
 func startBin(t *testing.T, clk *clock.ManualClock) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
-	pinDataKeyWithoutFileStore(t)
+	t.Setenv("BIN_SMTP_URL", "")
+	pinDataKeyWithoutFileStore(t, "bin")
 	a := app.NewApp("bin", Bin).With(app.InMemory(), app.Clock(clk),
 		app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard))
 	run(t, a)
 	return a
 }
 
-// trashPage is GET /_kit/api/trash of route's query, answered 200.
+// trashPage is GET /_app/api/trash of route's query, answered 200.
 func trashPage(t *testing.T, a *app.App, query string) model.StoreTrash {
 	t.Helper()
-	r := call(t, a, "GET /_kit/api/trash?"+query, noBody)
+	r := call(t, a, "GET /_app/api/trash?"+query, noBody)
 	if r.status != http.StatusOK {
 		t.Fatalf("trash?%s: %d %s", query, r.status, r.body)
 	}
@@ -112,7 +112,7 @@ func TestTheTrashListHidesAPersonalKey(t *testing.T) {
 	must(t, Passes.Insert(t.Context(), Pass{Email: "ann@bin.test", Label: "gold"}))
 	must(t, Passes.Delete(t.Context(), "ann@bin.test"))
 
-	r := call(t, a, "GET /_kit/api/trash?store=bin/store/passes", noBody)
+	r := call(t, a, "GET /_app/api/trash?store=bin/store/passes", noBody)
 	if r.status != http.StatusOK || mentions(string(r.body), "ann@bin.test", "gold") != nil {
 		t.Fatalf("the passes' trash: %d %s", r.status, r.body)
 	}
@@ -131,7 +131,7 @@ func TestTheTrashListRefusesWhatItCannotList(t *testing.T) {
 	type tc struct{ name, query, code string }
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		r := call(t, a, "GET /_kit/api/trash?"+c.query, noBody)
+		r := call(t, a, "GET /_app/api/trash?"+c.query, noBody)
 		if r.status < 400 || r.status >= 500 || r.errorCode(t) != c.code {
 			t.Errorf("trash?%s answers %d %s, want %s", c.query, r.status, r.body, c.code)
 		}

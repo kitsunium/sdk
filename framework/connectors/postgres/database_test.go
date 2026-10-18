@@ -45,7 +45,7 @@ func TestPostgresOpensMigratesAndChecks(t *testing.T) {
 		len(d.Migrations[1].Applied) != 2 || len(d.Migrations[1].Pending) != 0 {
 		t.Errorf("migrations %+v", d.Migrations)
 	}
-	if s := status(t, a.URL(), "/_kit/health/ready"); s != http.StatusOK {
+	if s := status(t, a.URL(), "/_app/health/ready"); s != http.StatusOK {
 		t.Errorf("ready: %d", s)
 	}
 }
@@ -127,10 +127,10 @@ func TestReadinessFollowsPostgres(t *testing.T) {
 	a := ledger(t, &logs)
 	run(t, a)
 	p.down()
-	if s := status(t, a.URL(), "/_kit/health/ready"); s != http.StatusServiceUnavailable {
+	if s := status(t, a.URL(), "/_app/health/ready"); s != http.StatusServiceUnavailable {
 		t.Errorf("ready while the server is away: %d", s)
 	}
-	if s := status(t, a.URL(), "/_kit/health/live"); s != http.StatusOK {
+	if s := status(t, a.URL(), "/_app/health/live"); s != http.StatusOK {
 		t.Errorf("live while the server is away: %d", s)
 	}
 	if d := databaseOf(t, a.Graph()); d.Ready || d.Problem == "" {

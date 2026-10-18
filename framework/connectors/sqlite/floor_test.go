@@ -67,7 +67,7 @@ func TestAURLsBusyTimeoutStaysUnderTheCallsBound(t *testing.T) {
 func TestALostLockComesBackBeforeTheCallsDeadline(t *testing.T) {
 	needsFileStore(t)
 	t.Setenv("LEDGER_ARCHIVE_TIMEOUT", "2s")
-	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("LEDGER_SECRETS", "memory")
 	dir := t.TempDir()
 	audit := app.NewService("audit", "The audit trail.")
 	store := audit.Store("trail", func(e entry) string { return e.ID })

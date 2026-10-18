@@ -37,17 +37,17 @@ func TestBuildOfATodoOnALocalKit(t *testing.T) {
 	if b.Product.Version != "" || !strings.HasPrefix(b.Product.Revision, "8cf3886") || !b.Product.Modified || b.Product.Time == nil || b.Product.Local {
 		t.Errorf("product %+v: a pseudo-version is not a version; the VCS stamp is the revision", b.Product)
 	}
-	if !b.Kit.Local || b.Kit.Version != "" || b.Kit.Revision != "814a8d1c0ffee" || b.Kit.Time == nil || !b.Kit.Time.Equal(at) || asked != local {
-		t.Errorf("the framework %+v (git asked about %q)", b.Kit, asked)
+	if !b.App.Local || b.App.Version != "" || b.App.Revision != "814a8d1c0ffee" || b.App.Time == nil || !b.App.Time.Equal(at) || asked != local {
+		t.Errorf("the framework %+v (git asked about %q)", b.App, asked)
 	}
 	// kit is a part of the SDK module (ADR 0162): the SDK says what kit says,
 	// in a copy of its own.
-	if b.SDK.Module != sdkModule || !b.SDK.Local || b.SDK.Revision != b.Kit.Revision || b.SDK.Time == nil || b.SDK.Time == b.Kit.Time {
-		t.Errorf("sdk %+v, want the framework's %+v in a copy of its own", b.SDK, b.Kit)
+	if b.SDK.Module != sdkModule || !b.SDK.Local || b.SDK.Revision != b.App.Revision || b.SDK.Time == nil || b.SDK.Time == b.App.Time {
+		t.Errorf("sdk %+v, want the framework's %+v in a copy of its own", b.SDK, b.App)
 	}
 	// Outside dev, nothing runs git: the local module has no revision.
-	if b := buildOf(bi, nil); !b.Kit.Local || b.Kit.Revision != "" {
-		t.Errorf("without git, the framework %+v", b.Kit)
+	if b := buildOf(bi, nil); !b.App.Local || b.App.Revision != "" {
+		t.Errorf("without git, the framework %+v", b.App)
 	}
 }
 
@@ -71,7 +71,7 @@ func TestKitIsTheSDKsRelease(t *testing.T) {
 		Deps: []*debug.Module{{Path: sdkModule, Version: "v0.18.0"}},
 	}
 	b := buildOf(bi, nil)
-	for name, m := range map[string]model.ModuleVersion{"kit": b.Kit, "sdk": b.SDK} {
+	for name, m := range map[string]model.ModuleVersion{"app": b.App, "sdk": b.SDK} {
 		if m.Module != sdkModule || m.Version != "v0.18.0" || m.Local {
 			t.Errorf("%s %+v, want %s v0.18.0", name, m, sdkModule)
 		}
@@ -105,8 +105,8 @@ func TestEachAppOwnsItsBuild(t *testing.T) {
 	if b1 == nil {
 		t.Fatal("a production app describes no build: the test binary carries build information")
 	}
-	b1.Product.Module, b1.Kit.Version = "edited", "edited"
-	if b2 := second.Graph().App.Build; b2 == nil || b2.Product.Module == "edited" || b2.Kit.Version == "edited" {
+	b1.Product.Module, b1.App.Version = "edited", "edited"
+	if b2 := second.Graph().App.Build; b2 == nil || b2.Product.Module == "edited" || b2.App.Version == "edited" {
 		t.Errorf("an edit of one graph's build reached another app's: %+v", b2)
 	}
 	if again := first.Graph().App.Build; again.Product.Module == "edited" {
@@ -117,11 +117,11 @@ func TestEachAppOwnsItsBuild(t *testing.T) {
 // A copy of a build shares no instant with it.
 func TestACopiedBuildSharesNothing(t *testing.T) {
 	at := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
-	b := &model.Build{Product: model.ModuleVersion{Module: "p", Time: &at}, Kit: model.ModuleVersion{Time: &at}, SDK: model.ModuleVersion{Time: &at}}
+	b := &model.Build{Product: model.ModuleVersion{Module: "p", Time: &at}, App: model.ModuleVersion{Time: &at}, SDK: model.ModuleVersion{Time: &at}}
 	c := cloneBuild(b)
-	*c.Product.Time, *c.Kit.Time, *c.SDK.Time = time.Time{}, time.Time{}, time.Time{}
+	*c.Product.Time, *c.App.Time, *c.SDK.Time = time.Time{}, time.Time{}, time.Time{}
 	c.Product.Module = "q"
-	if !b.Product.Time.Equal(at) || !b.Kit.Time.Equal(at) || !b.SDK.Time.Equal(at) || b.Product.Module != "p" {
+	if !b.Product.Time.Equal(at) || !b.App.Time.Equal(at) || !b.SDK.Time.Equal(at) || b.Product.Module != "p" {
 		t.Errorf("the copy shares with its build: %+v", b)
 	}
 	if cloneBuild(nil) != nil {

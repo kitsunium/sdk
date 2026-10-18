@@ -234,12 +234,12 @@ func TestAReadModelIsDerived(t *testing.T) {
 
 // badCart is an input its classification contradicts.
 type badCart struct {
-	Who string `json:"who" kit:"public,subject"`
+	Who string `json:"who" app:"public,subject"`
 }
 
 // badAnswer is a result its classification contradicts.
 type badAnswer struct {
-	Note string `json:"note" kit:"privat"`
+	Note string `json:"note" app:"privat"`
 }
 
 // A command's and a query's types are shown — payloads, the Studio's form —

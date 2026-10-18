@@ -60,7 +60,7 @@ func TestAModulesRoutesAreUnderItsPrefix(t *testing.T) {
 // startOnDisk runs the shop with its data in dir.
 func startOnDisk(t *testing.T, dir string, opts ...app.AppConfigurer) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
+	t.Setenv("SHOP_SMTP_URL", "")
 	a := app.NewApp("shop", Shop, Audit, Members).With(append([]app.AppConfigurer{
 		app.DataDir(dir), app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
 	}, opts...)...)
@@ -231,7 +231,7 @@ func startColliding(t *testing.T) *app.DiagnosticsError {
 		app.Mount(app.NewModule("kit", "Reserved.")), app.Mount(app.NewModule("Bad", "Upper case.")),
 		app.Mount(app.NewModule("schema", "Its version table would be the product's.")),
 		app.Mount(app.NewModule("privacy", "Kit's own service.", app.Privacy)),
-		app.Mount(app.NewModule("under", "Under the framework's own."), app.Prefix("/_kit/under/")),
+		app.Mount(app.NewModule("under", "Under the framework's own."), app.Prefix("/_app/under/")),
 	))
 }
 
@@ -252,7 +252,7 @@ func TestModuleCollisionsRefuseTheStart(t *testing.T) {
 		`module name "schema" is the framework's`:                                                       `app.Mount(app.NewModule("schema"`,
 		`module name "Bad" must be lower-case letters`:                                                  `app.Mount(app.NewModule("Bad"`,
 		`module privacy lists kit.privacy, the framework's own service`:                                 `app.Mount(app.NewModule("privacy"`,
-		`module under is mounted under "/_kit/under/"`:                                                  `app.Prefix("/_kit/under/")`,
+		`module under is mounted under "/_app/under/"`:                                                  `app.Prefix("/_app/under/")`,
 	} {
 		expectProblem(t, de, "module_mount_test.go", said, where)
 	}

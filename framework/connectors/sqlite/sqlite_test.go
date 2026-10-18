@@ -121,7 +121,7 @@ type entry struct {
 // dir.
 func ledger(t *testing.T, dir string, opts ...app.DatabaseOption) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("LEDGER_SECRETS", "memory")
 	audit := app.NewService("audit", "The audit trail.")
 	audit.Store("trail", func(e entry) string { return e.ID })
 	return app.NewApp("ledger", audit).With(
@@ -152,7 +152,7 @@ func TestTheFileLandsBesideTheData(t *testing.T) {
 	if c := containerOf(g, "container:database:archive"); c == nil || c.Technology != "SQLite · modernc.org/sqlite" {
 		t.Errorf("container %+v", c)
 	}
-	if s := status(t, a.URL(), "/_kit/health/ready"); s != http.StatusOK {
+	if s := status(t, a.URL(), "/_app/health/ready"); s != http.StatusOK {
 		t.Errorf("ready: %d", s)
 	}
 }
@@ -261,8 +261,8 @@ func TestStoresConform(t *testing.T) {
 // they rest.
 type patient struct {
 	ID    string `json:"id"`
-	Email string `json:"email" kit:"subject"`
-	Name  string `json:"name" kit:"personal"`
+	Email string `json:"email" app:"subject"`
+	Name  string `json:"name" app:"personal"`
 }
 
 // A store that seals rests on SQLite as it rests in files: its row holds
@@ -272,9 +272,9 @@ type patient struct {
 // as a backup kept it then reads as empty, never as an error.
 func TestASealedStoreRoundTripsAndErases(t *testing.T) {
 	needsFileStore(t)
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
-	t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")
+	t.Setenv("CLINIC_SECRETS", "memory")
+	t.Setenv("CLINIC_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("CLINIC_INDEX_KEY", "an index key of more than 16 bytes")
 	dir := t.TempDir()
 	clinic := app.NewService("clinic", "Patients, sealed where they rest.")
 	patients := clinic.Store("patients", func(p patient) string { return p.ID }, app.Purpose("Care for the patients"))

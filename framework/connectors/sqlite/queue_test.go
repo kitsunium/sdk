@@ -29,7 +29,7 @@ import (
 // watch hears.
 type memo struct {
 	ID   string `json:"id"`
-	Text string `json:"text" kit:"moderated"`
+	Text string `json:"text" app:"moderated"`
 }
 
 // bureau is a product whose one service keeps memos, publishes them, files
@@ -57,7 +57,7 @@ func newBureau(t *testing.T, dir string, opts ...app.AppOption) *bureau {
 // declareBureau declares the bureau's service and its nodes.
 func declareBureau(t *testing.T) (*bureau, *app.Service) {
 	t.Helper()
-	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("BUREAU_SECRETS", "memory")
 	d := &bureau{}
 	svc := app.NewService("bureau", "Memos, sent, filed and screened.")
 	d.memos = svc.Store("memos", func(m memo) string { return m.ID })

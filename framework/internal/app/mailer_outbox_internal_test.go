@@ -45,9 +45,9 @@ const mailroomTable = "kit_queue__mailroom__notify__outbox"
 func startMailroom(t *testing.T, wrap func(queue.Broker) queue.Broker) *mailroom {
 	t.Helper()
 	needsFileStore(t)
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
-	t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")
+	t.Setenv("MAILROOM_SECRETS", "memory")
+	t.Setenv("MAILROOM_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("MAILROOM_INDEX_KEY", "an index key of more than 16 bytes")
 	t.Setenv("MAILROOM_MAIN_URL", "fake://kit:pw@db.internal:5432/main?tls=verify-full")
 	svc := NewService("mailroom", "Notes, mailed.")
 	r := &mailroom{db: NewFakeDB(sql.DialectPostgres)}

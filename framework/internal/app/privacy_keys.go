@@ -26,7 +26,7 @@ const (
 	// can have a colon in its name.
 	subjectIndex = "kit:subject"
 	// indexSecret is kit's generated secret the references are keyed by:
-	// KIT_INDEX_KEY, or kit-index-key in the environment's store. It is
+	// <PRODUCT>_INDEX_KEY, or kit-index-key in the environment's store. It is
 	// never rotated.
 	indexSecret = "index-key"
 	// indexKeyBytes is the size of the index key kit generates.
@@ -52,7 +52,7 @@ type referenceKeys struct {
 	subject, record, index mac.Key
 }
 
-// referenceKeys derives the subkeys of index-key once per run: KIT_INDEX_KEY
+// referenceKeys derives the subkeys of index-key once per run: <PRODUCT>_INDEX_KEY
 // when the environment pins it, else kit-index-key in the environment's
 // store, made on first use.
 func (a *App) referenceKeys(ctx context.Context) (*referenceKeys, error) {
@@ -60,7 +60,7 @@ func (a *App) referenceKeys(ctx context.Context) (*referenceKeys, error) {
 	if made {
 		// The configuration the start read said it was set nowhere. The
 		// app's lock is taken once the privacy's is released.
-		a.settingFoundIn("KIT_INDEX_KEY", model.SettingStore)
+		a.settingFoundIn(a.variable(varIndexKeyStem), model.SettingStore)
 	}
 	return k, err
 }
@@ -112,7 +112,7 @@ func (a *App) indexKey(ctx context.Context) (raw []byte, made bool, err error) {
 		raw := v.Value.Reveal()
 		if len(raw) < minIndexKey {
 			clear(raw)
-			return nil, false, failure(CodePrivacyKey, "INDEX_KEY_SHORT", "KIT_INDEX_KEY must hold at least 16 bytes; 32 random ones are best: openssl rand -base64 32", nil)
+			return nil, false, failure(CodePrivacyKey, "INDEX_KEY_SHORT", "<PRODUCT>_INDEX_KEY must hold at least 16 bytes; 32 random ones are best: openssl rand -base64 32", nil)
 		}
 		return raw, false, nil
 	case !errors.Is(err, secret.NotFound):
@@ -128,7 +128,7 @@ func (a *App) makeIndexKey(ctx context.Context) ([]byte, error) {
 	st := a.secretsNow()
 	if st.kept == nil {
 		return nil, failure(CodePrivacyKey, "INDEX_KEY_NOT_KEPT",
-			"the framework's index key needs a store the framework can write — KIT_SECRETS=file:<dir> or memory — or KIT_INDEX_KEY to pin it", nil)
+			"the index key needs a writable store — <PRODUCT>_SECRETS=file:<dir> or memory — or <PRODUCT>_INDEX_KEY to pin it", nil)
 	}
 	value, err := secret.Random(indexKeyBytes)()
 	if err == nil {
@@ -158,7 +158,7 @@ func (a *App) usesIndexKey() bool {
 }
 
 // indexKeyProblems warns of index-key kept in memory alone — the
-// environment keeps its secrets in memory, KIT_INDEX_KEY is unset — while
+// environment keeps its secrets in memory, <PRODUCT>_INDEX_KEY is unset — while
 // what the app keeps persists: made again at every start, it would no
 // longer find what it referenced before a restart — a hold, a record's own
 // data key, a person's references — and a database would file its index
@@ -171,7 +171,7 @@ func (a *App) indexKeyProblems() []model.Diagnostic {
 	if _, err := st.kitEnv.Get(context.Background(), indexSecret); !errors.Is(err, secret.NotFound) {
 		return nil // pinned — or a variable the first use refuses, saying why
 	}
-	return []model.Diagnostic{diagnosticOf("warning", "", nil, say("privacy.index-key-memory", "variable", secretVariable("KIT", indexSecret)))}
+	return []model.Diagnostic{diagnosticOf("warning", "", nil, say("privacy.index-key-memory", "variable", a.variable(varIndexKeyStem), "prefix", appPrefix(a.name)))}
 }
 
 // subjectRef is the reference of a person's identity, as the product

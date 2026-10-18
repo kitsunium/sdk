@@ -321,7 +321,7 @@ func TestAGeneratedSecretPinnedByItsVariableIsNotRotated(t *testing.T) {
 // Where the environment keeps no store, a generated secret has nowhere to
 // live: the start fails and says what to do.
 func TestAGeneratedSecretNeedsAStoreKitCanWrite(t *testing.T) {
-	t.Setenv("KIT_SECRETS", "env")
+	t.Setenv("VAULT_SECRETS", "env")
 	a := app.NewApp("vault", Keys).With(app.Env(app.EnvProduction), app.DataDir(t.TempDir()), app.Listen("127.0.0.1:0"), app.Logs(io.Discard))
 	err := a.Start(t.Context())
 	if err == nil {
@@ -329,18 +329,18 @@ func TestAGeneratedSecretNeedsAStoreKitCanWrite(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err == nil || !strings.Contains(err.Error(), "KIT_SECRETS=env keeps nothing the framework can write") {
+	if err == nil || !strings.Contains(err.Error(), "VAULT_SECRETS=env keeps nothing the framework can write") {
 		t.Fatalf("Start = %v", err)
 	}
 }
 
 // A file store keeps a generated secret across starts, encrypted under
-// KIT_SECRETS_KEY: what one run sealed, the next opens. Without the key,
+// VAULT_SECRETS_KEY: what one run sealed, the next opens. Without the key,
 // outside dev, the start fails and says how to make one.
 func TestAFileStoreKeepsASecretAcrossStarts(t *testing.T) {
 	skipWithoutFileStore(t)
 	dir := t.TempDir()
-	t.Setenv("KIT_SECRETS", "file:"+filepath.Join(dir, "secrets"))
+	t.Setenv("VAULT_SECRETS", "file:"+filepath.Join(dir, "secrets"))
 	run := func(during func()) error {
 		t.Helper()
 		a := app.NewApp("vault", Keys).With(app.Env(app.EnvProduction), app.DataDir(filepath.Join(dir, "data")), app.Listen("127.0.0.1:0"), app.Logs(io.Discard))
@@ -350,11 +350,11 @@ func TestAFileStoreKeepsASecretAcrossStarts(t *testing.T) {
 		during()
 		return a.Stop(context.Background())
 	}
-	if err := run(func() {}); err == nil || !strings.Contains(err.Error(), "needs KIT_SECRETS_KEY or KIT_SECRETS_KEY_FILE") {
+	if err := run(func() {}); err == nil || !strings.Contains(err.Error(), "needs <PRODUCT>_SECRETS_KEY or <PRODUCT>_SECRETS_KEY_FILE") {
 		t.Fatalf("a file store without its key: %v", err)
 	}
 
-	t.Setenv("KIT_SECRETS_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
+	t.Setenv("VAULT_SECRETS_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
 	var box []byte
 	if err := run(func() {
 		var err error
@@ -474,7 +474,7 @@ func TestTheSMTPURLChangesWithoutARestart(t *testing.T) {
 	if err := os.WriteFile(file, []byte("smtp://"+first.addr()+"?tls=none\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("KIT_SMTP_URL_FILE", file)
+	t.Setenv("MAIL_SMTP_URL_FILE", file)
 	a := app.NewApp("mail", Members).With(app.InMemory(), app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard))
 	if err := a.Start(t.Context()); err != nil {
 		t.Fatal(err)
@@ -502,12 +502,12 @@ func TestTheSMTPURLChangesWithoutARestart(t *testing.T) {
 	}
 	var smtp model.Setting
 	for _, s := range a.Graph().Runtime.Config {
-		if s.Name == "KIT_SMTP_URL" {
+		if s.Name == "MAIL_SMTP_URL" {
 			smtp = s
 		}
 	}
 	if !smtp.Secret || smtp.Value != "" || smtp.From != model.SettingEnv {
-		t.Errorf("KIT_SMTP_URL setting %+v", smtp)
+		t.Errorf("MAIL_SMTP_URL setting %+v", smtp)
 	}
 }
 
@@ -520,7 +520,7 @@ func skipWithoutFileStore(t *testing.T) {
 	}
 }
 
-// Without KIT_SECRETS, the secrets follow the data in every environment:
+// Without VAULT_SECRETS, the secrets follow the data in every environment:
 // beside it on disk — the key beside them, said at every start outside dev —
 // and in memory when the data is.
 func TestTheSecretsFollowTheData(t *testing.T) {
@@ -581,13 +581,13 @@ func TestAKeyGivenWrongSaysWhichVariable(t *testing.T) {
 		}
 		return err
 	}
-	t.Setenv("KIT_SECRETS", "file:"+filepath.Join(t.TempDir(), "secrets"))
-	t.Setenv("KIT_SECRETS_KEY_FILE", t.TempDir()) // a directory, not a file
-	if err := start(); err == nil || !strings.Contains(err.Error(), "KIT_SECRETS_KEY_FILE names a file that cannot be read") {
+	t.Setenv("VAULT_SECRETS", "file:"+filepath.Join(t.TempDir(), "secrets"))
+	t.Setenv("VAULT_SECRETS_KEY_FILE", t.TempDir()) // a directory, not a file
+	if err := start(); err == nil || !strings.Contains(err.Error(), "<PRODUCT>_SECRETS_KEY_FILE names a file that cannot be read") {
 		t.Errorf("a key file that is a directory: %v", err)
 	}
-	t.Setenv("KIT_SECRETS_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
-	if err := start(); err == nil || !strings.Contains(err.Error(), "set KIT_SECRETS_KEY or KIT_SECRETS_KEY_FILE, not both") {
+	t.Setenv("VAULT_SECRETS_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
+	if err := start(); err == nil || !strings.Contains(err.Error(), "set <PRODUCT>_SECRETS_KEY or <PRODUCT>_SECRETS_KEY_FILE, not both") {
 		t.Errorf("both forms of the key: %v", err)
 	}
 }

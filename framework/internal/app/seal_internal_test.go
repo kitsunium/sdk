@@ -67,25 +67,26 @@ func TestABoxHidesAValuesLength(t *testing.T) {
 // card is a record the internal sealing tests keep.
 type card struct {
 	ID     string `json:"id"`
-	Owner  string `json:"owner,omitempty" kit:"subject"`
-	Secret string `json:"secret,omitempty" kit:"secret"`
-	Note   string `json:"note,omitempty" kit:"personal,history=2"`
+	Owner  string `json:"owner,omitempty" app:"subject"`
+	Secret string `json:"secret,omitempty" app:"secret"`
+	Note   string `json:"note,omitempty" app:"personal,history=2"`
 }
 
 // pinDataKeyWithoutFileStore pins data-key where the SDK keeps no protected
 // file store — Windows, Plan 9 —: the secrets live in memory there, and kit
-// refuses a store sealed on disk whose data-key would be made again.
-func pinDataKeyWithoutFileStore(t testing.TB) {
+// refuses a store sealed on disk whose data-key would be made again. The
+// key is the product named name's: <NAME>_DATA_KEY.
+func pinDataKeyWithoutFileStore(t testing.TB, name string) {
 	t.Helper()
 	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
-		t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
+		t.Setenv(productVariable(name, varDataKeyStem), "a data key of exactly 32 bytes..")
 	}
 }
 
 // sealedCards runs a store of cards on the data in dir, alone, in dev.
 func sealedCards(t *testing.T, name, dir string) (*App, *StoreService[card]) {
 	t.Helper()
-	pinDataKeyWithoutFileStore(t)
+	pinDataKeyWithoutFileStore(t, name)
 	svc := NewService(name, "Cards sealed at rest, for the sealing tests.")
 	cards := svc.Store("cards", func(c card) string { return c.ID })
 	app := NewApp(name, svc).With(DataDir(dir), Listen("127.0.0.1:0"), Env(EnvDev), Analyze(false), Logs(io.Discard))
@@ -140,8 +141,8 @@ func TestABoxOpensOnlyWhereItLies(t *testing.T) {
 
 // badge is keyed by its subject: its key reads a member kit seals.
 type badge struct {
-	ID   string `json:"id" kit:"subject"`
-	Name string `json:"name" kit:"personal"`
+	ID   string `json:"id" app:"subject"`
+	Name string `json:"name" app:"personal"`
 }
 
 // A store whose key reads a member kit seals keeps that member in clear —
@@ -149,7 +150,7 @@ type badge struct {
 // again at the next start.
 func TestAKeyThatReadsASealedMemberStaysInClear(t *testing.T) {
 	needsFileStore(t)
-	pinDataKeyWithoutFileStore(t)
+	pinDataKeyWithoutFileStore(t, "badges")
 	dir := t.TempDir()
 	svc := NewService("badges", "Badges keyed by their holder, for the sealing tests.")
 	badges := svc.Store("badges", func(b badge) string { return b.ID })
@@ -231,8 +232,8 @@ func TestADeletedRecordTakesItsOwnKey(t *testing.T) {
 // legacyNote is kept by a store that sealed nothing before.
 type legacyNote struct {
 	ID    string `json:"id"`
-	Owner string `json:"owner" kit:"subject"`
-	Body  string `json:"body" kit:"personal,history=2"`
+	Owner string `json:"owner" app:"subject"`
+	Body  string `json:"body" app:"personal,history=2"`
 }
 
 var legacySvc = NewService("legacy", "Notes written before the framework sealed them, for the sealing tests.")
@@ -244,7 +245,7 @@ var legacyNotes = legacySvc.Store("notes", func(n legacyNote) string { return n.
 // once, its former values too, and says what it did.
 func TestAPlainMemberIsSealedAtItsNextWrite(t *testing.T) {
 	needsFileStore(t)
-	pinDataKeyWithoutFileStore(t)
+	pinDataKeyWithoutFileStore(t, "legacy")
 	dir := t.TempDir()
 	must(t, os.MkdirAll(filepath.Join(dir, "legacy"), 0o700))
 	for file, content := range map[string]string{
@@ -318,7 +319,7 @@ func restingFiles(t *testing.T, dir string, words ...string) []string {
 // in clear.
 func TestThePasswordPolicyVerifiesSealedHashes(t *testing.T) {
 	needsFileStore(t)
-	pinDataKeyWithoutFileStore(t)
+	pinDataKeyWithoutFileStore(t, "sealedlocks")
 	f := useFakeHashing(t)
 	dir := t.TempDir()
 	l := startLocks(t, "sealedlocks", []PasswordConfigurer{NotReused(2)}, DataDir(dir))
@@ -345,21 +346,21 @@ func TestThePasswordPolicyVerifiesSealedHashes(t *testing.T) {
 
 // letter2 is a message the internal sealing tests queue.
 type letter2 struct {
-	To   string `json:"to" kit:"subject"`
-	Body string `json:"body" kit:"personal"`
+	To   string `json:"to" app:"subject"`
+	Body string `json:"body" app:"personal"`
 }
 
 // A dead letter about a person is sealed under their key: once they are
 // erased, it reads as empty.
 func TestADeadLetterOfAPersonErasedReadsEmpty(t *testing.T) {
 	needsFileStore(t)
-	pinDataKeyWithoutFileStore(t)
+	pinDataKeyWithoutFileStore(t, "post2")
 	svc := NewService("post2", "Letters no one accepts, for the sealing tests.")
 	letters := svc.Topic[letter2]("letters")
 	svc.Subscribe("refuse", letters, func(context.Context, letter2) error { return errors.New("refused") }, MaxDeliveries(1))
 	people := svc.Store("people", func(l letter2) string { return l.To })
 	forget := svc.Command("forget", func(ctx context.Context, in struct {
-		ID string `json:"id" kit:"personal"`
+		ID string `json:"id" app:"personal"`
 	},
 	) (Erasure, error) {
 		return Erase(ctx, "asked", in.ID)
@@ -381,7 +382,7 @@ func TestADeadLetterOfAPersonErasedReadsEmpty(t *testing.T) {
 		t.Fatalf("the dead letter before the erasure: %+v %v %v", msg, derr, oerr)
 	}
 	_, err := forget.Dispatch(ctx, struct {
-		ID string `json:"id" kit:"personal"`
+		ID string `json:"id" app:"personal"`
 	}{ID: "ann@x.dev"})
 	must(t, err)
 	if msg, _, derr, oerr := letters.decode(ctx, app, dead[0].Message.Payload); derr != nil || oerr != nil || msg.Body != "" || msg.To != "" {
@@ -398,7 +399,7 @@ func TestADeadLetterOfAPersonErasedReadsEmpty(t *testing.T) {
 // directory — a store that seals starts beside them.
 func TestTheDataKeysArePlacedApartFromWhatTheySeal(t *testing.T) {
 	needsFileStore(t)
-	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("PLACED_SECRETS", "memory")
 	svc := NewService("placed", "Cards placed by the app, for the sealing tests.")
 	svc.Store("cards", func(c card) string { return c.ID })
 	start := func(opts ...AppConfigurer) (*App, error) {
@@ -409,14 +410,14 @@ func TestTheDataKeysArePlacedApartFromWhatTheySeal(t *testing.T) {
 		}
 		return app, err
 	}
-	if _, err := start(); err == nil || !strings.Contains(err.Error(), "KIT_DATA_KEY") {
+	if _, err := start(); err == nil || !strings.Contains(err.Error(), "PLACED_DATA_KEY") {
 		t.Errorf("data-key in memory, a store on disk: %v", err)
 	}
-	t.Setenv("KIT_DATA_KEY", "a data key too short")
+	t.Setenv("PLACED_DATA_KEY", "a data key too short")
 	if _, err := start(); err == nil || !strings.Contains(err.Error(), "exactly 32 bytes") {
 		t.Errorf("a data-key of 20 bytes: %v", err)
 	}
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("PLACED_DATA_KEY", "a data key of exactly 32 bytes..")
 	t.Setenv("PLACED_VAULT_URL", "fake://kit:pw@db.internal:5432/vault?tls=verify-full")
 	app, err := start(Database("vault", NewFakeDB(sql.DialectPostgres).Engine(), Keeps(Privacy)))
 	must(t, err)
@@ -542,10 +543,10 @@ func TestErasingAPersonsLastRecordDestroysTheirKey(t *testing.T) {
 // (kitsunium/platform#35, kitsunium/sdk#274).
 func TestAnIndexKeyInMemoryIsWarnedOf(t *testing.T) {
 	needsFileStore(t)
-	t.Setenv("KIT_SECRETS", "memory")
-	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
-	t.Setenv("KIT_INDEX_KEY", "")
-	t.Setenv("KIT_INDEX_KEY_FILE", "")
+	t.Setenv("INDEXED_SECRETS", "memory")
+	t.Setenv("INDEXED_DATA_KEY", "a data key of exactly 32 bytes..")
+	t.Setenv("INDEXED_INDEX_KEY", "")
+	t.Setenv("INDEXED_INDEX_KEY_FILE", "")
 	svc := NewService("indexed", "Cards the framework references, for the index key's warning.")
 	svc.Store("cards", func(c card) string { return c.ID })
 	const said = "the framework's index key lives in memory alone"
@@ -572,7 +573,7 @@ func TestAnIndexKeyInMemoryIsWarnedOf(t *testing.T) {
 	if run(InMemory()) {
 		t.Error("an app kept in memory is warned of its index key")
 	}
-	t.Setenv("KIT_INDEX_KEY", "an index key of thirty-two bytes")
+	t.Setenv("INDEXED_INDEX_KEY", "an index key of thirty-two bytes")
 	if run(DataDir(t.TempDir())) {
 		t.Error("a pinned index key is warned of")
 	}

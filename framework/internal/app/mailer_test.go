@@ -149,7 +149,7 @@ func (s *syncBuffer) String() string {
 // mailApp runs the members service alone, with KIT_SMTP_URL set to url.
 func mailApp(t *testing.T, url string, opts ...app.AppConfigurer) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", url)
+	t.Setenv("MAIL_SMTP_URL", url)
 	a := app.NewApp("mail", Members).With(append([]app.AppConfigurer{
 		app.InMemory(), app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
 	}, opts...)...)
@@ -172,7 +172,7 @@ func mailApp(t *testing.T, url string, opts ...app.AppConfigurer) *app.App {
 // and closes it when the stream ends — the test's context ends the request.
 func events(t *testing.T, a *app.App) <-chan model.Event {
 	t.Helper()
-	req, reqErr := http.NewRequestWithContext(t.Context(), "GET", a.URL()+"/_kit/api/events", nil)
+	req, reqErr := http.NewRequestWithContext(t.Context(), "GET", a.URL()+"/_app/api/events", nil)
 	if reqErr != nil {
 		t.Fatal(reqErr)
 	}
@@ -322,7 +322,7 @@ func TestMailIsQueuedThenDelivered(t *testing.T) {
 	}
 	// The delivery continues the trace of the request that sent the mail,
 	// which stays the request's.
-	r = call(t, a, "GET /_kit/api/traces?root=members/endpoint/Invite", noBody)
+	r = call(t, a, "GET /_app/api/traces?root=members/endpoint/Invite", noBody)
 	var traces []model.Trace
 	r.json(t, &traces)
 	if len(traces) != 1 || traces[0].TraceID != m.TraceID {
@@ -496,7 +496,7 @@ func TestMailCredentialsNeverLeak(t *testing.T) {
 
 	// Credentials over an unencrypted session: refused before starting.
 	var logs syncBuffer
-	t.Setenv("KIT_SMTP_URL", "smtp://"+user+":"+secret+"@"+rel.addr()+"?tls=none")
+	t.Setenv("MAIL_SMTP_URL", "smtp://"+user+":"+secret+"@"+rel.addr()+"?tls=none")
 	a := app.NewApp("mail", Members).With(app.InMemory(), app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(&logs))
 	err := a.Start(t.Context())
 	if err == nil || !strings.Contains(err.Error(), "Credentials cannot be sent over an unencrypted mail session") {
@@ -506,7 +506,7 @@ func TestMailCredentialsNeverLeak(t *testing.T) {
 	leaksJSON("the graph", a.Graph())
 
 	// STARTTLS required, and the relay offers none: every attempt fails.
-	t.Setenv("KIT_SMTP_URL", "smtp://"+user+":"+secret+"@"+rel.addr()+"?tls=starttls")
+	t.Setenv("MAIL_SMTP_URL", "smtp://"+user+":"+secret+"@"+rel.addr()+"?tls=starttls")
 	a = app.NewApp("mail", Members).With(app.InMemory(), app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(&logs))
 	if err := a.Start(t.Context()); err != nil {
 		t.Fatal(err)
@@ -542,7 +542,7 @@ func TestMailOutboxSurvivesARestart(t *testing.T) {
 	dir := t.TempDir()
 	run := func(url string, fn func(a *app.App)) {
 		t.Helper()
-		t.Setenv("KIT_SMTP_URL", url)
+		t.Setenv("MAIL_SMTP_URL", url)
 		a := app.NewApp("mail", Members).With(app.DataDir(dir), app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard))
 		if err := a.Start(t.Context()); err != nil {
 			t.Fatal(err)
@@ -589,13 +589,13 @@ func TestMailDeclarationProblems(t *testing.T) {
 		{"smtp://u:" + secret + "@mail.example.com?tls=none", "Credentials cannot be sent over an unencrypted mail session"},
 	} {
 		t.Run(c.want, func(t *testing.T) {
-			t.Setenv("KIT_SMTP_URL", c.url)
+			t.Setenv("MAIL_SMTP_URL", c.url)
 			a := app.NewApp("mail", Members).With(app.InMemory(), app.Listen("127.0.0.1:0"), app.Logs(io.Discard))
 			err := a.Start(t.Context())
 			if err == nil {
 				a.Stop(context.Background())
 			}
-			if err == nil || !strings.Contains(err.Error(), "mailer members/mailer/mail cannot deliver: KIT_SMTP_URL") || !strings.Contains(err.Error(), c.want) {
+			if err == nil || !strings.Contains(err.Error(), "mailer members/mailer/mail cannot deliver: MAIL_SMTP_URL") || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("Start = %v", err)
 			}
 			if strings.Contains(err.Error(), secret) {
@@ -604,7 +604,7 @@ func TestMailDeclarationProblems(t *testing.T) {
 		})
 	}
 	t.Run("capture outside dev is a warning", func(t *testing.T) {
-		t.Setenv("KIT_SMTP_URL", "")
+		t.Setenv("MAIL_SMTP_URL", "")
 		a := app.NewApp("mail", Members).With(app.InMemory(), app.Listen("127.0.0.1:0"), app.Env(app.EnvProduction), app.Logs(io.Discard))
 		if err := a.Start(t.Context()); err != nil {
 			t.Fatal(err)
@@ -612,7 +612,7 @@ func TestMailDeclarationProblems(t *testing.T) {
 		defer a.Stop(context.Background())
 		var found bool
 		for _, d := range a.Graph().Diagnostics {
-			found = found || (d.Severity == "warning" && d.Node == "members/mailer/mail" && strings.Contains(d.Message, "set KIT_SMTP_URL"))
+			found = found || (d.Severity == "warning" && d.Node == "members/mailer/mail" && strings.Contains(d.Message, "set MAIL_SMTP_URL"))
 		}
 		if !found {
 			t.Errorf("no warning: %+v", a.Graph().Diagnostics)

@@ -52,13 +52,14 @@ type ModuleConfigurer interface {
 	moduleConfigure(m *Module)
 }
 
-// reservedModules are names no module may take: kit's own, the node
+// reservedModules are names no module may take: the framework's own — and
+// its former one, the name of its own service until ADR 0180 step 5 —, the node
 // standing for the outside world, and "schema", whose version table would
 // be the product's own, schema_migrations (module_database.go).
-var reservedModules = map[string]bool{"kit": true, model.ExternalID: true, "schema": true}
+var reservedModules = map[string]bool{frameworkName: true, formerName: true, model.ExternalID: true, "schema": true}
 
 // NewModule declares a module named name — lower-case letters, digits and
-// dashes, starting with a letter; "kit", "external" and "schema" are the framework's — that doc
+// dashes, starting with a letter; "app", "kit", "external" and "schema" are the framework's — that doc
 // describes, made of parts: its services, which it adopts, the modules it
 // requires ([Requires]), and the migrations of the data it keeps outside
 // the framework's stores ([Migrations]), run on the database that keeps it. Declare it

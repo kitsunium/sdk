@@ -137,9 +137,9 @@ func (a *App) middleware() []model.Mechanic {
 			remote = "on"
 		}
 		chain = append(chain, model.Mechanic{
-			Kind: "hostguard", Label: "host guard · /_kit/", Package: middlewarePkg,
+			Kind: "hostguard", Label: "host guard · " + reservedPrefix, Package: middlewarePkg,
 			Doc:    "The Studio's routes answer a loopback client whose Host is allowed; the health probes do not ask.",
-			Config: map[string]string{"only": "/_kit/", "remote": remote},
+			Config: map[string]string{"only": reservedPrefix, "remote": remote},
 		})
 	}
 	return chain

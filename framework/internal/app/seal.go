@@ -45,7 +45,7 @@ import (
 // dispatcher's for a queued command without one, or under data-key itself
 // — a box "sealed:v1:root:" — when it has no subject at all. Every data key
 // is 32 random bytes, wrapped under kit's generated secret data-key — a
-// keyring rotated every 30 days, 3 versions kept, pinned by KIT_DATA_KEY —
+// keyring rotated every 30 days, 3 versions kept, pinned by <PRODUCT>_DATA_KEY —
 // and filed in kit's own store, kit.privacy/store/keys. data-key's
 // rotation re-wraps the data keys, never a box, and never prunes a version
 // a key still needs (secret.RotatorConfig.InUse).
@@ -60,7 +60,7 @@ import (
 // The words of sealing.
 const (
 	// dataKeySecret is kit's generated secret the data keys are wrapped
-	// under: KIT_DATA_KEY, or kit-data-key in the environment's store.
+	// under: <PRODUCT>_DATA_KEY, or kit-data-key in the environment's store.
 	dataKeySecret = "data-key"
 	// dataKeyBytes is a data key's length.
 	dataKeyBytes int = 32

@@ -168,7 +168,7 @@ func TestTheEnvironmentNamesItsFile(t *testing.T) {
 	}
 	for env, want := range map[string]int{"dev": 7, "labs": 8} {
 		t.Run(env, func(t *testing.T) {
-			t.Setenv("KIT_ENV", env)
+			t.Setenv("NEWS_ENV", env)
 			a := app.NewApp("news", c.svc).With(app.InMemory(), app.Listen("127.0.0.1:0"), app.Studio(false), app.Analyze(false), app.Logs(io.Discard), app.ConfigFiles(files))
 			if err := a.Start(t.Context()); err != nil {
 				t.Fatal(err)
@@ -318,11 +318,11 @@ func TestATimerWaitsASetting(t *testing.T) {
 	}
 }
 
-// KIT_ENV names its file as it is written: local is dev, and reads
+// PAPERS_ENV names its file as it is written: local is dev, and reads
 // config/local.yaml.
 func TestAnAliasOfDevReadsItsOwnFile(t *testing.T) {
 	c := newConfigured()
-	t.Setenv("KIT_ENV", "local")
+	t.Setenv("NEWS_ENV", "local")
 	a := app.NewApp("news", c.svc).With(app.InMemory(), app.Listen("127.0.0.1:0"), app.Studio(false), app.Analyze(false), app.Logs(io.Discard),
 		app.ConfigFiles(fstest.MapFS{"config/local.yaml": {Data: []byte("page-size: 3\nsender: me@example.com\n")}}))
 	if err := a.Start(t.Context()); err != nil {

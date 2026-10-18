@@ -104,7 +104,7 @@ func (s *storeCore) keyShown(ctx context.Context, key string) bool {
 }
 
 // studioTrash is a page of a store's trash, as the Studio's data view lists
-// it (GET /_kit/api/trash?store=[&offset=&limit=]).
+// it (GET /_app/api/trash?store=[&offset=&limit=]).
 func (a *App) studioTrash(ctx context.Context, store, offsetText, limitText string) (model.StoreTrash, error) {
 	src, err := a.trashOf(store)
 	if err != nil {

@@ -164,6 +164,11 @@ type DiagnosticsError struct {
 	// Missing are the registration packages the program does not import
 	// and a declaration needs (ADR 0179 §6), sorted; nil when none is.
 	Missing []string
+	// Renamed are the old runtime names the start met (ADR 0180 §3, Q12),
+	// each written "<old> -> <new>" — "KIT_DATA_DIR -> TODO_DATA_DIR",
+	// `shop.Report.Email kit:"personal" -> app:"personal"` —, sorted; nil
+	// when none was.
+	Renamed []string
 }
 
 // routes is a ServeMux that remembers which node owns which pattern.
@@ -208,7 +213,7 @@ type mountedModule struct {
 //go:noinline
 func NewApp(name string, services ...*Service) *App {
 	a := &App{name: name, own: services, decl: callerPos(), phase: model.PhaseStopped}
-	a.mountEnv = mountEnv(&a.opts, os.Getenv)
+	a.mountEnv = mountEnv(&a.opts, name, os.Getenv)
 	a.modules, a.services = mounts(a.own, nil)
 	return a
 }
@@ -228,7 +233,7 @@ func (a *App) With(opts ...AppConfigurer) *App {
 		}
 	}
 	b.opts.withAt = pos{}
-	b.mountEnv = mountEnv(&b.opts, os.Getenv)
+	b.mountEnv = mountEnv(&b.opts, b.name, os.Getenv)
 	b.modules, b.services = mounts(b.own, mountsIn(b.opts.mounts, b.mountEnv))
 	return b
 }
@@ -260,16 +265,29 @@ func (a *App) Handler() http.Handler {
 	return a.handler
 }
 
-// resolve computes the configuration, the logger, the tracer and the source
-// root. It is shared by Start and by describing the app without running it.
-func (a *App) resolve() error {
-	a.cfg = resolveConfig(&a.opts, os.Getenv)
+// readConfig refuses an old variable of the framework's met in the
+// environment (ADR 0180 §3, Q12), then reads the configuration and resolves
+// the mounts for the environment it names.
+func (a *App) readConfig() error {
+	if err := renamedRefusal(renamedVariables(a.name, os.Getenv)); err != nil {
+		return err
+	}
+	a.cfg = resolveConfig(&a.opts, a.name, os.Getenv)
 	// A mount given app.Only holds in the environment this run names.
 	a.remount(a.cfg.envName)
 	if a.cliRun {
 		// A CLI command is not a product anybody looks at: no Studio, and no
 		// question to git about the build, whatever the environment.
 		a.cfg.studio = studioConfig{}
+	}
+	return nil
+}
+
+// resolve computes the configuration, the logger, the tracer and the source
+// root. It is shared by Start and by describing the app without running it.
+func (a *App) resolve() error {
+	if err := a.readConfig(); err != nil {
+		return err
 	}
 	a.build = newBuildDescription(a.cfg.env == EnvDev && !a.cliRun, os.Getenv)
 	a.clock = a.cfg.clock
@@ -379,7 +397,7 @@ func (a *App) declarationProblems() []model.Diagnostic {
 	if g := a.componentNodes(); a.cfg.memoryData && len(g.stores)+len(g.subs)+len(g.commands)+len(g.mailers) > 0 {
 		// Said only of an app that keeps something: a daemon with no store
 		// loses nothing at a restart.
-		out = append(out, diagnosticOf("warning", "", nil, say("config.memory")))
+		out = append(out, diagnosticOf("warning", "", nil, say("config.memory", "prefix", appPrefix(a.name))))
 	}
 	if a.cfg.studio.on && a.serves() && studioMount.Load() == nil {
 		out = append(out, diagnosticOf("warning", "", nil, say("config.studio-missing", "package", studioPackage)))
@@ -530,7 +548,7 @@ func (a *App) bootConfig(ctx context.Context) (count int, value string, err erro
 	}
 	resolved := a.resolveSettings()
 	a.settingValues.Store(&resolved.values)
-	set := slices.Concat(settings(&a.opts, os.Getenv, &a.cfg), a.secretSettings(ctx), resolved.shown)
+	set := slices.Concat(settings(&a.opts, a.name, os.Getenv, &a.cfg), a.secretSettings(ctx), resolved.shown)
 	a.mu.Lock()
 	a.rt.config = set
 	a.settingProblems = resolved.problems
@@ -548,7 +566,7 @@ func (a *App) bootDeclarations() (count int, value string, err error) {
 		}
 	}
 	if len(errorsFound) > 0 {
-		return len(errorsFound), "", &DiagnosticsError{Diagnostics: errorsFound, Missing: a.missingPackages()}
+		return len(errorsFound), "", &DiagnosticsError{Diagnostics: errorsFound, Missing: a.missingPackages(), Renamed: renamedList(a.renamedTags())}
 	}
 	return len(all), "", nil
 }
@@ -596,10 +614,10 @@ func (a *App) bootHandler(ctx context.Context, mux *http.ServeMux) error {
 		}
 		return nil
 	}
-	if err := a.health.AddReadiness(health.ReadinessCheck{Name: "kit", Check: serving}); err != nil {
+	if err := a.health.AddReadiness(health.ReadinessCheck{Name: frameworkName, Check: serving}); err != nil {
 		return err
 	}
-	if err := a.health.AddLiveness(health.LivenessCheck{Name: "kit", Check: func() error { return nil }}); err != nil {
+	if err := a.health.AddLiveness(health.LivenessCheck{Name: frameworkName, Check: func() error { return nil }}); err != nil {
 		return err
 	}
 	if a.cliRun {
@@ -625,7 +643,7 @@ func (a *App) announce(ctx context.Context) {
 	if a.cfg.studio.on {
 		// The Studio is kit's own process (ADR 0010, D8): the product says
 		// where its read routes are, and who shows them.
-		logger.Info(ctx, a.log, "the product, as a diagram: the Studio reads it from its API", logger.String("api", a.URL()+"/_kit/api/"))
+		logger.Info(ctx, a.log, "the product, as a diagram: the Studio reads it from its API", logger.String("api", a.URL()+reservedPrefix+"api/"))
 	}
 	for _, d := range a.declarationProblems() {
 		logger.Warn(ctx, a.log, d.Message, logger.String("node", d.Node))
@@ -1130,7 +1148,7 @@ func (a *App) startHTTP(ctx context.Context) error {
 	}
 	if err := startErr; err != nil {
 		// kit's words: the SDK's would not name the setting to change.
-		return explain(CodeAppListen, "LISTEN_FAILED", "the product could not listen on its address: change KIT_ADDR", err, errs.String("addr", a.cfg.addr))
+		return explain(CodeAppListen, "LISTEN_FAILED", "the product could not listen on its address: change <PRODUCT>_ADDR", err, errs.String("addr", a.cfg.addr))
 	}
 	addr := cmp.Or(srv.State().Addr, a.cfg.addr)
 	a.mu.Lock()
@@ -1272,7 +1290,7 @@ func (a *App) clientOf(r *http.Request) string {
 		return model.ExternalID
 	}
 	u, err := url.Parse(ref)
-	if err != nil || u.Host != r.Host || strings.HasPrefix(u.Path, "/_kit/") {
+	if err != nil || u.Host != r.Host || reservedPath(u.Path) {
 		return model.ExternalID
 	}
 	best, bestLen := model.ExternalID, -1

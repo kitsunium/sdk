@@ -21,12 +21,12 @@ var Folk = app.NewService("folk", "People whose records keep their revisions, fo
 // Member is a person's record.
 type Member struct {
 	ID     string     `json:"id"`
-	Email  string     `json:"email" kit:"subject"`
-	Name   string     `json:"name" kit:"personal"`
+	Email  string     `json:"email" app:"subject"`
+	Name   string     `json:"name" app:"personal"`
 	Bio    string     `json:"bio,omitempty"`
-	Code   string     `json:"code,omitempty" kit:"secret"`
+	Code   string     `json:"code,omitempty" app:"secret"`
 	Left   *time.Time `json:"left,omitempty"`
-	Erased *time.Time `json:"erased,omitempty" kit:"erased"`
+	Erased *time.Time `json:"erased,omitempty" app:"erased"`
 }
 
 func (m Member) Key() string { return m.ID }
@@ -48,8 +48,8 @@ var Folks = Folk.Store("members", Member.Key, app.Revisions(2),
 // versions side by side (ADR 0007 §1, §3).
 type Handle struct {
 	ID    string `json:"id"`
-	Email string `json:"email" kit:"subject"`
-	Name  string `json:"name" kit:"personal,history=2"`
+	Email string `json:"email" app:"subject"`
+	Name  string `json:"name" app:"personal,history=2"`
 }
 
 var Handles = Folk.Store("handles", func(h Handle) string { return h.ID }, app.Revisions(2), app.Purpose("Name the members"))
@@ -67,8 +67,8 @@ var (
 // directory.
 func startFolk(t *testing.T, opts ...app.AppConfigurer) *app.App {
 	t.Helper()
-	t.Setenv("KIT_SMTP_URL", "")
-	pinDataKeyWithoutFileStore(t)
+	t.Setenv("FOLK_SMTP_URL", "")
+	pinDataKeyWithoutFileStore(t, "folk")
 	a := app.NewApp("folk", Folk).With(append([]app.AppConfigurer{
 		app.Listen("127.0.0.1:0"), app.Env(app.EnvDev), app.Analyze(false), app.Logs(io.Discard),
 	}, opts...)...)

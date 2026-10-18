@@ -47,9 +47,10 @@ const (
 	// framework/app and framework/internal/app, so a source position the
 	// document gives in the framework's code names those paths, and the
 	// constants of the framework's own provenance, port owner and setting
-	// origin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]. The
-	// values the graph spells after the framework follow with its runtime
-	// names (ADR 0180 step 4).
+	// origin are [ProvenanceApp], [PortOwnerApp] and [SettingAppDev]; since
+	// ADR 0180's step 4 their values are "app" and "appdev", the build's
+	// and the graph's version of the framework are their field "app", and
+	// the variable a framework setting names carries the product's prefix.
 	Version int = core.Version
 )
 

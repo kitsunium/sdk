@@ -14,7 +14,7 @@ const traceback = `goroutine 1 [running]:
 main.main()
 	/src/main.go:10 +0x1d
 
-goroutine 7 [chan receive, 3 minutes] {kit_loop: http, kit_node: "shop/endpoint/Get-it"}:
+goroutine 7 [chan receive, 3 minutes] {app_loop: http, app_node: "shop/endpoint/Get-it"}:
 github.com/x/shop.(*Store[...]).wait(0x1400012c000, {0x100e0a1d8, 0x140001b4000})
 	/src/shop/store.go:40 +0x5e8
 github.com/x/shop.Get(...)

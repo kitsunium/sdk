@@ -23,7 +23,7 @@ const minIdleStep time.Duration = 10 * time.Millisecond
 //   - [model.ProfileServer], the default, serves HTTP until it is stopped.
 //   - [model.ProfileDaemon] runs until it is stopped, or until it was idle
 //     for its [IdleStop] time, and serves NO HTTP: its clients reach it on
-//     its listeners (Service.Listen), a private socket. It has no /_kit/
+//     its listeners (Service.Listen), a private socket. It has no /_app/
 //     surface and opens no TCP port.
 //   - [model.ProfileCLI] parses its arguments, runs one CLI command
 //     (Service.CLI) and exits with its status. It opens the stores and the

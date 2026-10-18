@@ -25,7 +25,7 @@
 //
 // Package app — the catalog of the generic mechanics a node is built from.
 //
-// Package app — the kit tag: the classes and words a field of personal data
+// Package app — the app tag: the classes and words a field of personal data
 // carries.
 //
 // Package app — the plan of a Go type's classified members, computed once per
