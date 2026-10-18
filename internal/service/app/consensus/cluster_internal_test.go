@@ -1056,23 +1056,27 @@ func TestInstallResumesAfterACrashAtPublication(t *testing.T) {
 			break
 		}
 	}
+	// Isolated before it stops: the memory network keeps what is sent to a
+	// stopped node and delivers it at the restart, so the appends the leader
+	// went on sending caught the node up past the live logs' start whenever
+	// they were compacted no further, and no install was ever needed (#374,
+	// linux/386). The crash is armed before the leader can reach the
+	// restarted node: armed after, an install that published in between left
+	// nothing to crash and the wait below timed out (#304, macOS).
+	c.net.Isolate(lag.id, true)
 	c.kill(lag)
 	var tok coreconsensus.TokenValue
 	for i := range 200 {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 	}
 	compactedPast(t, c, 10)
-	// The crash is armed before the leader can reach the restarted node:
-	// armed after, an install that published in between left nothing to
-	// crash and the wait below timed out (#304, macOS).
-	c.net.Isolate(lag.id, true)
 	c.start(lag)
 	lag.node.crashAfterPublish.Store(true)
 	c.net.Isolate(lag.id, false)
 	deadline := time.Now().Add(10 * time.Second)
 	for !lag.node.stopped.Load() {
 		if time.Now().After(deadline) {
-			t.Fatal("no install reached publication")
+			t.Fatalf("no install reached publication: the node applied %d", lag.node.Status().Applied)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -1105,6 +1109,10 @@ func TestAnInstallKeepsTheTwoNewestSnapshots(t *testing.T) {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 	}
 	c.waitApplied(tok.Index, 10*time.Second)
+	// The second cut may be one a trigger coalesced while the first was
+	// written, made once it was: it used to be dropped, and a follower that
+	// had applied all hundred entries behind its first cut never cut again
+	// (#375, windows and macOS; TestACoalescedCutIsMade).
 	deadline := time.Now().Add(10 * time.Second)
 	for len(must(lag.snaps.List())(t)) < 2 {
 		if time.Now().After(deadline) {
@@ -1113,12 +1121,17 @@ func TestAnInstallKeepsTheTwoNewestSnapshots(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	held := tok.Index
+	// Isolated while stopped, so that what the leader sends meanwhile is not
+	// kept for its restart: past the live logs' start, only an install can
+	// catch it up (see TestInstallResumesAfterACrashAtPublication).
+	c.net.Isolate(lag.id, true)
 	c.kill(lag)
 	for i := 100; i < 300; i++ {
 		tok = proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
 	}
 	compactedPast(t, c, held+1)
 	c.start(lag)
+	c.net.Isolate(lag.id, false)
 	c.waitApplied(tok.Index, 10*time.Second)
 	// The applied index moves with the restore, a moment before the install
 	// prunes: the count is waited for, on a bound.

@@ -141,6 +141,9 @@ type App struct {
 	// turn is the data's writer turn: a transaction on the data directory
 	// or in memory holds it alone (transact_turn.go).
 	turn writerTurn
+	// undone counts, per store, the writes rollbacks wrote back there
+	// (transact_turn.go).
+	undone undoneCounts
 	// roots are where the modules' Go modules lie on this machine, for the
 	// source endpoint (gomodule.go).
 	roots moduleRoots
