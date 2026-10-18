@@ -412,38 +412,85 @@ func TestMailRetriesThenDeadLetters(t *testing.T) {
 	}
 }
 
+// TestMailBackoffDoubles pins the outbox's backoff: a failed attempt is
+// retried mailBackoffFirst later, the next one twice that.
+//
+// The clock never moves while an attempt runs. It used to advance in tenths of
+// the backoff every 2 ms of real time, polling for the attempt count, so every
+// tick that landed while an attempt was dialling, logging and parking the mail
+// counted in the measured wait: on Windows, where those few milliseconds are
+// longer, four ticks of 200 ms made the third attempt come "2.8s after the
+// second" (bound 2.5s). Now the test waits for each attempt's failure event
+// with the clock still, so the mail is parked at a known instant, then moves
+// the clock to one nanosecond before the attempt is due and to the instant
+// itself, and reads when the attempt started on the clock it ran on: exactly
+// due, never a nanosecond early or late, on any machine.
 func TestMailBackoffDoubles(t *testing.T) {
 	clk := clock.NewManualClock(time.Date(2026, 9, 24, 9, 0, 0, 0, time.UTC))
 	a := mailApp(t, "smtp://"+refusedAddr(t)+"?tls=none", app.Clock(clk))
+	stream := events(t, a)
 	id, idErr := Mail.Send(t.Context(), mail.Message{To: []mail.Address{{Addr: "guest@example.org"}}, Subject: "Hello", Text: "Hi"})
 	if idErr != nil {
 		t.Fatal(idErr)
 	}
-	runs := func() int64 { return loopNamed(a.Graph(), "members/mailer/mail outbox").Runs }
-	step := func(d time.Duration, want int64) {
+	outbox := func() *model.Loop { return loopNamed(a.Graph(), "members/mailer/mail outbox") }
+	// failed waits for the event of the attempt-th failure, which the spool
+	// reports once the mail is parked for its backoff — or, after the third
+	// and last, dead-lettered.
+	failed := func(attempt int) {
 		t.Helper()
-		deadline := time.Now().Add(2 * time.Second)
+		timeout := time.After(10 * time.Second)
 		for {
-			clk.Advance(d / 10)
-			time.Sleep(2 * time.Millisecond)
-			if runs() == want {
-				return
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("%s: %d runs, want %d", id, runs(), want)
+			select {
+			case e, ok := <-stream:
+				if !ok {
+					t.Fatalf("the stream ended before attempt %d failed", attempt)
+				}
+				if e.Type == model.EventMail && e.Mail.ID == id && (e.Mail.Status == model.MailRetrying || e.Mail.Status == model.MailDead) && e.Mail.Attempts == attempt {
+					return
+				}
+			case <-timeout:
+				t.Fatalf("mail %s: attempt %d never failed (outbox %+v)", id, attempt, outbox())
 			}
 		}
 	}
-	step(100*time.Millisecond, 1) // the first attempt, at the next poll
-	before := clk.Now()
-	step(time.Second, 2)
-	if waited := clk.Now().Sub(before); waited < time.Second || waited > 1500*time.Millisecond {
-		t.Errorf("the second attempt came %s after the first", waited)
+	// early fails the test when the attempt-th attempt reports within window
+	// of real time while the clock stands a nanosecond before it is due. An
+	// early attempt that reports later fails the LastRun comparison whenever
+	// it read the clock before it moved on; a correct outbox passes both
+	// however slow the machine.
+	early := func(attempt int, window time.Duration) {
+		t.Helper()
+		quiet := time.After(window)
+		for {
+			select {
+			case e, ok := <-stream:
+				if !ok {
+					t.Fatalf("the stream ended before attempt %d", attempt)
+				}
+				if e.Type == model.EventMail && e.Mail.ID == id && e.Mail.Attempts == attempt {
+					t.Fatalf("attempt %d ran a nanosecond before it was due: %+v", attempt, *e.Mail)
+				}
+			case <-quiet:
+				return
+			}
+		}
 	}
-	before = clk.Now()
-	step(2*time.Second, 3)
-	if waited := clk.Now().Sub(before); waited < 2*time.Second || waited > 2500*time.Millisecond {
-		t.Errorf("the third attempt came %s after the second", waited)
+	// the first attempt follows the publication, with the clock still.
+	failed(1)
+	for attempt, backoff := range []time.Duration{time.Second, 2 * time.Second} {
+		parked := clk.Now()
+		clk.Advance(backoff - time.Nanosecond)
+		early(attempt+2, 100*time.Millisecond)
+		clk.Advance(time.Nanosecond)
+		failed(attempt + 2)
+		loop := outbox()
+		if loop.Runs != int64(attempt+2) {
+			t.Fatalf("the outbox ran %d times, want %d", loop.Runs, attempt+2)
+		}
+		if started := loop.LastRun.Sub(parked); started != backoff {
+			t.Errorf("attempt %d started %s after attempt %d failed, want %s", attempt+2, started, attempt+1, backoff)
+		}
 	}
 }
 
