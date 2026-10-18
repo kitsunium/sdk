@@ -90,7 +90,9 @@
 # floor so that work would not happen. Each is mutation-checked in its doc
 # comment, and all three count a TOTAL malloc delta rather than calling
 # testing.AllocsPerRun — whose integer division reported 0.0 for a mutation that
-# really did allocate.
+# really did allocate. console's counts that total on the window's own stack
+# (heap profile at rate 1, attributed through one frame), since a process-wide
+# Mallocs delta failed it once in CI on allocations that were not the writer's.
 //internal/service/observe/logger/writer/levelgate:levelgate_test
 //internal/service/observe/logger/writer/console:console_test
 //internal/service/observe/logger/writer/file:file_test
