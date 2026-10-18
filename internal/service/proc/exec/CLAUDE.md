@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T00:00:00Z -->
+<!-- updated: 2026-10-18T00:00:00Z -->
 # internal/service/proc/exec
 
 The keystone spawn primitive of the process-supervision domain (ADR 0016).
@@ -33,7 +33,7 @@ process that already exists.
 | `exec_windows.go`, `handle_windows.go`, `joblimits_windows.go`, `cgroup_placement_windows.go` | `windows` | the CreateProcess backend: stdio, a console process group for `Setpgid`, rlimits through a Job Object the child is assigned to while suspended (§A confined Windows child is created suspended); the Unix-only fields refused with `UnsupportedPlatform` |
 | `lookpath.go` | `unix \|\| windows` | `resolveSpec`: a bare `Spec.Path` searched in the CHILD's PATH (Spec.Env's, else the parent's), os/exec's rules — first executable wins, a relative match is `exec.ErrDot`, none is `exec.ErrNotFound`, both wrapped in `SpawnFailed`; argv[0] keeps the name as written |
 | `lookpath_unix.go` / `lookpath_windows.go` | per OS | the candidate spellings (PATHEXT on Windows), what "executable" means (an execute bit / the extension), and how variable names compare (case-insensitive on Windows) |
-| `handle_unix.go` | `unix` | the `handle` value: `PID`/`Wait`/`Signal`/`SignalGroup`/`Stop`, once-only reap through `collectExit` (claim first, own wait, `Reclaim` on ECHILD — it takes a `waiter`, the process's own wait and nothing else; `releaser` adds the handle release an aborted spawn needs), exit translation (`exitValue`), stdio-copier join |
+| `handle_unix.go` | `unix` | the `handle` value: `PID`/`Wait`/`Signal`/`SignalGroup`/`Stop`, the SIGKILL escalation resent until the reap (`killUntilReaped`, §Stop), once-only reap through `collectExit` (claim first, own wait, `Reclaim` on ECHILD — it takes a `waiter`, the process's own wait and nothing else; `releaser` adds the handle release an aborted spawn needs), exit translation (`exitValue`), stdio-copier join |
 | `stdio.go` | `unix \|\| windows` | `buildStdio`: wires `Spec.Stdio` (inherit/null/capture) to `ProcAttr.Files`; capture pipes + copier goroutines joined by `Wait` (100% delivery, no leak) |
 | `trampoline_unix.go` | `unix` | the re-exec trampoline (`installTrampoline`, `childHandshakeFD`) — see below |
 | `handshake_unix.go` | `unix` | the parent side of the trampoline's status pipe and `handshakeError` (status byte → sentinel) |
@@ -80,12 +80,35 @@ process that already exists.
 ## Stop: group-aware SIGTERM → SIGKILL escalation
 
 `Stop(ctx, grace, sig)` sends `sig` to the whole group (`kill(-pgid, sig)`),
-waits up to `grace` for exit, then escalates to `SIGKILL` on the group. It
+waits up to `grace` for exit, then escalates to `SIGKILL` on the group — at
+once when `grace` is not positive, as on Windows (it used to wait on `sig`
+alone, without a bound, for a child that ignored it). It
 returns `nil` once the group is gone, `ctx.Err()` if cancelled first, or
 `StopFailed` if the group survives the SIGKILL escalation for a non-ESRCH reason.
 A group that vanished (`ESRCH`) at any phase is treated as success. The reap runs
 under `sync.Once`, so concurrent `Stop`/`Wait` callers share one wait4 and one
 `close(done)`.
+
+**The SIGKILL is resent until the reap.** NetBSD up to 10.1 discards a signal
+posted to a process still inside `execve` (PR kern/58091, fixed in 10.2 and
+11.0), and `Start` returns from inside the child's `execve` (§Tests), so the
+escalation's SIGKILL — or the `teardown` of a child whose `Nice` or
+`OOMScoreAdj` was refused, which kills a child `Start` has just spawned — could
+be lost, and the wait for the reap after it never ended. `killUntilReaped`, the
+one escalation both use, sends SIGKILL again every `killResendInterval`
+(100 ms, on the handle's clock) until the leader is reaped or `ctx` ends the
+wait; `teardown` runs it uncancelled, the resend bounding it by the child's
+death. A SIGKILL that lands kills within the first interval, so on every other
+kernel the reap comes first and nothing is resent: the cost elsewhere is one
+timer per escalation. A resend is never sent once the reap is in hand — the
+first SIGKILL still is, since a private group can outlive its leader. A
+delivery fault other than "gone" ends the escalation with `StopFailed`, and
+`teardown` then leaves the child unreaped rather than wait on a child it could
+not signal. `Test_handle_killResentWhenLost` drops the first SIGKILL through
+the handle's `kill` double, on every OS, and pins that `Stop` with no grace,
+the escalation and `teardown` each end on the resend — not a nanosecond before
+the interval closes on a `ManualClock`; an escalation that sends SIGKILL once
+fails all three on the test's 30-second guard.
 
 **darwin says "gone" differently.** A group whose leader has exited but not
 been reaped holds nothing alive, and XNU's `kill(-pgid)` skips zombies, finds
@@ -258,7 +281,9 @@ up to 10.1 discards a signal posted to a process still in `execve` (PR
 kern/58091, fixed in 10.2 and 11.0), so a `SIGKILL` sent at once was lost
 and `Test_handle_SignalGroup` / `Test_handle_graceOnInjectedClock` waited out
 the child's 30 s on one NetBSD run in four. A caller that signals a child it
-has just started on such a kernel can lose the signal the same way. The
+has just started on such a kernel can lose the signal the same way; the SDK's
+own SIGKILLs — `Stop`'s escalation and `teardown` — are resent until the reap
+(§Stop). The
 shell therefore stays the leader, so a fixture without a private group runs
 `shellOnlyWait` — a read from a FIFO the test made, nothing beneath the
 shell — since its cleanup kills the leader's pid alone;
