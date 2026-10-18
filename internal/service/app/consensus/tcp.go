@@ -715,28 +715,28 @@ func queuedFrame(pc *peerConn) ([]byte, bool) {
 
 // sendBatch writes one batch on the link, dialling first when there is no
 // connection; a batch with no connection to go to is dropped, and Raft
-// retransmits what matters.
+// retransmits what matters. A connection that was already open and fails
+// the write is dialled again once and the batch written on the new one: it
+// died while the link was quiet — its peer reset it, or the kernel aborted
+// it under the user timeout (boundUnacknowledged) — and the batch, an
+// election's vote among others, would otherwise wait for Raft's next round.
 func (t *TCPTransport) sendBatch(k outKey, link *senderLink, batch [][]byte) {
 	if link.conn != nil && time.Since(link.created) > t.cfg.MaxConnectionAge {
 		// Retired by age, every frame of it flushed: the next batch
 		// dials a fresh one.
 		link.close()
 	}
-	if link.conn == nil && !t.redial(k, link) {
+	reused := link.conn != nil
+	if !reused && !t.redial(k, link) {
 		return
 	}
-	// A write without its deadline could block this sender for good,
-	// so a connection that refuses one fails like a write that missed
-	// it (D4, R2-06).
-	err := link.conn.SetWriteDeadline(time.Now().Add(t.cfg.WriteTimeout))
-	for _, b := range batch {
-		if err != nil {
-			break
+	err := t.writeBatch(link, batch)
+	if err != nil && reused {
+		link.close()
+		if !t.redial(k, link) {
+			return
 		}
-		_, err = link.w.Write(b)
-	}
-	if err == nil {
-		err = link.w.Flush()
+		err = t.writeBatch(link, batch)
 	}
 	if err != nil {
 		// The failure is reported as the peer unreachable; the socket
@@ -746,9 +746,31 @@ func (t *TCPTransport) sendBatch(k outKey, link *senderLink, batch [][]byte) {
 	}
 }
 
+// writeBatch writes the batch on the link's connection and flushes it,
+// under one write deadline.
+func (t *TCPTransport) writeBatch(link *senderLink, batch [][]byte) error {
+	// A write without its deadline could block this sender for good,
+	// so a connection that refuses one fails like a write that missed
+	// it (D4, R2-06).
+	err := link.conn.SetWriteDeadline(time.Now().Add(t.cfg.WriteTimeout))
+	for _, b := range batch {
+		if err != nil {
+			return err
+		}
+		_, err = link.w.Write(b)
+	}
+	if err != nil {
+		return err
+	}
+	return link.w.Flush()
+}
+
 // redial connects the link, unless a failed dial is still backing off or
 // the peer has no address; a failed dial starts the backoff and reports
-// the peer unreachable. It reports whether the link is connected.
+// the peer unreachable. It reports whether the link is connected. Bytes
+// left unacknowledged on the new connection for WriteTimeout abort it, as
+// a write that blocks that long does; a connection that refuses the bound
+// fails like a failed dial.
 func (t *TCPTransport) redial(k outKey, link *senderLink) bool {
 	if time.Now().Before(link.backoff) {
 		return false // dropped: Raft retransmits what matters
@@ -760,6 +782,11 @@ func (t *TCPTransport) redial(k outKey, link *senderLink) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), t.cfg.HandshakeTimeout)
 	defer cancel()
 	c, err := t.dial(ctx, addr, k.lane, &pin)
+	if err == nil {
+		if err = boundUnacknowledged(c.NetConn(), t.cfg.WriteTimeout); err != nil {
+			abandon(c.Close())
+		}
+	}
 	if err != nil {
 		link.backoff = time.Now().Add(redialBackoff)
 		t.reportUnreachable(k.to)

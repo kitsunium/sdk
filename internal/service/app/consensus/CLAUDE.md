@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-14T17:40:00Z -->
+<!-- updated: 2026-10-18T12:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -40,3 +40,9 @@ code: it raises the core's.
 - Publish a snapshot without `retain` after it: a cut and an install both
   keep the two newest (D7, R6-02). An install used to skip it and left three
   until the node's next cut (#304, `TestAnInstallKeepsTheTwoNewestSnapshots`).
+- Dial a sender link (control or data lane) without `boundUnacknowledged`,
+  or drop the batch a reused connection failed: a link quiet since a
+  partition keeps taking small writes into a stream the kernel retransmits
+  under exponential backoff, and an election waited 15 s for it
+  (`TestTCPFrameOnALinkThatDiedQuietlyIsDelivered`). The snapshot and JOIN
+  lanes stay unbounded: a receiver writing a snapshot may stop reading.

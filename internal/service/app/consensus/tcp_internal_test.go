@@ -496,3 +496,56 @@ func TestJoinAnswerMustListTheResponder(t *testing.T) {
 		t.Fatal("a membership listing the responder was refused")
 	}
 }
+
+// A link whose connection died while it was quiet delivers the next frame
+// on a new connection instead of dropping it. The chaos run's survivors of
+// a leader kill stayed pre-candidates for 15 s: their links to each other
+// had carried nothing since a partition, and each vote went into a stream
+// that only reached the peer at a retransmission. The connection here is
+// reset by its receiver, the state the kernel leaves a link in once
+// boundUnacknowledged aborts it.
+func TestTCPFrameOnALinkThatDiedQuietlyIsDelivered(t *testing.T) {
+	ca := newTestCA(t)
+	cid := coreconsensus.ClusterID{0xc0, 0xff, 0xee}
+	a, b := &tcpNode{id: 1, slot: "a"}, &tcpNode{id: 2, slot: "b"}
+	var members []coreconsensus.MemberValue
+	for _, tn := range []*tcpNode{a, b} {
+		tn.cert, tn.spki = ca.issue(t, SAN(cid, tn.slot), nil)
+		tn.listen(t, ca)
+		defer tn.tr.Close()
+		members = append(members, coreconsensus.MemberValue{ID: tn.id, Slot: tn.slot, SPKI: tn.spki, Address: tn.addr, Voter: true})
+	}
+	got := make(chan struct{}, 8)
+	if err := b.tr.Bind(1, func(coreconsensus.AuthenticatedPeerValue, []byte) { got <- struct{}{} }, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	a.tr.SetMembership(1, members)
+	b.tr.SetMembership(1, members)
+	frame := appendFrame(&coreconsensus.MessageValue{Version: 1, Group: 1, Kind: coreconsensus.MsgPreVote, From: a.id, To: b.id, Term: 2})
+	received := func(what string) {
+		t.Helper()
+		select {
+		case <-got:
+		case <-time.After(time.Second):
+			t.Fatalf("%s: the frame never arrived", what)
+		}
+	}
+	a.tr.Send(b.id, frame)
+	received("first frame")
+
+	// The receiver resets every connection it holds, then waits for the
+	// reset to reach the sender.
+	b.tr.mu.Lock()
+	for c := range b.tr.in {
+		tc := c.(*tls.Conn).NetConn().(*net.TCPConn)
+		if err := tc.SetLinger(0); err != nil {
+			t.Error(err)
+		}
+		abandon(tc.Close())
+	}
+	b.tr.mu.Unlock()
+	time.Sleep(100 * time.Millisecond)
+
+	a.tr.Send(b.id, frame)
+	received("frame after the reset")
+}
