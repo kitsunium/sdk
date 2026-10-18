@@ -10,7 +10,7 @@ import (
 
 // tcpUserTimeout is TCP_USER_TIMEOUT of linux/tcp.h, which package syscall
 // does not name.
-const tcpUserTimeout = 0x12
+const tcpUserTimeout int = 0x12
 
 // boundUnacknowledged makes the kernel abort c once bytes written on it
 // stay unacknowledged for d (TCP_USER_TIMEOUT): the next write then fails,
