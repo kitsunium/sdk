@@ -204,13 +204,23 @@ func TestARotatedPasswordReachesTheNextConnection(t *testing.T) {
 	run(t, a)
 	rotate(t)
 	t.Setenv("LEDGER_DATABASE_URL", testURL(t, url.UserPassword(rotationUser, secondWord)))
+	// The lifetime is the behaviour: the connection made with the first
+	// password must have outlived it before anything is asked.
 	time.Sleep(1200 * time.Millisecond)
 	eventually(t, a.URL(), "with the rotated password")
-	if n := count(t, sessionsOfRotation); n == 0 {
-		t.Error("no connection with the rotated password")
-	}
-	if d := databaseOf(t, a.Graph()); d.Pool == nil || d.Pool.Closed == 0 {
-		t.Errorf("no connection retired by its lifetime: %+v", d.Pool)
+	// The pool retires and redials on its own goroutines: wait for both
+	// facts to be observed, within a bound, rather than reading each once.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		n := count(t, sessionsOfRotation)
+		d := databaseOf(t, a.Graph())
+		if n > 0 && d.Pool != nil && d.Pool.Closed > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("after the rotation: %d connection(s) with the rotated password, pool %+v; want one, and one retired by its lifetime", n, d.Pool)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

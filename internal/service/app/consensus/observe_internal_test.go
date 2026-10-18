@@ -11,6 +11,7 @@ import (
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	coremetrics "github.com/kitsunium/sdk/internal/core/observe/metrics"
 	coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
 	svcmetrics "github.com/kitsunium/sdk/internal/service/observe/metrics"
@@ -92,14 +93,22 @@ func TestObservability(t *testing.T) {
 	if err := n0.UpdateAddress(ctx, "op:test", c.nodes[1].id, "elsewhere"); err != nil {
 		t.Fatalf("update address: %v", err)
 	}
-	time.Sleep(300 * time.Millisecond)
+	gauges := []string{mRole, mTerm, mHasLeader, mApplyLagEntries, mClusterVersion}
+	histograms := []string{mFsyncLatency, mCommitLatency, mBarrierLatency, mLoopTurn, mApplyLatency}
+	// The node publishes on its own goroutines: wait until every series,
+	// span event and log line has been published — a state observed, not a
+	// pause guessed — then hold each to its shape below.
+	deadline := time.Now().Add(5 * time.Second)
+	for !observed(meter, tr, lg, gauges, histograms) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
 	snap := meter.Collect()
-	for _, name := range []string{mRole, mTerm, mHasLeader, mApplyLagEntries, mClusterVersion} {
+	for _, name := range gauges {
 		if _, ok := snap.Gauges[name]; !ok {
 			t.Errorf("gauge %s missing", name)
 		}
 	}
-	for _, name := range []string{mFsyncLatency, mCommitLatency, mBarrierLatency, mLoopTurn, mApplyLatency} {
+	for _, name := range histograms {
 		if _, ok := snap.Histograms[name]; !ok {
 			t.Errorf("histogram %s missing", name)
 		}
@@ -123,6 +132,33 @@ func TestObservability(t *testing.T) {
 			t.Errorf("log %q missing in:\n%s", want, logs)
 		}
 	}
+}
+
+// observed reports whether node 0 has published everything TestObservability
+// holds to its shape: each gauge and histogram named, its spans' events and
+// both log lines.
+func observed(meter coremetrics.FullMeter, tr *fakeTracer, lg *fakeLogger, gauges, histograms []string) bool {
+	snap := meter.Collect()
+	for _, name := range gauges {
+		if _, ok := snap.Gauges[name]; !ok {
+			return false
+		}
+	}
+	for _, name := range histograms {
+		if _, ok := snap.Histograms[name]; !ok {
+			return false
+		}
+	}
+	tr.mu.Lock()
+	ev := strings.Join(tr.events, ",")
+	tr.mu.Unlock()
+	if !strings.Contains(ev, "start:consensus.Propose") || !strings.Contains(ev, "event:applied") || !strings.Contains(ev, "end") {
+		return false
+	}
+	lg.mu.Lock()
+	logs := strings.Join(lg.msgs, "\n")
+	lg.mu.Unlock()
+	return strings.Contains(logs, "role or term changed") && strings.Contains(logs, "administrative operation")
 }
 
 // D13: certificate expiry over the TCP transport, log bytes, quota and free

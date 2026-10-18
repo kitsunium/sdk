@@ -167,8 +167,9 @@ func Test_pollWatcher_poll(t *testing.T) {
 			done <- w.poll(ctx, func() { fired <- struct{}{} }, mod, size)
 		}()
 
-		//: let the loop reach its first tick before disturbing anything.
-		time.Sleep(tick * 2)
+		//: the baseline was taken above, before the loop started, so the
+		//: disturbance is observed whenever the loop next ticks: nothing
+		//: here waits for the loop to reach a state.
 		c.disturb(t, path)
 
 		if c.wantErr {
@@ -188,6 +189,14 @@ func Test_pollWatcher_poll(t *testing.T) {
 			case <-fired:
 			case <-time.After(5 * time.Second):
 				t.Fatal("the callback never fired after the file changed")
+			}
+		} else {
+			//: a window of several intervals in which an untouched file must
+			//: fire nothing: a duration observed, not a state awaited.
+			select {
+			case <-fired:
+				t.Error("the callback fired for an untouched file")
+			case <-time.After(tick * 5):
 			}
 		}
 
