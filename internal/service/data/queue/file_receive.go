@@ -136,8 +136,24 @@ func (b *fileBroker) takeLease(
 	//: ENOENT is "somebody else took it", which is the ordinary outcome under
 	//: contention and is not an error at any layer.
 	if renameErr != nil {
+		//: a rename that lost the race may still have made its target (see
+		//: dropStale) — a lease nobody holds, delivered again once it lapses.
+		//: The target carries this call's random lease, so a name there is
+		//: ours alone to remove.
+		if os.IsNotExist(renameErr) {
+			//: QueueBackendFailed when the medium refuses the removal.
+			if dropErr := b.dropStale(path.Join(dirInflight, target)); dropErr != nil {
+				return corequeue.DeliveryValue{}, false, dropErr
+			}
+		}
 		//: not-exist becomes (false, nil); anything else is the medium.
 		return corequeue.DeliveryValue{}, false, ignoreMissing("rename", base, renameErr)
+	}
+	//: the winner's rename must have taken the queued name with it; one left
+	//: behind would be leased again by the next consumer.
+	if dropErr := b.dropStale(path.Join(dirReady, base)); dropErr != nil {
+		//: QueueBackendFailed.
+		return corequeue.DeliveryValue{}, false, dropErr
 	}
 	//: no fsync on the way in. A crash before the rename reaches the device
 	//: leaves the message QUEUED, which is a redelivery — already permitted.
@@ -225,7 +241,26 @@ func (b *fileBroker) recoverOne(name nameValue, base string, now int64) error {
 	}
 	renameErr := b.root.Rename(path.Join(dirInflight, base), path.Join(dirReady, requeued.readyName()))
 	//: another consumer reclaimed it first, which is the ordinary race.
-	return ignoreMissing("rename", base, renameErr)
+	if renameErr != nil {
+		//: nil for the lost race, the medium's refusal otherwise.
+		return ignoreMissing("rename", base, renameErr)
+	}
+	//: the lapsed lease's name must be gone, or it is reclaimed again.
+	return b.dropStale(path.Join(dirInflight, base))
+}
+
+// dropStale removes name when a rename left it behind, and is nothing when
+// it is gone — the answer of every kernel whose rename is one step. OpenBSD's
+// FFS renames in two (link the new name, unlink the old), and two consumers
+// racing on one message there left it under two names, one queued and one
+// leased by nobody (#398: a queued command's restart test saw it, then
+// delivered the message twice). The queue's one rule — a message has exactly
+// one name, and that name is its state — holds only if the stale one is
+// removed. Only a name this broker owns at that instant is ever passed: a
+// source it has just renamed away, or a target carrying its own fresh lease.
+func (b *fileBroker) dropStale(name string) error {
+	//: absent is the ordinary answer.
+	return ignoreMissing("remove", name, b.root.Remove(name))
 }
 
 // ignoreMissing swallows an absent source — the ordinary outcome of losing a

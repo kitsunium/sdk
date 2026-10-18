@@ -62,6 +62,12 @@ func (b *fileBroker) Nack(
 		//: LeaseExpired or QueueBackendFailed.
 		return corequeue.NackValue{}, b.classifyMissing("rename", held, renameErr)
 	}
+	//: the lease's name must be gone with the rename (dropStale), or the
+	//: message would stand in two states: queued, and leased by nobody.
+	if dropErr := b.dropStale(path.Join(dirInflight, held)); dropErr != nil {
+		//: QueueBackendFailed.
+		return corequeue.NackValue{}, dropErr
+	}
 	//: AFTER the rename, so a consumer woken here and reading the directory
 	//: sees the message and records when it becomes visible.
 	b.wake.fire()

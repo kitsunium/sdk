@@ -59,6 +59,17 @@ rename. So:
   and — unlike `flock(2)`, which ADR 0052 MEASURED giving zero exclusion
   between goroutines sharing one open file description — it resolves identically
   for two goroutines and for two processes.
+- **A name a rename left behind is removed (`dropStale`).** Not every
+  filesystem renames in one step: OpenBSD's FFS links the new name and then
+  unlinks the old, and two consumers racing on one message there left it
+  under two names — queued, and leased by nobody (#398, where a queued
+  command's restart test then saw it delivered twice). After each transition
+  the broker removes the name it no longer owns: the source it just renamed
+  away (`takeLease`, `Nack`, `recoverOne`), or, when its rename lost with
+  `ENOENT`, the target carrying its own fresh lease (`takeLease`). On a
+  one-step kernel each removal answers `ENOENT` and costs one syscall. What it
+  cannot undo is two renames that both report success; delivery stays at
+  least once, as it always was.
 - **Recovery needs no daemon.** A lease deadline and a delivery count are both
   in the name, so a consumer that is SIGKILLed leaves a directory entry any
   other process can read and act on. There is no sweeper goroutine: a lapsed
