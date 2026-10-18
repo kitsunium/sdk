@@ -317,10 +317,10 @@ has the map): before writing something generic here, look for it there.
   under `formerSealDomain` by data-key's keyring and by `kit-data-key`'s
   (`openRoot`). A subject has one wrapped key, under one root: an erasure
   destroys it and folds the store, so nothing either root opens is left.
-  `kit-data-key` no longer rotates; once its newest version is older than
-  data-key's Keep × RotateEvery and a clean pass found nothing under it, it
-  is retired — one fresh version written, every other pruned
-  (`retireFormerDataKey`) —, so a copy outside the store (a backup, a
+  `kit-data-key` no longer rotates; after a clean pass that found nothing
+  under it, each of its versions older than data-key's Keep × RotateEvery is
+  pruned — a fresh version written first when all are
+  (`retireFormerDataKey`, `formerRetirement`) —, so a copy outside the store (a backup, a
   database's own history) stops opening on ADR 0142's bound. Nothing else a
   former release kept is written or deleted. `privacy rewrap [-back]` (`privacycmd_rewrap.go`) runs
   the pass now, or moves every data key back under `kit-data-key` for the

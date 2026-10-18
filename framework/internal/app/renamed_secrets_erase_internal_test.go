@@ -19,6 +19,63 @@ import (
 // opens is left of the person in what the product keeps, and a copy it
 // cannot reach stops opening on ADR 0142's bound, kit-data-key included.
 
+// failingPrune is a secret store whose next fails prunes fail.
+type failingPrune struct {
+	secret.Store
+	fails int
+}
+
+// Prune fails while fails is left, then prunes.
+func (s *failingPrune) Prune(ctx context.Context, name string, keep int) error {
+	if s.fails > 0 {
+		s.fails--
+		return secret.StoreUnavailable
+	}
+	return s.Store.Prune(ctx, name, keep)
+}
+
+// A retirement whose prune failed after its fresh version was written is
+// done by the next clean pass: the versions past their bound are judged one
+// by one, so the fresh version within it does not put the others off for
+// another bound.
+func TestARetirementWhosePruneFailedIsRetried(t *testing.T) {
+	needsFileStore(t)
+	ctx := t.Context()
+	dir := t.TempDir()
+	clk := clock.NewManualClock(time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC))
+	kept := &failingPrune{Store: secret.NewMemory(secret.MemoryConfig{Clock: clk})}
+	a, cards := startCards(t, dir, Clock(clk), SecretStore(kept))
+	must(t, cards.Insert(ctx, card{ID: "c1", Owner: "ann", Secret: "s1", Note: "n1"}))
+	for range 2 {
+		v, err := secret.Random(32)()
+		must(t, err)
+		_, err = kept.Put(ctx, formerSecretPrefix+dataKeySecret, v)
+		must(t, err)
+	}
+	must(t, a.Stop(context.Background()))
+	versions := func() int {
+		vs, err := kept.Versions(ctx, formerSecretPrefix+dataKeySecret)
+		must(t, err)
+		return len(vs)
+	}
+
+	clk.Advance(time.Duration(defaultKeep)*defaultRotation + time.Hour)
+	kept.fails = 1
+	a, _ = startCards(t, dir, Clock(clk), SecretStore(kept))
+	must(t, a.Stop(context.Background()))
+	if got := versions(); got != 3 {
+		t.Fatalf("after the failed prune kit-data-key keeps %d versions, want the fresh one and the two before", got)
+	}
+	a, cards = startCards(t, dir, Clock(clk), SecretStore(kept))
+	if got := versions(); got != 1 {
+		t.Errorf("the next pass left %d versions, want the fresh one alone", got)
+	}
+	if got := cardsOf(t, cards); got[0].Note != "n1" {
+		t.Errorf("the card once kit-data-key is retired: %+v", got)
+	}
+	must(t, a.Stop(context.Background()))
+}
+
 // copyData copies the data directory dir into to, but its secret store: what
 // a backup of the product's data holds.
 func copyData(t *testing.T, dir, to string) {

@@ -795,11 +795,12 @@ opens only while the root version that wrapped it is kept, and data-key's
 rotation prunes a version after Keep × RotateEvery (90 days by default).
 `kit-data-key` no longer rotates, so it would have kept every version it had
 for the whole window. It is retired on the schedule its rotation would have
-followed instead (`retireFormerDataKey`). Once its newest version is older
-than Keep × RotateEvery, a clean re-wrap pass that found no key under it
-writes one fresh random version under the name and prunes every other. The
-store offers no deletion, so this is the only way to destroy a version's
-material. After that, a backup's copy of an erased person's key wrapped under
+followed instead (`retireFormerDataKey`). After a clean re-wrap pass that
+found no key under it, each of its versions older than Keep × RotateEvery
+is pruned. When all of them are, one fresh random version is written under
+the name first: the store offers no deletion, so this is the only way to
+destroy the newest version's material. A prune that fails is retried by the
+next clean pass, since each version is judged on its own age. After that, a backup's copy of an erased person's key wrapped under
 `kit-data-key` opens nothing, as it would not have under the former
 release's own rotation. Nothing the running product needs is under those
 versions: every data key moved. A box under data-key itself sealed under
@@ -807,7 +808,7 @@ them is older than the bound, which data-key's own pruning has always
 allowed to read as empty (ADR 0006 §4). The way back still works:
 `privacy rewrap -back` wraps under the fresh version, which the former
 release opens. The retirement runs after every clean pass, so a fresh
-version that wrapped nothing is replaced again Keep × RotateEvery later.
+version that wrapped nothing is retired in its turn.
 
 **What 5b does not touch.** The privacy journal (its chain is over the
 entries' plaintext and its references, neither of which changes), the holds,
@@ -870,7 +871,9 @@ alone, after `privacy rewrap -back`; seen red with the key destruction taken
 out. `renamed_secrets_erase_internal_test.go`: a backup of the data taken
 before the move, restored beside the present secrets, still opens an erased
 person within ADR 0142's bound, and nothing of them once `kit-data-key` is
-retired past it; seen red with the retirement taken out.
+retired past it; seen red with the retirement taken out. A retirement whose
+prune failed after its fresh version was written is finished by the next
+pass; seen red when only the newest version is judged.
 
 **Verified.** `GOWORK=off go test -race ./...` in the root module, in
 `internal`, and in the four connector modules (`postgres` and `mysql` also
