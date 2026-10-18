@@ -173,7 +173,7 @@ func assertVerifies(t *testing.T, verifier coretoken.Verifier, token, side strin
 // byte-identical to the pre-mutation one and the surcharge is back to 0.
 func TestSetVerificationDoesNotRederiveTheKey(t *testing.T) {
 	rig := newJWKAllocRig(t)
-	set := mallocsOver(jwkAllocRuns, func() {
+	setCount := mallocsOver(jwkAllocRuns, func() {
 		//: the verdict lands in a package-level sink rather than a branch, so
 		//: the counted window holds no comparison the defect could move.
 		_, jwkAllocVerdict = rig.set.Verify(rig.token)
@@ -183,7 +183,7 @@ func TestSetVerificationDoesNotRederiveTheKey(t *testing.T) {
 	if jwkAllocVerdict != nil {
 		t.Fatalf("set verifier stopped accepting mid-window: %v", jwkAllocVerdict)
 	}
-	single := mallocsOver(jwkAllocRuns, func() {
+	singleCount := mallocsOver(jwkAllocRuns, func() {
 		//: the same token, the same policy, one key bound directly.
 		_, jwkAllocVerdict = rig.single.Verify(rig.token)
 	})
@@ -191,6 +191,9 @@ func TestSetVerificationDoesNotRederiveTheKey(t *testing.T) {
 	if jwkAllocVerdict != nil {
 		t.Fatalf("single-key verifier stopped accepting mid-window: %v", jwkAllocVerdict)
 	}
+	reportWindow(t, "set verifications", setCount)
+	reportWindow(t, "single-key verifications", singleCount)
+	set, single := setCount.own, singleCount.own
 	//: a JWKS verification may not cost meaningfully more than the single-key
 	//: one it wraps — everything above the baseline is selection, and
 	//: selection is a map read over a slice the constructor already built.

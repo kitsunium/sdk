@@ -27,6 +27,7 @@ published**, measured in `BENCH.md` and gated by
 | `frame.go` | the encoder — `AppendEvent` (an event's wire form; `pkg/v1/net/sse.AppendEvent` forwards to it) and `AppendComment` (the keep-alive frame), the one-pass terminator scan (`appendData` and its two forward cursors), `validateComment` |
 | `frame_external_test.go`, `frame_bench_test.go` | the encoder's tests and benchmarks, including the exhaustive equivalence corpus judged against `splitIndexAny`, the oracle |
 | `sse_alloc_internal_test.go` | the malloc-total gates under the "a steady-state send allocates nothing" claim (deliberately NOT `testing.AllocsPerRun` — its integer division reports 0.0 for anything allocating less than once per call) — `//go:build !race`, so the race-off alloc lane is its ONLY lane (see §Verification) |
+| `allocwindow_test.go` | `mallocsOver`, the allocation window the gates count with: the allocations made on the window's own call stack, never the process's, and its negative control — one copy of the SDK's instrument, held identical to the others by `check-alloc-lane-coverage.sh` |
 | `BENCH.md` | what a stream costs open, per frame, and to drain — see §Cost |
 
 The frame as a value — `corenet.SSEEventValue` and its `Validate`, the rules a

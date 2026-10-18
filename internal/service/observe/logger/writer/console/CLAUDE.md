@@ -72,7 +72,9 @@ terminal emulator's and is not reproducible.
 - **The gate counts the window's own allocations, not the process's.**
   `runtime.MemStats.Mallocs` is process-wide: it once failed this gate in CI at
   "6 allocations, want 0" over 500 bare writes — a path with no allocation site
-  — and passed on the rerun, unchanged. `mallocsOver` now records every
+  — and passed on the rerun, unchanged. `mallocsOver` (`allocwindow_test.go`,
+  the instrument every hand-written allocation gate of the SDK now carries, one
+  identical copy per package) records every
   allocation in the heap profile (`MemProfileRate = 1`) for the window and counts
   those whose stack passes through `allocWindow`, the frame only the measured
   calls have; a stack too deep to tell is counted, and the tiny block is cleared

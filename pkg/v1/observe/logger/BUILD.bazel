@@ -52,6 +52,7 @@ go_test(
     name = "logger_test",
     size = "small",
     srcs = [
+        "allocwindow_test.go",
         "api_gen_test.go",
         "builder_external_test.go",
         "caller_external_test.go",

@@ -26,7 +26,6 @@
 package metrics
 
 import (
-	"runtime"
 	"testing"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/observe/metrics"
@@ -63,46 +62,6 @@ const allocRuns int = 200
 // steps, which is the same blindness the integer division produces, moved into
 // the harness.
 const allocRuntimeWarmup int = 30000
-
-// mallocsOver reports the TOTAL heap allocations f performs across runs calls,
-// rather than the per-call average testing.AllocsPerRun reports.
-//
-// The gap between those two is the whole cardinality story of this package. A
-// meter's entire job is to hold state that GROWS — a series map, a name table,
-// an overflow ledger, and, the moment anyone adds one, a slice: recently-seen
-// keys, a sampled-exemplar ring, a per-name arrival log. Every one of those
-// allocates on a doubling step and not on the observations in between, so the
-// regression this file is meant to catch is amortised BY CONSTRUCTION rather
-// than by accident. testing.AllocsPerRun ends in
-// `float64(mallocs / uint64(runs))` — INTEGER division, documented in the
-// stdlib as being there so a caller can write `== 1` instead of `< 2` — and so
-// reports exactly 0.0 for any defect allocating less than once per call.
-// Measured here: a growing lookup log on the fetch path allocates 7 times in
-// 200 fetches and AllocsPerRun calls that 0.
-//
-// A total is not subject to that rounding. The bookkeeping mirrors
-// AllocsPerRun's otherwise — pin GOMAXPROCS so no other P allocates into the
-// count, warm up so lazily-initialised state is not attributed to the loop, and
-// read the counter either side. There is deliberately NO runtime.GC(): an
-// explicit collection returns before its sweep finishes, so the residual work
-// allocates INSIDE the window; AllocsPerRun does not call it either, for the
-// same reason.
-//
-// One caller-side obligation comes with counting totals: anything the RUNTIME
-// initialises lazily now shows up too. See allocRuntimeWarmup.
-func mallocsOver(runs int, f func()) uint64 {
-	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
-	//: warm up so first-call initialisation is not counted as steady state.
-	f()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	for range runs {
-		f()
-	}
-	runtime.ReadMemStats(&after)
-	//: Mallocs is cumulative and monotonic, so the difference is the total.
-	return after.Mallocs - before.Mallocs
-}
 
 // TestLookupIsAllocationFree pins zero allocations on every resolved-series
 // fetch, across the attribute counts and KINDS a caller realistically writes.
@@ -167,8 +126,9 @@ func TestLookupIsAllocationFree(t *testing.T) {
 		got := mallocsOver(allocRuns, func() {
 			m.Counter("http_requests_total", c.labels...).Inc()
 		})
-		if got != 0 {
-			t.Errorf("%d resolved fetches performed %d allocations, want 0", allocRuns, got)
+		reportWindow(t, "resolved fetches", got)
+		if got.own != 0 {
+			t.Errorf("%d resolved fetches performed %d allocations, want 0", allocRuns, got.own)
 		}
 	}
 	for _, c := range tests {
@@ -235,8 +195,10 @@ func TestEveryInstrumentLookupIsAllocationFree(t *testing.T) {
 		//: warm the series into existence.
 		c.fetch(port)
 
-		if got := mallocsOver(allocRuns, func() { c.fetch(port) }); got != 0 {
-			t.Errorf("%d resolved fetches performed %d allocations, want 0", allocRuns, got)
+		got := mallocsOver(allocRuns, func() { c.fetch(port) })
+		reportWindow(t, "resolved fetches", got)
+		if got.own != 0 {
+			t.Errorf("%d resolved fetches performed %d allocations, want 0", allocRuns, got.own)
 		}
 	}
 	for _, c := range tests {
@@ -281,8 +243,9 @@ func TestOverflowLookupIsAllocationFree(t *testing.T) {
 		i++
 		m.Counter("http_requests_total", coreotel.String("id", ids[i%len(ids)])).Inc()
 	})
-	if got != 0 {
-		t.Errorf("%d overflowing fetches performed %d allocations, want 0", allocRuns, got)
+	reportWindow(t, "overflowing fetches", got)
+	if got.own != 0 {
+		t.Errorf("%d overflowing fetches performed %d allocations, want 0", allocRuns, got.own)
 	}
 
 	//: and the fold really happened — one admitted series plus one overflow.
@@ -321,8 +284,9 @@ func TestDescribedMeterLookupIsAllocationFree(t *testing.T) {
 	got := mallocsOver(allocRuns, func() {
 		m.Counter("http_requests_total", labels...).Inc()
 	})
-	if got != 0 {
-		t.Errorf("%d fetches on a described meter performed %d allocations, want 0", allocRuns, got)
+	reportWindow(t, "fetches on a described meter", got)
+	if got.own != 0 {
+		t.Errorf("%d fetches on a described meter performed %d allocations, want 0", allocRuns, got.own)
 	}
 	//: and the description really is on the snapshot, so the gate is not
 	//: passing by measuring a meter that quietly dropped it.

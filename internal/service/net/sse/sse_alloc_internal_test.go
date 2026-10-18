@@ -13,8 +13,8 @@
 // how high the mark may go.
 //
 // The `!race` constraint is not a preference: the race detector allocates
-// shadow state on every memory access, so AllocsPerRun under `-race` measures
-// the detector. That makes this file invisible to the race suite, which is why
+// shadow state on every memory access, so a malloc count under `-race`
+// measures the detector. That makes this file invisible to the race suite, which is why
 // //internal/service/net/sse:sse_test carries an entry in
 // tools/alloc-lane-targets.txt — the race-off alloc lane is its ONLY gate
 // (SDK-wide rule 12).
@@ -23,7 +23,6 @@ package sse
 import (
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -74,42 +73,6 @@ const allocWarmup int = 8
 // reintroduced by the harness, and this is where it would have gone unnoticed.
 const allocRuntimeWarmup int = 30000
 
-// mallocsOver reports the TOTAL heap allocations f performs across runs calls,
-// rather than the per-call average testing.AllocsPerRun reports.
-//
-// A stream is where the difference bites hardest, because the whole subject of
-// this file is a buffer that GROWS. retain's job is to decide when s.frame is
-// kept and when it is replaced, and every way of getting that decision wrong —
-// a per-stream history of frame sizes, an id ring for reconnection, a growth
-// policy that reallocates on a doubling schedule instead of on a threshold —
-// costs an allocation on some sends and not on the ones between them.
-// AllocsPerRun ends in `float64(mallocs / uint64(runs))`, an INTEGER division
-// documented in the stdlib as being there so a caller can write `== 1` instead
-// of `< 2`, so anything under one allocation per frame reports exactly 0.0. A
-// stream leaking 8 allocations every 200 frames — 40 a second at a 5 Hz
-// keep-alive, per stream, forever — is invisible to it.
-//
-// A total is not subject to that rounding. The bookkeeping mirrors
-// AllocsPerRun's otherwise — pin GOMAXPROCS so no other P allocates into the
-// count, warm up so lazily-initialised state is not attributed to the loop, and
-// read the counter either side. There is deliberately NO runtime.GC(): an
-// explicit collection returns before its sweep finishes, so the residual work
-// allocates INSIDE the window; AllocsPerRun does not call it either, for the
-// same reason.
-func mallocsOver(runs int, f func()) uint64 {
-	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
-	//: warm up so first-call initialisation is not counted as steady state.
-	f()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	for range runs {
-		f()
-	}
-	runtime.ReadMemStats(&after)
-	//: Mallocs is cumulative and monotonic, so the difference is the total.
-	return after.Mallocs - before.Mallocs
-}
-
 // TestSteadyStateSendAllocatesNothing pins initialFrameCapacity's claim, for a
 // payload that fits inside the retention ceiling.
 //
@@ -136,8 +99,9 @@ func TestSteadyStateSendAllocatesNothing(t *testing.T) {
 	got := mallocsOver(allocRuns, func() {
 		allocSend(t, stream, event)
 	})
-	if got != 0 {
-		t.Fatalf("%d Sends performed %d allocations, want 0", allocRuns, got)
+	reportWindow(t, "Sends", got)
+	if got.own != 0 {
+		t.Fatalf("%d Sends performed %d allocations, want 0", allocRuns, got.own)
 	}
 	//: a stream that wrote nothing would satisfy the claim trivially.
 	if w.written == 0 {
@@ -169,8 +133,9 @@ func TestSteadyStateCommentAllocatesNothing(t *testing.T) {
 	got := mallocsOver(allocRuns, func() {
 		allocComment(t, stream)
 	})
-	if got != 0 {
-		t.Fatalf("%d Comments performed %d allocations, want 0", allocRuns, got)
+	reportWindow(t, "Comments", got)
+	if got.own != 0 {
+		t.Fatalf("%d Comments performed %d allocations, want 0", allocRuns, got.own)
 	}
 	//: a stream that wrote nothing would satisfy the claim trivially.
 	if w.written == 0 {
@@ -206,29 +171,32 @@ func TestOutsizedFramesInARowAllocateNothingEither(t *testing.T) {
 	got := mallocsOver(allocRuns, func() {
 		allocSend(t, stream, event)
 	})
-	if got != 0 {
-		t.Fatalf("%d outsized Sends in a steady stream of them performed %d allocations, want 0", allocRuns, got)
+	reportWindow(t, "outsized Sends in a steady stream of them", got)
+	if got.own != 0 {
+		t.Fatalf("%d outsized Sends in a steady stream of them performed %d allocations, want 0", allocRuns, got.own)
 	}
 }
 
 // allocStream opens a stream on a discarding response, with the keep-alive off
 // and both the runtime's and the stream's lazy state already spent.
 //
-// runtime.MemStats.Mallocs is a PROCESS-wide counter, so anything that
-// allocates once, late, and off this package's call graph lands in the window
-// anyway. Two such things exist here and both were found by counting totals,
-// because a per-call average rounds a single stray to zero:
+// Two things allocate once, late, and off this package's own logic, and both
+// were found by counting totals, because a per-call average rounds a single
+// stray to zero:
 //
 //   - The runtime's interface-switch cache, built lazily about a thousand
-//     frames in. That is allocRuntimeWarmup's subject; see its comment.
+//     frames in. It is built on the sending goroutine, so it lands on the
+//     window's own stack, and mallocsOver counts it. That is
+//     allocRuntimeWarmup's subject; see its comment.
 //   - The goroutines a Stream owns. The keep-alive's first act is
 //     time.NewTicker, and under GOMAXPROCS(1) it does not run until the
-//     measuring goroutine yields — which mallocsOver first does at its opening
-//     ReadMemStats, i.e. INSIDE the window. WithoutKeepAlive removes it
-//     entirely, which is also right on its own terms: a keep-alive firing
-//     mid-window would write a frame from another goroutine through the very
-//     buffer under measurement. The comment path is still exercised, because
-//     the tests call Comment directly — which is all the keep-alive does.
+//     measuring goroutine yields — inside the window. mallocsOver counts only
+//     the window's own stack now, so the ticker would no longer fail the gate,
+//     but WithoutKeepAlive stays, and is right on its own terms: a keep-alive
+//     firing mid-window would write a frame from another goroutine through the
+//     very buffer under measurement. The comment path is still exercised,
+//     because the tests call Comment directly — which is all the keep-alive
+//     does.
 func allocStream(t *testing.T) (*Stream, *allocWriter) {
 	t.Helper()
 	//: the runtime's lazy state is spent elsewhere, before this stream exists.

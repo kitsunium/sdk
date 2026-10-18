@@ -27,8 +27,6 @@
 package token
 
 import (
-	"runtime"
-	"runtime/debug"
 	"slices"
 	"strings"
 	"testing"
@@ -66,41 +64,6 @@ const (
 		"c2lnbmF0dXJlLXBsYWNlaG9sZGVyLXRoaXJ0eS10d28tb2N0ZXRz"
 )
 
-// mallocsOver reports the TOTAL number of heap allocations f performs across
-// runs calls, rather than the per-call average.
-//
-// testing.AllocsPerRun is deliberately not used, and the reason is a mutation
-// that PASSED against it elsewhere in this repository: its last line is
-// `float64(mallocs / uint64(runs))`, an INTEGER division, so any defect
-// allocating less than once per call reports exactly 0.0. A total is not
-// subject to that rounding. The bookkeeping mirrors AllocsPerRun's otherwise —
-// pin GOMAXPROCS so no other P allocates into the count, warm up so
-// lazily-initialised state (including the runtime's interface-switch caches)
-// is not attributed to the loop, and read the counter either side.
-//
-// It is a verbatim sibling of the helper in internal/service/observe/logger/writer/levelgate;
-// the two are deliberately not shared, because a package's allocation gate
-// must not be able to fail for a reason that lives in another package.
-func mallocsOver(runs int, f func()) uint64 {
-	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
-	//: collection is held off for the window: a collection is not free of
-	//: allocations from the measured goroutine's point of view. The argument
-	//: is evaluated now and the previous rate restored on return. NOT
-	//: runtime.GC(), which returns before its sweep finishes and therefore
-	//: allocates INSIDE the window it was meant to clear.
-	defer debug.SetGCPercent(debug.SetGCPercent(-1))
-	//: warm up so first-call initialisation is not counted as steady state.
-	f()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	for range runs {
-		f()
-	}
-	runtime.ReadMemStats(&after)
-	//: Mallocs is cumulative and monotonic, so the difference is the total.
-	return after.Mallocs - before.Mallocs
-}
-
 // TestSplitCompactAllocatesNothing pins claim 1: splitting a well-formed token
 // performs ZERO heap allocations, because segmentsValue is a fixed array of
 // views and not a slice grown per separator.
@@ -125,10 +88,11 @@ func TestSplitCompactAllocatesNothing(t *testing.T) {
 		}
 		sinkSegments = seg
 	})
+	reportWindow(t, "splits of a well-formed token", got)
 	//: zero, not "small": the parts are views, so there is nothing to allocate.
-	if got != 0 {
+	if got.own != 0 {
 		t.Fatalf("split of a well-formed token performed %d allocations in %d calls, want 0",
-			got, allocRuns)
+			got.own, allocRuns)
 	}
 }
 

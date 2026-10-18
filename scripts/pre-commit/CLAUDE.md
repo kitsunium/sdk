@@ -17,7 +17,7 @@ BSD tools, nothing installed) is in `scripts/CLAUDE.md`.
 
 | Guard | Fails when | Run by |
 |---|---|---|
-| `check-alloc-lane-coverage.sh` | a directory holding a `//go:build !race` test is not covered by `tools/alloc-lane-targets.txt` — such a test runs in no lane (rule 12) | `make lint` and a `bazel` job step |
+| `check-alloc-lane-coverage.sh` | a directory holding a `//go:build !race` test is not covered by `tools/alloc-lane-targets.txt` — such a test runs in no lane (rule 12); a copy of `allocwindow_test.go` differs from the others below its package clause; a hand-written test reads `runtime.MemStats`' `Mallocs`, a process-wide count (kit's generated files excepted) | `make lint` and a `bazel` job step |
 | `check-audit-coverage.sh` | a package declaring an `errs.Define` or an `errs.Code` constant is missing from `//:audit_sources`, so the errs AST audits never judge it (rule 3, ADR 0020); a re-export allocates nothing and is not counted | `make lint` and a `bazel` job step |
 | `check-bench-md.sh` | a directory holding a `*_bench_test.go` has no sibling `BENCH.md` (rule 9) — presence only, never freshness | `make lint` and a `bazel` job step |
 | `check-core-symmetry.sh` | a production file under `internal/service` declares a code, a service domain has no core package at its path, or a core package declares a code with no engine at its path — a sub-contract beneath a domain whose ranges are all the core's own (layer 2) excepted (ADR 0160) | `make lint` and a `bazel` job step |

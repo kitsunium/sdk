@@ -33,6 +33,7 @@ go_test(
     name = "failover_test",
     srcs = [
         "alloc_external_test.go",
+        "allocwindow_test.go",
         "api_gen_test.go",
         "failover_sink_external_test.go",
         "failover_sink_internal_test.go",

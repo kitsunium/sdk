@@ -35,6 +35,7 @@ alias(
 go_test(
     name = "file_test",
     srcs = [
+        "allocwindow_test.go",
         "api_gen_test.go",
         "file_alloc_external_test.go",
         "file_external_test.go",

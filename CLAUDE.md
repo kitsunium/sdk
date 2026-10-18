@@ -439,7 +439,7 @@ sdk/
 | `make build` | `bazel mod tidy` + `bazel run //:gazelle` + `gofumpt -l -w` + `bazel build //...` |
 | `make test` | every `*_test` target green incl. `//internal/kernel/errs:errs_test` (AST audit) |
 | `make test-alloc` | race-off allocation gates green — every target in `tools/alloc-lane-targets.txt`, the only lane running `//go:build !race` tests |
-| `bash scripts/pre-commit/check-alloc-lane-coverage.sh` | exit 0 — no `!race` test sits outside `tools/alloc-lane-targets.txt` (rule 12) |
+| `bash scripts/pre-commit/check-alloc-lane-coverage.sh` | exit 0 — no `!race` test sits outside `tools/alloc-lane-targets.txt` (rule 12), every `allocwindow_test.go` — the allocation window a hand-written gate counts with, on its own call stack — is the same below its package clause, and no other hand-written test reads `runtime.MemStats`' `Mallocs` |
 | `bash scripts/pre-commit/check-domain-docs.sh` | exit 0 — the architecture tree's one `core/` block still names exactly the Go packages under `internal/core`, at any depth, no domain is described twice, and the three ADR indexes name exactly the ADRs on disk, once each (rule 11) |
 | `bash scripts/pre-commit/check-audit-coverage.sh` | exit 0 — no package declaring an `errs.Define`/`errs.Code` sits outside `//:audit_sources` (rule 3) |
 | `bash scripts/pre-commit/check-core-symmetry.sh` | exit 0 — no production file under `internal/service` declares an error code, every service domain has a core package at the same path, and every code an `internal/core` package declares belongs to an engine at its path or, beneath a domain, to a range the core allocated (rule 3, ADR 0160) |
