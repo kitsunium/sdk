@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -159,6 +160,56 @@ func (t *writerTurn) wake() {
 // writes it makes on the way — its history, its journal — do not take it
 // again, which would wait behind a transaction waiting for this very write.
 type sharesTurn struct{}
+
+// undoneCounts counts, per store id, the writes the data's rollbacks wrote
+// back. A transaction's writes land before its commit, so a read outside it
+// may see one a rollback then undoes: a reader that writes what it read
+// compares the count across its read and its write (workflow_ports.go).
+type undoneCounts struct {
+	mu sync.Mutex
+	// byStore maps a store's id to its count, made at its first use.
+	byStore map[string]*atomic.Uint64
+}
+
+// of is the count of the store id.
+func (u *undoneCounts) of(store string) *atomic.Uint64 {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	c := u.byStore[store]
+	if c == nil {
+		if u.byStore == nil {
+			u.byStore = map[string]*atomic.Uint64{}
+		}
+		c = new(atomic.Uint64)
+		u.byStore[store] = c
+	}
+	return c
+}
+
+// counted records that the transaction's rollback wrote a write of store
+// back: in a's count, after the write back, so that a read that saw the
+// count first may have seen the write, and one that saw it after did not;
+// and in the transaction's own.
+func (t *txn) counted(a *App, store string) {
+	if a == nil {
+		return
+	}
+	a.undone.of(store).Add(1)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.undid == nil {
+		t.undid = map[string]uint64{}
+	}
+	t.undid[store]++
+}
+
+// undidOf is how many writes of store the transaction's own rollbacks wrote
+// back.
+func (t *txn) undidOf(store string) uint64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.undid[store]
+}
 
 // writeTurn is what a local write of the store needs before it runs: in a
 // transaction, the turn for the transaction — at its first write there —;

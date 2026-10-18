@@ -183,6 +183,9 @@ type txn struct {
 	release func()
 	// undo are its local writes, oldest first: what a rollback writes back.
 	undo []undoStep
+	// undid counts, per store, the writes its own rollbacks — a savepoint's
+	// — wrote back: none of them undoes a write another transaction read.
+	undid map[string]uint64
 	// held are the effects waiting for the commit, in the order they were
 	// made.
 	held []heldEffect
@@ -302,6 +305,7 @@ func (t *txn) rollback(ctx context.Context, u *unit) {
 			logger.Warn(ctx, a.log, "a rolled back write could not be undone", logger.String("store", step.store),
 				logger.String("error", describeText(err)))
 		}
+		t.counted(a, step.store)
 	}
 	for _, e := range dropped {
 		if e.drop != nil {

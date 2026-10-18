@@ -68,6 +68,10 @@ type WorkflowService[E any, S comparable] struct {
 	// (ADR 0179 Q3), and the facade reads a state back from it.
 	spelled sync.Map
 
+	// reads are the entities the engine's loop read outside a transaction,
+	// for the replacement that follows (workflow_ports.go).
+	reads loopReads
+
 	// mu guards what the running app built: the engine, its loop, and the
 	// function that takes the workflow's hooks off its store.
 	mu      sync.Mutex
