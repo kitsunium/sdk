@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-18T15:00:00Z -->
+<!-- updated: 2026-10-18T22:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -16,6 +16,15 @@ after it, its chain checked from the snapshot's `ChainTip` before anything
 is written, grouped as an `ImportParams`), the mTLS TCP transport over `net/tlsid` and
 `net/server.Admission` (ADR 0174), and the in-memory doubles. It declares no
 code: it raises the core's.
+
+Platforms. The data directory's lock is `fs/flock`: where it has none
+(`flock.Native` false — illumos and Solaris, ADR 0144) `NewDataDir` refuses
+with `proc.UnsupportedPlatform` before writing anything, and the suite asserts
+that refusal and skips what needs a directory. The free-space gauge
+(`consensus_fs_free_bytes`, `fsfree_*.go`) is read with statfs(2) on Linux,
+macOS, FreeBSD, DragonFly and OpenBSD and with GetDiskFreeSpaceEx on Windows;
+on NetBSD, illumos and Solaris, whose statvfs(2) the standard library does not
+wrap, it is not published (`TestResourceMetrics` asserts both).
 
 ## Lanes
 

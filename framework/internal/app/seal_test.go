@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -153,12 +152,12 @@ func remind(ctx context.Context, r Reminder) (app.EmptyValue, error) {
 }
 
 // pinDataKeyWithoutFileStore pins data-key where the SDK keeps no protected
-// file store — Windows, Plan 9 —: the secrets live in memory there, and kit
+// file store — every GOOS but Linux, macOS and the BSDs —: the secrets live in memory there, and kit
 // refuses a store sealed on disk whose data-key would be made again at the
 // next start. The key is the product named name's: <NAME>_DATA_KEY.
 func pinDataKeyWithoutFileStore(t *testing.T, name string) {
 	t.Helper()
-	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
+	if fileStoreRefused() {
 		t.Setenv(strings.ToUpper(strings.ReplaceAll(name, "-", "_"))+"_DATA_KEY", "a data key of exactly 32 bytes..")
 	}
 }
@@ -485,9 +484,7 @@ func TestTheModelSaysWhatIsSealed(t *testing.T) {
 // versions after four rotations, which only a re-wrap lets it prune, and
 // every record still opens.
 func TestDataKeyRotationRewrapsTheKeys(t *testing.T) {
-	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
-		t.Skip("data-key rotates where the secrets are kept on disk: the SDK's file store needs file modes that are access lists")
-	}
+	needsFileStore(t)
 	clk := clock.NewManualClock(epoch)
 	keep := app.NewService("keep", "A store sealed on disk, for data-key's rotation.")
 	holdings := keep.Store("holdings", func(h Holding) string { return h.ID })

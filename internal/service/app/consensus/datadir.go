@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/fs/flock"
 )
@@ -67,6 +68,14 @@ func NewDataDir(dir string) (DataDir, error) { return NewDataDirWith(dir, DataDi
 
 // NewDataDirWith is NewDataDir with options.
 func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
+	// The directory lock is the first thing taken (D11), and there is none to
+	// take where the kernel has no flock(2) — illumos and Solaris (ADR 0144):
+	// the refusal is the platform's, at construction and before anything is
+	// written (ADR 0018 §(a)), never a storage failure an operator would
+	// chase on the disk.
+	if !flock.Native {
+		return DataDir{}, coreproc.UnsupportedPlatform
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return DataDir{}, storageFailed("mkdir", err)
 	}

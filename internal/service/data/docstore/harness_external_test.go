@@ -123,19 +123,19 @@ func overlayEntries(t *testing.T, fsys fs.FS) []string {
 }
 
 // diskFS returns a vfs.NewOS filesystem over a fresh directory, and the
-// directory. Windows refuses it by design (ADR 0056): the refusal is
-// asserted, then the case is skipped, because it needs a filesystem that
-// exists.
+// directory. Every GOOS but Linux, macOS and the BSDs refuses it by design
+// (ADR 0056; Windows, illumos and Solaris, ADR 0144): the refusal is asserted,
+// then the case is skipped, because it needs a filesystem that exists.
 func diskFS(t *testing.T) (corevfs.FullFS, string) {
 	t.Helper()
 	root := t.TempDir()
 	fsys, err := svcvfs.NewOS(root)
 	//: the platform's refusal, asserted before anything is skipped.
-	if runtime.GOOS == "windows" {
+	if diskRefused() {
 		if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) || fsys != nil {
-			t.Fatalf("NewOS on windows = (%v, %v), want (nil, UNSUPPORTED_PLATFORM)", fsys, err)
+			t.Fatalf("NewOS on %s = (%v, %v), want (nil, UNSUPPORTED_PLATFORM)", runtime.GOOS, fsys, err)
 		}
-		t.Skip("vfs.NewOS refuses windows by design (ADR 0018, ADR 0056); that refusal is asserted above, and this case needs a disk filesystem")
+		t.Skipf("vfs.NewOS refuses %s by design (ADR 0018, ADR 0056, ADR 0144); that refusal is asserted above, and this case needs a disk filesystem", runtime.GOOS)
 	}
 	if err != nil {
 		t.Fatalf("NewOS() = %v", err)
@@ -215,4 +215,15 @@ func quotes(text string, values ...string) bool {
 // memFS returns a fresh in-memory filesystem: every OS, no cleanup.
 func memFS() corevfs.FullFS {
 	return svcvfs.NewMem()
+}
+
+// diskRefused reports whether vfs.NewOS refuses this GOOS by design — every
+// GOOS its osguard_unix.go does not name. Spelled out rather than probed, so
+// that a refusal on Linux, macOS or a BSD fails the suite instead of skipping.
+func diskRefused() bool {
+	switch runtime.GOOS {
+	case "linux", "android", "darwin", "ios", "freebsd", "openbsd", "netbsd", "dragonfly":
+		return false
+	}
+	return true
 }

@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/url"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -39,9 +38,7 @@ func secretsCmd(t *testing.T, dir, stdin string, args ...string) (code int, stdo
 }
 
 func TestTheSecretsCommand(t *testing.T) {
-	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
-		t.Skip("the SDK's file store needs file modes that are access lists")
-	}
+	needsFileStore(t)
 	dir := filepath.Join(t.TempDir(), "secrets")
 	code, out, _ := secretsCmd(t, dir, "", "list")
 	for _, want := range []string{
@@ -128,9 +125,7 @@ func TestTheSecretsCommandWithoutAStore(t *testing.T) {
 // The stores an app opened are closed when it stops: a file store holds its
 // directory open.
 func TestTheSecretStoresCloseWithTheApp(t *testing.T) {
-	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
-		t.Skip("the SDK's file store needs file modes that are access lists")
-	}
+	needsFileStore(t)
 	app := NewApp("vault", cmdSecrets).With(Env(EnvDev), DataDir(t.TempDir()), Listen("127.0.0.1:0"), Analyze(false), Logs(io.Discard))
 	t.Setenv("VAULT_API_TOKEN", "tok")
 	if err := app.Start(t.Context()); err != nil {
@@ -154,9 +149,7 @@ func TestTheSecretStoresCloseWithTheApp(t *testing.T) {
 // A database's URL is a secret of the product's: the command lists it and
 // keeps it, and the database finds it where it was kept.
 func TestTheSecretsCommandKeepsADatabasesURL(t *testing.T) {
-	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
-		t.Skip("the SDK's file store needs file modes that are access lists")
-	}
+	needsFileStore(t)
 	t.Setenv("VAULT_SECRETS", "file:"+filepath.Join(t.TempDir(), "secrets"))
 	t.Setenv("VAULT_SECRETS_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
 	app := NewApp("vault", cmdSecrets).With(Env(EnvProduction), Logs(io.Discard), Database("database", NewFakeDB(sql.DialectPostgres).Engine()))
@@ -207,9 +200,7 @@ func secretsOf(t *testing.T, app *App, stdin string, args ...string) (int, strin
 // the store holds none — a lost store's, brought back (kitsunium/platform#35,
 // kitsunium/sdk#274).
 func TestTheSecretsCommandListsKitsIndexKey(t *testing.T) {
-	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
-		t.Skip("the SDK's file store needs file modes that are access lists")
-	}
+	needsFileStore(t)
 	t.Setenv("VAULT_SECRETS", "file:"+filepath.Join(t.TempDir(), "secrets"))
 	t.Setenv("VAULT_SECRETS_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32)))
 	t.Setenv("VAULT_INDEX_KEY", "")

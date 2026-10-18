@@ -405,6 +405,7 @@ go_test(
         "//pkg/v1/errs",
         "//pkg/v1/observe/logger",
         "//pkg/v1/observe/profiling",
+        "//pkg/v1/proc",
         "//pkg/v1/proc/ipc",
         "//pkg/v1/security/authz",
         "//pkg/v1/security/secret",

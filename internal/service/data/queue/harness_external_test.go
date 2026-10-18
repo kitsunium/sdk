@@ -102,21 +102,23 @@ func makeFile(t *testing.T, clk clock.Clock, policy corequeue.PolicyValue) coreq
 }
 
 // requireFileBroker builds a durable broker and fails the test when it cannot —
-// except on Windows, where the refusal IS the contract.
+// except where the refusal IS the contract.
 //
 // The durable broker publishes through internal/service/data/vfs, and vfs refuses
-// Windows by design (ADR 0018, ADR 0056: no flushable directory handle, and a
-// mode that is not an ACL). So NewFile there returns UNSUPPORTED_PLATFORM once
-// the directory rules pass — which, on a directory this suite makes, they must:
-// a QUEUE_DIRECTORY_UNUSABLE here is the false verdict the first Windows run
-// found on every case. That refusal is ASSERTED, and then the case skips, since
-// the broker it needs does not exist there.
+// every GOOS but Linux, macOS and the BSDs by design (osguard_other.go; ADR
+// 0018, ADR 0056: no flushable directory handle on Windows, and neither a
+// flushable directory handle nor a file lock on illumos and Solaris, ADR 0144).
+// So NewFile there returns UNSUPPORTED_PLATFORM once the directory rules pass —
+// which, on a directory this suite makes, they must: a QUEUE_DIRECTORY_UNUSABLE
+// here is the false verdict the first Windows run found on every case. That
+// refusal is ASSERTED, and then the case skips, since the broker it needs does
+// not exist there.
 func requireFileBroker(t *testing.T, cfg svcqueue.FileConfig) corequeue.Broker {
 	t.Helper()
 	broker, err := svcqueue.NewFile(cfg)
 	//: the platform refusal, asserted before anything is skipped.
-	if runtime.GOOS == "windows" {
-		refusedOnWindows(t, broker, err)
+	if diskRefused() {
+		refusedHere(t, broker, err)
 	}
 	if err != nil {
 		t.Fatalf("NewFile() = %v, want nil", err)
@@ -124,15 +126,42 @@ func requireFileBroker(t *testing.T, cfg svcqueue.FileConfig) corequeue.Broker {
 	return broker
 }
 
-// refusedOnWindows asserts the durable broker's Windows answer — the platform
-// refusal, no broker — and then skips the calling case.
-func refusedOnWindows(t *testing.T, broker corequeue.Broker, err error) {
+// diskRefused reports whether internal/service/data/vfs refuses this GOOS by
+// design — every GOOS its osguard_unix.go does not name. It is spelled out
+// rather than probed, so that a refusal on Linux, macOS or a BSD fails the
+// suite instead of skipping it.
+func diskRefused() bool {
+	switch runtime.GOOS {
+	case "linux", "android", "darwin", "ios", "freebsd", "openbsd", "netbsd", "dragonfly":
+		return false
+	}
+	return true
+}
+
+// refusedHere asserts the durable broker's answer where vfs refuses the
+// platform — the platform refusal, no broker — and then skips the calling case.
+func refusedHere(t *testing.T, broker corequeue.Broker, err error) {
 	t.Helper()
 	//: the platform's refusal and no broker — anything else is the rules refusing a directory they should pass.
 	if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) || broker != nil {
-		t.Fatalf("NewFile on windows = (%v, %v), want (nil, UNSUPPORTED_PLATFORM) — the directory rules passed and vfs refused", broker, err)
+		t.Fatalf("NewFile on %s = (%v, %v), want (nil, UNSUPPORTED_PLATFORM) — the directory rules passed and vfs refused", runtime.GOOS, broker, err)
 	}
-	t.Skip("the durable broker publishes through internal/service/data/vfs, which refuses windows by design (ADR 0018, ADR 0056); that refusal is asserted above, and this case needs a broker that exists")
+	t.Skipf("the durable broker publishes through internal/service/data/vfs, which refuses %s by design (ADR 0018, ADR 0056, ADR 0144); that refusal is asserted above, and this case needs a broker that exists", runtime.GOOS)
+}
+
+// builtOrRefused asserts a construction the directory rules accept: nil, or
+// UNSUPPORTED_PLATFORM where vfs refuses the platform.
+func builtOrRefused(t *testing.T, what string, err error) {
+	t.Helper()
+	if diskRefused() {
+		if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
+			t.Fatalf("%s on %s = %v, want UNSUPPORTED_PLATFORM", what, runtime.GOOS, err)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("%s = %v, want nil", what, err)
+	}
 }
 
 // defaultPolicy is the policy every case starts from.

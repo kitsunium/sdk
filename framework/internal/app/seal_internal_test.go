@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -73,12 +72,12 @@ type card struct {
 }
 
 // pinDataKeyWithoutFileStore pins data-key where the SDK keeps no protected
-// file store — Windows, Plan 9 —: the secrets live in memory there, and kit
+// file store — every GOOS but Linux, macOS and the BSDs —: the secrets live in memory there, and kit
 // refuses a store sealed on disk whose data-key would be made again. The
 // key is the product named name's: <NAME>_DATA_KEY.
 func pinDataKeyWithoutFileStore(t testing.TB, name string) {
 	t.Helper()
-	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
+	if fileStoreRefused() {
 		t.Setenv(productVariable(name, varDataKeyStem), "a data key of exactly 32 bytes..")
 	}
 }

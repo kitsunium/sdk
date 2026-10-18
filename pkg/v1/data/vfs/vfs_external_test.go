@@ -10,6 +10,7 @@ import (
 
 	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
+	"github.com/kitsunium/sdk/pkg/v1/proc"
 )
 
 // TestTheFacadePublishesAliasesAndNotCopies is the ADR 0039 check at the
@@ -125,10 +126,29 @@ func TestARootThatIsNotThereIsRefusedByTheFacade(t *testing.T) {
 	if filesystem != nil {
 		t.Fatal("NewOS returned a filesystem for a root that does not exist")
 	}
-	if runtime.GOOS != "windows" && !errors.Is(newErr, vfs.RootUnavailable) {
+	//: where the platform itself is refused (Windows, illumos, Solaris), the
+	//: refusal comes first: it is the answer for every root, there or not.
+	if diskRefused() {
+		if !errors.Is(newErr, proc.UnsupportedPlatform) {
+			t.Errorf("NewOS on %s = %v, want proc.UnsupportedPlatform", runtime.GOOS, newErr)
+		}
+		return
+	}
+	if !errors.Is(newErr, vfs.RootUnavailable) {
 		t.Errorf("NewOS = %v, want vfs.RootUnavailable", newErr)
 	}
-	if runtime.GOOS != "windows" && !errors.Is(newErr, fs.ErrNotExist) {
+	if !errors.Is(newErr, fs.ErrNotExist) {
 		t.Errorf("NewOS = %v, want the cause to still match fs.ErrNotExist", newErr)
 	}
+}
+
+// diskRefused reports whether NewOS refuses this GOOS by design: every GOOS
+// but Linux, macOS and the BSDs. Spelled out rather than probed, so that a
+// refusal on Linux, macOS or a BSD fails instead of passing.
+func diskRefused() bool {
+	switch runtime.GOOS {
+	case "linux", "android", "darwin", "ios", "freebsd", "openbsd", "netbsd", "dragonfly":
+		return false
+	}
+	return true
 }

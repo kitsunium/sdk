@@ -161,8 +161,8 @@ func BenchmarkPutMemory(b *testing.B) {
 // filesystem, where the device's two flushes are the cost. Windows has no
 // disk filesystem in the SDK (ADR 0056).
 func BenchmarkPutDisk(b *testing.B) {
-	if runtime.GOOS == "windows" {
-		b.Skip("vfs.NewOS refuses windows by design")
+	if diskRefused() {
+		b.Skipf("vfs.NewOS refuses %s by design", runtime.GOOS)
 	}
 	for _, n := range []int{100, 10_000} {
 		b.Run(fmt.Sprintf("docs=%d", n), func(b *testing.B) {

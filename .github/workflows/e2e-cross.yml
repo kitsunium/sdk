@@ -142,20 +142,30 @@ env:
 jobs:
   # ── Native hosted runners: Go runs in place, no cross-compile ──────────────
   native:
-    name: ${{ matrix.name }}
+    name: ${{ matrix.name }}${{ matrix.shard && format(' ({0})', matrix.shard) || '' }}
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        # macOS and Windows run every module of the census in three shards,
+        # so the two modules that hold most of the packages — `internal` (the
+        # kernel, core and service layers) and `.` (the framework) — run
+        # beside the twenty-seven others rather than after them: the shards
+        # are `internal`, `root` and `rest`, and `rest` is the census minus
+        # the other two, so no module is left out by construction.
         include:
           - { name: linux, runs-on: ubuntu-latest }
           # macOS = darwin; proc syscall behaviour is arch-independent, so the
           # arm64 runner (macos-15) covers the darwin runtime bar. The Intel
           # runner (macos-13) is dropped: GitHub's Intel-mac pool is so contended
           # that the job sits queued indefinitely and never lets a run complete.
-          - { name: macos-arm64, runs-on: macos-15 }
-          - { name: windows, runs-on: windows-latest }
+          - { name: macos-arm64, runs-on: macos-15, shard: internal }
+          - { name: macos-arm64, runs-on: macos-15, shard: root }
+          - { name: macos-arm64, runs-on: macos-15, shard: rest }
+          - { name: windows, runs-on: windows-latest, shard: internal }
+          - { name: windows, runs-on: windows-latest, shard: root }
+          - { name: windows, runs-on: windows-latest, shard: rest }
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -185,10 +195,10 @@ jobs:
           path: |
             ${{ steps.gocache.outputs.build }}
             ${{ steps.gocache.outputs.mod }}
-          key: go-native-${{ matrix.name }}-${{ hashFiles('**/go.sum') }}-${{ steps.gocache.outputs.week }}
+          key: go-native-${{ matrix.name }}-${{ matrix.shard || 'kernel' }}-${{ hashFiles('**/go.sum') }}-${{ steps.gocache.outputs.week }}
           restore-keys: |
-            go-native-${{ matrix.name }}-${{ hashFiles('**/go.sum') }}-
-            go-native-${{ matrix.name }}-
+            go-native-${{ matrix.name }}-${{ matrix.shard || 'kernel' }}-${{ hashFiles('**/go.sum') }}-
+            go-native-${{ matrix.name }}-${{ matrix.shard || 'kernel' }}-
 
       # Linux only: Bazel runs every package on Linux (bazel-ci.yml), so this
       # leg runs the kernel-sensitive list — the same packages linux-init runs
@@ -234,13 +244,20 @@ jobs:
         env:
           GOWORK: "off"
           CGO_ENABLED: "0"
+          SHARD: ${{ matrix.shard }}
         run: |
           set -uo pipefail
           fail=0
           # Every module of the census (ADR 0137) — this loop named six, and
           # tools/genindex and tools/sdkguard never ran on macOS or Windows.
           # The root is the SDK module (ADR 0162) and is tested like the rest.
-          modules="$(bash scripts/ci/go-modules.sh)" || { echo "::error::the module census failed"; exit 1; }
+          census="$(bash scripts/ci/go-modules.sh)" || { echo "::error::the module census failed"; exit 1; }
+          case "$SHARD" in
+            internal) modules="internal" ;;
+            root) modules="." ;;
+            rest) modules="$(printf '%s\n' "$census" | grep -vx -e internal -e '[.]')" ;;
+            *) echo "::error::unknown shard '$SHARD'"; exit 1 ;;
+          esac
           for mod in $modules; do
             echo "::group::$mod"
             (cd "$mod" && go test -count=1 ./...) || { fail=1; echo "::error::$mod has failing tests on ${{ matrix.name }}"; }
@@ -249,7 +266,7 @@ jobs:
           exit $fail
 
       - name: E2E conformance — whole public API on ${{ matrix.name }}
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && (matrix.shard == '' || matrix.shard == 'rest') }}
         shell: bash
         env:
           GOWORK: "off"
@@ -267,7 +284,7 @@ jobs:
           path: |
             ${{ steps.gocache.outputs.build }}
             ${{ steps.gocache.outputs.mod }}
-          key: go-native-${{ matrix.name }}-${{ hashFiles('**/go.sum') }}-${{ steps.gocache.outputs.week }}
+          key: go-native-${{ matrix.name }}-${{ matrix.shard || 'kernel' }}-${{ hashFiles('**/go.sum') }}-${{ steps.gocache.outputs.week }}
 
   # ── Linux with a REAL init, and a real distro kernel: root, cgroup v2 delegated ──
   # Issue #118 / ADR 0177. The unprivileged `native` leg above cannot reach root,

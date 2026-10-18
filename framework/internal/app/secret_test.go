@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -517,9 +516,7 @@ func TestTheSMTPURLChangesWithoutARestart(t *testing.T) {
 // mode is an access list on the Unix family only.
 func skipWithoutFileStore(t *testing.T) {
 	t.Helper()
-	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
-		t.Skip("the SDK's file store needs file modes that are access lists")
-	}
+	needsFileStore(t)
 }
 
 // Without VAULT_SECRETS, the secrets follow the data in every environment:

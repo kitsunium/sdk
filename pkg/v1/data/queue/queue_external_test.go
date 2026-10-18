@@ -184,16 +184,16 @@ func facadeBroker(t *testing.T, kind string) queue.Broker {
 	t.Helper()
 	if kind == "file" {
 		broker, err := queue.NewFile(queue.FileConfig{Dir: t.TempDir(), Policy: facadePolicy()})
-		//: the durable broker's Windows answer is the platform refusal — its
-		//: atomic publisher, vfs, has no Windows backend — and a consumer
-		//: matches it through the public names alone. Asserted, then skipped:
+		//: where vfs refuses the platform (Windows, illumos, Solaris) the
+		//: durable broker's answer is that refusal, and a consumer matches it
+		//: through the public names alone. Asserted, then skipped:
 		//: the case needs a broker that does not exist there.
-		if runtime.GOOS == "windows" {
+		if diskRefused() {
 			//: the platform's refusal through the public names, and no broker.
 			if !errors.Is(err, proc.UnsupportedPlatform) || broker != nil {
-				t.Fatalf("NewFile on windows = (%v, %v), want (nil, proc.UnsupportedPlatform)", broker, err)
+				t.Fatalf("NewFile on %s = (%v, %v), want (nil, proc.UnsupportedPlatform)", runtime.GOOS, broker, err)
 			}
-			t.Skip("the durable broker is refused on windows by design (its atomic publisher has no windows backend); the refusal is asserted above")
+			t.Skipf("the durable broker is refused on %s by design (its atomic publisher, vfs, is Linux's, macOS's and the BSDs'); the refusal is asserted above", runtime.GOOS)
 		}
 		if err != nil {
 			t.Fatalf("NewFile() = %v, want nil", err)
@@ -276,4 +276,16 @@ func TestTheFacadeMovesALiveMessage(t *testing.T) {
 			}
 		})
 	}
+}
+
+// diskRefused reports whether the durable broker's atomic publisher refuses
+// this GOOS by design: every GOOS but Linux, macOS and the BSDs — Windows,
+// illumos and Solaris among them. Spelled out rather than probed, so that a
+// refusal on Linux, macOS or a BSD fails instead of skipping.
+func diskRefused() bool {
+	switch runtime.GOOS {
+	case "linux", "android", "darwin", "ios", "freebsd", "openbsd", "netbsd", "dragonfly":
+		return false
+	}
+	return true
 }

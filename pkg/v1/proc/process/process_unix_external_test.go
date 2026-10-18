@@ -89,7 +89,10 @@ func TestCaptureAndBareNamesThroughTheFacade(t *testing.T) {
 	t.Parallel()
 	probeDir := t.TempDir()
 	probe := filepath.Join(probeDir, "kprobe-facade")
-	writeExecutable(t, probe, "#!/bin/sh\nprintf from-spec-env\n")
+	//: echo, not printf: the child's PATH is probeDir alone, and printf is
+	//: a program on OpenBSD's ksh (exit 127 there), where echo is a builtin
+	//: of every sh.
+	writeExecutable(t, probe, "#!/bin/sh\necho from-spec-env\n")
 	type tc struct {
 		name    string
 		spec    process.Spec
@@ -105,7 +108,7 @@ func TestCaptureAndBareNamesThroughTheFacade(t *testing.T) {
 		{
 			"a name found only through Spec.Env's PATH",
 			process.Spec{Path: "kprobe-facade", Env: []string{"PATH=" + probeDir}},
-			"from-spec-env", nil,
+			"from-spec-env\n", nil,
 		},
 		{
 			"the same name without that PATH is not found",

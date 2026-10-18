@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -175,16 +176,19 @@ func TestResourceMetrics(t *testing.T) {
 			}
 		}
 	}()
+	// The free-space gauge is published where the platform can measure the
+	// filesystem, and only there: a -1 is never reported as a size.
+	wantFree := fsFree(dn.dir) >= 0
 	deadline = time.Now().Add(5 * time.Second)
 	for {
 		snap := dm.Collect()
 		lb, ok1 := snap.Gauges[mLogBytes]
 		_, ok2 := snap.Gauges[mFsFree]
-		if ok1 && ok2 && len(lb.Points) > 0 {
+		if ok1 && ok2 == wantFree && len(lb.Points) > 0 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("log gauges missing: %v %v", ok1, ok2)
+			t.Fatalf("log gauges: bytes %v, free %v (want free %v on %s)", ok1, ok2, wantFree, runtime.GOOS)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
