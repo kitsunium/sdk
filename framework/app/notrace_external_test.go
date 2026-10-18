@@ -282,6 +282,12 @@ func executionCarriesNoTrace(t *testing.T, bin string, words [][]byte) {
 			mustSay(t, "config", out, productPrefix+"DATA_DIR", productPrefix+"GREETING")
 		}
 	}
+	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
+		// The served probe keeps its data in a directory, and the SDK's disk
+		// filesystem refuses this platform at construction (ADR 0018): the
+		// start would refuse, as framework/internal/app's needsFileStore says.
+		t.Skip("served with a data directory: the SDK's disk filesystem needs file modes that are access lists")
+	}
 	answered := serve(t, bin, dir)
 	refuse(t, "what the served probe answered and logged", answered, words)
 	var made bytes.Buffer
@@ -334,26 +340,30 @@ func serve(t *testing.T, bin, dir string) []byte {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	stopped := false
+	// exited is closed once the probe exited and its output is all in logs.
+	exited := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(exited)
+	}()
 	stop := func() {
-		if stopped {
-			return
-		}
-		stopped = true
-		_ = cmd.Process.Signal(os.Interrupt)
-		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
 		select {
-		case <-done:
+		case <-exited:
+			return
+		default:
+		}
+		_ = cmd.Process.Signal(os.Interrupt)
+		select {
+		case <-exited:
 		case <-time.After(30 * time.Second):
 			_ = cmd.Process.Kill()
-			<-done
+			<-exited
 		}
 	}
 	defer stop()
 	client := &http.Client{Timeout: 10 * time.Second}
 	base := "http://" + addr
-	if !ready(ctx, client, base) {
+	if !ready(ctx, exited, client, base) {
 		stop()
 		t.Fatalf("the probe never answered on %s:\n%s", addr, logs.String())
 	}
@@ -372,8 +382,8 @@ func serve(t *testing.T, bin, dir string) []byte {
 // need pinned by their variables — what an operator gives a product whose
 // secrets are not on disk. Left to the default, the secrets would follow the
 // data on a platform with a protected file store and live in memory on one
-// without (Windows), where the start refuses a sealed store whose data key
-// is made again at every start. Each key is fresh hexadecimal: 32 bytes, as
+// without, where the start refuses a sealed store whose data key is made
+// again at every start. Each key is fresh hexadecimal: 32 bytes, as
 // a keyring's version holds, written in no letter beyond f.
 func pinnedKeys(t *testing.T) []string {
 	t.Helper()
@@ -391,9 +401,15 @@ func pinnedKeys(t *testing.T) []string {
 	}
 }
 
-// ready waits until the probe's liveness probe answers 200.
-func ready(ctx context.Context, client *http.Client, base string) bool {
+// ready waits until the probe's liveness probe answers 200, and gives up
+// when the probe exited: a refused start is reported at once, with its log.
+func ready(ctx context.Context, exited <-chan struct{}, client *http.Client, base string) bool {
 	for ctx.Err() == nil {
+		select {
+		case <-exited:
+			return false
+		default:
+		}
 		resp, err := client.Get(base + "/_app/health/live")
 		if err == nil {
 			_ = resp.Body.Close()
