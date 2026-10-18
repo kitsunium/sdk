@@ -388,7 +388,10 @@ jobs:
           # What runs inside the guest: POSIX sh, the same for all four legs.
           # A test binary run directly has no timeout of its own, so each gets
           # -test.timeout (a hang panics with every stack, and the next suite
-          # still runs, #118). The retry is the BSD lane's.
+          # still runs, #118). A failure is tried again only to name it, as
+          # run-test-binaries.sh does: one that passes on a retry is flaky
+          # and fails the job like one that never passes — CI detects a
+          # flake, it never masks one.
           cat > bins/run.sh <<'SH'
           set -u
           cd "$(dirname "$0")/.."
@@ -396,21 +399,28 @@ jobs:
           echo "== cgroup: $(stat -fc %T /sys/fs/cgroup 2>/dev/null) | self=$(cat /proc/self/cgroup) =="
           echo "== cgroup.controllers: $(cat /sys/fs/cgroup/cgroup.controllers 2>/dev/null) =="
           [ -r /etc/os-release ] && . /etc/os-release && echo "== distro: ${PRETTY_NAME:-?} =="
-          retry() {
+          attempts() { # name command...
+            name=$1
+            shift
             i=1
             while [ "$i" -le 3 ]; do
-              "$@" && return 0
-              echo "  (attempt $i failed, retrying)"
+              if "$@"; then
+                [ "$i" -eq 1 ] && return 0
+                echo "::error::$name is flaky on $(uname -sr): it failed, then passed on attempt $i"
+                return 1
+              fi
+              echo "  (attempt $i of $name failed)"
               i=$((i + 1))
             done
+            echo "::error::$name fails on $(uname -sr)"
             return 1
           }
           fail=0
           echo "== conformance =="
-          retry ./bins/conformance.run || fail=1
+          attempts conformance ./bins/conformance.run || fail=1
           for b in bins/*.test; do
             echo "== $b =="
-            retry ./"$b" -test.v -test.timeout=5m || fail=1
+            attempts "$b" ./"$b" -test.v -test.timeout=5m || fail=1
           done
           exit $fail
           SH
@@ -816,12 +826,18 @@ jobs:
           set -u
           fail=0
           echo "== conformance on ${{ matrix.os }} =="
+          # Tried again only to name a failure: a pass on a retry is a flake,
+          # and fails the job (run-test-binaries.sh's rule).
           ok=0
           for i in 1 2 3; do
-            ./bins/conformance.run && { ok=1; break; }
-            echo "  (attempt $i of conformance failed, retrying)"
+            ./bins/conformance.run && { ok=$i; break; }
+            echo "  (attempt $i of conformance failed)"
           done
-          [ "$ok" -eq 1 ] || fail=1
+          case "$ok" in
+            1) ;;
+            0) echo "::error::conformance fails on $(uname -sr)"; fail=1 ;;
+            *) echo "::error::conformance is flaky on $(uname -sr): it failed, then passed on attempt $ok"; fail=1 ;;
+          esac
           sh scripts/ci/run-test-binaries.sh bins || fail=1
           exit $fail
 
@@ -954,11 +970,17 @@ jobs:
           export PATH
           fail=0
           echo "== conformance on $(uname -sv) =="
+          # Tried again only to name a failure: a pass on a retry is a flake,
+          # and fails the job (run-test-binaries.sh's rule).
           ok=0
           for i in 1 2 3; do
-            ./bins/conformance.run && { ok=1; break; }
-            echo "  (attempt $i of conformance failed, retrying)"
+            ./bins/conformance.run && { ok=$i; break; }
+            echo "  (attempt $i of conformance failed)"
           done
-          [ "$ok" -eq 1 ] || fail=1
+          case "$ok" in
+            1) ;;
+            0) echo "::error::conformance fails on $(uname -sr)"; fail=1 ;;
+            *) echo "::error::conformance is flaky on $(uname -sr): it failed, then passed on attempt $ok"; fail=1 ;;
+          esac
           sh scripts/ci/run-test-binaries.sh bins || fail=1
           exit $fail

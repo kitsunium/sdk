@@ -204,13 +204,23 @@ func TestARotatedCredentialReachesTheNextConnection(t *testing.T) {
 	a := ledger(t, &logs)
 	run(t, a)
 	t.Setenv("LEDGER_DATABASE_URL", testURL(t, url.UserPassword(secondRole, secondWord)))
+	// The lifetime is the behaviour: the connection made with the first
+	// credential must have outlived it before anything is asked.
 	time.Sleep(1200 * time.Millisecond)
 	eventually(t, a.URL(), "with the rotated credential")
-	if n := countOn(t, server(t).String(), sessionsOfSecond); n == 0 {
-		t.Error("no connection made as the second role")
-	}
-	if d := databaseOf(t, a.Graph()); d.Pool == nil || d.Pool.Closed == 0 {
-		t.Errorf("no connection retired by its lifetime: %+v", d.Pool)
+	// The pool retires and redials on its own goroutines: wait for both
+	// facts to be observed, within a bound, rather than reading each once.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		n := countOn(t, server(t).String(), sessionsOfSecond)
+		d := databaseOf(t, a.Graph())
+		if n > 0 && d.Pool != nil && d.Pool.Closed > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("after the rotation: %d connection(s) as the second role, pool %+v; want one, and one retired by its lifetime", n, d.Pool)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

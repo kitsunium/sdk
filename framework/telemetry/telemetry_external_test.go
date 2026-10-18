@@ -80,9 +80,10 @@ func TestAnAttachedClientReadsTheHandshakeThenTheRecords(t *testing.T) {
 	if list != 2 || ex.Ref("nope") != 0 {
 		t.Fatalf("the references: %d %d", list, ex.Ref("nope"))
 	}
-	// The client is registered once the handshake is written; give the
-	// accept loop the lock back before emitting.
-	time.Sleep(20 * time.Millisecond)
+	// The accept loop writes the handshake and registers the client under
+	// one hold of the exporter's lock, and a flush takes that lock: a record
+	// emitted once the handshake was read is flushed to this client. Nothing
+	// to wait for.
 	for i := range 3 {
 		ex.Emit(&telemetry.Event{
 			Kind: telemetry.KindSpan, Op: telemetry.OpRequest, Outcome: telemetry.OutcomeOK,

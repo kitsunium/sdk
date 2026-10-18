@@ -4,7 +4,11 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"runtime/pprof"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -239,9 +243,25 @@ func TestAQueuedCommandSurvivesARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The attempt takes the failure; the consumer then nacks it, its retry
-	// due on a clock that stands still.
+	// due on a clock that stands still. The stop waits for that nack to be
+	// on disk — the message back among the queue's waiting ones, none
+	// leased —, not for a guess at how long the nack takes.
 	eventually(t, "the first attempt", func() bool { return labFailures.Load() == 0 })
-	time.Sleep(20 * time.Millisecond)
+	nacked := func() bool { return queuedIn(t, dir, "ready") == 1 && queuedIn(t, dir, "inflight") == 0 }
+	deadline := time.Now().Add(5 * time.Second)
+	for !nacked() {
+		if time.Now().After(deadline) {
+			// Where every goroutine stands says what kept the nack from
+			// the disk, which the timeout alone does not.
+			var stacks strings.Builder
+			if err := pprof.Lookup("goroutine").WriteTo(&stacks, 2); err != nil {
+				t.Logf("goroutine dump: %v", err)
+			}
+			t.Fatalf("timed out waiting for the first attempt's nack: ready %d, inflight %d\n%s",
+				queuedIn(t, dir, "ready"), queuedIn(t, dir, "inflight"), stacks.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if q := first.Graph().Node("lab/command/queued").Command.Queue; q != "file" {
 		t.Errorf("the queue is %q, want file", q)
 	}
@@ -250,4 +270,27 @@ func TestAQueuedCommandSurvivesARestart(t *testing.T) {
 	}
 	startOn(t, dir, nil)
 	eventually(t, "the retry after the restart", func() bool { return len(handledBy()) == 1 })
+}
+
+// queuedIn counts the messages the queued command's file queue under the
+// data directory dir holds in state — "ready" (waiting, a nacked one among
+// them) or "inflight" (leased): the SDK's file broker keeps one ".msg" file
+// per message in one directory per state, the layout the framework itself
+// reads (fileQueueStates).
+func queuedIn(t *testing.T, dir, state string) int {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Join(dir, "lab", "commands", "queued", state))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0
+		}
+		t.Fatalf("reading the queue's %s messages: %v", state, err)
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".msg") {
+			n++
+		}
+	}
+	return n
 }

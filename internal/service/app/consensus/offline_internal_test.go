@@ -304,11 +304,16 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 	}
 	victim.node = n
 	var l *diskNode
+	leaderBy := time.Now().Add(30 * time.Second)
 	for l == nil {
 		for _, dn := range nodes[:2] {
 			if dn.node != nil && dn.node.Status().Role == coreconsensus.RoleLeader {
 				l = dn
 			}
+		}
+		//: no leader within the bound is a failure, never a hang.
+		if l == nil && time.Now().After(leaderBy) {
+			t.Fatal("no leader among the two healthy nodes")
 		}
 		time.Sleep(5 * time.Millisecond)
 	}

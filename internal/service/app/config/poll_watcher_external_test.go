@@ -3,21 +3,22 @@ package config_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	coreconfig "github.com/kitsunium/sdk/internal/core/app/config"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	cfg "github.com/kitsunium/sdk/internal/service/app/config"
 )
 
-// watchInterval is short enough to keep the tests quick and long enough that a
-// loaded machine still ticks several times inside the deadline.
+// watchInterval is the poll interval: on a ManualClock, how far one Advance
+// moves it.
 const watchInterval time.Duration = 10 * time.Millisecond
 
-// watchDeadline bounds how long a test waits for a change to be observed.
+// watchDeadline bounds how long a test waits for a poll it caused to report.
 const watchDeadline time.Duration = 5 * time.Second
 
 // TestPollWatcher pins that a change to the watched file reaches the callback,
@@ -27,6 +28,12 @@ const watchDeadline time.Duration = 5 * time.Second
 // inotify/kqueue dependency, and both fields are checked because an editor that
 // rewrites a file in place within the same second changes the size while the
 // mtime may not have moved.
+//
+// The watch ticks on a ManualClock, which is what makes the order certain:
+// Watch takes its baseline before it arms its ticker, so BlockUntil(1)
+// returning means the baseline exists and the change made next is observed
+// rather than raced — a sleep only hoped so, and lost on a loaded Windows
+// runner, where the baseline then held the change and nothing ever fired.
 //
 // Goroutine lifecycle: one goroutine runs Watch, which returns when the context
 // is cancelled. It reports on a buffered channel so it can never block on send,
@@ -51,7 +58,15 @@ func TestPollWatcher(t *testing.T) {
 			t.Helper()
 			//: same size, so only the mtime moves — which is why both fields
 			//: are part of the fingerprint.
+			before := modTime(t, path)
 			write(t, path, []byte("INITIAL"))
+			//: a filesystem stamps a write at its own granularity — a
+			//: Windows tick, FAT's two seconds —, so a rewrite right after
+			//: the first write may keep its mtime. The mtime is moved past
+			//: any granularity, as a later edit would move it.
+			if err := os.Chtimes(path, time.Time{}, before.Add(2*time.Second)); err != nil {
+				t.Fatalf("moving the mtime of %s: %v", path, err)
+			}
 		}},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -59,28 +74,31 @@ func TestPollWatcher(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "conf.json")
 		write(t, path, []byte("initial"))
 
-		var fired atomic.Int64
+		manual := clock.NewManualClock(time.Unix(1_700_000_000, 0))
+		fired := make(chan struct{}, 1)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
 		done := make(chan error, 1)
 		go func() {
-			done <- cfg.PollWatcher(path, watchInterval).Watch(ctx, func() {
-				fired.Add(1)
+			done <- cfg.PollWatcherOnClockForTest(path, watchInterval, manual).Watch(ctx, func() {
+				select {
+				case fired <- struct{}{}:
+				default:
+				}
 			})
 		}()
 
-		//: give the watcher a tick to take its baseline before changing the
-		//: file, so the change is genuinely observed rather than raced.
-		time.Sleep(watchInterval * 2)
+		//: the ticker is armed, so the baseline was taken before it.
+		manual.BlockUntil(1)
 		c.mutate(t, path)
+		//: one poll, on the clock the watch ticks on.
+		manual.Advance(watchInterval)
 
-		deadline := time.Now().Add(watchDeadline)
-		for fired.Load() == 0 {
-			if time.Now().After(deadline) {
-				t.Fatal("the callback never fired after the file changed")
-			}
-			time.Sleep(watchInterval)
+		select {
+		case <-fired:
+		case <-time.After(watchDeadline):
+			t.Fatal("the callback never fired after the file changed")
 		}
 
 		cancel()
@@ -96,6 +114,36 @@ func TestPollWatcher(t *testing.T) {
 			runCase(t, c)
 		})
 	}
+}
+
+// TestPollWatcherOnTheWallClock pins what PollWatcher itself builds — the
+// watcher on the wall clock, the one a caller gets: it takes its baseline,
+// arms its ticker and stops cleanly when its context ends. The detection is
+// TestPollWatcher's, on a clock the test drives; nothing here waits for a
+// state of the watch goroutine, so nothing here can race it.
+func TestPollWatcherOnTheWallClock(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "conf.json")
+	write(t, path, []byte("initial"))
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		done <- cfg.PollWatcher(path, watchInterval).Watch(ctx, func() {})
+	}()
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("Watch after cancellation = %v, want nil", err)
+	}
+}
+
+// modTime is the file's modification time.
+func modTime(t *testing.T, path string) time.Time {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return info.ModTime()
 }
 
 // TestPollWatcherRejectsBadInput pins the two arguments that would otherwise

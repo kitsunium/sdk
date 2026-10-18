@@ -675,15 +675,34 @@ SH
   [ -f "$WORK/b.ran" ]
 }
 
-# A retry that passes is not silent: the package is named as a flake.
-@test "binaries: a suite passing only on a retry passes, and is named as a flake" {
+# A retry that passes is not a pass: the package is named as flaky and the
+# run FAILS, so a flake is detected and never masked; the suites after it
+# still run.
+@test "binaries: a suite passing only on a retry fails the run, named as flaky" {
   binaries_fixture
-  printf '1\n0\n' >"$WORK/b.codes"
+  printf '1\n0\n' >"$WORK/a.codes"
+
+  run sh "$CI_DIR/run-test-binaries.sh" bins
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::error::a/pkg is flaky on"*"passed on attempt 2"* ]]
+  [[ "$output" == *"FLAKY a/pkg"* ]]
+  [[ "$output" != *"::error::a/pkg fails on"* ]]
+  [[ "$output" != *"::warning::"* ]]
+  [ "$(wc -l <"$WORK/a.ran" | tr -d ' ')" = "2" ]
+  [ -f "$WORK/b.ran" ]
+}
+
+# A suite that passes at once is the only green: nothing is named.
+@test "binaries: suites passing on their first attempt pass, and nothing is named" {
+  binaries_fixture
 
   run sh "$CI_DIR/run-test-binaries.sh" bins
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"::warning::b/pkg passed only on a retry"* ]]
+  [[ "$output" != *"::error::"* ]]
+  [[ "$output" != *"FLAKY"* ]]
+  [ "$(wc -l <"$WORK/a.ran" | tr -d ' ')" = "1" ]
 }
 
 # A hang spends one timeout, never three: retried, it would eat the guest
@@ -727,4 +746,21 @@ SH
   # Comments name -short to say why it is gone; only the commands count.
   run bash -c "grep -v '^[[:space:]]*#' '$wf' | grep -cE -- '-(test[.])?short'"
   [ "$output" = "0" ]
+}
+
+# A retry in the runtime lane only names a failure. Every job that tries a
+# suite or the conformance program again fails a pass on a retry as flaky,
+# and none says a retry passed with a mere warning: CI detects a flake, it
+# never masks one.
+@test "lanes: no runtime job lets a test pass on a retry" {
+  local wf="$REPO_ROOT/.github/workflows/e2e-cross.yml"
+  for job in linux-init bsd solarish; do
+    body="$(job_body "$wf" "$job")"
+    [ -n "$body" ]
+    [[ "$body" == *"is flaky on"* ]]
+    [[ "$body" != *"passed only on a retry"* ]]
+    [[ "$body" != *'"$@" && return 0'* ]]
+  done
+  run grep -c '::warning::.*retry' "$wf" "$CI_DIR/run-test-binaries.sh"
+  [[ "$output" != *":"[1-9]* ]]
 }

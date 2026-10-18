@@ -336,7 +336,30 @@ func TestTCPCapsUnauthenticatedConnectionsPerAddress(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tr.Close()
+	// raw is how many admitted connections still wait on their handshake.
+	raw := func() int {
+		tr.mu.Lock()
+		defer tr.mu.Unlock()
+		return len(tr.raw)
+	}
+	// until polls cond, within a bound far beyond any accept loop's pace.
+	until := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		//: until the state is observed.
+		for !cond() {
+			//: past the bound, the state never came.
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	// open dials n connections that send nothing, and returns once the
+	// accept loop has decided each one: admitted (still raw, its handshake
+	// unread — its deadline is a second away) or refused (counted).
 	open := func(n int) []net.Conn {
+		before := tr.RefusedBeforeHandshake()
 		var cs []net.Conn
 		for range n {
 			c, err := net.Dial("tcp", tr.Addr())
@@ -345,7 +368,9 @@ func TestTCPCapsUnauthenticatedConnectionsPerAddress(t *testing.T) {
 			}
 			cs = append(cs, c)
 		}
-		time.Sleep(50 * time.Millisecond)
+		until("every connection admitted or refused", func() bool {
+			return int64(raw())+tr.RefusedBeforeHandshake()-before >= int64(n)
+		})
 		return cs
 	}
 	closeAll := func(cs []net.Conn) {
@@ -358,8 +383,33 @@ func TestTCPCapsUnauthenticatedConnectionsPerAddress(t *testing.T) {
 		t.Fatalf("refused %d of 4 over a cap of 2", got)
 	}
 	closeAll(cs)
-	time.Sleep(1200 * time.Millisecond) // the handshake timeout frees the slots
+	// A closed client ends its handshake at once: each slot is given back
+	// before its connection leaves the raw set.
+	until("the closed connections' slots given back", func() bool { return raw() == 0 })
 	tr.SetMembership(1, []coreconsensus.MemberValue{{ID: 1, SPKI: [32]byte{1}, Address: tr.Addr()}})
+	// The reservation resolves the members' addresses on a goroutine of its
+	// own: wait until the admission gives the loopback more than the
+	// unauthenticated cap — three slots at once — before dialling.
+	loopback := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)}
+	until("the member's address reserved", func() bool {
+		var releases []func()
+		reserved := true
+		//: three admissions over a cap of two say the reservation holds.
+		for range 3 {
+			release, ok := tr.admission.Admit(loopback)
+			//: refused: not reserved yet.
+			if !ok {
+				reserved = false
+				break
+			}
+			releases = append(releases, release)
+		}
+		//: the probe's slots are given back whatever it saw.
+		for _, release := range releases {
+			release()
+		}
+		return reserved
+	})
 	before := tr.RefusedBeforeHandshake()
 	cs = open(4)
 	defer closeAll(cs)

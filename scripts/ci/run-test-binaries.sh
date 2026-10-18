@@ -9,16 +9,20 @@
 #
 # Each binary gets -test.timeout (TEST_TIMEOUT, default 5m): a binary run
 # directly has no timeout of its own, and a hang must panic with every stack
-# and let the next suite run. A binary is tried up to TEST_ATTEMPTS times
-# (default 3) — the guests are virtual machines, and a timing-sensitive suite
-# can lose one round to the hypervisor; a real defect fails every attempt. A
-# suite that timed out is NOT tried again: a hang spends one timeout, never
-# three, so it cannot eat the step's cap and leave the suites after it unrun
-# and this summary unprinted. A suite that passed only on a retry is NAMED at
-# the end, as a flake to answer, never silently absorbed. Stdin is /dev/null,
+# and let the next suite run.
+#
+# A suite that fails is tried again, up to TEST_ATTEMPTS times in all (default
+# 3), and ONLY to tell a defect from a flake: a suite failing every attempt
+# fails, and a suite that failed and then passed FAILS TOO, named as flaky —
+# a flake is a defect to fix, and a lane that let it pass would hide it: CI
+# detects a flaky test, it never masks one. The retry never turns a red suite
+# green. A suite that timed out is NOT tried again: a hang
+# spends one timeout, never three, so it cannot eat the step's cap and leave
+# the suites after it unrun and this summary unprinted. Stdin is /dev/null,
 # so no suite can read the manifest this loop is reading.
 #
-# Exit 1 when any suite failed every attempt, naming each.
+# Exit 1 when any suite failed on any attempt, naming each: "fails" for one
+# that never passed, "is flaky" for one that passed only on a retry.
 
 set -u
 
@@ -71,9 +75,11 @@ while read -r bin dir; do
     i=$((i + 1))
   done
   t1=$(now)
-  if [ "$ok" -eq 1 ]; then
+  if [ "$ok" -eq 1 ] && [ "$i" -eq 1 ]; then
     echo "ok   $dir ($((t1 - t0))s)"
-    [ "$i" -gt 1 ] && flaky="$flaky $dir"
+  elif [ "$ok" -eq 1 ]; then
+    echo "FLAKY $dir ($((t1 - t0))s, failed $((i - 1)) of $i attempts)"
+    flaky="$flaky $dir:$i"
   else
     if [ "$hung" -eq 1 ]; then
       echo "FAIL $dir ($((t1 - t0))s, timed out after $timeout)"
@@ -85,13 +91,13 @@ while read -r bin dir; do
 done <"$bindir/manifest"
 
 echo "== $ran suites on $kernel in $(($(now) - start))s =="
-for dir in $flaky; do
-  echo "::warning::$dir passed only on a retry on $kernel"
+for entry in $flaky; do
+  echo "::error::${entry%:*} is flaky on $kernel: it failed, then passed on attempt ${entry##*:}; a flake is a defect to fix, never a pass"
 done
-if [ -n "$failed" ]; then
-  for dir in $failed; do
-    echo "::error::$dir fails on $kernel"
-  done
+for dir in $failed; do
+  echo "::error::$dir fails on $kernel"
+done
+if [ -n "$failed$flaky" ]; then
   exit 1
 fi
 exit 0

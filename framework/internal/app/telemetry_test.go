@@ -54,7 +54,9 @@ func TestADaemonReportsItsSpansOnTheTelemetrySocket(t *testing.T) {
 	if ref == 0 {
 		t.Fatalf("the node table lacks the listener: %v", h.Nodes)
 	}
-	time.Sleep(20 * time.Millisecond)
+	// The exporter registers this client under the lock it wrote the
+	// handshake under, and flushes under it: the connection's record, made
+	// once the handshake was read, reaches it. Nothing to wait for.
 	c, cErr := l.Dial(t.Context())
 	if cErr != nil {
 		t.Fatal(cErr)

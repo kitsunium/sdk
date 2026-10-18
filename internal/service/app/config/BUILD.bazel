@@ -53,6 +53,7 @@ go_test(
         "api_gen_test.go",
         "env_source_external_test.go",
         "env_source_internal_test.go",
+        "export_test.go",
         "file_source_external_test.go",
         "file_source_internal_test.go",
         "fs_source_external_test.go",

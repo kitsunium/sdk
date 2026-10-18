@@ -13,8 +13,10 @@ import (
 )
 
 // runKeyed dispatches the keyed lab command once per key, at once, holding
-// every run until each could start, and says how many ran at once.
-func runKeyed(t *testing.T, keys ...string) int32 {
+// every run until want of them run, and says how many ran at once. With
+// fewer runs wanted than keys, the rest are given a window in which they
+// must not start: a duration observed, not a state awaited.
+func runKeyed(t *testing.T, want int32, keys ...string) int32 {
 	t.Helper()
 	labKeyed.hold()
 	var wg sync.WaitGroup
@@ -25,8 +27,10 @@ func runKeyed(t *testing.T, keys ...string) int32 {
 			}
 		})
 	}
-	eventually(t, "a run holding its key", func() bool { return labKeyed.running.Load() >= 1 })
-	time.Sleep(20 * time.Millisecond)
+	eventually(t, "the runs holding their keys", func() bool { return labKeyed.running.Load() >= want })
+	if int(want) < len(keys) {
+		time.Sleep(20 * time.Millisecond)
+	}
 	labKeyed.release()
 	wg.Wait()
 	return labKeyed.most.Load()
@@ -36,10 +40,10 @@ func runKeyed(t *testing.T, keys ...string) int32 {
 // at once. A key that names nothing is refused.
 func TestAKeyRunsOneAtATime(t *testing.T) {
 	startCounter(t)
-	if most := runKeyed(t, "order_1", "order_1"); most != 1 {
+	if most := runKeyed(t, 1, "order_1", "order_1"); most != 1 {
 		t.Errorf("two runs of one key overlapped: %d at once", most)
 	}
-	if most := runKeyed(t, "order_1", "order_2"); most != 2 {
+	if most := runKeyed(t, 2, "order_1", "order_2"); most != 2 {
 		t.Errorf("two keys did not run at once: %d at once", most)
 	}
 	_, err := LabKeyed.Dispatch(t.Context(), LabInput{})
