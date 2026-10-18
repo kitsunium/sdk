@@ -420,6 +420,16 @@ func Test_handle_signalAfterReap(t *testing.T) {
 // child that exits between the decision to signal it and the kill(2) is not a
 // failure, it is the outcome the caller wanted. Reporting ESRCH there would make
 // every well-behaved shutdown look like an error.
+//
+// The child is a shell with nothing beneath it (shellOnlyWait), so killing
+// the group and reaping the leader leaves the group EMPTY. With a "sleep 30"
+// the shell forks — startChild keeps the shell as the leader — and the
+// SIGKILL leaves an orphaned sleep that init, not this process, reaps later.
+// Until it does, the group holds a zombie, and darwin's kill(-pgid) answers a
+// zombie-only group with EPERM: after the leader was collected that is a
+// refusal the SDK cannot tell from a live member it may not signal
+// (zombieGroupRefused), so the "already exited" case failed on macos-arm64
+// whenever launchd had not reaped the orphan yet.
 func Test_handle_signalGroupAllowGone(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -433,7 +443,7 @@ func Test_handle_signalGroupAllowGone(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		h := startChild(t, true, "sleep 30")
+		h := startChild(t, true, shellOnlyWait(t))
 		if c.alreadyGone {
 			if err := h.SignalGroup(coreproc.Signal(syscall.SIGKILL)); err != nil {
 				t.Fatalf("preparing the gone case: %v", err)
