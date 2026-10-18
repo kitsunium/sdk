@@ -62,3 +62,9 @@ code: it raises the core's.
   restart, which catches the node up by appends where the test meant an
   install. Isolate it before it stops (#374,
   `TestInstallResumesAfterACrashAtPublication`).
+- Bound an election in a test by a fixed number of split votes: a split
+  is a draw, about one round in a hundred on the memory network, and a
+  third round fails a two-round total every ten to twenty runs. Derive
+  the bound from the rounds the winner's term counts, each one election
+  timeout and a tick, and cap the rounds by the odds of that many splits
+  (`electionBound`, `maxRounds`).
