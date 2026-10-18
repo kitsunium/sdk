@@ -51,7 +51,7 @@ func TestTheGraphCarriesTheHoldsAndTheLoops(t *testing.T) {
 	if inv.HeldUntil == nil || inv.HeldUntil.Reason != "commercial code: 10 years" || inv.Erase == nil || inv.Erase.At == nil {
 		t.Errorf("invoices' privacy: %+v", inv)
 	}
-	if g.Node("kit.privacy/store/journal") == nil || g.Node("kit.privacy/store/holds") == nil {
+	if g.Node("app.privacy/store/journal") == nil || g.Node("app.privacy/store/holds") == nil {
 		t.Error("the framework's own stores are not in the graph")
 	}
 	if loops := retentionLoopNames(g); !slices.Equal(loops, []string{"desk/store/reports retention", "people/store/invoices retention"}) {

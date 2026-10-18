@@ -251,7 +251,7 @@ func TestModuleCollisionsRefuseTheStart(t *testing.T) {
 		`module name "kit" is the framework's`:                                                          `app.Mount(app.NewModule("kit"`,
 		`module name "schema" is the framework's`:                                                       `app.Mount(app.NewModule("schema"`,
 		`module name "Bad" must be lower-case letters`:                                                  `app.Mount(app.NewModule("Bad"`,
-		`module privacy lists kit.privacy, the framework's own service`:                                 `app.Mount(app.NewModule("privacy"`,
+		`module privacy lists app.privacy, the framework's own service`:                                 `app.Mount(app.NewModule("privacy"`,
 		`module under is mounted under "/_app/under/"`:                                                  `app.Prefix("/_app/under/")`,
 	} {
 		expectProblem(t, de, "module_mount_test.go", said, where)

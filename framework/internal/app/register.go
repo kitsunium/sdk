@@ -151,7 +151,7 @@ func mailersOf(g *model.Graph) map[string][]string {
 // productReads reports whether e is a node of the product reading a store:
 // not the outside world, not kit's own service.
 func productReads(e model.Edge) bool {
-	return e.Kind == model.EdgeReads && e.From != "" && e.From != model.ExternalID && model.ServiceOf(e.From) != privacyService
+	return e.Kind == model.EdgeReads && e.From != "" && e.From != model.ExternalID && !ownService(model.ServiceOf(e.From))
 }
 
 // addRecipients adds ids to the recipients of store, each once, in order.

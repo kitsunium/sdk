@@ -24,9 +24,11 @@ const (
 	// its probes' checks, the loops it writes, the settings it owns, the
 	// actor of what it does on its own.
 	frameworkName = "app"
-	// formerName is the name it said before ADR 0180 step 4. A module may
-	// not take it while the framework's own service is kit.privacy, whose
-	// stores rest under that name until step 5.
+	// formerName is the name it said before ADR 0180 step 4, and the name
+	// its data rested under before step 5. A module may not take it while
+	// that data may still be met under it: its tables, its privacy
+	// service's directory, and the labels sealed values are bound to, which
+	// a later minor re-seals (ADR 0180 Q6).
 	formerName = "kit"
 	// tagKey is the struct tag key the framework reads: app:"personal".
 	tagKey = frameworkName
@@ -46,6 +48,33 @@ const (
 	// Its probes still answer there, logged as deprecated, and it stays
 	// reserved, for two minors.
 	formerReserved = "/_kit/"
+)
+
+// The names at rest of ADR 0180 step 5 (Q5): what the framework keeps rests
+// under its own name — app_migrations, app_tables, app_queue__…, the privacy
+// service app.privacy and its stores, .app/data in dev —, and what a former
+// release kept under kit's is moved there, once, when the product meets it
+// (renamed_rest.go, and the store subsystem on a database). A move never
+// replaces: a present name already taken refuses the start, naming both.
+const (
+	// devDataDir is where the app keeps its data in dev when nothing names a
+	// directory.
+	devDataDir = "." + frameworkName + "/data"
+	// formerDevDataDir is where it kept it before ADR 0180 step 5.
+	formerDevDataDir = "." + formerName + "/data"
+	// formerPrivacyService is the framework's own service's name before ADR
+	// 0180 step 5: its directory in the data directory, its tables'
+	// prefix, and — until a later minor re-seals them (Q6) — what its
+	// stores' sealed values are bound to.
+	formerPrivacyService = formerName + ".privacy"
+	// formerSetTable is the version table of the framework's own set before
+	// ADR 0180 step 5.
+	formerSetTable = formerName + "_migrations"
+	// formerTablesTable is its registry of its tables before then.
+	formerTablesTable = formerName + "_tables"
+	// formerQueueService is what a consumer's queue's table was named under
+	// before then.
+	formerQueueService = formerName + "_queue"
 )
 
 // The framework's own variables an operator sets, by their name after the

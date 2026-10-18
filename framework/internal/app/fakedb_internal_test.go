@@ -479,6 +479,17 @@ func (c *fakeConn) lockQuery(query string, args []driver.NamedValue) (driver.Row
 			version = "8.0.36"
 		}
 		return &fakeRows{cols: []string{"VERSION()"}, rows: [][]driver.Value{{version}}}, true
+	case strings.HasPrefix(query, "SELECT tablename FROM pg_catalog.pg_tables "):
+		// The catalogue the move of the framework's tables reads (ADR 0180
+		// step 5): every table the fake holds, none of them under a former
+		// name — the move itself runs on the real engines' suites.
+		out := &fakeRows{cols: []string{"tablename"}}
+		for _, names := range [][]string{slices.Collect(maps.Keys(f.data.versions)), slices.Collect(maps.Keys(f.data.docs)), slices.Collect(maps.Keys(f.data.queues))} {
+			for _, name := range names {
+				out.rows = append(out.rows, []driver.Value{name})
+			}
+		}
+		return out, true
 	case strings.HasPrefix(query, "SELECT pg_try_advisory_lock("):
 		key := args[0].Value.(int64)
 		if holder, held := f.locks[key]; held && holder != c {

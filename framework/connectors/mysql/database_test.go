@@ -41,7 +41,7 @@ func TestMySQLOpensMigratesAndChecks(t *testing.T) {
 	}
 	// kit's own set first — its registry, the store's table —, then the
 	// product's.
-	if len(d.Migrations) != 2 || d.Migrations[0].Name != "kit" || len(d.Migrations[0].Applied) != 2 ||
+	if len(d.Migrations) != 2 || d.Migrations[0].Name != "app" || len(d.Migrations[0].Applied) != 2 ||
 		len(d.Migrations[1].Applied) != 2 || len(d.Migrations[1].Pending) != 0 {
 		t.Errorf("migrations %+v", d.Migrations)
 	}
@@ -218,7 +218,7 @@ func TestARotatedPasswordReachesTheNextConnection(t *testing.T) {
 // kit's own — its version table, its registry, the store's table and index
 // rows — and the product's.
 func withKitsTables(product ...string) []string {
-	out := append([]string{"books__entries", "books__entries___ix", "kit_migrations", "kit_tables", "kit_tables___ix"}, product...)
+	out := append([]string{"app_migrations", "app_tables", "app_tables___ix", "books__entries", "books__entries___ix"}, product...)
 	slices.Sort(out)
 	return out
 }

@@ -124,7 +124,7 @@ func (d *bureau) waitFor(t *testing.T, id string) {
 }
 
 // queueTables are the three queues' tables, as kit names them.
-var queueTables = []string{"kit_queue__bureau__heard", "kit_queue__bureau__file__command", "kit_queue__bureau__screen"}
+var queueTables = []string{"app_queue__bureau__heard", "app_queue__bureau__file__command", "app_queue__bureau__screen"}
 
 // waiting counts the messages the three queues hold.
 func waiting(t *testing.T, db *stdsql.DB) int {

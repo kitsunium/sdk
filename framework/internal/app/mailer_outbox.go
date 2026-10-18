@@ -10,7 +10,7 @@ import (
 // A mailer's outbox on a database (ADR 0178 C1, C7 item 7). A mailer whose
 // service a database keeps — by a store's rules, the database that would
 // keep its queue (queueKeeper) — keeps its outbox in one table of the SDK's
-// SQL broker there, kit_queue__<service>__<mailer>__outbox, instead of the
+// SQL broker there, app_queue__<service>__<mailer>__outbox, instead of the
 // spool's file queue under <data>/<service>/outbox/<mailer>. A mail sent in
 // a transaction on that database is written in it, just before its commit
 // (txn.join): it exists if and only if the transaction commits, and the
@@ -106,7 +106,7 @@ func (m *Mailer) openOutbox(ctx context.Context, a *App) (db *databaseRun, broke
 
 // queueUnder is what the mailer's outbox is kept under, beside its name:
 // <data>/<service>/outbox/<mailer> on disk, the table
-// kit_queue__<service>__<mailer>__outbox on a database.
+// app_queue__<service>__<mailer>__outbox on a database.
 func (m *Mailer) queueUnder() string { return underOutbox }
 
 // sealsAtRest reports whether the mailer's mails are sealed where they wait:

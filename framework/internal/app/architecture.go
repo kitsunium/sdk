@@ -395,7 +395,7 @@ func connectorsOn(g *model.Graph, nodes []string) []string {
 }
 
 // nearRoot spells a path relative to the product when it lies inside it —
-// ".kit/data" rather than a home directory.
+// ".app/data" rather than a home directory.
 func (a *App) nearRoot(p string) string {
 	if a.root == "" || p == "" {
 		return p

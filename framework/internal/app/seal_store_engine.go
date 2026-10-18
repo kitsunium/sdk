@@ -263,7 +263,7 @@ func (e *sealedEngine) dropOwnKey(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	ref := keys.ownRef(e.s.id, key)
+	ref := keys.ownRef(sealedAs(e.s.id), key)
 	release, err := e.z.alone(ctx, ref)
 	if err != nil {
 		return err

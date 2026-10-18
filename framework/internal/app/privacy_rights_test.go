@@ -292,7 +292,7 @@ func TestErasureLeavesNoTrace(t *testing.T) {
 	ctxStop, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	must(t, a.Stop(ctxStop))
-	const journal = "kit.privacy/journal.json"
+	const journal = "app.privacy/journal.json"
 	raw, rawErr := data.ReadFile(journal)
 	if rawErr != nil {
 		t.Fatal(rawErr)

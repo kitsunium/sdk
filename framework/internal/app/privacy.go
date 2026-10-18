@@ -13,7 +13,7 @@ import (
 // kit's own privacy service, as the graph names and describes it.
 const (
 	// privacyService is the service's name.
-	privacyService = "kit.privacy"
+	privacyService = frameworkName + ".privacy"
 	// privacyDoc is the service's documentation.
 	privacyDoc = "the framework's own service: the data keys, the legal holds and the privacy journal of the personal data the product keeps (ADR 0006)."
 )
@@ -48,7 +48,7 @@ const (
 
 // Privacy is the framework's own service: the data keys, the legal holds and the
 // privacy journal of an app that keeps personal data or seals what it
-// keeps. The framework mounts a copy of it — named kit.privacy, a name no service of a
+// keeps. The framework mounts a copy of it — named app.privacy, a name no service of a
 // product can take — in every app whose stores keep personal data or declare
 // a retention, or that keeps sealed values at rest, before the product's
 // services. Its stores stay in the data directory unless the product places

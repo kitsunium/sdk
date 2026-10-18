@@ -127,8 +127,8 @@ func TestTheDataKeysStayOffTheFile(t *testing.T) {
 	needsFileStore(t)
 	g := startDesk(t, true).app.Graph()
 	for id, want := range map[string]string{
-		"kit.privacy/store/keys": "file", "kit.privacy/store/holds": "sqlite",
-		"kit.privacy/store/journal": "sqlite", "desk/store/cases": "sqlite",
+		"app.privacy/store/keys": "file", "app.privacy/store/holds": "sqlite",
+		"app.privacy/store/journal": "sqlite", "desk/store/cases": "sqlite",
 	} {
 		if n := g.Node(id); n == nil || n.Store.Backend != want {
 			t.Errorf("%s: %+v, want the backend %s", id, n, want)

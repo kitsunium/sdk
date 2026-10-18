@@ -327,7 +327,17 @@ func (a *App) resolve() error {
 		Clock:    a.clock,
 	})
 	a.root, a.module = findModule(a.decl.file())
-	// kit's own service first, when the app keeps personal data (privacy.go).
+	return a.settle()
+}
+
+// settle puts what a former release kept in the data directory at its
+// present names before anything reads it (ADR 0180 step 5), then mounts
+// kit's own service first, when the app keeps personal data (privacy.go) —
+// which a data directory holding its data keys says.
+func (a *App) settle() error {
+	if err := a.moveAtRest(); err != nil {
+		return err
+	}
 	a.mountPrivacy()
 	return nil
 }

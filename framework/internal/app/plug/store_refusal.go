@@ -64,6 +64,10 @@ const (
 	// RefusalOutOfOrder is a migration older than one already applied; its
 	// "applied" field names the newer.
 	RefusalOutOfOrder
+	// RefusalRenameTarget is a table whose present name is taken while its
+	// former one still holds the framework's data (ADR 0180 step 5); its
+	// "tables" field names them, and nothing was moved.
+	RefusalRenameTarget
 )
 
 // Refusal is a kind of refusal of a store's engine or a database, as the framework

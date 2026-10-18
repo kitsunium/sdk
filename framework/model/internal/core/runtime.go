@@ -257,9 +257,9 @@ type Pool struct {
 // product's (app.Migrations), a module's — with its own version table, and
 // so its own lock.
 type MigrationSetMessage struct {
-	// Name is the set's origin: "kit", "product", or a module's name.
+	// Name is the set's origin: "app", "product", or a module's name.
 	Name string `json:"name"`
-	// Table is its version table: "kit_migrations", "schema_migrations".
+	// Table is its version table: "app_migrations", "schema_migrations".
 	Table string `json:"table"`
 	// Applied are the migrations the database records, and Pending those
 	// this build carries that it does not, oldest first.

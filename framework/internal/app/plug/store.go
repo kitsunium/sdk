@@ -48,6 +48,51 @@ type StoreDriverConfig struct {
 	// TableMigration is the migration that makes the table t on a database
 	// of the dialect named, at version.
 	TableMigration func(dialect string, t TableSpec, version uint64) (MigrationValue, error)
+	// FormerTables are the tables of plan still under a former name on db —
+	// its former version table among them —, read from the database's
+	// catalogue, sorted: what RenameTables would move; none once moved.
+	FormerTables func(ctx context.Context, db Database, plan RenameSpec) ([]string, error)
+	// RenameTables moves the tables of plan to their present names on db
+	// (ADR 0180 step 5), under the migration lock of plan's former version
+	// table and in the transaction that records the move there, and returns
+	// the tables it moved; none when nothing was left under a former name.
+	// A table whose present name is taken too is a [RefusalRenameTarget],
+	// and nothing moves.
+	RenameTables func(ctx context.Context, db Database, plan RenameSpec) ([]string, error)
+}
+
+// RenameSpec is the framework's tables on a database moved to their present
+// names (ADR 0180 step 5): each table — with the tables the document store
+// derives from it, <table>___ix and <table>___vs —, the history of the
+// former version table taken by the present one, and the names that
+// history gives the tables' migrations.
+type RenameSpec struct {
+	// FormerVersions is the version table the framework's set had: the move
+	// holds its migration lock, is recorded there, and drops it once the
+	// history is the present table's.
+	FormerVersions string
+	// Versions is the version table the framework's set has now.
+	Versions string
+	// Name labels the move in FormerVersions, at Version.
+	Name string
+	// Tables are the tables moved, each from its former name to its present
+	// one.
+	Tables []RenameValue
+	// Labels are the names of the tables' migrations in the history, each
+	// from what the former release recorded to what this one says.
+	Labels []RenameValue
+	// Version is the move's version in FormerVersions: above every version
+	// the framework gives.
+	Version uint64
+}
+
+// RenameValue is one name replaced by another: a table's, or a migration's
+// name in a version table.
+type RenameValue struct {
+	// From is the former name.
+	From string
+	// To is the present one.
+	To string
 }
 
 // DocumentValue is a record as a store's engine holds it (ADR 0179 §2):
