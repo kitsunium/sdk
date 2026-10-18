@@ -810,6 +810,9 @@ func (a *App) addComponents() error {
 	}
 	return firstError(
 		func() error { return a.startGroups(g.stores, g.workflows, g.mailers, g.subs, g.commands) },
+		// What a former release sealed under its references, sealed again
+		// under the present ones, once the stores are open (renamed_refs.go).
+		a.addRelabel,
 		func() error { return a.addScheduler(g.jobs, g.workflows) },
 		func() error { return a.startGroups(g.loops, g.listeners) },
 		// The stores' retention loops, once whatever their writes wake is up

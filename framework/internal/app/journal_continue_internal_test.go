@@ -138,8 +138,9 @@ func formerJournalEntry(t *testing.T, app *App, op, reason string) journalRecord
 	t.Helper()
 	ctx := t.Context()
 	_, j := app.privacyStores()
-	keys, err := app.referenceKeys(ctx)
+	dual, err := app.derivedKeys(ctx)
 	must(t, err)
+	keys := dual.former
 	app.privacy.chain.Lock()
 	defer app.privacy.chain.Unlock()
 	must(t, app.loadChain(ctx, j))
@@ -220,13 +221,11 @@ func TestAFormerJournalIsContinuedOnceByTheNextEntry(t *testing.T) {
 	}
 	must(t, erased(t, app, cards, "after the close"))
 	all := continued(t, app, former, "after the close")
-	rest, err := app.referenceKeys(ctx)
+	dual, err := app.derivedKeys(ctx)
 	must(t, err)
-	journal, err := app.journalKeys(ctx)
-	must(t, err)
-	if e := all[3]; e.Record != journal.recordRef(cards.id, "c1") || e.Record == rest.recordRef(cards.id, "c1") {
+	if e := all[3]; e.Record != dual.present.recordRef(cards.id, "c1") || e.Record == dual.former.recordRef(cards.id, "c1") {
 		t.Errorf("the entry of this release names %q: its record's reference under app/v1 is %q, under kit/v1 %q",
-			e.Record, journal.recordRef(cards.id, "c1"), rest.recordRef(cards.id, "c1"))
+			e.Record, dual.present.recordRef(cards.id, "c1"), dual.former.recordRef(cards.id, "c1"))
 	}
 	_, j := app.privacyStores()
 	raw, err := j.sealing().inner.Get(ctx, all[3].key())
@@ -279,6 +278,9 @@ func TestAFormerJournalsReasonsOpenOnlyWhereTheyWereSealed(t *testing.T) {
 		t.Errorf("this release's reason under kit.privacy's id: %v, want CodeSealOpen", err)
 	}
 }
+
+// journalID is the privacy journal's node id.
+const journalID = privacyService + "/store/journal"
 
 // unpaddedJSON is a JSON value without the spaces sealing padded it with.
 func unpaddedJSON(b []byte) []byte { return []byte(strings.TrimSpace(string(b))) }

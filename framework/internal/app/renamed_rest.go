@@ -34,11 +34,11 @@ import (
 // database did not run — is CodeRenameFailed: what was not moved stays
 // under its former name, and the next start resumes.
 //
-// What a sealed value is bound to does not move here: the privacy service's
-// stores keep sealing under kit.privacy's ids (sealedAs), and the labels of
-// sealing and of the privacy keys keep their words, until a later minor
-// re-seals them (ADR 0180 Q6). That is what keeps a move undoable: renamed
-// back, the data is the former release's again.
+// What a sealed value is bound to does not move here: what the privacy
+// service's stores sealed stays bound to kit.privacy's ids (sealedAs), and
+// the labels of sealing and of the privacy keys keep their words, until
+// steps 5b and 5c re-seal them (ADR 0180 Q6). That is what keeps a move
+// undoable: renamed back, the data is the former release's again.
 
 // The move of the framework's tables, as its version table records it.
 const (
@@ -205,11 +205,11 @@ func (a *App) saidMoved(from, to string) {
 	}
 }
 
-// sealedAs is what a value sealed in the node id is bound to: the node's
-// id, the framework's own service's under its former name — the label its
-// sealed values carry until a later minor re-seals them (ADR 0180 Q6), so
-// that a box sealed by a former release still opens where it lies, and a
-// record's own data key is still found under its reference.
+// sealedAs is what a former release bound a value sealed in the node id to:
+// the node's id, the framework's own service's under its former name. A box
+// it sealed there is read under it (openMember), and its own data keys are
+// named after it (derivedKeys.ownRefs); nothing is sealed under it since ADR
+// 0180 step 5c.
 func sealedAs(id string) string {
 	if rest, ok := strings.CutPrefix(id, privacyService+"/"); ok {
 		return formerPrivacyService + "/" + rest

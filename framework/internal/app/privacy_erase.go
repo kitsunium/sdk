@@ -264,11 +264,11 @@ func (s *storeCore) sealedRefs(ctx context.Context, a *App, key string) ([]strin
 	case err != nil:
 		return nil, s.said(err, key, "")
 	}
-	keys, err := a.referenceKeys(ctx)
+	keys, err := a.derivedKeys(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return append(refs, keys.ownRef(sealedAs(s.id), key)), nil
+	return append(refs, keys.ownRefs(s.id, key)...), nil
 }
 
 // moveOwn seals the held record under key again, under a data key of its
@@ -296,17 +296,22 @@ func (s *storeCore) moveOwn(ctx context.Context, a *App, key string) error {
 	if id == "" {
 		return nil
 	}
-	keys, err := a.referenceKeys(ctx)
+	keys, err := a.derivedKeys(ctx)
 	if err != nil {
 		return err
 	}
-	from, to := keys.personRef(id), keys.ownRef(sealedAs(s.id), key)
-	var moved error
-	if h := s.historied(); h != nil {
-		moved = h.moveFormer(ctx, key, from, to)
+	// From either of the person's keys: what a former release sealed names
+	// the one it made (ADR 0180 step 5c).
+	to := keys.present.ownRef(s.id, key)
+	var moved []error
+	for _, from := range keys.personRefs(id) {
+		if h := s.historied(); h != nil {
+			moved = append(moved, h.moveFormer(ctx, key, from, to, nil))
+		}
+		// Its versions too (ADR 0007 §4): a hold keeps them readable.
+		moved = append(moved, s.moveVersions(ctx, key, from, to))
 	}
-	// Its versions too (ADR 0007 §4): a hold keeps them readable.
-	return errors.Join(moved, s.moveVersions(ctx, key, from, to))
+	return errors.Join(moved...)
 }
 
 // deleteOnRequest deletes one record of a person who asked.

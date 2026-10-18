@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"maps"
 	"slices"
 
@@ -255,16 +256,13 @@ func (e *sealedEngine) dropOwnKeyAfter(ctx context.Context, key string) {
 }
 
 // dropOwnKey destroys the own data key of the record under key, once the
-// record is gone: under the key's stripe alone, so that a write sealing
-// under it meanwhile either stands before — and keeps it — or makes a new
-// one after.
+// record is gone — and the one a former release made, which what it sealed
+// may still name (ADR 0180 step 5c) —: under the keys' stripes alone, so
+// that a write sealing under one meanwhile either stands before — and keeps
+// it — or makes a new one after.
 func (e *sealedEngine) dropOwnKey(ctx context.Context, key string) error {
-	keys, err := e.a.referenceKeys(ctx)
-	if err != nil {
-		return err
-	}
-	ref := keys.ownRef(sealedAs(e.s.id), key)
-	release, err := e.z.alone(ctx, ref)
+	refs := e.z.dual.ownRefs(e.s.id, key)
+	release, err := e.z.alone(ctx, refs...)
 	if err != nil {
 		return err
 	}
@@ -275,8 +273,12 @@ func (e *sealedEngine) dropOwnKey(ctx context.Context, key string) error {
 	if e.inTrash(ctx, key) {
 		return nil // trashed meanwhile: the key seals what a restoration brings back
 	}
-	_, err = e.z.destroy(ctx, ref)
-	return err
+	var failed []error
+	for _, ref := range refs {
+		_, err := e.z.destroy(ctx, ref)
+		failed = append(failed, err)
+	}
+	return errors.Join(failed...)
 }
 
 // inTrash reports whether the record under key is in the trash: its

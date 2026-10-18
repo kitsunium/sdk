@@ -1,0 +1,602 @@
+{
+  "cases": [
+    {
+      "id": "c-ann",
+      "email": "ann@atelier.test",
+      "note": "a third note about ann",
+      "stage": 3
+    },
+    {
+      "id": "c-cy",
+      "email": "",
+      "note": "",
+      "stage": 1
+    },
+    {
+      "id": "c-dan",
+      "email": "dan@atelier.test",
+      "note": "a note about dan",
+      "stage": 4
+    },
+    {
+      "id": "c-eve",
+      "email": "eve@atelier.test",
+      "note": "a second note about eve",
+      "stage": 2
+    },
+    {
+      "id": "c-fay",
+      "email": "",
+      "note": "",
+      "stage": 1
+    },
+    {
+      "id": "c-ivy",
+      "email": "jay@atelier.test",
+      "note": "a note about jay, once ivy's",
+      "stage": 2
+    },
+    {
+      "id": "c-kim",
+      "email": "kim@atelier.test",
+      "note": "a second note about kim",
+      "stage": 2
+    }
+  ],
+  "tally": [
+    {
+      "id": "t1",
+      "n": 7
+    }
+  ],
+  "revisions": {
+    "c-ann": [
+      {
+        "number": 3,
+        "at": "2026-10-18T04:57:19.118410138Z",
+        "by": "",
+        "command": "",
+        "value": {
+          "id": "c-ann",
+          "email": "ann@atelier.test",
+          "note": "a third note about ann",
+          "stage": 3
+        }
+      },
+      {
+        "number": 2,
+        "at": "2026-10-18T04:57:19.115552131Z",
+        "by": "",
+        "command": "",
+        "value": {
+          "id": "c-ann",
+          "email": "ann@atelier.test",
+          "note": "a second note about ann",
+          "stage": 2
+        }
+      },
+      {
+        "number": 1,
+        "at": "2026-10-18T04:57:19.112743716Z",
+        "by": "",
+        "command": "",
+        "value": {
+          "id": "c-ann",
+          "email": "ann@atelier.test",
+          "note": "a first note about ann",
+          "stage": 1
+        }
+      }
+    ],
+    "c-bob": [
+      {
+        "number": 1,
+        "at": "2026-10-18T04:57:19.124196124Z",
+        "by": "",
+        "command": "",
+        "value": {
+          "id": "c-bob",
+          "email": "bob@atelier.test",
+          "note": "a note about bob",
+          "stage": 1
+        }
+      }
+    ],
+    "c-cy": [
+      {
+        "number": 2,
+        "at": "2026-10-18T04:57:19.158987345Z",
+        "by": "",
+        "command": "atelier/command/forget",
+        "value": {
+          "id": "c-cy",
+          "email": "",
+          "note": "",
+          "stage": 1
+        }
+      },
+      {
+        "number": 1,
+        "at": "2026-10-18T04:57:19.132764886Z",
+        "by": "",
+        "command": "",
+        "value": {
+          "id": "c-cy",
+          "email": "",
+          "note": "",
+          "stage": 1
+        }
+      }
+    ],
+    "c-dan": [
+      {
+        "number": 1,
+        "at": "2026-10-18T04:57:19.138409048Z",
+        "by": "",
+        "command": "",
+        "value": {
+          "id": "c-dan",
+          "email": "dan@atelier.test",
+          "note": "a note about dan",
+          "stage": 4
+        }
+      }
+    ],
+    "c-eve": [
+      {
+        "number": 2,
+        "at": "2026-10-18T09:19:10.499206866Z",
+        "by": "",
+        "command": "",
+        "value": {
+          "id": "c-eve",
+          "email": "eve@atelier.test",
+          "note": "a second note about eve",
+          "stage": 2
+        }
+      },
+      {
+        "number": 1,
+        "at": "2026-10-18T09:19:10.494778888Z",
+        "by": "",
+        "command": "",
+        "value": {
+          "id": "c-eve",
+          "email": "eve@atelier.test",
+          "note": "a first note about eve",
+          "stage": 1
+        }
+      }
+    ],
+    "c-fay": [
+      {
+        "number": 2,
+        "at": "2026-10-18T09:19:10.512856422Z",
+        "by": "",
+        "command": "atelier/command/forget",
+        "value": {
+          "id": "c-fay",
+          "email": "",
+          "note": "",
+          "stage": 1
+        }
+      },
+      {
+        "number": 1,
+        "at": "2026-10-18T09:19:10.507345538Z",
+        "by": "",
+        "command": "",
+        "value": {
+          "id": "c-fay",
+          "email": "",
+          "note": "",
+          "stage": 1
+        }
+      }
+    ],
+    "c-ivy": [
+      {
+        "number": 2,
+        "at": "2026-10-18T10:45:36.583171012Z",
+        "by": "",
+        "command": "",
+        "value": {
+          "id": "c-ivy",
+          "email": "jay@atelier.test",
+          "note": "a note about jay, once ivy's",
+          "stage": 2
+        }
+      },
+      {
+        "number": 1,
+        "at": "2026-10-18T10:45:36.575379757Z",
+        "by": "",
+        "command": "",
+        "value": {
+          "id": "c-ivy",
+          "email": "ivy@atelier.test",
+          "note": "a note about ivy",
+          "stage": 1
+        }
+      }
+    ],
+    "c-kim": [
+      {
+        "number": 2,
+        "at": "2026-10-18T10:45:36.60825876Z",
+        "by": "",
+        "command": "",
+        "value": {
+          "id": "c-kim",
+          "email": "kim@atelier.test",
+          "note": "a second note about kim",
+          "stage": 2
+        }
+      },
+      {
+        "number": 1,
+        "at": "2026-10-18T10:45:36.588780079Z",
+        "by": "",
+        "command": "",
+        "value": {
+          "id": "c-kim",
+          "email": "kim@atelier.test",
+          "note": "a first note about kim",
+          "stage": 1
+        }
+      }
+    ],
+    "c-leo": [
+      {
+        "number": 1,
+        "at": "2026-10-18T10:45:36.614110508Z",
+        "by": "",
+        "command": "",
+        "value": {
+          "id": "c-leo",
+          "email": "leo@atelier.test",
+          "note": "a note about leo",
+          "stage": 1
+        }
+      }
+    ]
+  },
+  "former": {
+    "c-ann": [
+      {
+        "value": "a second note about ann",
+        "until": "2026-10-18T04:57:19.118100032Z"
+      },
+      {
+        "value": "a first note about ann",
+        "until": "2026-10-18T04:57:19.115168638Z"
+      }
+    ],
+    "c-cy": [],
+    "c-dan": [],
+    "c-eve": [
+      {
+        "value": "a first note about eve",
+        "until": "2026-10-18T09:19:10.498389326Z"
+      }
+    ],
+    "c-fay": [],
+    "c-ivy": [
+      {
+        "value": "a note about ivy",
+        "until": "2026-10-18T10:45:36.57946098Z"
+      }
+    ],
+    "c-kim": [
+      {
+        "value": "a first note about kim",
+        "until": "2026-10-18T10:45:36.607915782Z"
+      }
+    ]
+  },
+  "trashed": [
+    {
+      "Key": "c-bob",
+      "At": "2026-10-18T04:57:19.126411446Z",
+      "PurgeAt": "2026-11-17T04:57:19.126411446Z"
+    },
+    {
+      "Key": "c-leo",
+      "At": "2026-10-18T10:45:36.616512567Z",
+      "PurgeAt": "2026-11-17T10:45:36.616512567Z"
+    }
+  ],
+  "exports": {
+    "ann@atelier.test": {
+      "stores": [
+        {
+          "store": "atelier/store/cases",
+          "purpose": "Handle the cases",
+          "retention": "kept until the product deletes them",
+          "records": [
+            {
+              "email": "ann@atelier.test",
+              "id": "c-ann",
+              "note": "a third note about ann",
+              "stage": 3
+            }
+          ],
+          "former": [
+            {
+              "record": 0,
+              "fields": {
+                "/note": [
+                  {
+                    "value": "a second note about ann",
+                    "until": "2026-10-18T04:57:19.118100032Z"
+                  },
+                  {
+                    "value": "a first note about ann",
+                    "until": "2026-10-18T04:57:19.115168638Z"
+                  }
+                ]
+              }
+            }
+          ],
+          "versions": [
+            {
+              "record": 0,
+              "versions": [
+                {
+                  "number": 3,
+                  "at": "2026-10-18T04:57:19.118410138Z",
+                  "value": {
+                    "email": "ann@atelier.test",
+                    "id": "c-ann",
+                    "note": "a third note about ann",
+                    "stage": 3
+                  }
+                },
+                {
+                  "number": 2,
+                  "at": "2026-10-18T04:57:19.115552131Z",
+                  "value": {
+                    "email": "ann@atelier.test",
+                    "id": "c-ann",
+                    "note": "a second note about ann",
+                    "stage": 2
+                  }
+                },
+                {
+                  "number": 1,
+                  "at": "2026-10-18T04:57:19.112743716Z",
+                  "value": {
+                    "email": "ann@atelier.test",
+                    "id": "c-ann",
+                    "note": "a first note about ann",
+                    "stage": 1
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "bob@atelier.test": {
+      "stores": []
+    },
+    "cy@atelier.test": {
+      "stores": []
+    },
+    "dan@atelier.test": {
+      "stores": [
+        {
+          "store": "atelier/store/cases",
+          "purpose": "Handle the cases",
+          "retention": "kept until the product deletes them",
+          "records": [
+            {
+              "email": "dan@atelier.test",
+              "id": "c-dan",
+              "note": "a note about dan",
+              "stage": 4
+            }
+          ],
+          "versions": [
+            {
+              "record": 0,
+              "versions": [
+                {
+                  "number": 1,
+                  "at": "2026-10-18T04:57:19.138409048Z",
+                  "value": {
+                    "email": "dan@atelier.test",
+                    "id": "c-dan",
+                    "note": "a note about dan",
+                    "stage": 4
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "eve@atelier.test": {
+      "stores": [
+        {
+          "store": "atelier/store/cases",
+          "purpose": "Handle the cases",
+          "retention": "kept until the product deletes them",
+          "records": [
+            {
+              "email": "eve@atelier.test",
+              "id": "c-eve",
+              "note": "a second note about eve",
+              "stage": 2
+            }
+          ],
+          "former": [
+            {
+              "record": 0,
+              "fields": {
+                "/note": [
+                  {
+                    "value": "a first note about eve",
+                    "until": "2026-10-18T09:19:10.498389326Z"
+                  }
+                ]
+              }
+            }
+          ],
+          "versions": [
+            {
+              "record": 0,
+              "versions": [
+                {
+                  "number": 2,
+                  "at": "2026-10-18T09:19:10.499206866Z",
+                  "value": {
+                    "email": "eve@atelier.test",
+                    "id": "c-eve",
+                    "note": "a second note about eve",
+                    "stage": 2
+                  }
+                },
+                {
+                  "number": 1,
+                  "at": "2026-10-18T09:19:10.494778888Z",
+                  "value": {
+                    "email": "eve@atelier.test",
+                    "id": "c-eve",
+                    "note": "a first note about eve",
+                    "stage": 1
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "fay@atelier.test": {
+      "stores": []
+    },
+    "ivy@atelier.test": {
+      "stores": []
+    },
+    "jay@atelier.test": {
+      "stores": [
+        {
+          "store": "atelier/store/cases",
+          "purpose": "Handle the cases",
+          "retention": "kept until the product deletes them",
+          "records": [
+            {
+              "email": "jay@atelier.test",
+              "id": "c-ivy",
+              "note": "a note about jay, once ivy's",
+              "stage": 2
+            }
+          ],
+          "former": [
+            {
+              "record": 0,
+              "fields": {
+                "/note": [
+                  {
+                    "value": "a note about ivy",
+                    "until": "2026-10-18T10:45:36.57946098Z"
+                  }
+                ]
+              }
+            }
+          ],
+          "versions": [
+            {
+              "record": 0,
+              "versions": [
+                {
+                  "number": 2,
+                  "at": "2026-10-18T10:45:36.583171012Z",
+                  "value": {
+                    "email": "jay@atelier.test",
+                    "id": "c-ivy",
+                    "note": "a note about jay, once ivy's",
+                    "stage": 2
+                  }
+                },
+                {
+                  "number": 1,
+                  "at": "2026-10-18T10:45:36.575379757Z",
+                  "value": {
+                    "email": "ivy@atelier.test",
+                    "id": "c-ivy",
+                    "note": "a note about ivy",
+                    "stage": 1
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "kim@atelier.test": {
+      "stores": [
+        {
+          "store": "atelier/store/cases",
+          "purpose": "Handle the cases",
+          "retention": "kept until the product deletes them",
+          "records": [
+            {
+              "email": "kim@atelier.test",
+              "id": "c-kim",
+              "note": "a second note about kim",
+              "stage": 2
+            }
+          ],
+          "former": [
+            {
+              "record": 0,
+              "fields": {
+                "/note": [
+                  {
+                    "value": "a first note about kim",
+                    "until": "2026-10-18T10:45:36.607915782Z"
+                  }
+                ]
+              }
+            }
+          ],
+          "versions": [
+            {
+              "record": 0,
+              "versions": [
+                {
+                  "number": 2,
+                  "at": "2026-10-18T10:45:36.60825876Z",
+                  "value": {
+                    "email": "kim@atelier.test",
+                    "id": "c-kim",
+                    "note": "a second note about kim",
+                    "stage": 2
+                  }
+                },
+                {
+                  "number": 1,
+                  "at": "2026-10-18T10:45:36.588780079Z",
+                  "value": {
+                    "email": "kim@atelier.test",
+                    "id": "c-kim",
+                    "note": "a first note about kim",
+                    "stage": 1
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "leo@atelier.test": {
+      "stores": []
+    }
+  }
+}

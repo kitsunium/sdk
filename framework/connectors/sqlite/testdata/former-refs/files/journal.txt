@@ -1,0 +1,20 @@
+SEQ  AT                    OP        STORE                   RECORD                            SUBJECT                           BY
+1    2026-10-18T04:57:19Z  erase     atelier/store/cases     3bec49fd4e83b37ef0714024f9e6af66  e389b7d0090eaefef5bbdea970f53f22  atelier/command/forget
+2    2026-10-18T04:57:19Z  shred     app.privacy/store/keys  -                                 e389b7d0090eaefef5bbdea970f53f22  atelier/command/forget
+3    2026-10-18T04:57:19Z  hold      atelier/store/cases     7aa9096f9747e5c40c5450260517948c  7419215b5c72282cb567c3115afaa636  app
+4    2026-10-18T04:57:19Z  hold      atelier/store/tally     ad2335c4d8cf5d6d475134ed52112b52  -                                 app
+5    2026-10-18T04:57:19Z  export    atelier/store/cases     -                                 7419215b5c72282cb567c3115afaa636  atelier/command/export
+6    2026-10-18T09:19:10Z  erase     atelier/store/cases     fec7bfd534a529492acd2559b447a7fc  f75ca75a046523a4373d0894d1919ac0  atelier/command/forget
+7    2026-10-18T09:19:10Z  shred     app.privacy/store/keys  -                                 f75ca75a046523a4373d0894d1919ac0  atelier/command/forget
+8    2026-10-18T09:19:10Z  hold      atelier/store/cases     3e4bbbbca90c2d253c5d144373481e9d  4c19d88c2c1a6141f7ec887d3beb6ffa  app
+9    2026-10-18T09:19:10Z  export    atelier/store/cases     -                                 4c19d88c2c1a6141f7ec887d3beb6ffa  atelier/command/export
+10   2026-10-18T09:19:10Z  export    atelier/store/cases     -                                 7419215b5c72282cb567c3115afaa636  atelier/command/export
+11   2026-10-18T10:45:36Z  continue  -                       -                                 -                                 app
+12   2026-10-18T10:45:36Z  hold      atelier/store/cases     37963fac6e75884897a85b34e5167eb5  fae0980d4c0c46100e967076bf0e3b32  app
+13   2026-10-18T10:45:36Z  export    atelier/store/cases     -                                 9041e88b5e718ecf33397963b00edbdb  atelier/command/export
+14   2026-10-18T10:45:36Z  export    atelier/store/cases     -                                 ab999e8b5775f7894ec783b3093c06dd  atelier/command/export
+15   2026-10-18T10:45:36Z  export    atelier/store/cases     -                                 8776d9d470d788cd59b100c1fd6de981  atelier/command/export
+16   2026-10-18T10:45:36Z  export    atelier/store/cases     -                                 a4447c566dd25ef3396d13f0588d0c9a  atelier/command/export
+17   2026-10-18T10:45:36Z  export    atelier/store/cases     -                                 fae0980d4c0c46100e967076bf0e3b32  atelier/command/export
+a journal closed at entry 10: entry 11 names its hash and continues it
+the chain holds: 17 entries

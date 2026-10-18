@@ -94,7 +94,7 @@ func (a *App) appendToJournal(ctx context.Context, l *journalLine) error {
 	if j == nil {
 		return nil
 	}
-	keys, err := a.journalKeys(ctx)
+	keys, err := a.referenceKeys(ctx)
 	if err != nil {
 		return err
 	}

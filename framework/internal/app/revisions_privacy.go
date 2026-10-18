@@ -154,14 +154,14 @@ func (s *storeCore) moveVersions(ctx context.Context, key, from, to string) erro
 				if ref, _ := boxRef(value); ref != from {
 					return value, false, nil
 				}
-				plain, err := se.z.open(ctx, value, sealedAs(s.id), key, at.pointer)
+				plain, err := se.openMember(ctx, value, key, at.pointer)
 				switch {
 				case errors.Is(err, errErased):
 					return value, false, nil
 				case err != nil:
 					return nil, false, err
 				}
-				box, err := se.z.seal(ctx, to, plain, sealedAs(s.id), key, at.pointer)
+				box, err := se.z.seal(ctx, to, plain, s.id, key, at.pointer)
 				return box, false, err
 			})
 			if err != nil {
@@ -224,7 +224,7 @@ func (s *storeCore) sealVersions(ctx context.Context, key, ref string) error {
 				if isBoxValue(value) || isNull(value) || (!at.inList && clear[at.pointer]) {
 					return value, false, nil
 				}
-				box, err := se.z.seal(ctx, ref, value, sealedAs(s.id), key, at.pointer)
+				box, err := se.z.seal(ctx, ref, value, s.id, key, at.pointer)
 				return box, false, err
 			})
 			if err != nil {

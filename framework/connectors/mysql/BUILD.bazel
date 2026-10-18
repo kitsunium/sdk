@@ -39,6 +39,7 @@ go_test(
         "database_test.go",
         "former_journal_test.go",
         "former_keys_test.go",
+        "former_refs_test.go",
         "former_test.go",
         "mysql_test.go",
         "server_test.go",

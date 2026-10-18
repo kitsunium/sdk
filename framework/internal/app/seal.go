@@ -10,6 +10,7 @@ import (
 	"iter"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -113,7 +114,14 @@ type sealer struct {
 	root   *secret.Keyring
 	former *secret.Keyring
 	refs   *referenceKeys
-	locks  *sealLocks
+	// dual are the present and the former reference keys: a person's or a
+	// record's two data keys, both destroyed by an erasure (ADR 0180 step
+	// 5c).
+	dual  *derivedKeys
+	locks *sealLocks
+	// onWait, nil but in a test, runs when a destruction first finds a
+	// stripe it needs taken (alone).
+	onWait func()
 }
 
 // sealLocks order, per data key, the writes that seal under it and its
@@ -124,23 +132,48 @@ type sealLocks [sealStripes]sync.RWMutex
 
 // of is the stripe of the data key ref.
 func (l *sealLocks) of(ref string) *sync.RWMutex {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(ref))
-	return &l[h.Sum32()%uint32(len(l))]
+	return &l[l.index(ref)]
 }
 
-// alone takes the stripe of the data key ref alone, for its destruction,
-// and returns what releases it. It never waits as a writer the mutex knows
-// of: a write holding the stripe shared may wait on another write — a
-// workflow's transition its store's hook reaches — that takes it shared
+// index is the stripe's position of the data key ref.
+func (l *sealLocks) index(ref string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(ref))
+	return h.Sum32() % uint32(len(l))
+}
+
+// stripes are the stripes of refs, each once, in their order in l: two
+// takers of several never take them in two orders.
+func (l *sealLocks) stripes(refs []string) []*sync.RWMutex {
+	at := make([]uint32, 0, len(refs))
+	for _, r := range refs {
+		at = append(at, l.index(r))
+	}
+	slices.Sort(at)
+	at = slices.Compact(at)
+	out := make([]*sync.RWMutex, len(at))
+	for i, n := range at {
+		out[i] = &l[n]
+	}
+	return out
+}
+
+// alone takes the stripes of the data keys refs alone, for their
+// destruction, and returns what releases them: all of them or none, each
+// stripe once — two keys may share one. It never waits as a writer the
+// mutex knows of: a write holding a stripe shared may wait on another write
+// — a workflow's transition its store's hook reaches — that takes it shared
 // too, and a waiting writer would stop that one, and both. It tries, and
 // sleeps between tries; past aloneFor, or ctx's end, it is kit's
-// CodeSealShred and the key stays.
-func (z *sealer) alone(ctx context.Context, ref string) (func(), error) {
-	lock := z.locks.of(ref)
+// CodeSealShred and the keys stay.
+func (z *sealer) alone(ctx context.Context, refs ...string) (func(), error) {
+	locks := z.locks.stripes(refs)
 	deadline := time.Now().Add(aloneFor)
 	wait := 100 * time.Microsecond
-	for !lock.TryLock() {
+	for tries := 0; !tryAll(locks); tries++ {
+		if tries == 0 && z.onWait != nil {
+			z.onWait()
+		}
 		if time.Now().After(deadline) {
 			return nil, failure(CodeSealShred, "SEAL_SHRED_BUSY", "a data key could not be destroyed: writes under it did not end", nil)
 		}
@@ -153,7 +186,39 @@ func (z *sealer) alone(ctx context.Context, ref string) (func(), error) {
 		}
 		wait = min(2*wait, 20*time.Millisecond)
 	}
-	return lock.Unlock, nil
+	return func() {
+		for _, l := range locks {
+			l.Unlock()
+		}
+	}, nil
+}
+
+// shared takes the stripes of the data keys refs shared, each once, and
+// returns what releases them: a pass that re-seals under them holds off
+// their destruction while it does.
+func (z *sealer) shared(refs ...string) func() {
+	locks := z.locks.stripes(refs)
+	for _, l := range locks {
+		l.RLock()
+	}
+	return func() {
+		for _, l := range locks {
+			l.RUnlock()
+		}
+	}
+}
+
+// tryAll takes every lock alone, or none: false when one is taken.
+func tryAll(locks []*sync.RWMutex) bool {
+	for i, l := range locks {
+		if !l.TryLock() {
+			for _, held := range locks[:i] {
+				held.Unlock()
+			}
+			return false
+		}
+	}
+	return true
 }
 
 // personRef is the reference of a person's data key.
@@ -446,7 +511,7 @@ func (a *App) sealing(ctx context.Context) (*sealer, error) {
 	if err != nil {
 		return nil, err
 	}
-	refs, err := a.referenceKeys(ctx)
+	dual, err := a.derivedKeys(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -461,7 +526,7 @@ func (a *App) sealing(ctx context.Context) (*sealer, error) {
 	if err != nil {
 		return nil, failure(CodeSealKey, "SEAL_KEYS", "the framework's data keys could not be set up", err)
 	}
-	z = &sealer{keys: sk, root: root, former: former, refs: refs, locks: &a.privacy.locks}
+	z = &sealer{keys: sk, root: root, former: former, refs: dual.present, dual: dual, locks: &a.privacy.locks}
 	a.privacy.mu.Lock()
 	defer a.privacy.mu.Unlock()
 	if a.privacy.sealer == nil {

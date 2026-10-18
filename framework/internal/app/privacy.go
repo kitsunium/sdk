@@ -86,6 +86,10 @@ type privacyRun struct {
 	explain bool
 	// holdLocks are the stores' hold locks, by store ID (hold.go).
 	holdLocks sync.Map
+	// relabelOpened, nil but in a test, runs when the re-seal pass has
+	// opened a former value under a former key and not yet sealed it again
+	// (renamed_refs.go): where an erasure must not slip in between.
+	relabelOpened func(store, key string)
 
 	// chain guards the journal's last entry: its number, its hash, and the
 	// labels it says its references are made under — none when a former
@@ -125,6 +129,7 @@ type privacyStore interface {
 	heldCount(a *App) int
 	fold(ctx context.Context) error
 	records() recordsPort
+	relabel(ctx context.Context) (int, error)
 }
 
 // withActor returns ctx acting for who.

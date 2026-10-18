@@ -178,11 +178,11 @@ func (e *sealedEngine) openDoc(ctx context.Context, key string, raw []byte) ([]b
 }
 
 // openMember opens a member's box of the record under key, at pointer: bound
-// where the store seals now (sealedIn), else where a former release sealed
-// it — an entry of the privacy journal it closed, bound to kit.privacy's id,
+// to the store's id, where it seals now, else where a former release sealed
+// it — a box of the privacy service's stores, bound to kit.privacy's id,
 // read for as long as it is kept (ADR 0180 step 5c).
 func (e *sealedEngine) openMember(ctx context.Context, value []byte, key, pointer string) ([]byte, error) {
-	present, former := sealedIn(e.s.id), sealedAs(e.s.id)
+	present, former := e.s.id, sealedAs(e.s.id)
 	if present == former {
 		return e.z.open(ctx, value, present, key, pointer)
 	}
@@ -253,7 +253,7 @@ func (e *sealedEngine) refOf(ctx context.Context, key string, v any) (string, er
 	}
 	id := e.s.subjectOf(v)
 	if id == "" || e.held(ctx, key, v) {
-		return keys.ownRef(sealedAs(e.s.id), key), nil
+		return keys.ownRef(e.s.id, key), nil
 	}
 	return keys.personRef(id), nil
 }
@@ -299,7 +299,7 @@ func (e *sealedEngine) seal(ctx context.Context, raw []byte, key, ref string, cl
 		case isNull(value), !at.inList && clear[at.pointer], erasing && zeroJSON(value, at.f.typ):
 			return value, false, nil
 		}
-		box, err := e.z.seal(ctx, ref, value, sealedIn(e.s.id), key, at.pointer)
+		box, err := e.z.seal(ctx, ref, value, e.s.id, key, at.pointer)
 		return box, false, err
 	})
 	return out, err
