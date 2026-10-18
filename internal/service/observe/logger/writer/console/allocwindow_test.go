@@ -39,6 +39,9 @@ type windowCount struct {
 	process uint64
 	// foreign names the stacks process counted and own did not, for the log.
 	foreign []string
+	// stacks names the stacks own counted, so a gate that fails says which
+	// allocation failed it.
+	stacks []string
 }
 
 // mallocsOver reports the TOTAL number of heap allocations f performs across
@@ -124,6 +127,7 @@ func mallocsOver(runs int, f func()) windowCount {
 		}
 		if allocWindowOnStack(stk) {
 			got.own += uint64(d)
+			got.stacks = append(got.stacks, fmt.Sprintf("%d by %s", d, allocWindowSummary(stk)))
 			continue
 		}
 		//: this helper's own bookkeeping, around the window, is not foreign.
@@ -221,10 +225,15 @@ func allocWindowTrim(stk [32]uintptr) []uintptr {
 	return s
 }
 
-// reportForeign logs what the process allocated beside the window, which is
-// not the gate's to answer for and is exactly what used to fail it.
-func reportForeign(t *testing.T, what string, got windowCount) {
+// reportWindow logs what a window counted, by stack, and what the process
+// allocated beside it, which is not the gate's to answer for and is exactly
+// what used to fail it. The log shows when the gate fails (or under -v), and
+// names the allocation that failed it.
+func reportWindow(t *testing.T, what string, got windowCount) {
 	t.Helper()
+	if len(got.stacks) > 0 {
+		t.Logf("%s: %d allocations on the window's stack: %s", what, got.own, strings.Join(got.stacks, "; "))
+	}
 	if len(got.foreign) > 0 {
 		t.Logf("%s: %d allocations process-wide, %d on the window's stack; not counted: %s",
 			what, got.process, got.own, strings.Join(got.foreign, "; "))
@@ -246,7 +255,9 @@ var allocWindowControlTiny *uint32
 // publishes would pass every gate of its package if either half stopped
 // working, so it is made to see allocations it knows are there — one per call,
 // one on a single call of the window, and a tiny one, which the tiny allocator
-// would hide if the block were not cleared.
+// would hide if the block were not cleared. And the other way round: a lazy
+// initialisation, made once on the first call, is the warm-up call's and must
+// not reach the window — a gate is about the steady state.
 func TestAllocWindowCountsARealAllocation(t *testing.T) {
 	got := mallocsOver(allocWindowControlRuns, func() {
 		allocWindowControlSink = make([]byte, 64)
@@ -272,5 +283,16 @@ func TestAllocWindowCountsARealAllocation(t *testing.T) {
 	if got.own == 0 {
 		t.Fatalf("the window counted none of %d tiny allocations (process-wide %d)",
 			allocWindowControlRuns, got.process)
+	}
+	var lazy []byte
+	got = mallocsOver(allocWindowControlRuns, func() {
+		if lazy == nil {
+			lazy = make([]byte, 64)
+			allocWindowControlSink = lazy
+		}
+	})
+	if got.own != 0 {
+		t.Fatalf("the window counted %d allocations where only the first call, the warm-up, made one: %v",
+			got.own, got.stacks)
 	}
 }

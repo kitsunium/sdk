@@ -128,7 +128,7 @@ func TestFanoutWidthAddsNoAllocation(t *testing.T) {
 			allocSink = b
 			b.Send(ctx, "msg")
 		})
-		reportForeign(t, fmt.Sprintf("emits at width %d", width), got)
+		reportWindow(t, fmt.Sprintf("emits at width %d", width), got)
 		return got.own
 	}
 	//: before either arm, and never through a Logger an arm measures.

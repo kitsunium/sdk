@@ -99,7 +99,7 @@ func TestSteadyStateSendAllocatesNothing(t *testing.T) {
 	got := mallocsOver(allocRuns, func() {
 		allocSend(t, stream, event)
 	})
-	reportForeign(t, "Sends", got)
+	reportWindow(t, "Sends", got)
 	if got.own != 0 {
 		t.Fatalf("%d Sends performed %d allocations, want 0", allocRuns, got.own)
 	}
@@ -133,7 +133,7 @@ func TestSteadyStateCommentAllocatesNothing(t *testing.T) {
 	got := mallocsOver(allocRuns, func() {
 		allocComment(t, stream)
 	})
-	reportForeign(t, "Comments", got)
+	reportWindow(t, "Comments", got)
 	if got.own != 0 {
 		t.Fatalf("%d Comments performed %d allocations, want 0", allocRuns, got.own)
 	}
@@ -171,7 +171,7 @@ func TestOutsizedFramesInARowAllocateNothingEither(t *testing.T) {
 	got := mallocsOver(allocRuns, func() {
 		allocSend(t, stream, event)
 	})
-	reportForeign(t, "outsized Sends in a steady stream of them", got)
+	reportWindow(t, "outsized Sends in a steady stream of them", got)
 	if got.own != 0 {
 		t.Fatalf("%d outsized Sends in a steady stream of them performed %d allocations, want 0", allocRuns, got.own)
 	}

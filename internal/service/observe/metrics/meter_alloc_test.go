@@ -126,7 +126,7 @@ func TestLookupIsAllocationFree(t *testing.T) {
 		got := mallocsOver(allocRuns, func() {
 			m.Counter("http_requests_total", c.labels...).Inc()
 		})
-		reportForeign(t, "resolved fetches", got)
+		reportWindow(t, "resolved fetches", got)
 		if got.own != 0 {
 			t.Errorf("%d resolved fetches performed %d allocations, want 0", allocRuns, got.own)
 		}
@@ -196,7 +196,7 @@ func TestEveryInstrumentLookupIsAllocationFree(t *testing.T) {
 		c.fetch(port)
 
 		got := mallocsOver(allocRuns, func() { c.fetch(port) })
-		reportForeign(t, "resolved fetches", got)
+		reportWindow(t, "resolved fetches", got)
 		if got.own != 0 {
 			t.Errorf("%d resolved fetches performed %d allocations, want 0", allocRuns, got.own)
 		}
@@ -243,7 +243,7 @@ func TestOverflowLookupIsAllocationFree(t *testing.T) {
 		i++
 		m.Counter("http_requests_total", coreotel.String("id", ids[i%len(ids)])).Inc()
 	})
-	reportForeign(t, "overflowing fetches", got)
+	reportWindow(t, "overflowing fetches", got)
 	if got.own != 0 {
 		t.Errorf("%d overflowing fetches performed %d allocations, want 0", allocRuns, got.own)
 	}
@@ -284,7 +284,7 @@ func TestDescribedMeterLookupIsAllocationFree(t *testing.T) {
 	got := mallocsOver(allocRuns, func() {
 		m.Counter("http_requests_total", labels...).Inc()
 	})
-	reportForeign(t, "fetches on a described meter", got)
+	reportWindow(t, "fetches on a described meter", got)
 	if got.own != 0 {
 		t.Errorf("%d fetches on a described meter performed %d allocations, want 0", allocRuns, got.own)
 	}

@@ -76,7 +76,7 @@ func TestGateAllocatesNothingInEitherDirection(t *testing.T) {
 			t.Fatalf("dropping a record reported (%d, %v), want (%d, nil)", n, err, len(allocPayload))
 		}
 	})
-	reportForeign(t, "dropped records", dropped)
+	reportWindow(t, "dropped records", dropped)
 	if dropped.own != 0 {
 		t.Errorf("%d dropped records performed %d allocations, want 0", allocRuns, dropped.own)
 	}
@@ -87,7 +87,7 @@ func TestGateAllocatesNothingInEitherDirection(t *testing.T) {
 			t.Fatalf("passing a record reported (%d, %v), want (%d, nil)", n, err, len(allocPayload))
 		}
 	})
-	reportForeign(t, "passed records", passed)
+	reportWindow(t, "passed records", passed)
 	if passed.own != 0 {
 		t.Errorf("%d records passed by the gate performed %d allocations, want 0", allocRuns, passed.own)
 	}

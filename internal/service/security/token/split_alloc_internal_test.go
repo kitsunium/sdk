@@ -88,7 +88,7 @@ func TestSplitCompactAllocatesNothing(t *testing.T) {
 		}
 		sinkSegments = seg
 	})
-	reportForeign(t, "splits of a well-formed token", got)
+	reportWindow(t, "splits of a well-formed token", got)
 	//: zero, not "small": the parts are views, so there is nothing to allocate.
 	if got.own != 0 {
 		t.Fatalf("split of a well-formed token performed %d allocations in %d calls, want 0",

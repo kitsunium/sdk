@@ -191,8 +191,8 @@ func TestSetVerificationDoesNotRederiveTheKey(t *testing.T) {
 	if jwkAllocVerdict != nil {
 		t.Fatalf("single-key verifier stopped accepting mid-window: %v", jwkAllocVerdict)
 	}
-	reportForeign(t, "set verifications", setCount)
-	reportForeign(t, "single-key verifications", singleCount)
+	reportWindow(t, "set verifications", setCount)
+	reportWindow(t, "single-key verifications", singleCount)
 	set, single := setCount.own, singleCount.own
 	//: a JWKS verification may not cost meaningfully more than the single-key
 	//: one it wraps — everything above the baseline is selection, and

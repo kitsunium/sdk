@@ -143,7 +143,7 @@ func TestConsoleWriterAddsNoAllocationToAnEmit(t *testing.T) {
 			t.Fatalf("write: %v", err)
 		}
 	})
-	reportForeign(t, "writes", writes)
+	reportWindow(t, "writes", writes)
 	if writes.own != 0 {
 		t.Errorf("%d writes through the console writer performed %d allocations on their own stack (%d process-wide), want 0",
 			allocRuns, writes.own, writes.process)
@@ -152,8 +152,8 @@ func TestConsoleWriterAddsNoAllocationToAnEmit(t *testing.T) {
 	//: the same emit twice: once with no transport, once with this writer.
 	bare := emitCost(t, allocNoopSink{})
 	through := emitCost(t, sink)
-	reportForeign(t, "emits with no transport", bare)
-	reportForeign(t, "emits through the console writer", through)
+	reportWindow(t, "emits with no transport", bare)
+	reportWindow(t, "emits through the console writer", through)
 	if through.own != bare.own {
 		t.Errorf("%d emits through the console writer performed %d allocations against %d with no transport; the writer must add none",
 			allocRuns, through.own, bare.own)
@@ -164,16 +164,21 @@ func TestConsoleWriterAddsNoAllocationToAnEmit(t *testing.T) {
 // handler and sink nothing else will touch, so no measured window pays for them.
 func warmRuntimeCaches(t *testing.T) {
 	t.Helper()
-	h, err := servicelogger.NewHandler(encoder.NewText(clock.System), allocNoopSink{}, level.Info)
-	if err != nil {
-		t.Fatalf("building the warm-up handler: %v", err)
-	}
 	ctx := context.Background()
 	rec := corelogger.RecordEvent{Level: level.Info, Message: "warm"}
-	//: the emit path is what the measured windows walk, so it is what is warmed.
-	for range allocRuntimeWarmup {
-		if herr := h.Handle(ctx, rec); herr != nil {
-			t.Fatalf("warming the runtime caches: %v", herr)
+	//: the emit path is what the measured windows walk, so it is what is
+	//: warmed — over each transport the two arms use, since a type switch's
+	//: cache is built per type it meets, and through handlers no window
+	//: measures.
+	for _, sink := range []corelogger.Sink{allocNoopSink{}, allocSink(t)} {
+		h, err := servicelogger.NewHandler(encoder.NewText(clock.System), sink, level.Info)
+		if err != nil {
+			t.Fatalf("building the warm-up handler: %v", err)
+		}
+		for range allocRuntimeWarmup {
+			if herr := h.Handle(ctx, rec); herr != nil {
+				t.Fatalf("warming the runtime caches: %v", herr)
+			}
 		}
 	}
 }

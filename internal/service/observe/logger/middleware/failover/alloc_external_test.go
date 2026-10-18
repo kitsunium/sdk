@@ -136,7 +136,7 @@ func TestChainDepthAddsNoAllocationOnTheHealthyPath(t *testing.T) {
 			}
 			allocSink = n
 		})
-		reportForeign(t, fmt.Sprintf("writes at depth %d", depth), got)
+		reportWindow(t, fmt.Sprintf("writes at depth %d", depth), got)
 		return got.own
 	}
 	//: fewestAllocs is the least writeAllocs reports over allocRounds rounds,

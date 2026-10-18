@@ -56,17 +56,15 @@ const (
 // warmRuntimeCaches pays for the runtime's lazily-built interface-switch caches
 // on a handler no budget is measured through. See allocRuntimeWarmup.
 func warmRuntimeCaches() {
-	tracer := svctrace.NewTracer(svctrace.TracerConfig{
-		Sampler: svctrace.AlwaysSample,
-		Sink:    func(coretrace.SpanValue) {},
-	})
-	handler := svctrace.ServerMiddleware(tracer)(http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) },
-	))
 	writer := &allocWriter{header: make(http.Header, 4)}
 	request := httptest.NewRequest(http.MethodGet, "/warm", nil)
-	for range allocRuntimeWarmup {
-		handler.ServeHTTP(writer, request)
+	//: both samplers the budget table measures, since each arm walks its own
+	//: sampler's type through the middleware's call sites.
+	for _, sampler := range []coretrace.Sampler{svctrace.AlwaysSample, svctrace.NeverSample} {
+		handler := tracedAllocHandler(sampler)
+		for range allocRuntimeWarmup {
+			handler.ServeHTTP(writer, request)
+		}
 	}
 }
 
@@ -157,7 +155,7 @@ func runAllocBudgetCase(t *testing.T, name string, sampler coretrace.Sampler, bu
 	got := mallocsOver(allocRuns, func() {
 		handler.ServeHTTP(writer, request)
 	})
-	reportForeign(t, name, got)
+	reportWindow(t, name, got)
 	//: the ceiling is per request, so the total is compared against runs × budget.
 	if got.own > uint64(allocRuns*budget) {
 		t.Errorf("%s performed %d allocations over %d requests (%.2f per request), budget %d",
@@ -200,7 +198,7 @@ func TestRecordingAtCapacityAllocatesNothing(t *testing.T) {
 	got := mallocsOver(allocRuns, func() {
 		sink(value)
 	})
-	reportForeign(t, "spans recorded into a full recorder", got)
+	reportWindow(t, "spans recorded into a full recorder", got)
 	if got.own != 0 {
 		t.Errorf("recording %d spans into a full recorder performed %d allocations, want 0", allocRuns, got.own)
 	}

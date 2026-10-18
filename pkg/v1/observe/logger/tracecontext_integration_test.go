@@ -110,10 +110,29 @@ func TestT34TraceCorrelationAddsNoAllocation(t *testing.T) {
 			},
 		},
 	}
+	//: the runtime's lazily built caches are paid on a Logger no window
+	//: measures, over every path and both contexts (allocRuntimeWarmup, in
+	//: fanout_integration_test.go): they are built on the emitting goroutine,
+	//: so a window that paid for one would count it.
+	warm, err := logger.NewWithSink(logger.SinkConfig{
+		Sink:    discardSink{},
+		Encoder: logger.TextEncoder(),
+	})
+	if err != nil {
+		t.Fatalf("building the warm-up Logger: %v", err)
+	}
+	warmCtx := []context.Context{t.Context(), tracedContext(t.Context())}
+	for range allocRuntimeWarmup {
+		for _, ctx := range warmCtx {
+			logger.Info(ctx, warm, "warm")
+			logger.LogAttrs(ctx, warm, logger.LevelInfo, "warm", allocProbeAttrs)
+			logger.Build(warm, logger.LevelInfo).Str("k", "v").Send(ctx, "warm")
+		}
+	}
 	//: measure one path under one context; the helper warms the recycler.
 	measure := func(emit func(context.Context), ctx context.Context) uint64 {
 		got := mallocsOver(traceRuns, func() { emit(ctx) })
-		reportForeign(t, "emits", got)
+		reportWindow(t, "emits", got)
 		return got.own
 	}
 	runCase := func(t *testing.T, tc tc) {
