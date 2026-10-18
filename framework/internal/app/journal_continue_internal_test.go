@@ -71,11 +71,17 @@ func TestTheChainHoldsAcrossAClosedJournalAndBreaksWhereItIsChanged(t *testing.T
 	if check := verifyChain(aClosedJournal()); check.BrokenAt != 0 || check.Entries != 6 || !slices.Equal(check.Closed, []int64{3}) {
 		t.Fatalf("a closed journal and the next: %+v", check)
 	}
-	for _, c := range []struct {
+	type tc struct {
 		name   string
 		change func([]journalRecord) []journalRecord
 		at     int64
-	}{
+	}
+	runCase := func(t *testing.T, c tc) {
+		if got := verifyChain(c.change(aClosedJournal())).BrokenAt; got != c.at {
+			t.Errorf("the chain breaks at %d, want %d", got, c.at)
+		}
+	}
+	for _, c := range []tc{
 		{"an entry of the former journal changed", func(all []journalRecord) []journalRecord {
 			all[1].By = "studio"
 			return all
@@ -120,11 +126,7 @@ func TestTheChainHoldsAcrossAClosedJournalAndBreaksWhereItIsChanged(t *testing.T
 			return all
 		}, 5},
 	} {
-		t.Run(c.name, func(t *testing.T) {
-			if got := verifyChain(c.change(aClosedJournal())).BrokenAt; got != c.at {
-				t.Errorf("the chain breaks at %d, want %d", got, c.at)
-			}
-		})
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
@@ -323,42 +325,44 @@ func failJournal(t *testing.T, app *App, n int) func() {
 // writes.
 func TestAnInterruptedCloseResumes(t *testing.T) {
 	needsFileStore(t)
-	for _, c := range []struct {
+	type tc struct {
 		name    string
 		failAt  int
 		restart bool
-	}{
+	}
+	runCase := func(t *testing.T, c tc) {
+		dir := t.TempDir()
+		clk := clock.NewManualClock(time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC))
+		app, cards := journalApp(t, dir, clk)
+		ctx := t.Context()
+		must(t, cards.Insert(ctx, card{ID: "c1", Owner: "ann", Note: "n"}))
+		former := []journalRecord{formerJournalEntry(t, app, model.JournalHold, "a court"), formerJournalEntry(t, app, model.JournalErase, "asked")}
+		heal := failJournal(t, app, c.failAt)
+		if err := erased(t, app, cards, "refused"); !errs.HasCode(err, CodePrivacyJournal) {
+			t.Fatalf("the interrupted entry: %v, want CodePrivacyJournal", err)
+		}
+		heal()
+		all, err := app.allJournal(ctx)
+		must(t, err)
+		if want := len(former) + c.failAt - 1; len(all) != want {
+			t.Fatalf("after the interruption, %d entries, want %d", len(all), want)
+		}
+		if check := verifyChain(all); check.BrokenAt != 0 {
+			t.Fatalf("after the interruption the chain breaks at %d", check.BrokenAt)
+		}
+		if c.restart {
+			must(t, app.Stop(ctx))
+			app, cards = journalApp(t, dir, clk)
+		}
+		must(t, erased(t, app, cards, "resumed"))
+		continued(t, app, former, "resumed")
+	}
+	for _, c := range []tc{
 		{"the continuing entry refused", 1, false},
 		{"the entry after it refused", 2, false},
 		{"the continuing entry refused, then a restart", 1, true},
 		{"the entry after it refused, then a restart", 2, true},
 	} {
-		t.Run(c.name, func(t *testing.T) {
-			dir := t.TempDir()
-			clk := clock.NewManualClock(time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC))
-			app, cards := journalApp(t, dir, clk)
-			ctx := t.Context()
-			must(t, cards.Insert(ctx, card{ID: "c1", Owner: "ann", Note: "n"}))
-			former := []journalRecord{formerJournalEntry(t, app, model.JournalHold, "a court"), formerJournalEntry(t, app, model.JournalErase, "asked")}
-			heal := failJournal(t, app, c.failAt)
-			if err := erased(t, app, cards, "refused"); !errs.HasCode(err, CodePrivacyJournal) {
-				t.Fatalf("the interrupted entry: %v, want CodePrivacyJournal", err)
-			}
-			heal()
-			all, err := app.allJournal(ctx)
-			must(t, err)
-			if want := len(former) + c.failAt - 1; len(all) != want {
-				t.Fatalf("after the interruption, %d entries, want %d", len(all), want)
-			}
-			if check := verifyChain(all); check.BrokenAt != 0 {
-				t.Fatalf("after the interruption the chain breaks at %d", check.BrokenAt)
-			}
-			if c.restart {
-				must(t, app.Stop(ctx))
-				app, cards = journalApp(t, dir, clk)
-			}
-			must(t, erased(t, app, cards, "resumed"))
-			continued(t, app, former, "resumed")
-		})
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }

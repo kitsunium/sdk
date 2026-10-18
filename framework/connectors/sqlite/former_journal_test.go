@@ -279,30 +279,34 @@ func editJournal(t *testing.T, dir string, onSQLite bool, key string, edit func(
 // another hash — breaks it at entry 11.
 func TestAClosedFormerJournalStillBreaksWhereItIsChanged(t *testing.T) {
 	needsFileStore(t)
-	for _, kind := range []string{"sqlite", "files"} {
-		for _, c := range []struct {
-			name string
-			key  string
-			edit func(map[string]any)
-			at   string
-		}{
-			{"a former entry", seqKey(3), func(e map[string]any) { e["by"] = "studio" }, "the chain breaks at entry 3"},
-			{"the link", seqKey(11), func(e map[string]any) { e["follows"] = strings.Repeat("0", 64) }, "the chain breaks at entry 11"},
-		} {
-			t.Run(kind+"/"+c.name, func(t *testing.T) {
-				onSQLite := kind == "sqlite"
-				fixture := filepath.Join("testdata", "former-journal", kind)
-				dir := keyedCopy(t, fixture)
-				if err := readsAsItWas(t, dir, fixture, onSQLite).app.Stop(t.Context()); err != nil {
-					t.Fatal(err)
-				}
-				editJournal(t, dir, onSQLite, c.key, c.edit)
-				status, out := mainOf(t, newKeyed(t, dir, onSQLite, false).atelier, "privacy", "journal", "-verify")
-				if status == 0 || !strings.Contains(string(out), c.at) {
-					t.Errorf("privacy journal -verify with %s changed: %d\n%s", c.name, status, out)
-				}
-			})
+	type tc struct {
+		kind, name string
+		key        string
+		edit       func(map[string]any)
+		at         string
+	}
+	runCase := func(t *testing.T, c tc) {
+		onSQLite := c.kind == "sqlite"
+		fixture := filepath.Join("testdata", "former-journal", c.kind)
+		dir := keyedCopy(t, fixture)
+		if err := readsAsItWas(t, dir, fixture, onSQLite).app.Stop(t.Context()); err != nil {
+			t.Fatal(err)
 		}
+		editJournal(t, dir, onSQLite, c.key, c.edit)
+		status, out := mainOf(t, newKeyed(t, dir, onSQLite, false).atelier, "privacy", "journal", "-verify")
+		if status == 0 || !strings.Contains(string(out), c.at) {
+			t.Errorf("privacy journal -verify with %s changed: %d\n%s", c.name, status, out)
+		}
+	}
+	formerEntry := func(e map[string]any) { e["by"] = "studio" }
+	link := func(e map[string]any) { e["follows"] = strings.Repeat("0", 64) }
+	for _, c := range []tc{
+		{"sqlite", "a former entry", seqKey(3), formerEntry, "the chain breaks at entry 3"},
+		{"sqlite", "the link", seqKey(11), link, "the chain breaks at entry 11"},
+		{"files", "a former entry", seqKey(3), formerEntry, "the chain breaks at entry 3"},
+		{"files", "the link", seqKey(11), link, "the chain breaks at entry 11"},
+	} {
+		t.Run(c.kind+"/"+c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
