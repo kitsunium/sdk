@@ -828,7 +828,10 @@ jobs:
           # TEMPORARY DIAGNOSTIC (to be removed before merge): reproduce the
           # queued-command flake many times in one run.
           set -- $(grep ' framework/internal/app$' bins/manifest)
-          (cd "framework/internal/app" && "$OLDPWD/bins/$1" -test.run '^TestAQueuedCommandSurvivesARestart$' -test.count=40 -test.failfast -test.timeout=10m 2>&1 | grep -v '^=== RUN\|^--- PASS' | head -4000) || true
+          for n in 1 2 3 4 5 6; do
+            echo "== diagnostic run $n of framework/internal/app"
+            (cd "framework/internal/app" && "$OLDPWD/bins/$1" -test.timeout=10m 2>&1 | grep -v '^=== \|^--- PASS\|^    --- PASS\|^PASS$' | grep -A3000 -- '--- FAIL' | head -4000) || true
+          done
           echo "== conformance on ${{ matrix.os }} =="
           # Tried again only to name a failure: a pass on a retry is a flake,
           # and fails the job (run-test-binaries.sh's rule).
