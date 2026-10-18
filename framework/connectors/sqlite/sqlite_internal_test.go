@@ -56,24 +56,48 @@ func TestTheURLsParametersWin(t *testing.T) {
 // SQLite counts the busy sleeps it asked for, not the time that passed: the
 // timeout handed to it is kit's wait where a sleep ends when asked, and where
 // each ends late, the longest one whose sleeps and their overshoot still end
-// within the wait — one millisecond more would not.
+// within the wait — one millisecond more would not —, zero when not even one
+// late sleep fits.
 func TestTheBusyTimeoutEndsWithinTheWaitOfWallTime(t *testing.T) {
 	if got := busySleeps(1750 * time.Millisecond); got != 27 {
 		t.Errorf("SQLite sleeps %d times in 1.75 s, want 27 (twelve, then 100 ms each, the last cut)", got)
 	}
-	for _, wait := range []time.Duration{250 * time.Millisecond, 1750 * time.Millisecond, 4500 * time.Millisecond, 27 * time.Second} {
-		if got := busyTimeoutWith(wait, 0); got != wait {
-			t.Errorf("busyTimeoutWith(%s, 0) = %s, want the wait itself", wait, got)
+	const late = 12 * time.Millisecond
+	type tc struct {
+		name string
+		wait time.Duration
+		zero bool
+	}
+	tests := []tc{
+		{"under a millisecond", 500 * time.Microsecond, true},
+		{"shorter than one late sleep", 5 * time.Millisecond, true},
+		{"kit's floor", 250 * time.Millisecond, false},
+		{"a 2 s deadline", 1750 * time.Millisecond, false},
+		{"the default", 4500 * time.Millisecond, false},
+		{"a long one", 27 * time.Second, false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := busyTimeoutWith(c.wait, 0); got != c.wait {
+			t.Errorf("busyTimeoutWith(%s, 0) = %s, want the wait itself", c.wait, got)
 		}
-		const late = 12 * time.Millisecond
-		got := busyTimeoutWith(wait, late)
-		if spent := got + time.Duration(busySleeps(got))*late; spent > wait {
-			t.Errorf("busyTimeoutWith(%s, %s) = %s, which ends after %s", wait, late, got, spent)
+		got := busyTimeoutWith(c.wait, late)
+		if c.zero {
+			if got != 0 {
+				t.Errorf("busyTimeoutWith(%s, %s) = %s, want 0: not one late sleep fits", c.wait, late, got)
+			}
+			return
+		}
+		if spent := got + time.Duration(busySleeps(got))*late; got <= 0 || spent > c.wait {
+			t.Errorf("busyTimeoutWith(%s, %s) = %s, which ends after %s", c.wait, late, got, spent)
 		}
 		next := got + time.Millisecond
-		if spent := next + time.Duration(busySleeps(next))*late; spent <= wait {
-			t.Errorf("busyTimeoutWith(%s, %s) = %s, and %s would still end by %s", wait, late, got, next, spent)
+		if spent := next + time.Duration(busySleeps(next))*late; spent <= c.wait {
+			t.Errorf("busyTimeoutWith(%s, %s) = %s, and %s would still end by %s", c.wait, late, got, next, spent)
 		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 	switch runtime.GOOS {
 	case "openbsd", "netbsd":

@@ -630,6 +630,10 @@ binaries_fixture() {
 #!/bin/sh
 pwd >>"$WORK/$n.ran"
 echo "\$*" >>"$WORK/$n.args"
+if [ -f "$WORK/$n.hang" ]; then
+  echo "panic: test timed out after 5m0s"
+  exit 2
+fi
 c=0
 if [ -f "$WORK/$n.codes" ]; then
   c=\$(head -n 1 "$WORK/$n.codes")
@@ -653,7 +657,7 @@ SH
   [ "$status" -eq 0 ]
   [ "$(cat "$WORK/a.ran")" = "$WORK/a/pkg" ]
   [ "$(cat "$WORK/b.ran")" = "$WORK/b/pkg" ]
-  [[ "$(cat "$WORK/a.args")" == *"-test.timeout=10m -test.v"* ]]
+  [[ "$(cat "$WORK/a.args")" == *"-test.timeout=5m -test.v"* ]]
   [[ "$output" == *"2 suites on"* ]]
 }
 
@@ -680,6 +684,21 @@ SH
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"::warning::b/pkg passed only on a retry"* ]]
+}
+
+# A hang spends one timeout, never three: retried, it would eat the guest
+# step's cap and leave the suites after it unrun and the summary unprinted.
+@test "binaries: a suite that timed out is not tried again, and fails named" {
+  binaries_fixture
+  touch "$WORK/a.hang"
+
+  run sh "$CI_DIR/run-test-binaries.sh" bins
+
+  [ "$status" -eq 1 ]
+  [ "$(wc -l <"$WORK/a.ran" | tr -d ' ')" = "1" ]
+  [[ "$output" == *"timed out after 5m"* ]]
+  [[ "$output" == *"::error::a/pkg fails on"* ]]
+  [ -f "$WORK/b.ran" ]
 }
 
 # A run that executed nothing must not pass.

@@ -48,13 +48,15 @@ func busyTimeout(wait time.Duration) time.Duration {
 	return busyTimeoutWith(wait, sleepOvershoot())
 }
 
-// busyTimeoutWith is busyTimeout for a given overshoot.
+// busyTimeoutWith is busyTimeout for a given overshoot. A wait too short for
+// even one late sleep gets zero: SQLite then refuses at once, which still
+// ends within the wait.
 func busyTimeoutWith(wait, overshoot time.Duration) time.Duration {
 	if overshoot <= 0 {
 		return wait
 	}
 	budget := wait.Truncate(time.Millisecond)
-	for budget > time.Millisecond && budget+time.Duration(busySleeps(budget))*overshoot > wait {
+	for budget > 0 && budget+time.Duration(busySleeps(budget))*overshoot > wait {
 		budget -= time.Millisecond
 	}
 	return budget

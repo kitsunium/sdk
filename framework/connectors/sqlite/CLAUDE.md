@@ -27,13 +27,13 @@ Rules:
   and kit opens it with `OpenWaiting` and `B = T − max(250ms, T/10)`, `T`
   being `<name>-timeout` — 4.5 s for the default 5 s —, so a lost race on the
   write lock comes back as SQLite's refusal before the call's deadline
-  (`TestALostLockComesBackBeforeTheCallsDeadline`). `B` is wall time: on
-  OpenBSD and NetBSD the parameter SQLite is given is less, by its sleeps'
-  overshoot (`busy.go`) — handed `B` itself, it gave up 2.04 s to 2.10 s into a
-  2 s deadline there. kit refuses at start a
-  `T` under 500 ms and a URL whose own busy timeout reaches `T`
+  (`TestALostLockComesBackBeforeTheCallsDeadline`). kit refuses at start a `T` under 500 ms
+  and a URL whose own busy timeout reaches `T`
   (`database.sqlite-busy-timeout`), and never rewrites it; `Open` alone
   keeps the engine's 5 s.
+- `B` is wall time. On OpenBSD and NetBSD the parameter SQLite is given is
+  less, by its sleeps' overshoot (`busy.go`): handed `B` itself, it gave up
+  2.04 s to 2.10 s into a 2 s deadline there.
 - kit's consumer queues live on the database that keeps their service
   (ADR 0178 C1): `queue_test.go` runs the outbox on a real file — a
   publication, a queued dispatch and a watch's notice written in the
