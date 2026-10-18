@@ -27,7 +27,7 @@ outbox on a database it declares (`CodeSubsystemMissing`).
 ## Rules
 
 - It imports `plug`, `storeengine` (the SDK's handles of a database the store subsystem opened, `SQLOf` — ADR 0179 Q4: the queues depend on the stores) and the SDK, never kit's core: the core imports no `*kit` package (ADR 0179 §3), and kit's own suites plug it in through `framework/app/queue` (`framework/internal/app/subsystems_test.go`).
-- The core encodes every message: a queue carries bytes, and nothing here names a message's type. The bytes at rest are unchanged — the same tables (`kit_queue__…`), the same file queues.
+- The core encodes every message: a queue carries bytes, and nothing here names a message's type. The bytes at rest are unchanged — the same tables (`app_queue__…`, `kit_queue__…` before ADR 0180 step 5, which the store subsystem's `RenameTables` moves), the same file queues.
 - A refusal of the SDK's queue reaches the core as the SDK's error, which the core wraps in its own codes (`CodeQueueOpen`, `CodeTopicPublish`, `CodeCommandQueue`, `CodeWatchQueue`, `CodeMailQueue`, `CodeDataCopy`); it never matches a queue sentinel itself — the one mark it reads, a delivery no retry helps, it asks through `plug.QueueDriverConfig`'s `NotRetryable`.
 
 ## Verify

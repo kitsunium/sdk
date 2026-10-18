@@ -38,7 +38,7 @@ type mailroom struct {
 }
 
 // mailroomTable is the mailroom's outbox, as kit names it.
-const mailroomTable = "kit_queue__mailroom__notify__outbox"
+const mailroomTable = "app_queue__mailroom__notify__outbox"
 
 // startMailroom runs the mailroom in dev on the fake database main, every
 // queue it opens behind wrap when it is set, and listens to its events.

@@ -9,7 +9,7 @@ import (
 // a handler holds can never alias what the store holds, and the memory and
 // file backends behave identically.
 //
-// With a data directory (<PRODUCT>_DATA_DIR; ".kit/data" in dev) the store persists
+// With a data directory (<PRODUCT>_DATA_DIR; ".app/data" in dev) the store persists
 // every write before returning, atomically — a crash never leaves a torn
 // file — and a write costs one entity, whatever the store holds. Without one,
 // it lives in memory. A store is a port (ADR 0004): what it runs on is its

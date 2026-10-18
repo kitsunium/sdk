@@ -1520,7 +1520,7 @@ SecretFromEnv is the environment: the variable, or the file its \_FILE form name
 const SecretFromFile = "file"
 ```
 
-SecretFromFile is kit's encrypted file store: \<PRODUCT>\_SECRETS=file:\<dir>, or .kit/secrets/dev in dev.
+SecretFromFile is the framework's encrypted file store: \<PRODUCT>\_SECRETS=file:\<dir>, or the data directory's .secrets in dev.
 
 <a name="SecretFromMemory"></a>
 ```go
@@ -3593,9 +3593,9 @@ MigrationSetMessage is one set of migrations on a database — kit's own, the pr
 
 ```go
 type MigrationSetMessage struct {
-	// Name is the set's origin: "kit", "product", or a module's name.
+	// Name is the set's origin: "app", "product", or a module's name.
 	Name    string             `json:"name"`
-	// Table is its version table: "kit_migrations", "schema_migrations".
+	// Table is its version table: "app_migrations", "schema_migrations".
 	Table   string             `json:"table"`
 	// Applied are the migrations the database records, and Pending those
 	// this build carries that it does not, oldest first.

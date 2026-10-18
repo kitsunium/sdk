@@ -56,7 +56,7 @@ func marked(t *fieldTag, m Mark) bool {
 // and erases through. A store the app does not mount is a [NotFound] error.
 func (a *App) Records(store string) (RecordsService, error) {
 	st, ok := a.findNode(store).(privacyStore)
-	if !ok || model.ServiceOf(store) == privacyService {
+	if !ok || ownService(model.ServiceOf(store)) {
 		return RecordsService{}, NotFound("no such store: " + clip(store))
 	}
 	return NewRecordsService(st.records()), nil

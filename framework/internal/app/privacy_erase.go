@@ -268,7 +268,7 @@ func (s *storeCore) sealedRefs(ctx context.Context, a *App, key string) ([]strin
 	if err != nil {
 		return nil, err
 	}
-	return append(refs, keys.ownRef(s.id, key)), nil
+	return append(refs, keys.ownRef(sealedAs(s.id), key)), nil
 }
 
 // moveOwn seals the held record under key again, under a data key of its
@@ -300,7 +300,7 @@ func (s *storeCore) moveOwn(ctx context.Context, a *App, key string) error {
 	if err != nil {
 		return err
 	}
-	from, to := keys.personRef(id), keys.ownRef(s.id, key)
+	from, to := keys.personRef(id), keys.ownRef(sealedAs(s.id), key)
 	var moved error
 	if h := s.historied(); h != nil {
 		moved = h.moveFormer(ctx, key, from, to)

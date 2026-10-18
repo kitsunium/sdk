@@ -377,6 +377,27 @@ packages:
             name: CodeRenamed
             value: "0x00_04_02_55"
         type: errs.Code
+      - const:
+          - comment: "0.4.2.86 — a name at rest the framework moves to its present name is taken too: nothing is moved, both are named"
+            doc: |-
+              CodeRenameTarget refuses a start that meets what a former release
+              kept under the tool's name — a table, the privacy service's
+              directory, the dev data directory — while its present name is taken
+              too (ADR 0180 step 5): the framework never replaces one with the
+              other, so nothing is moved and both are named. What rests under the
+              former name stays as it was, readable by the release that wrote it.
+            name: CodeRenameTarget
+            value: "0x00_04_02_56"
+          - comment: "0.4.2.87 — a name at rest could not be moved to its present name: the former stays readable, the next start resumes"
+            doc: |-
+              CodeRenameFailed refuses a start whose move of a name at rest to its
+              present name did not complete (ADR 0180 step 5): a directory the
+              system would not rename, a statement the database did not run. What
+              was not moved stays under its former name, readable as it was, and
+              the next start resumes the move.
+            name: CodeRenameFailed
+            value: "0x00_04_02_57"
+        type: errs.Code
     constants:
       - blockDoc: The environments.
         doc: |-
@@ -4468,7 +4489,7 @@ packages:
           a handler holds can never alias what the store holds, and the memory and
           file backends behave identically.
 
-          With a data directory (<PRODUCT>_DATA_DIR; ".kit/data" in dev) the store persists
+          With a data directory (<PRODUCT>_DATA_DIR; ".app/data" in dev) the store persists
           every write before returning, atomically — a crash never leaves a torn
           file — and a write costs one entity, whatever the store holds. Without one,
           it lives in memory. A store a database keeps ([Database], [Keeps]) lives
@@ -5160,7 +5181,7 @@ packages:
       - doc: |-
           Privacy is the framework's own service: the data keys, the legal holds and the
           privacy journal of an app that keeps personal data or seals what it
-          keeps. The framework mounts a copy of it — named kit.privacy, a name no service of a
+          keeps. The framework mounts a copy of it — named app.privacy, a name no service of a
           product can take — in every app whose stores keep personal data or declare
           a retention, or that keeps sealed values at rest, before the product's
           services. Its stores stay in the data directory unless the product places
@@ -5428,6 +5449,14 @@ packages:
         name: RefusalOutOfOrder
         type: Refusal
         value: "22"
+      - blockDoc: The kinds of refusal.
+        doc: |-
+          RefusalRenameTarget is a table whose present name is taken while its
+          former one still holds the framework's data (ADR 0180 step 5); its
+          "tables" field names them, and nothing was moved.
+        name: RefusalRenameTarget
+        type: Refusal
+        value: "23"
       - doc: |-
           WorkflowCreateEvent is the event of a transition Start fires: an entity
           entering its workflow.
@@ -6469,6 +6498,69 @@ packages:
                 of the dialect named, at version.
               name: TableMigration
               type: func(dialect string, t TableSpec, version uint64) (MigrationValue, error)
+            - doc: |-
+                FormerTables are the tables of plan still under a former name on db —
+                its former version table among them —, read from the database's
+                catalogue, sorted: what RenameTables would move; none once moved.
+              name: FormerTables
+              type: func(ctx context.Context, db Database, plan RenameSpec) ([]string, error)
+            - doc: |-
+                RenameTables moves the tables of plan to their present names on db
+                (ADR 0180 step 5), under the migration lock of plan's former version
+                table and in the transaction that records the move there, and returns
+                the tables it moved; none when nothing was left under a former name.
+                A table whose present name is taken too is a [RefusalRenameTarget],
+                and nothing moves.
+              name: RenameTables
+              type: func(ctx context.Context, db Database, plan RenameSpec) ([]string, error)
+      - doc: |-
+          RenameSpec is the framework's tables on a database moved to their present
+          names (ADR 0180 step 5): each table — with the tables the document store
+          derives from it, <table>___ix and <table>___vs —, the history of the
+          former version table taken by the present one, and the names that
+          history gives the tables' migrations.
+        name: RenameSpec
+        struct:
+          fields:
+            - doc: |-
+                FormerVersions is the version table the framework's set had: the move
+                holds its migration lock, is recorded there, and drops it once the
+                history is the present table's.
+              name: FormerVersions
+              type: string
+            - doc: Versions is the version table the framework's set has now.
+              name: Versions
+              type: string
+            - doc: Name labels the move in FormerVersions, at Version.
+              name: Name
+              type: string
+            - doc: |-
+                Tables are the tables moved, each from its former name to its present
+                one.
+              name: Tables
+              type: "[]RenameValue"
+            - doc: |-
+                Labels are the names of the tables' migrations in the history, each
+                from what the former release recorded to what this one says.
+              name: Labels
+              type: "[]RenameValue"
+            - doc: |-
+                Version is the move's version in FormerVersions: above every version
+                the framework gives.
+              name: Version
+              type: uint64
+      - doc: |-
+          RenameValue is one name replaced by another: a table's, or a migration's
+          name in a version table.
+        name: RenameValue
+        struct:
+          fields:
+            - doc: From is the former name.
+              name: From
+              type: string
+            - doc: To is the present one.
+              name: To
+              type: string
       - doc: |-
           DocumentValue is a record as a store's engine holds it (ADR 0179 §2):
           its JSON as it rests, byte for byte what the framework encodes, and the entity
@@ -8858,7 +8950,7 @@ packages:
           a handler holds can never alias what the store holds, and the memory and
           file backends behave identically.
 
-          With a data directory (<PRODUCT>_DATA_DIR; ".kit/data" in dev) the store persists
+          With a data directory (<PRODUCT>_DATA_DIR; ".app/data" in dev) the store persists
           every write before returning, atomically — a crash never leaves a torn
           file — and a write costs one entity, whatever the store holds. Without one,
           it lives in memory. A store is a port (ADR 0004): what it runs on is its
@@ -9457,6 +9549,20 @@ packages:
         name: CodeRenamed
         type: errs.Code
         value: "0x00_04_02_55"
+      - doc: |-
+          CodeRenameTarget refuses a start that meets data a former release kept
+          under the tool's name while its present name is taken too (ADR 0180
+          step 5): nothing is moved, and both names are said.
+        name: CodeRenameTarget
+        type: errs.Code
+        value: "0x00_04_02_56"
+      - doc: |-
+          CodeRenameFailed refuses a start whose move of a name at rest did not
+          complete (ADR 0180 step 5): what was not moved stays readable under its
+          former name, and the next start resumes the move.
+        name: CodeRenameFailed
+        type: errs.Code
+        value: "0x00_04_02_57"
     doc: |-
       Package app — who may call an operation: the principal, the rules and their
       checks.
@@ -11200,7 +11306,7 @@ packages:
       - doc: |-
           Privacy is the framework's own service: the legal holds and the privacy journal of
           an app that keeps personal data. The framework mounts a copy of it — named
-          kit.privacy, a name no service of a product can take — in every app whose
+          app.privacy, a name no service of a product can take — in every app whose
           stores keep personal data or declare a retention, before the product's
           services. Its stores stay in the data directory unless the product places
           them (ADR 0004). A product never mounts it itself.

@@ -37,7 +37,7 @@ func moduleTable(module string) string {
 }
 
 // migrationSets are the sets a database runs after kit's own — its tables,
-// under kit_migrations, which kit resolves against its registry when the
+// under app_migrations, which the framework resolves against its registry when the
 // database opens (store_sql_migrate.go) —, in order: the modules' it keeps,
 // in the order they start, then the product's.
 func (a *App) migrationSets(d *database) []migrationSet {

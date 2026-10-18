@@ -106,6 +106,10 @@ type kitTable struct {
 	// versionsOf is, for a store's versions, the store's table: the SDK
 	// derives the versions' table from it (docstore.SQLVersionsMigration).
 	versionsOf string
+	// former is the table's name before ADR 0180 step 5, when a former
+	// release named it otherwise — a consumer's queue's, the privacy
+	// service's —; "" when the name did not change.
+	former string
 	// queue marks a consumer's queue: the SDK's SQL broker's one table, which
 	// the queue subsystem migrates, not a document store's.
 	queue bool
@@ -119,7 +123,7 @@ func (a *App) kitTables(d *database) []kitTable {
 	var out []kitTable
 	for _, st := range a.placedStores() {
 		if t, ok := st.(tabled); ok && a.keptOn(st, d) {
-			out = append(out, storeTables(t, st.base().id)...)
+			out = append(out, storeTables(t, st.base())...)
 		}
 	}
 	for _, n := range a.mountedNodes() {
@@ -134,12 +138,12 @@ func (a *App) nodeTables(n node, d *database) []kitTable {
 	var out []kitTable
 	if w, ok := n.(journaled); ok {
 		if st := w.journalStore(); st != nil && a.keptOn(st, d) {
-			out = append(out, kitTable{name: w.journalTable(), node: n.base().id})
+			out = append(out, kitTable{name: w.journalTable(), node: n.base().id}.withFormer(n.base(), workflowSuffix, ""))
 		}
 	}
 	if q, ok := n.(queueOwner); ok {
 		if under := q.queueUnder(); under != "" && a.queueKeptOn(q.base(), d) {
-			out = append(out, kitTable{name: queueTable(q.base(), under), node: q.base().id, queue: true})
+			out = append(out, kitTable{name: queueTable(q.base(), under), node: q.base().id, former: formerQueueTable(q.base(), under), queue: true})
 		}
 	}
 	return out
@@ -151,21 +155,37 @@ func (a *App) keptOn(st placementSource, d *database) bool {
 	return p.db == d && !p.memory
 }
 
-// storeTables are the tables of the store t, node id: its own, its former
-// values' when it remembers, its versions' when it keeps revisions.
-func storeTables(t tabled, id string) []kitTable {
-	out := []kitTable{{name: t.table(), node: id}}
+// storeTables are the tables of the store t, node b: its own, its former
+// values' when it remembers, its versions' when it keeps revisions — each
+// with the name a former release gave it, when that differs.
+func storeTables(t tabled, b *nodeBase) []kitTable {
+	id := b.id
+	out := []kitTable{kitTable{name: t.table(), node: id}.withFormer(b, "", "")}
 	if t.remembers() {
-		out = append(out, kitTable{name: t.historyTable(), node: id})
+		out = append(out, kitTable{name: t.historyTable(), node: id}.withFormer(b, historySuffix, ""))
 	}
 	if t.keepsRevisions() {
-		out = append(out, kitTable{name: t.table() + versionsSuffix, node: id, versionsOf: t.table()})
+		out = append(out, kitTable{name: t.table() + versionsSuffix, node: id, versionsOf: t.table()}.withFormer(b, "", versionsSuffix))
 	}
 	return out
 }
 
+// withFormer is t with the name a former release gave it, when the node b
+// is the privacy service's — whose tables were named after kit.privacy
+// before ADR 0180 step 5 —: the node's table ending with suffix, then tail;
+// every other node's table kept its name, and t is returned as it is.
+func (t kitTable) withFormer(b *nodeBase, suffix, tail string) kitTable {
+	if b.svc != nil && b.svc.name == privacyService {
+		t.former = tableName(formerPrivacyService, b.name, suffix) + tail
+	}
+	return t
+}
+
 // reservedTables are the tables kit's own set keeps on every database.
-var reservedTables = map[string]string{kitTablesTable: "kit", "kit_migrations": "kit", tableProduct: "kit"}
+var reservedTables = map[string]string{
+	kitTablesTable: frameworkName, tableKit: frameworkName, tableProduct: frameworkName,
+	formerTablesTable: frameworkName, formerSetTable: frameworkName,
+}
 
 // tableProblems are the tables two of kit's names would give one name on a
 // database: two nodes whose names differ only by what the rule writes '_'

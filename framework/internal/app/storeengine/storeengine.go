@@ -5,7 +5,10 @@ import "github.com/kitsunium/sdk/framework/internal/app/plug"
 // Enable plugs the stores' engines, the framework's scope on a database and the
 // migrations of the framework's tables into the framework.
 func Enable() {
-	plug.Stores.Store(&plug.StoreDriverConfig{Open: open, Database: openDatabase, TableMigration: tableMigration})
+	plug.Stores.Store(&plug.StoreDriverConfig{
+		Open: open, Database: openDatabase, TableMigration: tableMigration,
+		FormerTables: formerTables, RenameTables: renameTables,
+	})
 }
 
 // open opens the engine of one store where cfg places it: on its database,

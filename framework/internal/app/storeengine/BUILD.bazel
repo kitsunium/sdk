@@ -10,6 +10,7 @@ go_library(
         "document.go",
         "file.go",
         "refusal.go",
+        "rename.go",
         "sql.go",
         "storeengine.go",
         "storeengine_compliance.go",

@@ -236,7 +236,7 @@ func TestMigrationsAndStoresRunOnTheFile(t *testing.T) {
 			t.Errorf("set %+v", s)
 		}
 	}
-	if !slices.Equal(sets, []string{"kit", "product"}) {
+	if !slices.Equal(sets, []string{"app", "product"}) {
 		t.Errorf("the sets: %v", sets)
 	}
 	if st := g.Node("audit/store/trail").Store; st.Backend != "sqlite" || st.Table != "audit__trail" {

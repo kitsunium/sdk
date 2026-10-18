@@ -1928,7 +1928,7 @@ Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.SecretF
 const SecretFromFile string = "file"
 ```
 
-SecretFromFile is kit's encrypted file store: \<PRODUCT>\_SECRETS=file:\<dir>, or .kit/secrets/dev in dev.
+SecretFromFile is the framework's encrypted file store: \<PRODUCT>\_SECRETS=file:\<dir>, or the data directory's .secrets in dev.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.SecretFromFile`.
 
@@ -4447,9 +4447,9 @@ MigrationSet is an alias of `github.com/kitsunium/sdk/framework/model/internal/c
 
 ```go
 type MigrationSet struct {
-	// Name is the set's origin: "kit", "product", or a module's name.
+	// Name is the set's origin: "app", "product", or a module's name.
 	Name    string             `json:"name"`
-	// Table is its version table: "kit_migrations", "schema_migrations".
+	// Table is its version table: "app_migrations", "schema_migrations".
 	Table   string             `json:"table"`
 	// Applied are the migrations the database records, and Pending those
 	// this build carries that it does not, oldest first.

@@ -987,6 +987,28 @@ Initialised with `github.com/kitsunium/sdk/framework/internal/app.CodeRecordsKey
 
 Code `0.4.2.77`
 
+<a name="CodeRenameFailed"></a>
+```go
+const CodeRenameFailed errs.Code = 262743
+```
+
+CodeRenameFailed refuses a start whose move of a name at rest did not complete (ADR 0180 step 5): what was not moved stays readable under its former name, and the next start resumes the move.
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/app.CodeRenameFailed`.
+
+Code `0.4.2.87`
+
+<a name="CodeRenameTarget"></a>
+```go
+const CodeRenameTarget errs.Code = 262742
+```
+
+CodeRenameTarget refuses a start that meets data a former release kept under the tool's name while its present name is taken too (ADR 0180 step 5): nothing is moved, and both names are said.
+
+Initialised with `github.com/kitsunium/sdk/framework/internal/app.CodeRenameTarget`.
+
+Code `0.4.2.86`
+
 <a name="CodeRenamed"></a>
 ```go
 const CodeRenamed errs.Code = 262741
@@ -1650,7 +1672,7 @@ Initialised with `github.com/kitsunium/sdk/framework/internal/app.PerUID`.
 var Privacy *Service
 ```
 
-Privacy is the framework's own service: the legal holds and the privacy journal of an app that keeps personal data. The framework mounts a copy of it — named kit.privacy, a name no service of a product can take — in every app whose stores keep personal data or declare a retention, before the product's services. Its stores stay in the data directory unless the product places them (ADR 0004). A product never mounts it itself.
+Privacy is the framework's own service: the legal holds and the privacy journal of an app that keeps personal data. The framework mounts a copy of it — named app.privacy, a name no service of a product can take — in every app whose stores keep personal data or declare a retention, before the product's services. Its stores stay in the data directory unless the product places them (ADR 0004). A product never mounts it itself.
 
 Initialised with `github.com/kitsunium/sdk/framework/internal/app.Privacy`.
 
@@ -4943,7 +4965,7 @@ type Stdio struct {
 
 Store is a typed, keyed collection of entities. Every read returns a copy and every write stores one: an entity is kept as its JSON encoding, so what a handler holds can never alias what the store holds, and the memory and file backends behave identically.
 
-With a data directory (\<PRODUCT>\_DATA\_DIR; ".kit/data" in dev) the store persists every write before returning, atomically — a crash never leaves a torn file — and a write costs one entity, whatever the store holds. Without one, it lives in memory. A store is a port (ADR 0004): what it runs on is its engine (store\_engine.go), today the SDK's document store (docstore); the framework makes it a node of the graph, observes every call, and speaks for its refusals.
+With a data directory (\<PRODUCT>\_DATA\_DIR; ".app/data" in dev) the store persists every write before returning, atomically — a crash never leaves a torn file — and a write costs one entity, whatever the store holds. Without one, it lives in memory. A store is a port (ADR 0004): what it runs on is its engine (store\_engine.go), today the SDK's document store (docstore); the framework makes it a node of the graph, observes every call, and speaks for its refusals.
 
 ```go
 type Store[T any] = iapp.StoreService[T]

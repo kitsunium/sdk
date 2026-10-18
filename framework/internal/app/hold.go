@@ -31,7 +31,7 @@ import (
 // declares, which the register publishes —, never a placed hold's reason. A
 // hold records who placed it and when; its reason is kept for whoever runs
 // the product, tagged secret — the Studio never shows it, and kit seals it
-// at rest. Holds are kept in kit's own store, kit.privacy/store/holds, one
+// at rest. Holds are kept in kit's own store, app.privacy/store/holds, one
 // per record, filed under the record's reference.
 //
 // Placing a hold, and checking for one before an erasure or a deletion,

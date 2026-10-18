@@ -56,6 +56,10 @@ type config struct {
 	// memoryData says no data directory was given outside dev: what the app
 	// keeps lives in memory — a warning when it keeps anything.
 	memoryData bool
+	// formerDataDir is, when the data directory is dev's default and
+	// nothing named it, where a former release kept its data, moved there
+	// (renamed_rest.go); "" otherwise.
+	formerDataDir string
 	// studio is what the Studio may do in this run.
 	studio       studioConfig
 	allowedHosts []string
@@ -198,7 +202,7 @@ func resolveConfig(o *appOptions, name string, getenv func(string) string) confi
 	cfg.env, cfg.envName = resolveEnv(env)
 	dev := cfg.env == EnvDev
 	cfg.addr = resolveAddr(o, own, getenv, dev)
-	cfg.dataDir, cfg.memoryData = resolveDataDir(o, own, dev)
+	cfg.dataDir, cfg.memoryData, cfg.formerDataDir = resolveDataDir(o, own, dev)
 	studio := studioEnv(getenv)
 	cfg.studio = resolveStudio(o, studio, dev)
 	if !dev && studioAsked(o, studio) {
@@ -257,20 +261,22 @@ func resolveAddr(o *appOptions, own, getenv func(string) string, dev bool) strin
 	}
 }
 
-// resolveDataDir is where the app keeps its data — "" for memory — and
-// whether it keeps it in memory for want of a directory, which is said.
-func resolveDataDir(o *appOptions, own func(string) string, dev bool) (dir string, warn bool) {
+// resolveDataDir is where the app keeps its data — "" for memory —,
+// whether it keeps it in memory for want of a directory, which is said, and
+// — for dev's default directory alone — where a former release kept it
+// (ADR 0180 step 5).
+func resolveDataDir(o *appOptions, own func(string) string, dev bool) (dir string, warn bool, former string) {
 	switch {
 	case o.memory:
-		return "", false
+		return "", false, ""
 	case o.dataDir != nil:
-		return *o.dataDir, false
+		return *o.dataDir, false, ""
 	case own(varDataDir) != "":
-		return own(varDataDir), false
+		return own(varDataDir), false, ""
 	case dev:
-		return ".kit/data", false
+		return devDataDir, false, formerDevDataDir
 	default:
-		return "", true
+		return "", true, ""
 	}
 }
 

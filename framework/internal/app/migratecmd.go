@@ -170,8 +170,37 @@ func (r *migrateRun) database(ctx context.Context, d *database) bool {
 			fmt.Fprintf(r.stderr, "%s: closing the pool: %s\n", d.name, errs.PublicOf(err))
 		}
 	}()
-	ok := r.target != nil || len(r.a.kitTables(d)) == 0 || r.kitSet(ctx, d, o)
+	ok := r.target != nil || len(r.a.kitTables(d)) == 0 || (r.formerTables(ctx, d, o) && r.kitSet(ctx, d, o))
 	return r.sets(ctx, d, o) && ok
+}
+
+// formerTables runs the command on the framework's tables a former release
+// named otherwise (ADR 0180 step 5): status says which are still under
+// their former names, up moves them — before the framework's set, which
+// reads them under their present ones. It reports whether it went through.
+func (r *migrateRun) formerTables(ctx context.Context, d *database, o *opened) bool {
+	fail := func(err error) bool {
+		fmt.Fprintf(r.stderr, "%s/%s: %s\n", d.name, setKit, errs.PublicOf(err))
+		return false
+	}
+	if r.sub == "status" {
+		former, err := r.a.formerTablesOn(ctx, d, o.db)
+		if err != nil {
+			return fail(err)
+		}
+		if len(former) > 0 {
+			fmt.Fprintf(r.tw, "%s\t%s\t%s\t-\t%s\t%s\n", d.name, setKit, formerSetTable, "under former names: "+strings.Join(former, ", "), "pending")
+		}
+		return true
+	}
+	moved, err := r.a.renameTables(ctx, d, o.db)
+	if err != nil {
+		return fail(err)
+	}
+	if len(moved) > 0 {
+		fmt.Fprintf(r.tw, "%s/%s: moved to their present names: %s\n", d.name, setKit, strings.Join(moved, ", "))
+	}
+	return true
 }
 
 // sets runs the command on d's sets — the one it targets, or all — and
@@ -217,7 +246,7 @@ func (r *migrateRun) kitSet(ctx context.Context, d *database, o *opened) bool {
 		fmt.Fprintf(r.stderr, "%s/%s: %s\n", d.name, setKit, errs.PublicOf(r.a.migrationFailure(d, set, err)))
 		return false
 	}
-	g, err := openRegistry(ctx, d, o.db, false)
+	g, err := r.registry(ctx, d, o, false)
 	if err != nil {
 		return fail(migrationSet{name: setKit, table: tableKit}, err)
 	}
@@ -239,7 +268,7 @@ func (r *migrateRun) kitSet(ctx context.Context, d *database, o *opened) bool {
 	if err != nil {
 		return fail(set, err)
 	}
-	if g, err = openRegistry(ctx, d, o.db, true); err == nil {
+	if g, err = r.registry(ctx, d, o, true); err == nil {
 		set, err = r.a.applyKitSet(ctx, d, o.db, g)
 	}
 	switch {
@@ -251,6 +280,17 @@ func (r *migrateRun) kitSet(ctx context.Context, d *database, o *opened) bool {
 		fmt.Fprintf(r.tw, "%s/%s: applied %s\n", d.name, setKit, versionsText(pending))
 	}
 	return true
+}
+
+// registry is kit's registry on d, its migration applied when apply says
+// so; `up` re-keys the records of the tables a former release named
+// otherwise (ADR 0180 step 5), `status` reads it as it is.
+func (r *migrateRun) registry(ctx context.Context, d *database, o *opened, apply bool) (*tableRegistry, error) {
+	g, err := openRegistry(ctx, d, o.db, apply)
+	if err != nil || r.sub != "up" {
+		return g, err
+	}
+	return g, g.rekey(ctx, r.a.kitTables(d))
 }
 
 // status prints what a set's version table records and what is pending.

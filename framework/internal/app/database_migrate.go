@@ -31,7 +31,7 @@ const maxPublic int = 120
 // migrationSet is one set of migrations a database runs, with its own
 // version table — and so its own lock.
 type migrationSet struct {
-	// name is the set's origin: "kit", "product", a module's.
+	// name is the set's origin: "app", "product", a module's.
 	name       string
 	table      string
 	migrations []plug.MigrationValue
@@ -58,6 +58,9 @@ func (a *App) migrateAtStart(ctx context.Context, d *database, o *opened) ([]mod
 	sets := a.migrationSets(d)
 	var registry *tableRegistry
 	if len(a.kitTables(d)) > 0 {
+		if err := a.tablesAtStart(ctx, d, o, manual); err != nil {
+			return out, nil, err
+		}
 		kit, g, err := a.kitSetAtStart(ctx, d, o, manual)
 		registry = g
 		if err != nil {
@@ -116,6 +119,9 @@ func (a *App) pendingSet(ctx context.Context, d *database, set migrationSet, m p
 // the start to judge.
 func (a *App) kitSetAtStart(ctx context.Context, d *database, o *opened, manual bool) (migrationSet, *tableRegistry, error) {
 	g, err := openRegistry(ctx, d, o.db, !manual)
+	if err == nil {
+		err = g.rekey(ctx, a.kitTables(d))
+	}
 	if err != nil {
 		return migrationSet{name: setKit, table: tableKit}, nil, err
 	}
@@ -125,6 +131,26 @@ func (a *App) kitSetAtStart(ctx context.Context, d *database, o *opened, manual 
 	}
 	set, err := a.applyKitSet(ctx, d, o.db, g)
 	return set, g, err
+}
+
+// tablesAtStart moves the framework's tables on d to their present names
+// at its start (renamed_rest.go); when d migrates manually, a table still
+// under its former name refuses the start, naming the command that moves it.
+func (a *App) tablesAtStart(ctx context.Context, d *database, o *opened, manual bool) error {
+	if !manual {
+		_, err := a.renameTables(ctx, d, o.db)
+		return err
+	}
+	former, err := a.formerTablesOn(ctx, d, o.db)
+	if err != nil {
+		return a.migrationFailure(d, migrationSet{name: setKit, table: tableKit}, err)
+	}
+	if len(former) > 0 {
+		return dbFailure(CodeDatabaseMigrate, "DATABASE_MIGRATIONS_PENDING",
+			fmt.Sprintf("database %q keeps the framework's tables under their former names and migrates manually: run `%s migrate up`", d.name, a.name),
+			errs.String("database", d.name), errs.String("set", setKit))
+	}
+	return nil
 }
 
 // migrationFailure is a set that did not apply, in kit's words: the SDK's

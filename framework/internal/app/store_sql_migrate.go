@@ -17,28 +17,29 @@ import (
 // one migration of the SDK's document store, which the store subsystem
 // writes (plug.StoreDriverConfig's TableMigration), or, for a queue, of its
 // SQL broker, which the queue subsystem writes (plug.QueueDriverConfig's),
-// under kit's version table, kit_migrations, and run before
+// under the framework's version table, app_migrations, and run before
 // the modules' and the product's.
 //
 // The SDK's migrator refuses a pending migration older than one already
 // applied, and kit cannot know when a store was declared: a table's version
 // is given the first time kit creates it, and kept in kit's own registry,
-// kit_tables — whose migration, version 1, comes first. A new table takes the
+// app_tables — whose migration, version 1, comes first. A new table takes the
 // next generation, above every version kit gave — its high 32 bits — and the
 // digest of its name — its low ones —, so that two processes of two
 // releases starting together give two new tables two versions. When one of
 // them applied its own first, the other's is below it: the migrator refuses
 // it, and kit gives the next generation again. Every statement of a table's
 // migration does nothing when its table exists, so a table created twice —
-// its registry row lost — is only a second row in kit_migrations.
+// its registry row lost — is only a second row in app_migrations. A former
+// release kept them under kit_* names, which renamed_rest.go moves first.
 
 const (
-	// setKit is kit's own set.
-	setKit = "kit"
-	// tableKit is the version table of kit's own set.
-	tableKit = "kit_migrations"
-	// kitTablesTable is kit's registry of its tables.
-	kitTablesTable = "kit_tables"
+	// setKit is the framework's own set.
+	setKit = frameworkName
+	// tableKit is the version table of the framework's own set.
+	tableKit = frameworkName + "_migrations"
+	// kitTablesTable is the framework's registry of its tables.
+	kitTablesTable = frameworkName + "_tables"
 	// registryVersion is the registry's migration, first of kit's set.
 	registryVersion uint64 = 1
 	// kitSetAttempts bounds how often kit gives new tables the next
@@ -85,6 +86,17 @@ func (g *tableRegistry) put(ctx context.Context, rec tableRecord) error {
 	}
 	g.mu.Lock()
 	g.known[rec.Table] = rec
+	g.mu.Unlock()
+	return nil
+}
+
+// drop removes the record of table: none is not a failure.
+func (g *tableRegistry) drop(ctx context.Context, table string) error {
+	if err := g.store.Delete(ctx, table); err != nil && !plug.Refused(err, plug.RefusalNotFound) {
+		return err
+	}
+	g.mu.Lock()
+	delete(g.known, table)
 	g.mu.Unlock()
 	return nil
 }
