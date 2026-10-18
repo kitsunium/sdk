@@ -387,6 +387,29 @@ func TestTCPCapsUnauthenticatedConnectionsPerAddress(t *testing.T) {
 	// before its connection leaves the raw set.
 	until("the closed connections' slots given back", func() bool { return raw() == 0 })
 	tr.SetMembership(1, []coreconsensus.MemberValue{{ID: 1, SPKI: [32]byte{1}, Address: tr.Addr()}})
+	// The reservation resolves the members' addresses on a goroutine of its
+	// own: wait until the admission gives the loopback more than the
+	// unauthenticated cap — three slots at once — before dialling.
+	loopback := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)}
+	until("the member's address reserved", func() bool {
+		var releases []func()
+		reserved := true
+		//: three admissions over a cap of two say the reservation holds.
+		for range 3 {
+			release, ok := tr.admission.Admit(loopback)
+			//: refused: not reserved yet.
+			if !ok {
+				reserved = false
+				break
+			}
+			releases = append(releases, release)
+		}
+		//: the probe's slots are given back whatever it saw.
+		for _, release := range releases {
+			release()
+		}
+		return reserved
+	})
 	before := tr.RefusedBeforeHandshake()
 	cs = open(4)
 	defer closeAll(cs)
