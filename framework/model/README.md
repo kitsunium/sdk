@@ -960,6 +960,15 @@ The gaps a register lists for a store that keeps personal data.
 
 Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.GapSubject`.
 
+<a name="JournalContinue"></a>
+```go
+const JournalContinue string = "continue"
+```
+
+The operations of the privacy journal.
+
+Initialised with `github.com/kitsunium/sdk/framework/model/internal/core.JournalContinue`.
+
 <a name="JournalDelete"></a>
 ```go
 const JournalDelete string = "delete"
@@ -4061,10 +4070,16 @@ JournalCheck is an alias of `github.com/kitsunium/sdk/framework/model/internal/c
 ```go
 type JournalCheck struct {
 	// Entries is how many entries the journal holds.
-	Entries  int   `json:"entries"`
+	Entries  int     `json:"entries"`
 	// BrokenAt is the sequence number where the chain breaks: an entry
-	// changed, or one removed before it. Zero when the chain holds.
-	BrokenAt int64 `json:"brokenAt,omitempty"`
+	// changed, or one removed before it, or a JournalContinue entry
+	// that does not name the hash of the entry before it. Zero when the
+	// chain holds.
+	BrokenAt int64   `json:"brokenAt,omitempty"`
+	// Closed are the last entries of the journals the journal closed,
+	// each followed by the JournalContinue entry that names its hash:
+	// the chain holds across them, journal after journal.
+	Closed   []int64 `json:"closed,omitempty"`
 }
 ```
 
@@ -4098,8 +4113,13 @@ type JournalEntry struct {
 	// By is who: a user's ID, the node that called, "retention", "cli" or
 	// "studio".
 	By      string    `json:"by"`
+	// Follows is set on a JournalContinue entry alone: the hash of the
+	// last entry of the journal it continues, which closed there. Its
+	// own chain starts again from it (ADR 0180 step 5c).
+	Follows string    `json:"follows,omitempty"`
 	// Hash is the entry's link in the chain: SHA-256 of the previous
-	// entry's hash and this entry.
+	// entry's hash and this entry — of nothing and this entry for a
+	// JournalContinue entry, which opens a chain.
 	Hash    string    `json:"hash"`
 }
 ```

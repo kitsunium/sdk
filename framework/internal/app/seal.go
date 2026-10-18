@@ -220,21 +220,23 @@ func boxBytes(value []byte) (root bool, box []byte, ok bool) {
 // altered, or bound elsewhere, or whose key does not unwrap, is kit's
 // CodeSealOpen.
 func (z *sealer) open(ctx context.Context, value []byte, bind ...string) ([]byte, error) {
+	return z.openIn(ctx, value, bind)
+}
+
+// openIn is open under the first of binds the box opens under: a box sealed
+// bound to a former place — a former release's, read where it lies for as
+// long as it is kept (ADR 0180 step 5c) — opens all the same. Only a box
+// none of them opens is altered or moved.
+func (z *sealer) openIn(ctx context.Context, value []byte, binds ...[]string) ([]byte, error) {
 	root, raw, ok := boxBytes(value)
 	if !ok {
 		return nil, sealInvalid(nil)
 	}
-	var plain []byte
-	var err error
-	if root {
-		plain, err = z.openRoot(ctx, raw, bind)
-		if errors.Is(err, secret.SealInvalid) {
-			// A version pruned since, or a box altered: a message outliving
-			// data-key's kept versions reads as empty (ADR 0006 §4).
-			return nil, errErased
-		}
-	} else {
-		plain, err = z.keys.Open(ctx, raw, bind...)
+	plain, err := z.openFirst(ctx, root, raw, binds)
+	if root && errors.Is(err, secret.SealInvalid) {
+		// A version pruned since, or a box altered: a message outliving
+		// data-key's kept versions reads as empty (ADR 0006 §4).
+		return nil, errErased
 	}
 	switch {
 	case err == nil:
@@ -248,6 +250,25 @@ func (z *sealer) open(ctx context.Context, value []byte, bind ...string) ([]byte
 			"a data key does not unwrap under the framework's data-key: it was replaced, or the version that wrapped it was pruned", err)
 	}
 	return nil, explain(CodeSealKey, "SEAL_KEYS", "the framework's data keys could not be read", err)
+}
+
+// openFirst opens raw, a box — under data-key itself when root — under each
+// of binds in turn, until one is not secret.SealInvalid: the SDK's answer
+// for the first binding the box opens under, or for the last it tried.
+func (z *sealer) openFirst(ctx context.Context, root bool, raw []byte, binds [][]string) ([]byte, error) {
+	var plain []byte
+	var err error = secret.SealInvalid
+	for _, bind := range binds {
+		if !errors.Is(err, secret.SealInvalid) {
+			break
+		}
+		if root {
+			plain, err = z.openRoot(ctx, raw, bind)
+		} else {
+			plain, err = z.keys.Open(ctx, raw, bind...)
+		}
+	}
+	return plain, err
 }
 
 // openRoot opens a box sealed under data-key itself, bound to bind: under

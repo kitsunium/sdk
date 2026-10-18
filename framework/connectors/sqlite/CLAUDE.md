@@ -113,3 +113,23 @@ data key under `kit-data-key`. `former_keys_erase_test.go`: a person erased
 after the move, their boxes restored from a backup taken just before the
 erasure, opens under neither data-key, nor each alone, nor after `privacy
 rewrap -back`.
+`testdata/former-journal` was written on 2026-10-18 by the release before
+ADR 0180 step 5c — `testdata/former-keys` migrated by it, then eve's case
+written twice and held, fay's written and fay erased, eve exported, a letter
+to eve kept in the queue, ann exported: a privacy journal of ten entries
+whose references are made under the `kit/v1` labels and whose reasons are
+sealed bound to `kit.privacy/store/journal` —, on SQLite and in the data
+directory alone, with what it read (`dump.json`, `journal.txt`, `holds.txt`,
+`names.json`); never regenerate it with this release. `former_journal_test.go`
+holds the close: the commands read the journal and the holds as the former
+release did and close nothing; the product reads everything as it read it;
+the first entry it journals is preceded by a `continue` entry naming the
+tenth's hash, the ten former entries stay byte for byte, every later entry is
+under `app/v1` — a reference this test computes with the standard library
+alone, the former ones checked by the same formula —; `privacy journal
+-verify` holds across the two and says where the former closed, and breaks
+where a former entry or the link is changed; a second start closes nothing;
+a close the disk refuses changes nothing and the next entry completes it;
+and an erasure stays one across the close — cy and fay erased before, dan
+after, ann's held case kept —, no data key filed under an `app/v1`
+reference.

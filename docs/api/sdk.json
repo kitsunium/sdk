@@ -20968,6 +20968,19 @@
       "layer": "framework"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/framework/model.JournalContinue",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model",
+      "name": "JournalContinue",
+      "spelled": "string",
+      "canonical": "string",
+      "value": "\"continue\"",
+      "init": "go:github.com/kitsunium/sdk/framework/model/internal/core.JournalContinue",
+      "doc": "The operations of the privacy journal.\n",
+      "file": "framework/model/privacy.go",
+      "layer": "framework"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/framework/model.JournalDelete",
       "kind": "const",
       "package": "github.com/kitsunium/sdk/framework/model",
@@ -27319,8 +27332,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
       "name": "JournalCheckMessage",
-      "spelled": "struct{Entries int \"json:\\\"entries\\\"\"; BrokenAt int64 \"json:\\\"brokenAt,omitempty\\\"\"}",
-      "canonical": "struct{Entries int \"json:\\\"entries\\\"\"; BrokenAt int64 \"json:\\\"brokenAt,omitempty\\\"\"}",
+      "spelled": "struct{Entries int \"json:\\\"entries\\\"\"; BrokenAt int64 \"json:\\\"brokenAt,omitempty\\\"\"; Closed []int64 \"json:\\\"closed,omitempty\\\"\"}",
+      "canonical": "struct{Entries int \"json:\\\"entries\\\"\"; BrokenAt int64 \"json:\\\"brokenAt,omitempty\\\"\"; Closed []int64 \"json:\\\"closed,omitempty\\\"\"}",
       "fields": [
         {
           "name": "Entries",
@@ -27332,10 +27345,28 @@
           "name": "BrokenAt",
           "type": "int64",
           "tag": "json:\"brokenAt,omitempty\"",
-          "doc": "BrokenAt is the sequence number where the chain breaks: an entry\nchanged, or one removed before it. Zero when the chain holds.\n"
+          "doc": "BrokenAt is the sequence number where the chain breaks: an entry\nchanged, or one removed before it, or a JournalContinue entry\nthat does not name the hash of the entry before it. Zero when the\nchain holds.\n"
+        },
+        {
+          "name": "Closed",
+          "type": "[]int64",
+          "tag": "json:\"closed,omitempty\"",
+          "doc": "Closed are the last entries of the journals the journal closed,\neach followed by the JournalContinue entry that names its hash:\nthe chain holds across them, journal after journal.\n"
         }
       ],
       "doc": "JournalCheckMessage is what verifying the journal's chain found.\nA broken chain names the first entry whose hash does not follow.\n",
+      "file": "framework/model/internal/core/privacy.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/model/internal/core.JournalContinue",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/model/internal/core",
+      "name": "JournalContinue",
+      "spelled": "untyped string",
+      "canonical": "untyped string",
+      "value": "\"continue\"",
+      "doc": "The operations of the privacy journal.\n",
       "file": "framework/model/internal/core/privacy.go",
       "layer": "framework"
     },
@@ -27356,8 +27387,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/framework/model/internal/core",
       "name": "JournalEntryEvent",
-      "spelled": "struct{Seq int64 \"json:\\\"seq\\\"\"; At time.Time \"json:\\\"at\\\"\"; Op string \"json:\\\"op\\\"\"; DryRun bool \"json:\\\"dryRun,omitempty\\\"\"; Store string \"json:\\\"store,omitempty\\\"\"; Record string \"json:\\\"record,omitempty\\\"\"; Subject string \"json:\\\"subject,omitempty\\\"\"; By string \"json:\\\"by\\\"\"; Hash string \"json:\\\"hash\\\"\"}",
-      "canonical": "struct{Seq int64 \"json:\\\"seq\\\"\"; At time.Time \"json:\\\"at\\\"\"; Op string \"json:\\\"op\\\"\"; DryRun bool \"json:\\\"dryRun,omitempty\\\"\"; Store string \"json:\\\"store,omitempty\\\"\"; Record string \"json:\\\"record,omitempty\\\"\"; Subject string \"json:\\\"subject,omitempty\\\"\"; By string \"json:\\\"by\\\"\"; Hash string \"json:\\\"hash\\\"\"}",
+      "spelled": "struct{Seq int64 \"json:\\\"seq\\\"\"; At time.Time \"json:\\\"at\\\"\"; Op string \"json:\\\"op\\\"\"; DryRun bool \"json:\\\"dryRun,omitempty\\\"\"; Store string \"json:\\\"store,omitempty\\\"\"; Record string \"json:\\\"record,omitempty\\\"\"; Subject string \"json:\\\"subject,omitempty\\\"\"; By string \"json:\\\"by\\\"\"; Follows string \"json:\\\"follows,omitempty\\\"\"; Hash string \"json:\\\"hash\\\"\"}",
+      "canonical": "struct{Seq int64 \"json:\\\"seq\\\"\"; At time.Time \"json:\\\"at\\\"\"; Op string \"json:\\\"op\\\"\"; DryRun bool \"json:\\\"dryRun,omitempty\\\"\"; Store string \"json:\\\"store,omitempty\\\"\"; Record string \"json:\\\"record,omitempty\\\"\"; Subject string \"json:\\\"subject,omitempty\\\"\"; By string \"json:\\\"by\\\"\"; Follows string \"json:\\\"follows,omitempty\\\"\"; Hash string \"json:\\\"hash\\\"\"}",
       "fields": [
         {
           "name": "Seq",
@@ -27407,10 +27438,16 @@
           "doc": "By is who: a user's ID, the node that called, \"retention\", \"cli\" or\n\"studio\".\n"
         },
         {
+          "name": "Follows",
+          "type": "string",
+          "tag": "json:\"follows,omitempty\"",
+          "doc": "Follows is set on a JournalContinue entry alone: the hash of the\nlast entry of the journal it continues, which closed there. Its\nown chain starts again from it (ADR 0180 step 5c).\n"
+        },
+        {
           "name": "Hash",
           "type": "string",
           "tag": "json:\"hash\"",
-          "doc": "Hash is the entry's link in the chain: SHA-256 of the previous\nentry's hash and this entry.\n"
+          "doc": "Hash is the entry's link in the chain: SHA-256 of the previous\nentry's hash and this entry — of nothing and this entry for a\nJournalContinue entry, which opens a chain.\n"
         }
       ],
       "doc": "JournalEntryEvent is one operation of the privacy journal: what was done,\nwhere, by whom and when, with references only — never an identity, a\nvalue or a key. Each entry is chained to the previous one by SHA-256.\n",

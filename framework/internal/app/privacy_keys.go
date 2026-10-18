@@ -37,25 +37,46 @@ const (
 	refBytes int = 16
 )
 
-// The HKDF labels of the index key's subkeys: one per kind of reference, so
-// that a subject's reference and a record's never meet — and one for the
-// index keys a store on a database files (ADR 0004).
-const (
-	subjectLabel = "kit/v1 subject reference"
-	recordLabel  = "kit/v1 record reference"
-	indexLabel   = "kit/v1 database index key"
-)
-
 // referenceKeys are the subkeys of index-key a run references with, and
-// files index keys on a database with.
+// files index keys on a database with, derived under one set of labels
+// (renamed_labels.go).
 type referenceKeys struct {
 	subject, record, index mac.Key
 }
 
-// referenceKeys derives the subkeys of index-key once per run: <PRODUCT>_INDEX_KEY
+// derivedKeys are the reference keys a run derives from index-key: those the
+// references it keeps at rest are made with, and those the privacy journal
+// records its references with (ADR 0180 step 5c).
+type derivedKeys struct {
+	rest, journal *referenceKeys
+}
+
+// referenceKeys are the reference keys the references the app keeps at rest
+// are made with: the data keys, the subject index, the holds, a database's
+// index rows (restLabels).
+func (a *App) referenceKeys(ctx context.Context) (*referenceKeys, error) {
+	k, err := a.derivedKeys(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return k.rest, nil
+}
+
+// journalKeys are the reference keys the privacy journal records a record's
+// and a subject's references with: presentLabels, since the journal a former
+// release kept is closed (ADR 0180 step 5c).
+func (a *App) journalKeys(ctx context.Context) (*referenceKeys, error) {
+	k, err := a.derivedKeys(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return k.journal, nil
+}
+
+// derivedKeys derives the subkeys of index-key once per run: <PRODUCT>_INDEX_KEY
 // when the environment pins it, else app-index-key in the environment's
 // store, made on first use.
-func (a *App) referenceKeys(ctx context.Context) (*referenceKeys, error) {
+func (a *App) derivedKeys(ctx context.Context) (*derivedKeys, error) {
 	k, made, err := a.deriveKeys(ctx)
 	if made {
 		// The configuration the start read said it was set nowhere. The
@@ -65,9 +86,9 @@ func (a *App) referenceKeys(ctx context.Context) (*referenceKeys, error) {
 	return k, err
 }
 
-// deriveKeys is referenceKeys under the privacy's lock; made says kit made
+// deriveKeys is derivedKeys under the privacy's lock; made says kit made
 // the index key now.
-func (a *App) deriveKeys(ctx context.Context) (_ *referenceKeys, made bool, _ error) {
+func (a *App) deriveKeys(ctx context.Context) (_ *derivedKeys, made bool, _ error) {
 	a.privacy.mu.Lock()
 	defer a.privacy.mu.Unlock()
 	if a.privacy.keys != nil {
@@ -78,7 +99,10 @@ func (a *App) deriveKeys(ctx context.Context) (_ *referenceKeys, made bool, _ er
 		return nil, false, err
 	}
 	defer clear(ikm)
-	k, err := subkeysOf(ikm)
+	k := &derivedKeys{}
+	if k.rest, err = subkeysOf(ikm, restLabels); err == nil {
+		k.journal, err = subkeysOf(ikm, presentLabels)
+	}
 	if err != nil {
 		return nil, made, failure(CodePrivacyKey, "INDEX_KEY_DERIVE", "the framework's index key could not be derived", err)
 	}
@@ -86,10 +110,11 @@ func (a *App) deriveKeys(ctx context.Context) (_ *referenceKeys, made bool, _ er
 	return k, made, nil
 }
 
-// subkeysOf derives the reference keys from the index key's bytes.
-func subkeysOf(ikm []byte) (*referenceKeys, error) {
+// subkeysOf derives the reference keys from the index key's bytes, under
+// labels.
+func subkeysOf(ikm []byte, labels referenceLabels) (*referenceKeys, error) {
 	k := &referenceKeys{}
-	for label, key := range map[string]*mac.Key{subjectLabel: &k.subject, recordLabel: &k.record, indexLabel: &k.index} {
+	for label, key := range map[string]*mac.Key{labels.subject: &k.subject, labels.record: &k.record, labels.index: &k.index} {
 		raw, err := kdf.Subkey(kdf.HKDFSHA256, ikm, nil, label, kdf.KeyLen)
 		if err == nil {
 			*key, err = mac.NewKey(raw)
