@@ -1507,6 +1507,31 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.ImportObserved",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "ImportObserved",
+      "spelled": "func(d DataDir, p *ImportParams, newCluster ClusterID, members []MemberValue, opt *RestoreOptions) (SnapshotMetaValue, error)",
+      "canonical": "func(d github.com/kitsunium/sdk/pkg/v1/app/consensus.DataDir, p *github.com/kitsunium/sdk/pkg/v1/app/consensus.ImportParams, newCluster github.com/kitsunium/sdk/pkg/v1/app/consensus.ClusterID, members []github.com/kitsunium/sdk/pkg/v1/app/consensus.MemberValue, opt *github.com/kitsunium/sdk/pkg/v1/app/consensus.RestoreOptions) (github.com/kitsunium/sdk/pkg/v1/app/consensus.SnapshotMetaValue, error)",
+      "doc": "ImportObserved starts a new history from a saved snapshot and the verified tail an observer read after it, offline.\n",
+      "file": "consensus/facade_gen.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.ImportParams",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "ImportParams",
+      "spelled": "svcconsensus.ImportParams",
+      "canonical": "github.com/kitsunium/sdk/internal/service/app/consensus.ImportParams",
+      "owner": "go:github.com/kitsunium/sdk/internal/service/app/consensus.ImportParams",
+      "doc": "Every type needed to implement a published port is aliased here (R2-32).\n",
+      "file": "consensus/facade_gen.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.Incarnation",
       "kind": "alias",
       "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
@@ -2481,6 +2506,18 @@
         "public": "This node is not the leader; the proposal was not appended"
       },
       "doc": "The sentinels a caller matches with errors.Is or errs.HasCode.\n",
+      "file": "consensus/facade_gen.go",
+      "layer": "public",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/app/consensus.OpenSnapshot",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/pkg/v1/app/consensus",
+      "name": "OpenSnapshot",
+      "spelled": "func(r io.Reader, opt *RestoreOptions) (io.Reader, error)",
+      "canonical": "func(r io.Reader, opt *github.com/kitsunium/sdk/pkg/v1/app/consensus.RestoreOptions) (io.Reader, error)",
+      "doc": "OpenSnapshot reads a saved snapshot's stream without a node, checked to its digest.\n",
       "file": "consensus/facade_gen.go",
       "layer": "public",
       "family": "app"

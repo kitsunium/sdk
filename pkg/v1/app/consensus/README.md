@@ -36,6 +36,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [func AppendToken\(dst \[\]byte, t TokenValue\) \[\]byte](<#AppendToken>)
 - [func Bootstrap\(ctx context.Context, cfg \*Config, members \[\]MemberValue\) error](<#Bootstrap>)
 - [func ClearQuarantine\(d DataDir, exit QuarantineExit, op Operator\) error](<#ClearQuarantine>)
+- [func ImportObserved\(d DataDir, p \*ImportParams, newCluster ClusterID, members \[\]MemberValue, opt \*RestoreOptions\) \(SnapshotMetaValue, error\)](<#ImportObserved>)
 - [func Init\(d DataDir, cluster ClusterID, slot string\) \(NodeID, Incarnation, error\)](<#Init>)
 - [func InitLog\(log LogStore, cluster ClusterID, slot string\) \(NodeID, Incarnation, error\)](<#InitLog>)
 - [func Inspect\(d DataDir\) \(ReportValue, error\)](<#Inspect>)
@@ -54,6 +55,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [func NewPEMIdentity\(certFile string, keyFile string, caFile string\) \(\*PEMIdentity, error\)](<#NewPEMIdentity>)
 - [func NewTCPTransport\(cfg \*TransportConfig\) \(\*TCPTransport, error\)](<#NewTCPTransport>)
 - [func NewTCPTransportFromPEM\(certFile string, keyFile string, caFile string, cfg \*TransportConfig\) \(\*TCPTransport, error\)](<#NewTCPTransportFromPEM>)
+- [func OpenSnapshot\(r io.Reader, opt \*RestoreOptions\) \(io.Reader, error\)](<#OpenSnapshot>)
 - [func ParseMessage\(frame \[\]byte, m \*MessageValue\) error](<#ParseMessage>)
 - [func ParseSnapshotMeta\(b \[\]byte, m \*SnapshotMetaValue\) error](<#ParseSnapshotMeta>)
 - [func ParseToken\(b \[\]byte\) \(TokenValue, error\)](<#ParseToken>)
@@ -95,6 +97,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
 - [type HealthFlags](<#HealthFlags>)
   - [func \(HealthFlags\) Has\(x HealthFlags\) bool](<#HealthFlags.Has>)
 - [type HealthValue](<#HealthValue>)
+- [type ImportParams](<#ImportParams>)
 - [type Incarnation](<#Incarnation>)
   - [func \(Incarnation\) IsZero\(\) bool](<#Incarnation.IsZero>)
   - [func \(Incarnation\) String\(\) string](<#Incarnation.String>)
@@ -178,6 +181,7 @@ StateMachine.Apply is called for every committed command, in log order, on one g
   - [func \(\*Node\) Propose\(ctx context.Context, data \[\]byte\) \(coreconsensus.TokenValue, any, error\)](<#Node.Propose>)
   - [func \(\*Node\) ProposeTimingContract\(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec, c coreconsensus.TimingContractSpec\) error](<#Node.ProposeTimingContract>)
   - [func \(\*Node\) RaiseClusterVersion\(ctx context.Context, op coreconsensus.Operator, pre coreconsensus.PreconditionSpec, v uint32\) error](<#Node.RaiseClusterVersion>)
+  - [func \(\*Node\) ReadCommitted\(ctx context.Context, from uint64, to uint64, maxBytes int\) \(\[\]coreconsensus.EntryValue, error\)](<#Node.ReadCommitted>)
   - [func \(\*Node\) Remove\(ctx context.Context, op coreconsensus.Operator, id coreconsensus.NodeID\) error](<#Node.Remove>)
   - [func \(\*Node\) SaveSnapshot\(ctx context.Context, op coreconsensus.Operator, w io.Writer\) \(coreconsensus.SnapshotMetaValue, error\)](<#Node.SaveSnapshot>)
   - [func \(\*Node\) Status\(\) coreconsensus.StatusValue](<#Node.Status>)
@@ -1137,6 +1141,15 @@ func ClearQuarantine(d DataDir, exit QuarantineExit, op Operator) error
 
 ClearQuarantine clears a quarantined or stopped directory by one of its two exits.
 
+<a name="ImportObserved"></a>
+## func [ImportObserved](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+```go
+func ImportObserved(d DataDir, p *ImportParams, newCluster ClusterID, members []MemberValue, opt *RestoreOptions) (SnapshotMetaValue, error)
+```
+
+ImportObserved starts a new history from a saved snapshot and the verified tail an observer read after it, offline.
+
 <a name="Init"></a>
 ## func [Init](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
 
@@ -1298,6 +1311,15 @@ func NewTCPTransportFromPEM(certFile string, keyFile string, caFile string, cfg 
 ```
 
 NewTCPTransportFromPEM builds it from a certificate, a key and the consensus CA, as PEM files reloaded in place on renewal.
+
+<a name="OpenSnapshot"></a>
+## func [OpenSnapshot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+```go
+func OpenSnapshot(r io.Reader, opt *RestoreOptions) (io.Reader, error)
+```
+
+OpenSnapshot reads a saved snapshot's stream without a node, checked to its digest.
 
 <a name="ParseMessage"></a>
 ## func [ParseMessage](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
@@ -1909,6 +1931,28 @@ type HealthValue struct {
 	LongTurns          int64
 	// JoinsRateLimited counts JOINs refused by the one-per-slot rate.
 	JoinsRateLimited   int64
+}
+```
+
+<a name="ImportParams"></a>
+## type [ImportParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
+
+Every type needed to implement a published port is aliased here (R2-32).
+
+```go
+type ImportParams = svcconsensus.ImportParams
+```
+
+ImportParams is an alias of `github.com/kitsunium/sdk/internal/service/app/consensus.ImportParams`, declared as:
+
+```go
+type ImportParams struct {
+	// Snapshot is the saved snapshot's encoded stream, as SaveSnapshot wrote it.
+	Snapshot io.Reader
+	// Tail is the committed entries read after the snapshot, in log order.
+	Tail     []coreconsensus.EntryValue
+	// Machine is a fresh state machine; the snapshot is restored into it and the tail applied.
+	Machine  coreconsensus.StateMachine
 }
 ```
 
@@ -2970,6 +3014,15 @@ func (*Node) RaiseClusterVersion(ctx context.Context, op coreconsensus.Operator,
 ```
 
 RaiseClusterVersion raises the protocol version every member must speak.
+
+<a name="Node.ReadCommitted"></a>
+### func \(Node\) [ReadCommitted](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/observed.go>)
+
+```go
+func (*Node) ReadCommitted(ctx context.Context, from uint64, to uint64, maxBytes int) ([]coreconsensus.EntryValue, error)
+```
+
+ReadCommitted returns the committed entries \[from, to], to clamped to this node's commit index, at most maxBytes of them but always one when any is due. from below the first entry the log keeps is COMPACTED: the reader starts again from a snapshot. It reads the log store concurrently with the writer, as every reader does, and never waits on the loop.
 
 <a name="Node.Remove"></a>
 ### func \(Node\) [Remove](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)
