@@ -60,7 +60,8 @@ import (
 // The words of sealing.
 const (
 	// dataKeySecret is kit's generated secret the data keys are wrapped
-	// under: <PRODUCT>_DATA_KEY, or kit-data-key in the environment's store.
+	// under: <PRODUCT>_DATA_KEY, or app-data-key in the environment's store
+	// — kit-data-key under a former release, re-wrapped (renamed_secrets.go).
 	dataKeySecret = "data-key"
 	// dataKeyBytes is a data key's length.
 	dataKeyBytes int = 32
@@ -89,8 +90,6 @@ const (
 	// aloneFor bounds how long a destruction waits for the writes sealing
 	// under its key's stripe.
 	aloneFor time.Duration = 10 * time.Second
-	// bindDomain separates what kit binds a box under data-key to.
-	bindDomain = "kit/v1 sealed at rest\x00"
 )
 
 // errErased says a sealed value's data key is gone: an erasure destroyed it,
@@ -106,12 +105,15 @@ var (
 
 // sealer seals and opens the members of an app's data at rest, in one run:
 // the data keys, filed in kit's own store and wrapped under data-key, and
-// data-key's keyring itself.
+// data-key's keyring itself — and former, kit-data-key's, when a former
+// release kept one: what it wrapped or sealed still opens, and nothing is
+// sealed under it (renamed_secrets.go).
 type sealer struct {
-	keys  *secret.SubjectKeys
-	root  *secret.Keyring
-	refs  *referenceKeys
-	locks *sealLocks
+	keys   *secret.SubjectKeys
+	root   *secret.Keyring
+	former *secret.Keyring
+	refs   *referenceKeys
+	locks  *sealLocks
 }
 
 // sealLocks order, per data key, the writes that seal under it and its
@@ -181,7 +183,7 @@ func (z *sealer) seal(ctx context.Context, ref string, plaintext []byte, bind ..
 	prefix := boxPrefix
 	if ref == "" {
 		prefix = rootPrefix
-		box, err = z.root.Seal(ctx, padded, bindAAD(bind))
+		box, err = z.root.Seal(ctx, padded, bindAAD(sealDomain, bind))
 	} else {
 		box, err = z.keys.Seal(ctx, ref, padded, bind...)
 	}
@@ -225,7 +227,7 @@ func (z *sealer) open(ctx context.Context, value []byte, bind ...string) ([]byte
 	var plain []byte
 	var err error
 	if root {
-		plain, err = z.root.Open(ctx, raw, bindAAD(bind))
+		plain, err = z.openRoot(ctx, raw, bind)
 		if errors.Is(err, secret.SealInvalid) {
 			// A version pruned since, or a box altered: a message outliving
 			// data-key's kept versions reads as empty (ADR 0006 §4).
@@ -243,9 +245,27 @@ func (z *sealer) open(ctx context.Context, value []byte, bind ...string) ([]byte
 		return nil, sealInvalid(err)
 	case errors.Is(err, secret.SubjectKeyUnreadable):
 		return nil, explain(CodeSealOpen, "SEAL_KEY_UNREADABLE",
-			"a data key does not unwrap under the framework's data-key: data-key was replaced, or the version that wrapped it was pruned", err)
+			"a data key does not unwrap under the framework's data-key: it was replaced, or the version that wrapped it was pruned", err)
 	}
 	return nil, explain(CodeSealKey, "SEAL_KEYS", "the framework's data keys could not be read", err)
+}
+
+// openRoot opens a box sealed under data-key itself, bound to bind: under
+// the present label, then — a box a former release sealed, read for two
+// minors (ADR 0180 step 5b, Q12) — under the former label, by data-key's
+// keyring — pinned by its variable, its name did not change — and by
+// kit-data-key's. Only a box none of them opens is secret.SealInvalid.
+func (z *sealer) openRoot(ctx context.Context, raw []byte, bind []string) ([]byte, error) {
+	plain, err := z.root.Open(ctx, raw, bindAAD(sealDomain, bind))
+	if !errors.Is(err, secret.SealInvalid) {
+		return plain, err
+	}
+	former := bindAAD(formerSealDomain, bind)
+	plain, err = z.root.Open(ctx, raw, former)
+	if !errors.Is(err, secret.SealInvalid) || z.former == nil {
+		return plain, err
+	}
+	return z.former.Open(ctx, raw, former)
 }
 
 // sealInvalid is a box that does not open where it lies: altered, or moved
@@ -284,10 +304,10 @@ func padded(plaintext []byte) []byte {
 // unpadded is a sealed value without its padding.
 func unpadded(plain []byte) []byte { return bytes.TrimRight(plain, " ") }
 
-// bindAAD is what a box under data-key itself is bound to: each part behind
-// its length, as the SDK binds a subject box.
-func bindAAD(parts []string) []byte {
-	out := []byte(bindDomain)
+// bindAAD is what a box under data-key itself is bound to: the label domain,
+// then each part behind its length, as the SDK binds a subject box.
+func bindAAD(domain string, parts []string) []byte {
+	out := []byte(domain)
 	for _, p := range parts {
 		out = binary.BigEndian.AppendUint32(out, uint32(len(p)))
 		out = append(out, p...)
@@ -409,14 +429,18 @@ func (a *App) sealing(ctx context.Context) (*sealer, error) {
 	if err != nil {
 		return nil, err
 	}
+	former, err := a.formerDataKeyring(ctx)
+	if err != nil {
+		return nil, err
+	}
 	sk, err := secret.NewSubjectKeys(secret.SubjectKeysConfig{
-		Root: root, Store: keyStore{s: keys},
+		Root: root, Former: former, Store: keyStore{s: keys},
 		CacheSize: keyCacheSize, CacheTTL: keyCacheTTL, Clock: a.clock,
 	})
 	if err != nil {
 		return nil, failure(CodeSealKey, "SEAL_KEYS", "the framework's data keys could not be set up", err)
 	}
-	z = &sealer{keys: sk, root: root, refs: refs, locks: &a.privacy.locks}
+	z = &sealer{keys: sk, root: root, former: former, refs: refs, locks: &a.privacy.locks}
 	a.privacy.mu.Lock()
 	defer a.privacy.mu.Unlock()
 	if a.privacy.sealer == nil {
@@ -466,19 +490,19 @@ func (a *App) dataKeysInUse(ctx context.Context) (int, error) {
 }
 
 // rewrapDataKeys moves every data key to data-key's newest version: after
-// a rotation, and at the start, to finish a pass a stop interrupted. It
-// touches no box. What it cannot re-wrap is said on the app's log and to
-// the Studio; nothing else is refused for it.
+// a rotation, and at the start, to finish a pass a stop interrupted — and
+// every data key a former release wrapped under kit-data-key with them, the
+// first start of this release (ADR 0180 step 5b). It touches no box. What it
+// cannot re-wrap is said on the app's log and to the Studio; nothing else
+// is refused for it.
 func (a *App) rewrapDataKeys(ctx context.Context) {
 	z, err := a.sealing(ctx)
 	if err == nil {
 		var report secret.RewrapReport
 		report, err = z.keys.Rewrap(ctx)
 		if err == nil {
-			if report.Rewrapped > 0 {
-				logger.Info(ctx, a.log, "the framework's data keys moved to data-key's newest version",
-					logger.Int("rewrapped", report.Rewrapped), logger.Int("version", report.Root))
-			}
+			a.saidRewrapped(ctx, report)
+			a.retireFormerDataKey(ctx, z, report)
 			return
 		}
 		logger.Warn(ctx, a.log, "some of the framework's data keys could not be re-wrapped", logger.Int("unreadable", report.Unreadable),
@@ -487,6 +511,20 @@ func (a *App) rewrapDataKeys(ctx context.Context) {
 	if keys := a.privacyKeyStore(); keys != nil {
 		a.problem(keys.id, say("seal.rewrap", "secret", privacyService+"/secret/"+dataKeySecret, "detail", describeText(
 			failure(CodeSealRewrap, "SEAL_REWRAP", "data-key's rotation could not re-wrap every data key", err))))
+	}
+}
+
+// saidRewrapped says on the app's log what a re-wrap pass moved: to
+// data-key's newest version, and from kit-data-key.
+func (a *App) saidRewrapped(ctx context.Context, report secret.RewrapReport) {
+	if report.FromFormer > 0 {
+		logger.Info(ctx, a.log, "the framework's data keys a former release wrapped moved to the present data-key (ADR 0180 step 5b)",
+			logger.String("from", formerSecretPrefix+dataKeySecret), logger.String("to", ownSecretPrefix+dataKeySecret),
+			logger.Int("moved", report.FromFormer), logger.Int("version", report.Root))
+	}
+	if moved := report.Rewrapped - report.FromFormer; moved > 0 {
+		logger.Info(ctx, a.log, "the framework's data keys moved to data-key's newest version",
+			logger.Int("rewrapped", moved), logger.Int("version", report.Root))
 	}
 }
 

@@ -1229,7 +1229,7 @@ packages:
           	)
 
           name is 1 to 49 lower-case letters, digits and dashes, not starting with
-          "kit-", unique among the app's databases. It names the database's URL, the
+          "app-" nor "kit-", unique among the app's databases. It names the database's URL, the
           secret <name>-url — the variable <APP>_<NAME>_URL, or <APP>_<NAME>_URL_FILE
           naming a file that holds it, then the environment's secret store —, and
           its settings: <name>-max-open (10), <name>-max-idle (2), <name>-max-lifetime
@@ -10166,7 +10166,7 @@ packages:
           	)
 
           name is 1 to 49 lower-case letters, digits and dashes, not starting with
-          "kit-", unique among the app's databases. It names the database's URL, the
+          "app-" nor "kit-", unique among the app's databases. It names the database's URL, the
           secret <name>-url — the variable <APP>_<NAME>_URL, or <APP>_<NAME>_URL_FILE
           naming a file that holds it, then the environment's secret store —, and
           its settings: <name>-max-open (10), <name>-max-idle (2), <name>-max-lifetime

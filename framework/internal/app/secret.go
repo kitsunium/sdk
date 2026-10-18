@@ -24,9 +24,6 @@ const (
 	// bits a secret can be guessed, and above 4 KiB it is not a key.
 	minSecretBytes int = 16
 	maxSecretBytes int = 4096
-	// kitSecretPrefix names kit's own secrets in the environment's store, so
-	// that no product secret can take one's place.
-	kitSecretPrefix = "kit-"
 )
 
 // Secrets. A product declares the secrets it needs on its services —
@@ -188,8 +185,8 @@ func (s *Secret) checkName(svc *Service) {
 		svc.problem(s.decl, s.id, "secret.name", "name", name, "max", secret.MaxNameLen)
 	case strings.HasSuffix(name, "-file"):
 		svc.problem(s.decl, s.id, "secret.file-suffix", "name", name)
-	case strings.HasPrefix(name, kitSecretPrefix):
-		svc.problem(s.decl, s.id, "secret.kit-prefix", "name", name, "prefix", kitSecretPrefix)
+	case reservedPrefixOf(name) != "":
+		svc.problem(s.decl, s.id, "secret.kit-prefix", "name", name, "prefix", reservedPrefixOf(name))
 	}
 }
 
@@ -339,9 +336,9 @@ func (s *Secret) key() string { return qualifiedKey(s.svc, s.name) }
 // stem, its name in the kept store: "moderation-openai-key".
 func (s *Secret) stored() string { return flatKey(s.key()) }
 
-// kitOwn reports whether the secret is kit's own — data-key, on kit's own
-// service —: read from <APP>_<NAME>, kept as kit-<name>, like the mail
-// connector's smtp-url.
+// kitOwn reports whether the secret is the framework's own — data-key, on
+// its own service —: read from <APP>_<NAME>, kept as app-<name>, like the
+// mail connector's smtp-url (ADR 0180 step 5b).
 func (s *Secret) kitOwn() bool { return kitOwn(s.svc) }
 
 // envName is the secret's name in the environment it is read from first:
@@ -356,7 +353,7 @@ func (s *Secret) envName() string {
 // keptName is its name in the environment's store.
 func (s *Secret) keptName() string {
 	if s.kitOwn() {
-		return kitSecretPrefix + s.name
+		return ownSecretPrefix + s.name
 	}
 	return s.stored()
 }

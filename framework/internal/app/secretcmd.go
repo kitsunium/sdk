@@ -28,7 +28,8 @@ import (
 const maxSecretInput int64 = 64 << 10
 
 // managedSecret is one secret the command manages: the product's, by the name
-// it declared, or kit's own, by its name in the store (kit-smtp-url).
+// it declared, or the framework's own, by its name in the store
+// (app-smtp-url).
 type managedSecret struct {
 	// name is what the command shows and takes; stored, its name in the
 	// environment's store — the same, for the product's.
@@ -111,11 +112,11 @@ func (a *App) managedSecrets() []managedSecret {
 	slices.SortFunc(out, func(x, y managedSecret) int { return strings.Compare(x.name, y.name) })
 	out = append(out, own...)
 	if a.usesIndexKey() {
-		name := kitSecretPrefix + indexSecret
+		name := ownSecretPrefix + indexSecret
 		out = append(out, managedSecret{name: name, stored: name, env: st.kitEnv, envName: indexSecret, variable: secretVariable(prefix, indexSecret), index: true})
 	}
 	if a.hasMailer() {
-		out = append(out, managedSecret{name: kitSecretPrefix + smtpSecret, stored: kitSecretPrefix + smtpSecret, env: st.kitEnv, envName: smtpSecret, variable: secretVariable(prefix, smtpSecret)})
+		out = append(out, managedSecret{name: ownSecretPrefix + smtpSecret, stored: ownSecretPrefix + smtpSecret, env: st.kitEnv, envName: smtpSecret, variable: secretVariable(prefix, smtpSecret)})
 	}
 	return out
 }
@@ -231,7 +232,7 @@ func (m *managedSecret) versionLine(ctx context.Context, store secret.Store, nam
 func (a *App) setSecret(ctx context.Context, all []managedSecret, name string, stdin io.Reader, stdout, stderr io.Writer) int {
 	managed, ok := findManaged(all, name)
 	if !ok {
-		fmt.Fprintf(stderr, "no secret named %q: %s secrets lists them\n", name, a.name)
+		a.noSecretNamed(all, name, stderr)
 		return 2
 	}
 	st := a.secretsNow()
@@ -323,7 +324,7 @@ func (a *App) rotationTargets(all []managedSecret, name string, stderr io.Writer
 	m, ok := findManaged(all, name)
 	switch {
 	case !ok:
-		fmt.Fprintf(stderr, "no secret named %q: %s secrets lists them\n", name, a.name)
+		a.noSecretNamed(all, name, stderr)
 		return nil, 2
 	case !m.generated():
 		fmt.Fprintf(stderr, "%s is given by the operator, not made by the framework: %s secrets set %s\n", name, a.name, name)
@@ -364,6 +365,17 @@ func (a *App) rotateOne(ctx context.Context, st *secretStores, m *managedSecret,
 		return false
 	}
 	return true
+}
+
+// noSecretNamed says that no secret is named name: the name that replaces it
+// when it is one of the framework's own under a former release's prefix
+// (ADR 0180 step 5b, Q12), else where the names are listed.
+func (a *App) noSecretNamed(all []managedSecret, name string, stderr io.Writer) {
+	if present, ok := formerOwnSecret(all, name); ok {
+		fmt.Fprintf(stderr, "%s is the name a former release kept it under, which the framework no longer writes: it is %s\n", name, present)
+		return
+	}
+	fmt.Fprintf(stderr, "no secret named %q: %s secrets lists them\n", name, a.name)
 }
 
 // findManaged is the managed secret named name among all.

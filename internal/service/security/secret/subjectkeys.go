@@ -38,6 +38,14 @@ type SubjectKeysConfig struct {
 	// newest version, and RotatorConfig.InUse keeps a version from being
 	// pruned while a key is still wrapped under it. Required.
 	Root *Keyring
+	// Former is the root this one replaces — a root secret renamed, whose
+	// name every key it wrapped is bound to —, or nil. A key wrapped under it
+	// still unwraps, under any version it keeps, so nothing it wrapped stops
+	// opening; no key is ever wrapped under it, and [SubjectKeys.Rewrap]
+	// moves every key it wrapped to Root's newest version. Nothing here
+	// rotates, prunes or deletes it: retiring it is the caller's, once a
+	// pass finds no key under it (RewrapValue.FromFormer, then zero).
+	Former *Keyring
 	// Store keeps the wrapped keys, one per subject. Required.
 	Store coresecret.SubjectKeyStore
 	// CacheSize is how many opened keys this process keeps, the least
@@ -72,6 +80,8 @@ type SubjectKeysConfig struct {
 type SubjectKeys struct {
 	// root wraps and unwraps every data key.
 	root *Keyring
+	// former unwraps what the root it replaces wrapped; nil when none.
+	former *Keyring
 	// store keeps them.
 	store coresecret.SubjectKeyStore
 	// cache keeps opened keys for a bounded time.
@@ -96,9 +106,10 @@ func NewSubjectKeys(cfg SubjectKeysConfig) (keys *SubjectKeys, err error) {
 	}
 	//: an engine that has not read the store yet.
 	return &SubjectKeys{
-		root:  cfg.Root,
-		store: cfg.Store,
-		cache: newKeyCache(cfg.CacheSize, cfg.CacheTTL, clk),
+		root:   cfg.Root,
+		former: cfg.Former,
+		store:  cfg.Store,
+		cache:  newKeyCache(cfg.CacheSize, cfg.CacheTTL, clk),
 	}, nil
 }
 
@@ -128,6 +139,11 @@ func (c SubjectKeysConfig) validate() error {
 	if c.CacheSize == 0 && c.CacheTTL != 0 {
 		//: InvalidConfig.
 		return refuseSetting("CacheTTL", "set without a CacheSize")
+	}
+	//: a root that replaces itself would move every key onto the key it is under.
+	if c.Former != nil && c.Former == c.Root {
+		//: InvalidConfig.
+		return refuseSetting("Former", "the root itself")
 	}
 	//: an engine that can work.
 	return nil
@@ -407,9 +423,14 @@ func (s *SubjectKeys) settle(ctx context.Context, subject string, dek, wrapped [
 	return replaced, nil
 }
 
-// unwrap opens a wrapped key under the root keyring.
+// unwrap opens a wrapped key under the root keyring, else under the root it
+// replaces.
 func (s *SubjectKeys) unwrap(ctx context.Context, subject string, wrapped []byte) (opened *openedKey, err error) {
 	dek, openErr := s.root.openAs(ctx, wrapLabel, wrapped, wrapAAD(subject))
+	//: a key the root does not open may be one the former root wrapped.
+	if openErr != nil && s.former != nil && !errs.HasCode(openErr, coresecret.CodeStoreUnavailable) {
+		dek, openErr = s.former.openAs(ctx, wrapLabel, wrapped, wrapAAD(subject))
+	}
 	//: the root could not be read, or the key does not open under it.
 	if openErr != nil {
 		//: a root store that failed is worth a retry.

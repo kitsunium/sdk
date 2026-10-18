@@ -1801,7 +1801,7 @@ var App = app.NewApp("vigie", intake.Service, desk.Service, audit.Service).With(
 )
 ```
 
-name is 1 to 49 lower-case letters, digits and dashes, not starting with "kit-", unique among the app's databases. It names the database's URL, the secret \<name>-url — the variable \<APP>\_\<NAME>\_URL, or \<APP>\_\<NAME>\_URL\_FILE naming a file that holds it, then the environment's secret store —, and its settings: \<name>-max-open (10), \<name>-max-idle (2), \<name>-max-lifetime (30m), \<name>-max-idle-time (0: none), \<name>-timeout (5s), \<name>-check-timeout (5s) and \<name>-migrate (start, or manual). Outside dev the URL is required and writes its TLS mode; in dev a database without one leaves its stores in the data directory, and a SQLite database without one is the file \<data>/\<name>.sqlite. [InMemory](#InMemory) on the app opens none.
+name is 1 to 49 lower-case letters, digits and dashes, not starting with "app-" nor "kit-", unique among the app's databases. It names the database's URL, the secret \<name>-url — the variable \<APP>\_\<NAME>\_URL, or \<APP>\_\<NAME>\_URL\_FILE naming a file that holds it, then the environment's secret store —, and its settings: \<name>-max-open (10), \<name>-max-idle (2), \<name>-max-lifetime (30m), \<name>-max-idle-time (0: none), \<name>-timeout (5s), \<name>-check-timeout (5s) and \<name>-migrate (start, or manual). Outside dev the URL is required and writes its TLS mode; in dev a database without one leaves its stores in the data directory, and a SQLite database without one is the file \<data>/\<name>.sqlite. [InMemory](#InMemory) on the app opens none.
 
 <a name="DefaultCommand"></a>
 ## func [DefaultCommand](<https://github.com/kitsunium/sdk/blob/main/framework/internal/app/cli.go>)

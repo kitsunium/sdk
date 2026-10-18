@@ -1,0 +1,52 @@
+{
+  "00000000000000000001": {
+    "seq": 1,
+    "at": "2026-10-18T04:57:19.407153439Z",
+    "op": "erase",
+    "store": "atelier/store/cases",
+    "record": "3bec49fd4e83b37ef0714024f9e6af66",
+    "subject": "e389b7d0090eaefef5bbdea970f53f22",
+    "by": "atelier/command/forget",
+    "reason": "sealed:v1:AQlqOjIwMjYtMTB7mkRBf988kwEBcX3y60WCrjyxYGG82WC58bTWQB_cFj3vsuGOO4Cv7ZB4cZMck6HRr7j00J4aLDra5qIMPEtku8d9mqH1",
+    "hash": "ecf34ae71c628c92fa4a6544e6b87cfef2f75297ae5cfb2c1536d496a6ccc834"
+  },
+  "00000000000000000002": {
+    "seq": 2,
+    "at": "2026-10-18T04:57:19.426451565Z",
+    "op": "shred",
+    "store": "app.privacy/store/keys",
+    "subject": "e389b7d0090eaefef5bbdea970f53f22",
+    "by": "atelier/command/forget",
+    "hash": "cc19c2ce8cb843ebea83dbb230d63c8265f54871a9da7cac48d691ba09d3540f"
+  },
+  "00000000000000000003": {
+    "seq": 3,
+    "at": "2026-10-18T04:57:19.451879364Z",
+    "op": "hold",
+    "store": "atelier/store/cases",
+    "record": "7aa9096f9747e5c40c5450260517948c",
+    "subject": "7419215b5c72282cb567c3115afaa636",
+    "by": "app",
+    "reason": "sealed:v1:AQlqOjIwMjYtMTB7mkRBf988kwEBl4DEVEOMXlC94ksHbw_S0m-erGGUjxMW_IbUzoIQq9_cinMtF8MfUq58uVjsTVLMZGc3ZjgFhKkqVRul",
+    "hash": "ed64a5b6dcea3c015a60a907aa890ea67ee1a623cc22db4336ee2fa4e10df563"
+  },
+  "00000000000000000004": {
+    "seq": 4,
+    "at": "2026-10-18T04:57:19.463894079Z",
+    "op": "hold",
+    "store": "atelier/store/tally",
+    "record": "ad2335c4d8cf5d6d475134ed52112b52",
+    "by": "app",
+    "reason": "sealed:v1:AQlqOjIwMjYtMTB7mkRBf988kwEBpUBjkJ4B2mFdFJI1tLQDZWlqoQaEnXVlNapObrrhr3JuvpUzbu8D6g4W7WiZtQE9aZ2S_RblQbcwmvVk",
+    "hash": "89f516cbea6bd26d7eb226dfc693ae3bfa935991a816f90c03243f0762f0675f"
+  },
+  "00000000000000000005": {
+    "seq": 5,
+    "at": "2026-10-18T04:57:19.467022839Z",
+    "op": "export",
+    "store": "atelier/store/cases",
+    "subject": "7419215b5c72282cb567c3115afaa636",
+    "by": "atelier/command/export",
+    "hash": "7427d30e2d027df70676946aebd6f4665ef25ce8e093e5b0c92f33e92b290f87"
+  }
+}

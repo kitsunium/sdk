@@ -274,8 +274,8 @@ func (s *Service) Setting[T SettingValue](name string, def T, opts ...SettingCon
 		s.problem(st.decl, s.name, "setting.name", "name", name, "max", secret.MaxNameLen)
 	case strings.HasSuffix(name, "-file"):
 		s.problem(st.decl, s.name, "setting.file-suffix", "name", name)
-	case strings.HasPrefix(name, kitSecretPrefix):
-		s.problem(st.decl, s.name, "setting.kit-prefix", "name", name, "prefix", kitSecretPrefix)
+	case reservedPrefixOf(name) != "":
+		s.problem(st.decl, s.name, "setting.kit-prefix", "name", name, "prefix", reservedPrefixOf(name))
 	}
 	s.mu.Lock()
 	s.settings = append(s.settings, st)
@@ -804,7 +804,7 @@ func (a *App) settingDecls() []settingDecl {
 // settingNamed reports whether a setting's name is one a setting may take:
 // a secret's grammar, not a file variable's, not kit's own.
 func settingNamed(b *settingBase) bool {
-	return secret.ValidateName(b.name) == nil && !strings.HasSuffix(b.name, "-file") && !strings.HasPrefix(b.name, kitSecretPrefix)
+	return secret.ValidateName(b.name) == nil && !strings.HasSuffix(b.name, "-file") && reservedPrefixOf(b.name) == ""
 }
 
 // databaseSettings are the settings kit declares for the app's databases,

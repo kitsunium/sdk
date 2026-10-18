@@ -91,3 +91,25 @@ present name taken refuses the start and nothing moves; a renaming the
 database refuses half-way rolls the move back and the next start resumes;
 and the move is undone by renaming back — the procedure ADR 0180 gives —,
 which restores the fixture byte for byte.
+`former_keys_test.go` declares the product `testdata/former-keys` was
+written by — the release before ADR 0180 step 5b, its secrets in the file
+store beside the data (kept in the fixture as `data/_secrets`, a name git
+tracks, renamed `.secrets` by `keyedCopy`): `kit-data-key` rotated once,
+`kit-index-key`, `kit-smtp-url`, every data key wrapped under
+`kit-data-key`, a letter and a notice about nobody still queued, the notice
+sealed under `kit-data-key` itself with the label `kit/v1 sealed at rest` —,
+with what it read then (`dump.json`, `journal.txt`, `holds.txt`, `names.json`,
+on SQLite and in the data directory alone); never regenerate it with this
+release. `former_keys_move_test.go` holds the re-seal: the index key and the
+SMTP URL copied, `app-data-key` made and every data key re-wrapped under it,
+the journal, holds, cases, versions, former values, trash, a person's data,
+the erased person and both kept messages read as the former release read
+them, the former secrets byte for byte untouched, a second start changing
+nothing, and everything read with the former secrets gone; an index key
+under both names refused (`CodeRenameTarget`); a copy refused half-way
+(`CodeRenameFailed`) resumed by the next start; `app-data-key` rotated and
+pruned once moved; and `privacy rewrap -back`, the way back, leaving every
+data key under `kit-data-key`. `former_keys_erase_test.go`: a person erased
+after the move, their boxes restored from a backup taken just before the
+erasure, opens under neither data-key, nor each alone, nor after `privacy
+rewrap -back`.
