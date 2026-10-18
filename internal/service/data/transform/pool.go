@@ -93,6 +93,21 @@ type readerBox struct {
 // exist, and went on to judge the stream by the wrong grammar.
 type readerScheme uint8
 
+// readerBoxPool is the half of a decoder pool a take uses: Get never yields nil
+// (a miss is a fresh, empty box) and Put hands a box back. *recycler.Pool
+// satisfies it; the interface exists so takeFlateReaderFrom's Reset-fault branch
+// can be gated on a pool whose Get returns what Put stored. A sync.Pool promises
+// no such thing — a Put lands in the current P's private slot, which a goroutine
+// migrated to another P cannot reach, and any collection may drop it — so a
+// test driving that branch through the real pool can miss its own fixture, and
+// one it missed stays behind to poison a later take.
+type readerBoxPool interface {
+	// Get borrows a box, a fresh empty one on a miss.
+	Get() *readerBox
+	// Put returns box for a later Get.
+	Put(box *readerBox)
+}
+
 // newZlibWriterPools builds one recycler per level in the stdlib's accepted
 // band [HuffmanOnly, BestCompression]. Building the pools costs nothing at
 // package load: recycler.NewPool stores the factory and calls it only on a
@@ -278,7 +293,16 @@ func releaseGzipReader(box *readerBox) {
 // Resetter interface is still allowed to fail, and that failure is returned
 // typed rather than discarded.
 func takeFlateReader(src io.Reader) (box *readerBox, err error) {
-	held := flateReaderPool.Get()
+	//: the process-wide pool; takeFlateReaderFrom holds the logic.
+	return takeFlateReaderFrom(flateReaderPool, src)
+}
+
+// takeFlateReaderFrom is takeFlateReader over an explicit pool, which is the
+// seam that lets the Reset-fault branch be gated deterministically: today's
+// stdlib cannot reach it, so its gate has to inject a failing decoder, and only
+// a pool whose Get returns what Put stored makes that injection certain.
+func takeFlateReaderFrom(pool readerBoxPool, src io.Reader) (box *readerBox, err error) {
+	held := pool.Get()
 	resetter, pooled := held.rc.(flate.Resetter)
 	//: two things are being asked and neither answers the other. The assertion
 	//: establishes the CAPABILITY: it is to an INTERFACE, and zlib.Resetter
@@ -301,7 +325,7 @@ func takeFlateReader(src io.Reader) (box *readerBox, err error) {
 	if rerr := resetter.Reset(src, nil); rerr != nil {
 		//: unreachable with today's stdlib, whose Reset ends in `return nil`;
 		//: kept so a future implementation that CAN fail fails typed.
-		flateReaderPool.Put(held)
+		pool.Put(held)
 		//: hand the fault back for the scheme to wrap.
 		return nil, rerr
 	}
