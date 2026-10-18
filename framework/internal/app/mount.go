@@ -178,7 +178,7 @@ func (a *App) remount(env string) {
 		a.mountEnv = env
 		return
 	}
-	own := slices.DeleteFunc(slices.Clone(a.services), func(s *Service) bool { return s == Privacy || !kitOwn(s) })
+	own := slices.DeleteFunc(slices.Clone(a.services), func(s *Service) bool { return s == Privacy || !frameworkOwn(s) })
 	a.mountEnv = env
 	a.modules, a.services = mounts(a.own, mountsIn(a.opts.mounts, env))
 	a.services = slices.Concat(own, a.services)

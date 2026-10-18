@@ -87,7 +87,7 @@ func (c *databaseCheck) name(d *database) {
 	case secret.ValidateName(d.name) != nil || len(d.name) > maxDatabaseName:
 		c.add(d, say("database.name", "name", d.name, "max", maxDatabaseName))
 	case reservedPrefixOf(d.name) != "":
-		c.add(d, say("database.kit-prefix", "name", d.name, "prefix", reservedPrefixOf(d.name)))
+		c.add(d, say("database.own-prefix", "name", d.name, "prefix", reservedPrefixOf(d.name)))
 	case c.seen[d.name]:
 		c.add(d, say("database.twice", "name", d.name))
 	default:

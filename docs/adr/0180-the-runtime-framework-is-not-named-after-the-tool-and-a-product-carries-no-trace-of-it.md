@@ -312,7 +312,7 @@ nothing.
 | 3 | SDK | The rename of §1, a design edit first (ADR 0163, 0167, 0168): `design/framework/app.yaml`, `kit gen`, `make api`, `make docs-readme`; the facade's and implementation's paths; `model` `Version` 6; the scripts, `BUILD.bazel`, `//:audit_sources`, `tools/alloc-lane-targets.txt` and `codes.ranges` owners re-pointed; the three database connectors follow; the texts of §2 reworded — done (2026-10-18, §Step 3, done) |
 | 4 | SDK | The runtime names of §3: the prefix, the routes, the tag key, the graph values, the telemetry name; the refusals of an old name at the start (§3, Q12) — done (2026-10-18, §Step 4, done) |
 | 5 | SDK | The names at rest (Q5, Q6): the tables, the migration set, the secret prefix, the dev data directory — renamed by a framework migration —, the domain-separation labels re-sealed under new ones, the old ones removed in a later minor (Q6) — split in three: 5a done (2026-10-18, §Step 5a, done): the tables, the migration set, the dev data directory and the privacy service moved; 5b done (2026-10-18, §Step 5b, done): the secret prefix, every data key re-wrapped under `app-data-key`, and the label of a box sealed under data-key itself; 5c split in two on the owner's decision of 2026-10-18 (§Decision of 18 October): 5c-1 done (2026-10-18, §Step 5c-1, done): the privacy journal a former release kept closed as it is and continued under the new labels; 5c-2 done (2026-10-18, §Step 5c-2, done): the references at rest and the privacy service's ids re-sealed under the new labels; the module name `kit` stays reserved, for the reasons that section gives |
-| 6 | SDK | `TestAProductCarriesNoTraceOfTheTool`, with an empty allow-list; it can land earlier with an allow-list shrinking step by step, as ADR 0179's `stillInCore` did |
+| 6 | SDK | `TestAProductCarriesNoTraceOfTheTool`, with an empty allow-list; it can land earlier with an allow-list shrinking step by step, as ADR 0179's `stillInCore` did — done (2026-10-18, §Step 6, done): the tree and the execution admit nothing; the binary admits the former names of Q12's window and at rest alone, each entry naming the step it comes from and when it goes, and the list may only shrink |
 | 7 | platform | Its ADR for §5: the header, the digest line, the skeletons, the seed variable, the design's `apiVersion`, the lock, the version pin; the analyzer and `subsystem.Table` on the new paths; `internal/modelts` regenerated for `Version` 6; the Studio's client on the new prefix; the reference regenerated, and its guard |
 | 8 | products | todo, moderation, statusline: the import path and `kit.` → `app.` (a rewrite of the import path and the package qualifier, then the 14 shadowing files by hand), the struct tags (moderation's 174), the variables in Dockerfiles, compose files and CI, `.gitignore` |
 
@@ -1136,6 +1136,136 @@ connector modules (`postgres` and `mysql` also against servers in Docker),
 `scripts/pre-commit/`, `make guard`, `make doclinks`, `gofumpt -l` and
 `make lint-ktn-check`.
 
+### Step 6, done (2026-10-18)
+
+The guard of §6, in `framework/app/notrace_external_test.go`, on
+`framework/app/testdata/traceprobe`: a whole product on `framework/app` —
+every subsystem but the Studio imported (`store`, `queue`, `workflow`,
+`mail`, `jobs`, `server`), a store with a personal field that names its
+subject and a retention, a frontend served from embedded files, a topic and
+its subscription, a workflow, a mailer, two jobs, a command and a query
+exposed, a webhook, a setting and a secret.
+
+**The token, defined.** An occurrence of the three letters, in any case, is
+a trace wherever it lies — alone, at the head or the tail of a word
+(`kitTable`, `studiokit`, `KIT_DATA_DIR`, `kit-data-key`, `/_kit/`), or inside
+one —, but in two places, lifted out before the text is read: `kitsunium`,
+the vendor's name (§Context), and a word of a natural language in which the
+letters belong to another word (`kitten`, `skittles`). In a product the only
+such words are the SDK's common-password list's (`pkg/v1/crypto/password`'s
+`IsCommon`, ADR 0143), which the framework links to refuse a weak password:
+the list is the dictionary, and the test reads it, so nothing is lifted by
+hand. A word boundary is not asked for, and cannot be: in a binary's string
+data two literals lie end to end — `app-data-key` then `kit-data-key` read
+`keykit-` —, so a rule that wanted a separator would miss the traces it is
+for. The inventory of §Context counted the same token, `kitsunium` aside.
+
+**What is read.** *The tree*: every file of the probe's directory but its
+prose (`*.md`, the owner's, §6), path and content, and the `go.mod` its build
+reads. *The binary*: built as a release is — `go build -trimpath`, no tag, no
+overlay, `-buildvcs=false` (the stamp names a commit, never the tool) —, its
+symbols (`go tool nm`), `go version -m`, and its string data: every section
+an ELF loader maps but the code (the code holds no string the data does not,
+and its bytes read as letters by chance — `Kitcu<f` — where the data's never
+did) and the debug sections, compressed and never mapped; so the binary's
+part runs on Linux, where CI runs it. *The execution*: `-h`, `graph`,
+`graph -format mermaid`, `config` (the environment table: every variable the
+product reads, by name), `secrets list`, then the product served in
+production on a data directory of its own — its three probes, its frontend,
+an operation, its webhook, `/_app/`, a Studio read refused, a missing file,
+each answer as written on the wire —, its log, and the name of every file it
+made. Each read must say what it is for (`mustSay`: the variables, the
+routes, the probe's 200, the frontend's page), so that the guard cannot pass
+by reading nothing.
+
+**The second check**, `TestTheFrameworksLiteralsNameNoTool`: the string
+literals of `framework/app` and `framework/internal/app` — every package
+under them but `studio`, `studioengine` and `testdata` — and the keys and
+sentences of the catalogue the core embeds (`locales/en.json`). It needs no
+toolchain; it skips under Bazel, whose sandbox holds no other package's
+sources.
+
+**The allow-lists, measured.** The tree and the execution admit nothing. The
+binary admits `formerInBinary`, the literals `formerLiterals`, and nothing
+else; an entry the binary or the sources no longer hold fails the test, so a
+list only shrinks — the change that makes an entry stale takes it out, as
+ADR 0179's `stillInCore` did. Every entry is a former name read, refused or
+moved during Q12's window, or a former name at rest a former release left:
+
+| Entry (binary) | Admitted by | Goes |
+|---|---|---|
+| `KIT_` | step 4, Q12: a former operator variable is refused, naming its new name | with the minor that ends the window |
+| `/_kit/` | step 4, Q12: the former probes answer, logged as deprecated; the former route space stays reserved, its refusals naming it | with the minor that ends the window |
+| `is tagged kit:\"{value}\"` | step 4, Q12: a field under the former tag key is refused, naming it | with the minor that ends the window |
+| `\"app\", \"kit\"` | step 5c-2: the module name `kit` stays reserved, the refusal naming it | with the minor that ends the window |
+| `kit_migrations`, `kit_tables`, `kit_queue`, `the kit_* tables` | step 5a: the former tables, moved at the first start, and the refusal of a move | with the minor that ends the window |
+| `.kit/data` | step 5a: dev's former data directory | with the minor that ends the window |
+| `kit-` | step 5b: the former secret prefix, copied, re-wrapped, reserved | with the minor that ends the window, which refuses to start while a data key is still under `kit-data-key` |
+| `kit/v1 sealed at rest` | step 5b: the former label of a box under data-key itself | with the minor that ends the window, which refuses to start while a box bears it |
+| `kit/v1 subject reference`, `kit/v1 record reference` | step 5c: the former references, read and erased under | once no box and no hold names a former reference (§Step 5c-2, done) |
+| `kit/v1 database index key` | step 5c: a database's former index rows, filed again as a store opens | with the minor that ends the window |
+| `kit.privacy` | steps 5a and 5c-1: the privacy service's former id, moved, and bound by what its stores sealed | while a former journal is kept (§Step 5c-1, done) — the last to go |
+| `kit` alone | steps 4 and 5: `formerName`, from which the reserved name, the former tag key, tables and labels are made — admitted only where it runs into its neighbours in the string data (`appkitsql`), joined to no punctuation, which every former name above is | with the last of the entries above |
+
+`formerLiterals` is their sources: `formerName` (`"kit"`), `formerPrefix`
+(`"KIT"`), `formerReserved` (`"/_kit/"`) in `renamed.go`, and five catalogue
+sentences — `classify.tag-renamed`, `module.reserved`, `mount.prefix`,
+`route.reserved`, `static.prefix` — each a refusal that names the former name
+it refuses. No entry of either list is the tool's own: §3's nine variables of
+the tool are read by `studioengine` alone, which a release binary does not
+link (step 1), and the binary holds none of them.
+
+**What no step covered, found by the guard and renamed here.** None of it
+is at rest or on the wire a former release reads, so each is a rename:
+
+- *Two dozen unexported identifiers of `framework/internal/app`*, in every
+  binary's symbols and type data, which step 3 renamed the paths around but
+  not the names: `kitTransaction`, `kitTable`, `kitTables`, `kitTablesOf`,
+  `kitTablesTable`, `kitSet` (a type and a method), `setKit`, `tableKit`,
+  `kitSetAttempts`, `resolveKitSet`, `planKitSet`, `applyKitSet`,
+  `applyKitSetAt`, `kitSetAtStart`, `kitOwn`, `kitRefusal`, `kitTrigger`,
+  `kitSecret`, `kitSecretFrom`, `kitIndexes`, `kitLanguages`, `kitVersion`,
+  `kitLoop` and the field `kitEnv` — `framework…` each (`frameworkTable`,
+  `frameworkSet`, `frameworkOwn`, `frameworkEnv`…).
+- *Ten sentences of the catalogue still quoting the former tag key* where
+  they speak of the present one (`classify.history`, `looks-personal`,
+  `secret-moderated`, `secret-personal`, `special-plain`, `subject-class`,
+  `two-classes`, `unknown`, `passwords.history-short`, `not-secret`): step 4
+  renamed the key and left these saying `kit:"personal"`; they say
+  `app:"…"`, in English and in French. `classify.tag-renamed` names the former
+  key on purpose and keeps it.
+- *Four catalogue keys*, `database.kit-prefix`, `secret.kit-prefix`,
+  `setting.kit-prefix`, `module.kit-service`, embedded with the English
+  table: `database.own-prefix`, `secret.own-prefix`, `setting.own-prefix`,
+  `module.own-service` — a key is the catalogues' alone, never in the graph
+  nor on the wire.
+- *The process container's technology* in the graph's architecture, `Go 1.27
+  · kit`: `Go 1.27 · app`, the framework's name (`frameworkName`), as step 4
+  named the graph's other values. The model's doc comment of
+  `Container.Technology` still gives the former example; it is the design's
+  (ADR 0167), and changes with the next `kit gen` at the pinned version.
+- *The diff's secret token*, `\u0000kit-secret:`, which a version diff puts in
+  place of a secret member's value and takes out before it returns, never
+  written down: `\u0000app-secret:`.
+
+**Seen red before green.** A sentence `"made with kit"` added to the probe:
+red in its tree and in the binary's `.rodata`. `frameworkLoop` named
+`kitLoop` again: red in `go tool nm` and in `.gopclntab`. `kit says:` added to
+a sentence of the catalogue: red in the binary's `.noptrdata` and in the
+literals' check. A stale entry added to each list: red, "which the binary no
+longer holds", "which no source writes any more".
+
+**Its gate** (rule 12): like the initgraph tests it skips without a go
+toolchain and under Bazel (`TEST_SRCDIR`); it runs in CI's `test-386` job,
+which runs `go test ./...` over every module of the census, so on linux/386
+with cgo off — a static binary, seen green there —, and in `make
+test-framework`, a step of the `bazel` job, on linux/amd64 under `-race`.
+
+**Verified.** `GOWORK=off go test -race` of `./framework/internal/app/...`
+and `./framework/app/...`, the guard on linux/386 (`GOARCH=386
+CGO_ENABLED=0`), the guards of `scripts/pre-commit/`, `make guard`, `make
+doclinks`, `gofumpt -l` and `make lint-ktn-check`.
+
 ### Impact
 
 - **The SDK.** Under `framework/`, 694 Go files mention the word (7 012
@@ -1511,6 +1641,7 @@ journal closed and the new one chained), 5c-2 (the references re-sealed).
 | Accepted, step 5c-1 done | 2026-10-18 | §Decision of 18 October records the owner's answer for step 5c — new labels for the future, the journal closed and chained, never rewritten, step 5c split in two —; the migration table splits step 5c and marks 5c-1 done; §Step 5c-1, done records the journal a former release kept closed as it is by a `continue` entry naming its last hash (`model.JournalContinue`, `JournalEntry.Follows`) and starting a chain of its own, every later entry's references under the `app/v1` labels (`refs`) and its reason bound to `app.privacy/store/journal`, the former's read where it was sealed, `verifyChain`'s link and `JournalCheck.Closed`, why the former journal needs its binding and not its labels, when the former names can go, the references at rest, the privacy service's other ids and the module name `kit` left to 5c-2, and what holds it (`connectors/sqlite/testdata/former-journal`, written by the release before); §Breaking changes says what the first journaled entry does and what going back costs. No decision of 17 October changed |
 | Accepted, step 5c-2 done | 2026-10-18 | The migration table marks 5c-2 done; §Step 5c-2, done records every reference made under the `app/v1` labels — data keys, `app:subject`, a database's index rows (`app:fingerprint`), the holds' filing and subject — and the privacy service's stores sealing bound to `app.privacy/…`; the pass at every start (`renamed_refs.go`) filing the holds again and moving each record, its former values and versions from the former keys to the present ones under shared stripes, the mark of progress what rests; what it leaves where it lies (queued messages, a trashed record's versions, a former value under a person the record no longer names) and why the former keys stay, destroyed with their person or record; an erasure destroying both keys; what the former names are still for and why `kit` and `kit.privacy` are not released; the measure; what holds it (`connectors/sqlite/testdata/former-refs`, written by the release before, and the PostgreSQL and MySQL suites through `data copy`); §Breaking changes says what the first start does and that going back needs a backup. No decision changed |
 | Accepted, step 3 done | 2026-10-18 | The migration table marks step 3 done; §Step 3, done records the rename — `framework/app`, `apptest`, `framework/internal/app` and its engines `storeengine`, `queueengine`, `workflowengine`, `mailengine`, `jobengine`, `serverengine`, `studioengine`, `design/framework/app.yaml`, the codes at their values under re-pointed owners, `model.Version` 6 with `ProvenanceApp`, `PortOwnerApp` and `SettingAppDev` —, the texts of §2 and what they leave to steps 4 and 5; §Breaking changes gives a product's migration, a rewrite of the import path and the qualifier then the shadowing files; §4 records what the platform found at step 2, `kit dev` building with a `go.mod` outside the tree (`-modfile`). No decision changed |
+| Accepted, step 6 done | 2026-10-18 | The migration table marks step 6 done; §Step 6, done records the guard — `TestAProductCarriesNoTraceOfTheTool` on `testdata/traceprobe`, a whole product, reading its tree, its release binary (symbols, string data by ELF section, `go version -m`) and its execution (`-h`, `graph`, `config`, `secrets list`, served), and `TestTheFrameworksLiteralsNameNoTool` over the framework's literals and embedded catalogue —, the token defined (`kitsunium` and the words of the SDK's password list lifted out, no word boundary asked for), the allow-lists measured, each entry with the step that admits it and when it goes, the list only shrinking; the traces no step covered, renamed (two dozen unexported identifiers, ten catalogue sentences quoting the former tag key, four catalogue keys, the process container's technology, the diff's secret token); the mutations seen red; its gate, CI's `test-386` job and `make test-framework`. No decision changed |
 
 ## Deferred
 

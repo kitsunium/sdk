@@ -121,7 +121,7 @@ func subkeysOf(ikm []byte, labels referenceLabels) (*referenceKeys, error) {
 // store, where kit makes it on first use and never rotates it. made says kit
 // made it now.
 func (a *App) indexKey(ctx context.Context) (raw []byte, made bool, err error) {
-	v, _, err := a.kitSecret(ctx, indexSecret)
+	v, _, err := a.frameworkSecret(ctx, indexSecret)
 	switch {
 	case err == nil:
 		raw := v.Value.Reveal()
@@ -183,7 +183,7 @@ func (a *App) indexKeyProblems() []model.Diagnostic {
 	if st == nil || st.kept == nil || st.from != model.SecretFromMemory || !a.sealsOnDisk() || !a.usesIndexKey() {
 		return nil
 	}
-	if _, err := st.kitEnv.Get(context.Background(), indexSecret); !errors.Is(err, secret.NotFound) {
+	if _, err := st.frameworkEnv.Get(context.Background(), indexSecret); !errors.Is(err, secret.NotFound) {
 		return nil // pinned — or a variable the first use refuses, saying why
 	}
 	return []model.Diagnostic{diagnosticOf("warning", "", nil, say("privacy.index-key-memory", "variable", a.variable(varIndexKeyStem), "prefix", appPrefix(a.name)))}
@@ -258,12 +258,12 @@ func (s *storeCore) heldAt(ctx context.Context, a *App, key string, v any, now t
 	return held && until.After(now), nil
 }
 
-// kitIndexes are the indexes kit adds to the store: its subject's, when its
+// frameworkIndexes are the indexes kit adds to the store: its subject's, when its
 // entity has one. They are kept by the SDK's document store with the
 // product's own, in the same write, and rebuilt at every start.
-func (s *storeCore) kitIndexes(ctx context.Context, a *App) ([]plug.IndexSpec, error) {
+func (s *storeCore) frameworkIndexes(ctx context.Context, a *App) ([]plug.IndexSpec, error) {
 	plan := s.plan()
-	if plan.subject == nil || kitOwn(s.svc) {
+	if plan.subject == nil || frameworkOwn(s.svc) {
 		return nil, nil
 	}
 	keys, err := a.referenceKeys(ctx)

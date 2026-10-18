@@ -123,8 +123,8 @@ func (m *Module) adopt(s *Service) {
 		m.problem(m.decl, "", "module.nil-part", "module", m.name)
 		return
 	}
-	if s == Privacy || kitOwn(s) {
-		m.problem(m.decl, "", "module.kit-service", "module", m.name, "service", s.name)
+	if s == Privacy || frameworkOwn(s) {
+		m.problem(m.decl, "", "module.own-service", "module", m.name, "service", s.name)
 		return
 	}
 	s.mu.Lock()

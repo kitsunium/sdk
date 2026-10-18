@@ -401,7 +401,7 @@ func (s *storeCore) docOf(v any) (plug.DocumentValue, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		if s.keyOf(v) == "" {
-			return plug.DocumentValue{}, kitRefusal(plug.RefusalKeyEmpty, s.id)
+			return plug.DocumentValue{}, frameworkRefusal(plug.RefusalKeyEmpty, s.id)
 		}
 		return plug.DocumentValue{}, unencodable(s.id, err)
 	}
@@ -654,7 +654,7 @@ func (s *storeCore) start(ctx context.Context, a *App) error {
 	}
 	// kit's own index — a subject's reference (privacy_keys.go) — is one
 	// more spec, kept with the product's in the same write.
-	own, err := s.kitIndexes(ctx, a)
+	own, err := s.frameworkIndexes(ctx, a)
 	if err != nil {
 		return err
 	}
@@ -750,7 +750,7 @@ func (s *storeCore) open(ctx context.Context, a *App, where storeFS, specs []plu
 // it is a product store of an app that keeps data keys, which opens what an
 // earlier classification sealed.
 func (s *storeCore) opensSealed(a *App) bool {
-	return s.plan().sealsAny() || (a.keepsDataKeys() && !kitOwn(s.svc))
+	return s.plan().sealsAny() || (a.keepsDataKeys() && !frameworkOwn(s.svc))
 }
 
 // sealsAtRest reports whether the store seals what it keeps: its entity has

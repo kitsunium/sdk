@@ -231,9 +231,9 @@ func ownService(service string) bool {
 // consumer's queue, the privacy service's stores —, and the names their
 // migrations had in the history.
 func (a *App) renamePlan(d *database) (plug.RenameSpec, error) {
-	plan := plug.RenameSpec{FormerVersions: formerSetTable, Versions: tableKit, Name: renameName, Version: renameVersion}
-	registry := []kitTable{{name: kitTablesTable, former: formerTablesTable}}
-	for _, t := range append(registry, a.kitTables(d)...) {
+	plan := plug.RenameSpec{FormerVersions: formerSetTable, Versions: tableFramework, Name: renameName, Version: renameVersion}
+	registry := []frameworkTable{{name: frameworkTablesTable, former: formerTablesTable}}
+	for _, t := range append(registry, a.frameworkTables(d)...) {
 		if t.former == "" {
 			continue
 		}
@@ -255,8 +255,8 @@ func (a *App) renamePlan(d *database) (plug.RenameSpec, error) {
 }
 
 // formerTable is t as a former release named it.
-func (t kitTable) formerTable() kitTable {
-	f := kitTable{name: t.former, node: t.node, queue: t.queue}
+func (t frameworkTable) formerTable() frameworkTable {
+	f := frameworkTable{name: t.former, node: t.node, queue: t.queue}
 	if t.versionsOf != "" {
 		f.versionsOf = strings.TrimSuffix(t.former, versionsSuffix)
 	}
@@ -315,7 +315,7 @@ func (a *App) renameTables(ctx context.Context, d *database, db plug.Database) (
 // tables moved: what the move left to the registry's rows, which the core
 // alone reads. A record already under its present name is kept, and the
 // former one dropped.
-func (g *tableRegistry) rekey(ctx context.Context, tables []kitTable) error {
+func (g *tableRegistry) rekey(ctx context.Context, tables []frameworkTable) error {
 	for _, t := range tables {
 		if t.former == "" {
 			continue

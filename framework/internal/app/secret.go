@@ -186,7 +186,7 @@ func (s *Secret) checkName(svc *Service) {
 	case strings.HasSuffix(name, "-file"):
 		svc.problem(s.decl, s.id, "secret.file-suffix", "name", name)
 	case reservedPrefixOf(name) != "":
-		svc.problem(s.decl, s.id, "secret.kit-prefix", "name", name, "prefix", reservedPrefixOf(name))
+		svc.problem(s.decl, s.id, "secret.own-prefix", "name", name, "prefix", reservedPrefixOf(name))
 	}
 }
 
@@ -336,15 +336,15 @@ func (s *Secret) key() string { return qualifiedKey(s.svc, s.name) }
 // stem, its name in the kept store: "moderation-openai-key".
 func (s *Secret) stored() string { return flatKey(s.key()) }
 
-// kitOwn reports whether the secret is the framework's own — data-key, on
+// frameworkOwn reports whether the secret is the framework's own — data-key, on
 // its own service —: read from <APP>_<NAME>, kept as app-<name>, like the
 // mail connector's smtp-url (ADR 0180 step 5b).
-func (s *Secret) kitOwn() bool { return kitOwn(s.svc) }
+func (s *Secret) frameworkOwn() bool { return frameworkOwn(s.svc) }
 
 // envName is the secret's name in the environment it is read from first:
 // its variable's stem under the app's prefix, or kit's.
 func (s *Secret) envName() string {
-	if s.kitOwn() {
+	if s.frameworkOwn() {
 		return s.name
 	}
 	return s.stored()
@@ -352,7 +352,7 @@ func (s *Secret) envName() string {
 
 // keptName is its name in the environment's store.
 func (s *Secret) keptName() string {
-	if s.kitOwn() {
+	if s.frameworkOwn() {
 		return ownSecretPrefix + s.name
 	}
 	return s.stored()
@@ -361,7 +361,7 @@ func (s *Secret) keptName() string {
 // variable is the variable that provides it, or pins it: <APP>_<NAME>, or
 // <APP>_<NAME> too for the framework's own (ADR 0180 §3).
 func (s *Secret) variable(a *App) string {
-	if s.kitOwn() {
+	if s.frameworkOwn() {
 		return secretVariable(appPrefix(a.name), s.name)
 	}
 	return variableOf(appPrefix(a.name), s.key())
@@ -369,8 +369,8 @@ func (s *Secret) variable(a *App) string {
 
 // envOf is where the secret's variable is read: the app's, or kit's.
 func (st *secretStores) envOf(s *Secret) secret.Store {
-	if s.kitOwn() {
-		return st.kitEnv
+	if s.frameworkOwn() {
+		return st.frameworkEnv
 	}
 	return st.env
 }
@@ -474,7 +474,7 @@ func (s *Secret) start(ctx context.Context, a *App) error {
 	if _, err := r.rotator.Ensure(ctx); err != nil {
 		return failure(CodeSecretRotate, "SECRET_CREATE", "a generated secret could not be made", err, errs.String("secret", s.id))
 	}
-	if s.kitOwn() {
+	if s.frameworkOwn() {
 		// The configuration the start read said it was set nowhere: kit
 		// made it in the environment's store, if it was not there.
 		a.settingFoundIn(s.variable(a), model.SettingStore)

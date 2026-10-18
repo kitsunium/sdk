@@ -110,10 +110,10 @@ func (c *secretsConfig) describe(dataDir string) string {
 // secretStores is where a running app finds its secrets.
 type secretStores struct {
 	// env reads the product's variables, <APP>_<NAME>; nil when the app's
-	// name makes no prefix. kitEnv reads the framework's own under the same
+	// name makes no prefix. frameworkEnv reads the framework's own under the same
 	// prefix (ADR 0180 §3) — <APP>_DATA_KEY, <APP>_SMTP_URL —, and finds
 	// nothing when the name makes none.
-	env, kitEnv secret.Store
+	env, frameworkEnv secret.Store
 	// prefix is the product's variables' prefix, which its sentences name.
 	prefix string
 	// kept is the store the environment keeps, nil when it keeps none; from
@@ -154,9 +154,9 @@ func envStores(app string) *secretStores {
 	}
 	// The framework's own, under the product's prefix: a store that finds
 	// nothing when the name makes no prefix, so that no bare name is read.
-	st.kitEnv = st.env
-	if st.kitEnv == nil {
-		st.kitEnv = secret.NewMemory(secret.MemoryConfig{})
+	st.frameworkEnv = st.env
+	if st.frameworkEnv == nil {
+		st.frameworkEnv = secret.NewMemory(secret.MemoryConfig{})
 	}
 	return st
 }
@@ -243,7 +243,7 @@ func (a *App) openFileStore(ctx context.Context, cfg *secretsConfig, st *secretS
 		}
 		return nil
 	}
-	kept, besideKey, err := a.openFileSecrets(ctx, cfg, st.kitEnv)
+	kept, besideKey, err := a.openFileSecrets(ctx, cfg, st.frameworkEnv)
 	if cfg.dir == "" && errors.Is(err, errNoFileStore) {
 		// A platform whose file modes are not access lists: nothing is
 		// written that could not be protected.
@@ -263,7 +263,7 @@ func (a *App) openFileStore(ctx context.Context, cfg *secretsConfig, st *secretS
 
 // openFileSecrets opens the encrypted file store of cfg, and reports whether
 // its key is the key file beside it.
-func (a *App) openFileSecrets(ctx context.Context, cfg *secretsConfig, kitEnv secret.Store) (secret.Store, bool, error) {
+func (a *App) openFileSecrets(ctx context.Context, cfg *secretsConfig, frameworkEnv secret.Store) (secret.Store, bool, error) {
 	dir := cfg.dir
 	if dir == "" {
 		dir = filepath.Join(a.dataDir, besideData, "store")
@@ -272,7 +272,7 @@ func (a *App) openFileSecrets(ctx context.Context, cfg *secretsConfig, kitEnv se
 	if err != nil {
 		return nil, false, failure(CodeSecretStore, "SECRETS_DIR", "the secret store's directory cannot be resolved", err, errs.String("dir", cfg.dir))
 	}
-	key, besideKey, err := a.secretsKey(ctx, cfg, kitEnv)
+	key, besideKey, err := a.secretsKey(ctx, cfg, frameworkEnv)
 	if err != nil {
 		return nil, false, err
 	}
@@ -293,8 +293,8 @@ func (a *App) openFileSecrets(ctx context.Context, cfg *secretsConfig, kitEnv se
 // file beside the store that follows the data, <data>/.secrets/key, made on
 // first use; dev's for a store <PRODUCT>_SECRETS names. besideKey reports the key
 // file.
-func (a *App) secretsKey(ctx context.Context, cfg *secretsConfig, kitEnv secret.Store) (key crypto.Key, besideKey bool, err error) {
-	v, err := kitEnv.Get(ctx, "secrets-key")
+func (a *App) secretsKey(ctx context.Context, cfg *secretsConfig, frameworkEnv secret.Store) (key crypto.Key, besideKey bool, err error) {
+	v, err := frameworkEnv.Get(ctx, "secrets-key")
 	switch {
 	case err == nil:
 		key, err := keyFromText(v.Value.Reveal())
@@ -477,14 +477,14 @@ func (st *secretStores) find(ctx context.Context, env secret.Store, name, keptNa
 	return st.kept, st.from, nil
 }
 
-// kitSecret returns one of the framework's own secrets — the mail
+// frameworkSecret returns one of the framework's own secrets — the mail
 // connector's SMTP URL, the index key — as it is now: <APP>_<NAME> first,
 // then app-<name> in the kept store, then kit-<name> where a former release
 // kept it and the copy to its present name is not made yet (ADR 0180 step
 // 5b). It reports secret.NotFound when none holds it.
-func (a *App) kitSecret(ctx context.Context, name string) (secret.Versioned, string, error) {
+func (a *App) frameworkSecret(ctx context.Context, name string) (secret.Versioned, string, error) {
 	st := a.secretsNow()
-	store, from, err := st.find(ctx, st.kitEnv, name, ownSecretPrefix+name)
+	store, from, err := st.find(ctx, st.frameworkEnv, name, ownSecretPrefix+name)
 	stored := ownSecretPrefix + name
 	if errors.Is(err, secret.NotFound) && st.kept != nil {
 		stored = formerSecretPrefix + name
@@ -517,13 +517,13 @@ func settingFrom(from string) string {
 // kit's own data-key is not the product's, and seals nothing without a data
 // directory.
 func (a *App) generatesSecrets() bool {
-	return a.anySecret(func(s *Secret) bool { return s.opts.generated && !s.kitOwn() })
+	return a.anySecret(func(s *Secret) bool { return s.opts.generated && !s.frameworkOwn() })
 }
 
 // declaresSecrets reports whether the product declares a secret — under its
 // own prefix, which kit's own does not use.
 func (a *App) declaresSecrets() bool {
-	return a.anySecret(func(s *Secret) bool { return !s.kitOwn() })
+	return a.anySecret(func(s *Secret) bool { return !s.frameworkOwn() })
 }
 
 // anySecret reports whether one of the app's secrets satisfies ok.

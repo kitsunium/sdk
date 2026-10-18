@@ -277,7 +277,7 @@ func (s *storeCore) purgeScheduled(ctx context.Context, a *App, tr plug.Trasher,
 			}
 			i := slices.IndexFunc(stones, func(st plug.TombstoneValue) bool { return st.Key == key })
 			if i < 0 || stones[i].At.After(scheduled) {
-				return kitRefusal(plug.RefusalNotTrashed, s.id)
+				return frameworkRefusal(plug.RefusalNotTrashed, s.id)
 			}
 		}
 		return tr.Purge(ctx, key)

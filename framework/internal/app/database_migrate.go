@@ -57,14 +57,14 @@ func (a *App) migrateAtStart(ctx context.Context, d *database, o *opened) ([]mod
 	var out []model.MigrationSet
 	sets := a.migrationSets(d)
 	var registry *tableRegistry
-	if len(a.kitTables(d)) > 0 {
+	if len(a.frameworkTables(d)) > 0 {
 		if err := a.tablesAtStart(ctx, d, o, manual); err != nil {
 			return out, nil, err
 		}
-		kit, g, err := a.kitSetAtStart(ctx, d, o, manual)
+		kit, g, err := a.frameworkSetAtStart(ctx, d, o, manual)
 		registry = g
 		if err != nil {
-			return out, registry, a.migrationFailure(d, migrationSet{name: setKit, table: tableKit}, err)
+			return out, registry, a.migrationFailure(d, migrationSet{name: setFramework, table: tableFramework}, err)
 		}
 		sets = append([]migrationSet{kit}, sets...)
 	}
@@ -91,7 +91,7 @@ func (a *App) migrateSet(ctx context.Context, d *database, o *opened, set migrat
 	if manual {
 		return a.pendingSet(ctx, d, set, m)
 	}
-	if set.name != setKit {
+	if set.name != setFramework {
 		if err := m.Up(ctx); err != nil {
 			return new(readSet(ctx, set, m)), a.migrationFailure(d, set, err)
 		}
@@ -114,22 +114,22 @@ func (a *App) pendingSet(ctx context.Context, d *database, set migrationSet, m p
 	return new(readSet(ctx, set, m)), nil
 }
 
-// kitSetAtStart is kit's set on d at its start: applied — its registry, then
+// frameworkSetAtStart is kit's set on d at its start: applied — its registry, then
 // its tables —, or, when d migrates manually, as its registry says it, for
 // the start to judge.
-func (a *App) kitSetAtStart(ctx context.Context, d *database, o *opened, manual bool) (migrationSet, *tableRegistry, error) {
+func (a *App) frameworkSetAtStart(ctx context.Context, d *database, o *opened, manual bool) (migrationSet, *tableRegistry, error) {
 	g, err := openRegistry(ctx, d, o.db, !manual)
 	if err == nil {
-		err = g.rekey(ctx, a.kitTables(d))
+		err = g.rekey(ctx, a.frameworkTables(d))
 	}
 	if err != nil {
-		return migrationSet{name: setKit, table: tableKit}, nil, err
+		return migrationSet{name: setFramework, table: tableFramework}, nil, err
 	}
 	if manual {
-		set, err := a.planKitSet(d, g)
+		set, err := a.planFrameworkSet(d, g)
 		return set, g, err
 	}
-	set, err := a.applyKitSet(ctx, d, o.db, g)
+	set, err := a.applyFrameworkSet(ctx, d, o.db, g)
 	return set, g, err
 }
 
@@ -143,12 +143,12 @@ func (a *App) tablesAtStart(ctx context.Context, d *database, o *opened, manual 
 	}
 	former, err := a.formerTablesOn(ctx, d, o.db)
 	if err != nil {
-		return a.migrationFailure(d, migrationSet{name: setKit, table: tableKit}, err)
+		return a.migrationFailure(d, migrationSet{name: setFramework, table: tableFramework}, err)
 	}
 	if len(former) > 0 {
 		return dbFailure(CodeDatabaseMigrate, "DATABASE_MIGRATIONS_PENDING",
 			fmt.Sprintf("database %q keeps the framework's tables under their former names and migrates manually: run `%s migrate up`", d.name, a.name),
-			errs.String("database", d.name), errs.String("set", setKit))
+			errs.String("database", d.name), errs.String("set", setFramework))
 	}
 	return nil
 }

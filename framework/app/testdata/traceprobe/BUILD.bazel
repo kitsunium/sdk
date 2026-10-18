@@ -1,0 +1,26 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "traceprobe_lib",
+    srcs = ["main.go"],
+    embedsrcs = ["site/index.html"],
+    importpath = "github.com/kitsunium/sdk/framework/app/testdata/traceprobe",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/app",
+        "//framework/app/jobs",
+        "//framework/app/mail",
+        "//framework/app/queue",
+        "//framework/app/server",
+        "//framework/app/store",
+        "//framework/app/workflow",
+    ],
+)
+
+go_binary(
+    name = "traceprobe",
+    embed = [":traceprobe_lib"],
+    visibility = ["//visibility:public"],
+)

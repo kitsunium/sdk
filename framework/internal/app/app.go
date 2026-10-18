@@ -326,7 +326,7 @@ func (a *App) resolve() error {
 	a.rt.plog = a.productLogger(sink, enc, level)
 	a.tracer = trace.NewTracer(trace.TracerConfig{
 		Resource: trace.Resource{Attrs: []trace.Attr{metrics.String(trace.ServiceNameKey, a.name)}},
-		Scope:    trace.Scope{Name: "github.com/kitsunium/sdk/framework/internal/app", Version: kitVersion()},
+		Scope:    trace.Scope{Name: "github.com/kitsunium/sdk/framework/internal/app", Version: frameworkVersion()},
 		Clock:    a.clock,
 	})
 	a.root, a.module = findModule(a.decl.file())

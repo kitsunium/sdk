@@ -427,7 +427,7 @@ func (a *App) secretStoreSettings(ctx context.Context) []model.Setting {
 		return out
 	}
 	key := model.Setting{Name: a.variable(varSecretsKey), Secret: true, From: model.SettingDefault}
-	switch _, err := a.secretsNow().kitEnv.Get(ctx, "secrets-key"); {
+	switch _, err := a.secretsNow().frameworkEnv.Get(ctx, "secrets-key"); {
 	case err == nil:
 		key.From = model.SettingEnv
 	case a.dataDir != "" && (c.dir == "" || a.cfg.env == EnvDev):
@@ -443,7 +443,7 @@ func (a *App) smtpSettings(ctx context.Context) []model.Setting {
 	if !a.hasMailer() {
 		return nil
 	}
-	_, from, err := a.kitSecret(ctx, smtpSecret)
+	_, from, err := a.frameworkSecret(ctx, smtpSecret)
 	if err != nil {
 		from = ""
 	}
