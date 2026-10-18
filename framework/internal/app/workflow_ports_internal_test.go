@@ -15,6 +15,9 @@ type gated struct {
 	State string `json:"state,omitempty"`
 }
 
+// errRolled is what the tests' transactions that roll back return.
+var errRolled = errors.New("rolled back")
+
 // gatedFlow runs, in memory, a workflow over gated entities from new to done,
 // and holds the entities g and h in new — two keys of different slots of
 // undoneCounts. The test plays its loop through the port: the workflow
@@ -76,8 +79,36 @@ func fireOn(ctx context.Context, port workflowPort[gated, string], read gated, i
 	})
 }
 
+// nothing is a transition's transaction with nothing before its write.
+func nothing(context.Context) error { return nil }
+
 // setReady makes an entity ready.
 func setReady(g *gated) error { g.Ready = true; return nil }
+
+// rollBack makes key ready in a transaction that rolls back; read, when not
+// nil, runs inside it once the write landed.
+func rollBack(t *testing.T, items *StoreService[gated], key string, read func()) {
+	t.Helper()
+	err := Transact(t.Context(), func(ctx context.Context) error {
+		if _, err := items.Update(ctx, key, setReady); err != nil {
+			return err
+		}
+		if read != nil {
+			read()
+		}
+		return errRolled
+	})
+	if !errors.Is(err, errRolled) {
+		t.Fatal(err)
+	}
+}
+
+// refusedUnavailable reports whether err is the refusal of a transition
+// decided on a rolled back write.
+func refusedUnavailable(err error) bool {
+	ke, ok := errors.AsType[*Error](err)
+	return ok && ke.Code == WireUnavailable
+}
 
 // The engine's loop reads an entity to check its guard outside any
 // transaction, and in memory a transaction's write lands before its commit:
@@ -86,94 +117,120 @@ func setReady(g *gated) error { g.Ready = true; return nil }
 // rolled back write with it — what made the storetest case
 // hooks-after-the-commit fail under load. The interleaving is played here
 // step by step: the replacement is refused, and the store keeps what the
-// rollback left.
+// rollback left; the loop's next read is of what the store holds, and nothing
+// holds its transition back.
 func TestALoopTransitionNeverWritesBackARolledBackWrite(t *testing.T) {
-	items, port, _ := gatedFlow(t)
-	errRolled := errors.New("rolled back")
-	var read gated
-	err := Transact(t.Context(), func(ctx context.Context) error {
-		if _, err := items.Update(ctx, "g", setReady); err != nil {
-			return err
+	type tc struct {
+		name string
+		// reread reads the entity again after the rollback, as the loop's
+		// next pass does, before the transition is fired.
+		reread bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		items, port, _ := gatedFlow(t)
+		var read gated
+		rollBack(t, items, "g", func() { read = loopRead(t, port, "g") })
+		if !read.Ready {
+			t.Fatal("setup: the loop's read did not see the transaction's write")
 		}
-		read = loopRead(t, port, "g")
-		return errRolled
-	})
-	if !errors.Is(err, errRolled) {
-		t.Fatal(err)
+		if c.reread {
+			read = loopRead(t, port, "g")
+			read.Ready = true
+			if err := fireOn(t.Context(), port, read, nothing); err != nil {
+				t.Fatalf("a transition decided on a committed read: %v", err)
+			}
+			return
+		}
+		if err := fireOn(t.Context(), port, read, nothing); !refusedUnavailable(err) {
+			t.Fatalf("a transition decided on a rolled back write: %v, want it refused as unavailable", err)
+		}
+		got, err := items.Get(t.Context(), "g")
+		if err != nil || got.Ready || got.State != "new" {
+			t.Fatalf("after the refused transition the store holds %+v %v, want the entity as the rollback left it", got, err)
+		}
 	}
-	if !read.Ready {
-		t.Fatal("setup: the loop's read did not see the transaction's write")
-	}
-	err = fireOn(t.Context(), port, read, func(context.Context) error { return nil })
-	if ke, ok := errors.AsType[*Error](err); !ok || ke.Code != WireUnavailable {
-		t.Fatalf("a transition decided on a rolled back write: %v, want it refused as unavailable", err)
-	}
-	got, err := items.Get(t.Context(), "g")
-	if err != nil || got.Ready || got.State != "new" {
-		t.Fatalf("after the refused transition the store holds %+v %v, want the entity as the rollback left it", got, err)
-	}
-	// The loop's next read is of what the store holds, and nothing holds
-	// its transition back.
-	read = loopRead(t, port, "g")
-	read.Ready = true
-	if err := fireOn(t.Context(), port, read, func(context.Context) error { return nil }); err != nil {
-		t.Fatalf("a transition decided on a committed read: %v", err)
+	for _, c := range []tc{
+		{name: "decided on the rolled back write", reread: false},
+		{name: "decided on a read after the rollback", reread: true},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
 // What counts is a rollback of another transaction: one the transition's own
 // transaction makes — a savepoint of a hook — undoes nothing the loop read.
 func TestALoopTransitionStandsOverItsOwnSavepointsRollback(t *testing.T) {
-	items, port, _ := gatedFlow(t)
-	must(t, Transact(t.Context(), func(ctx context.Context) error {
-		_, err := items.Update(ctx, "g", setReady)
-		return err
-	}))
-	read := loopRead(t, port, "g")
-	errRolled := errors.New("rolled back")
-	err := fireOn(t.Context(), port, read, func(ctx context.Context) error {
-		inner := Transact(ctx, func(ctx context.Context) error {
-			return errors.Join(items.Insert(ctx, gated{ID: "other"}), errRolled)
-		})
-		if !errors.Is(inner, errRolled) {
-			return inner
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("a transition whose own savepoint rolled back: %v", err)
+	type tc struct {
+		name string
+		// savepoint rolls back a savepoint of the transition's transaction
+		// before its write.
+		savepoint bool
 	}
-	if got, err := items.Get(t.Context(), "g"); err != nil || got.State != "done" {
-		t.Fatalf("the store holds %+v %v, want the transition stored", got, err)
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		items, port, _ := gatedFlow(t)
+		must(t, Transact(t.Context(), func(ctx context.Context) error {
+			_, err := items.Update(ctx, "g", setReady)
+			return err
+		}))
+		read := loopRead(t, port, "g")
+		inner := nothing
+		if c.savepoint {
+			inner = func(ctx context.Context) error {
+				err := Transact(ctx, func(ctx context.Context) error {
+					return errors.Join(items.Insert(ctx, gated{ID: "other"}), errRolled)
+				})
+				if !errors.Is(err, errRolled) {
+					return err
+				}
+				return nil
+			}
+		}
+		if err := fireOn(t.Context(), port, read, inner); err != nil {
+			t.Fatalf("a transition (own savepoint rolled back: %v): %v", c.savepoint, err)
+		}
+		if got, err := items.Get(t.Context(), "g"); err != nil || got.State != "done" {
+			t.Fatalf("the store holds %+v %v, want the transition stored", got, err)
+		}
+	}
+	for _, c := range []tc{
+		{name: "its own savepoint rolled back", savepoint: true},
+		{name: "no savepoint", savepoint: false},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
 // A rollback is compared for the entity read, not for its whole store: one
 // that wrote h back leaves the transition the loop decided on g standing,
-// and one that wrote g back still refuses it.
+// and one that wrote h back still refuses h's.
 func TestALoopTransitionStandsOverAnotherEntitysRollback(t *testing.T) {
-	items, port, _ := gatedFlow(t)
-	errRolled := errors.New("rolled back")
-	rollBack := func(key string) {
+	type tc struct {
+		name string
+		// read is the entity the loop read and transitions, rolled the one
+		// a rollback wrote back after the read.
+		read, rolled string
+		refused      bool
+	}
+	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		err := Transact(t.Context(), func(ctx context.Context) error {
-			_, err := items.Update(ctx, key, setReady)
-			return errors.Join(err, errRolled)
-		})
-		if !errors.Is(err, errRolled) {
-			t.Fatal(err)
+		items, port, _ := gatedFlow(t)
+		read := loopRead(t, port, c.read)
+		rollBack(t, items, c.rolled, nil)
+		err := fireOn(t.Context(), port, read, nothing)
+		if c.refused && !refusedUnavailable(err) {
+			t.Fatalf("a transition on %s after a rollback of %s: %v, want it refused as unavailable", c.read, c.rolled, err)
+		}
+		if !c.refused && err != nil {
+			t.Fatalf("a transition on %s after a rollback of %s: %v", c.read, c.rolled, err)
 		}
 	}
-	read := loopRead(t, port, "g")
-	rollBack("h")
-	if err := fireOn(t.Context(), port, read, func(context.Context) error { return nil }); err != nil {
-		t.Fatalf("a transition on g after a rollback of h: %v", err)
-	}
-	read = loopRead(t, port, "h")
-	rollBack("h")
-	err := fireOn(t.Context(), port, read, func(context.Context) error { return nil })
-	if ke, ok := errors.AsType[*Error](err); !ok || ke.Code != WireUnavailable {
-		t.Fatalf("a transition on h after a rollback of h: %v, want it refused as unavailable", err)
+	for _, c := range []tc{
+		{name: "another entity rolled back", read: "g", rolled: "h", refused: false},
+		{name: "the entity read rolled back", read: "h", rolled: "h", refused: true},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
@@ -181,24 +238,43 @@ func TestALoopTransitionStandsOverAnotherEntitysRollback(t *testing.T) {
 // found nothing, and when the workflow stops: it holds no more than the
 // entities the store holds.
 func TestALoopsReadsAreForgotten(t *testing.T) {
-	items, port, stop := gatedFlow(t)
-	loopRead(t, port, "g")
-	if _, ok := remembered(port, "g"); !ok {
-		t.Fatal("setup: the loop's read of g is not remembered")
+	type tc struct {
+		name string
+		// key is the entity read; forget is what should make the read
+		// forgotten.
+		key    string
+		forget func(t *testing.T, items *StoreService[gated], port workflowPort[gated, string], stop func())
+		// all says that no read at all is left, not only key's.
+		all bool
 	}
-	must(t, items.Delete(t.Context(), "g"))
-	if _, ok := remembered(port, "g"); ok {
-		t.Fatal("the read of g is still remembered after its deletion")
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		items, port, stop := gatedFlow(t)
+		if _, found, err := port.Get(context.Background(), c.key); err != nil {
+			t.Fatalf("the loop's read of %s: %v %v", c.key, found, err)
+		}
+		c.forget(t, items, port, stop)
+		n, ok := remembered(port, c.key)
+		if ok {
+			t.Fatalf("the read of %s is still remembered", c.key)
+		}
+		if c.all && n != 0 {
+			t.Fatalf("%d reads are remembered, want 0", n)
+		}
 	}
-	if _, found, err := port.Get(context.Background(), "g"); found || err != nil {
-		t.Fatalf("a read of a deleted entity: %v %v", found, err)
-	}
-	if _, ok := remembered(port, "g"); ok {
-		t.Fatal("a read of g that found nothing is remembered")
-	}
-	loopRead(t, port, "h")
-	stop()
-	if n, _ := remembered(port, ""); n != 0 {
-		t.Fatalf("after the stop %d reads are remembered, want 0", n)
+	for _, c := range []tc{
+		{name: "the entity deleted", key: "g", forget: func(t *testing.T, items *StoreService[gated], port workflowPort[gated, string], _ func()) {
+			t.Helper()
+			if _, ok := remembered(port, "g"); !ok {
+				t.Fatal("setup: the loop's read of g is not remembered")
+			}
+			must(t, items.Delete(t.Context(), "g"))
+		}},
+		{name: "a read that found nothing", key: "absent", forget: func(*testing.T, *StoreService[gated], workflowPort[gated, string], func()) {}},
+		{name: "the workflow stopped", key: "h", all: true, forget: func(_ *testing.T, _ *StoreService[gated], _ workflowPort[gated, string], stop func()) {
+			stop()
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
