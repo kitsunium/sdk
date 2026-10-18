@@ -297,6 +297,12 @@ func Test_applyToken(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
+		//: "u18" sets the process-wide umask to 022: unlocked, it lands in
+		//: the middle of Test_applyUmaskToken's set-and-observe sequence,
+		//: which then reads 022 where it set 0 (seen on illumos).
+		procStateMu.Lock()
+		defer procStateMu.Unlock()
+		defer restoreProcState(t)()
 		got := applyToken(c.tok)
 		if c.wantMsg != (got != "") {
 			t.Errorf("applyToken(%q) = %q, want a diagnostic: %v", c.tok, got, c.wantMsg)
