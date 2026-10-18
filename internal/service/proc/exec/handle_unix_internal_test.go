@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -657,7 +658,6 @@ func Test_handle_awaitExit(t *testing.T) {
 	}
 	tests := []tc{
 		{name: "the process exits within the window", program: "exit 0", grace: 5 * time.Second, want: exited},
-		{name: "the process exits with no deadline", program: "exit 0", grace: 0, want: exited},
 		{name: "the grace window closes first", program: "sleep 30", grace: 100 * time.Millisecond, want: graceElapsed},
 		{name: "the caller cancels", program: "sleep 30", grace: 5 * time.Second, want: cancelled},
 	}
@@ -781,6 +781,118 @@ func Test_handle_graceOnInjectedClock(t *testing.T) {
 			}
 		case <-time.After(30 * time.Second):
 			t.Fatal("advancing the clock past the grace did not end the call")
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// dropFirstKill is a kill(2) double for a handle: it discards the first
+// SIGKILL it is asked to send, as NetBSD up to 10.1 discards a signal posted
+// to a process still inside execve (PR kern/58091), and sends every other
+// signal for real. It counts the SIGKILLs it was asked for.
+type dropFirstKill struct {
+	mu    sync.Mutex
+	kills int
+}
+
+// send is the double's kill(2).
+func (d *dropFirstKill) send(pid int, sig syscall.Signal) error {
+	d.mu.Lock()
+	first := false
+	if sig == syscall.SIGKILL {
+		d.kills++
+		first = d.kills == 1
+	}
+	d.mu.Unlock()
+	//: the lost signal: accepted, never delivered.
+	if first {
+		return nil
+	}
+	return syscall.Kill(pid, sig)
+}
+
+// sigkills reports how many SIGKILLs the handle asked for.
+func (d *dropFirstKill) sigkills() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.kills
+}
+
+// Test_handle_killResentWhenLost pins that a SIGKILL escalation does not rest
+// on one signal. Start returns from inside the child's execve, and NetBSD up
+// to 10.1 discards a signal posted there (PR kern/58091), so the first SIGKILL
+// sent to a child just started can be lost — and a wait for the reap after it
+// never ends. The double drops the first SIGKILL on every kernel; the child
+// ignores SIGTERM, so only a second SIGKILL can end it, and that one is sent
+// when the resend interval closes on the handle's manual clock, not a
+// nanosecond before.
+//
+// MUTATION-CHECKED: an escalation that sends SIGKILL once and waits fails
+// every row on the 30-second guard.
+//
+// Goroutine lifecycle: one goroutine runs the call under test and reports on a
+// buffered channel; the test always receives from it, and startChild's cleanup
+// kills and reaps whatever the call left.
+func Test_handle_killResentWhenLost(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		//: the escalation under test, on a child whose first SIGKILL is lost.
+		call func(ctx context.Context, h *handle) error
+	}
+	tests := []tc{
+		{"Stop with no grace escalates at once", func(ctx context.Context, h *handle) error {
+			return h.Stop(ctx, 0, coreproc.Signal(syscall.SIGTERM))
+		}},
+		{"the escalation itself", func(ctx context.Context, h *handle) error {
+			return h.killUntilReaped(ctx)
+		}},
+		{"a teardown of a half-configured child", func(_ context.Context, h *handle) error {
+			teardown(h)
+			return nil
+		}},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		h := startTermIgnoringChild(t)
+		manual := clock.NewManualClock(time.Unix(1_700_000_000, 0))
+		h.clk = manual
+		lossy := &dropFirstKill{}
+		h.kill = lossy.send
+		done := make(chan error, 1)
+		go func() { done <- c.call(t.Context(), h) }()
+		//: the resend timer is armed, so the first SIGKILL has been "sent".
+		manual.BlockUntil(1)
+		manual.Advance(killResendInterval - time.Nanosecond)
+		select {
+		case err := <-done:
+			t.Fatalf("the call returned (%v) with its only SIGKILL lost", err)
+		default:
+		}
+		if got := lossy.sigkills(); got != 1 {
+			t.Fatalf("%d SIGKILLs before the resend interval closed, want 1", got)
+		}
+		manual.Advance(time.Nanosecond)
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("the call = %v, want nil", err)
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatal("closing the resend interval did not end the escalation")
+		}
+		if got := lossy.sigkills(); got < 2 {
+			t.Errorf("%d SIGKILLs sent, want the lost one resent", got)
+		}
+		//: the child died of the resent SIGKILL, and its status is its own.
+		exit, err := h.Wait()
+		if err != nil || !exit.Signaled || exit.Signal != coreproc.Signal(syscall.SIGKILL) {
+			t.Errorf("Wait = (%+v, %v), want a death by SIGKILL", exit, err)
 		}
 	}
 	for _, c := range tests {

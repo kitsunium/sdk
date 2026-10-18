@@ -20,6 +20,15 @@ import (
 // termination; the port reserves -1 for "died by signal, no status".
 const signalledCode int = -1
 
+// killResendInterval is how long a SIGKILL escalation waits for the reap
+// before it sends SIGKILL again. NetBSD up to 10.1 discards a signal posted to
+// a process still inside execve (PR kern/58091, fixed in 10.2 and 11.0), and
+// Start returns from inside the child's execve, so the first SIGKILL sent to a
+// child just started can be lost; a single SIGKILL followed by an unbounded
+// wait then never ends. A SIGKILL that landed kills at once, so on every other
+// kernel the reap comes first and nothing is ever resent.
+const killResendInterval time.Duration = 100 * time.Millisecond
+
 // maxRSSKB (in maxrss_rss64_unix.go / maxrss_rss32_unix.go) reports the peak
 // resident set size in KiB from the wait4 rusage. Rusage.Maxrss is int64
 // on a 64-bit GOARCH but int32 on 386/arm, so the widening lives in a per-width
@@ -50,9 +59,14 @@ type handle struct {
 	waitErr  error
 	done     chan struct{}
 
-	// clk is what Stop's grace window is measured on: clock.System from
-	// newHandle, a ManualClock in a white-box test.
+	// clk is what Stop's grace window and the SIGKILL resend interval are
+	// measured on: clock.System from newHandle, a ManualClock in a white-box
+	// test.
 	clk clock.Waiter
+
+	// kill is the kill(2) SignalGroup sends through: syscall.Kill from
+	// newHandle, a double that drops a signal in a white-box test.
+	kill func(pid int, sig syscall.Signal) error
 }
 
 // newHandle wraps a freshly started *os.Process and the claim on its exit
@@ -65,7 +79,7 @@ func newHandle(p *os.Process, claim *childwait.Claim, setpgid bool, stdio *stdio
 	//: group and group operations degrade to the leader (see groupTarget).
 	return &handle{
 		proc: p, claim: claim, pid: p.Pid, pgid: p.Pid, setpgid: setpgid, stdio: stdio,
-		done: make(chan struct{}), clk: clock.System,
+		done: make(chan struct{}), clk: clock.System, kill: syscall.Kill,
 	}
 }
 
@@ -257,7 +271,7 @@ func (h *handle) SignalGroup(sig coreproc.Signal) error {
 		return wrapSignal(syscall.ESRCH, errs.Int("target", target), errs.Int("signal", sig.Int()))
 	}
 	//: one kill(2) reaches the whole group (negative) or the leader (positive).
-	if err := syscall.Kill(target, syscall.Signal(sig.Int())); err != nil {
+	if err := h.kill(target, syscall.Signal(sig.Int())); err != nil {
 		//: wrap the group kill(2) cause under the central SIGNAL_FAILED fields.
 		return wrapSignal(err, errs.Int("target", target), errs.Int("signal", sig.Int()))
 	}
@@ -266,9 +280,12 @@ func (h *handle) SignalGroup(sig coreproc.Signal) error {
 }
 
 // Stop terminates the process group gracefully: it signals the whole group with
-// sig, waits up to grace for exit, then escalates to SIGKILL on the group. It
-// returns nil once the group has exited, ctx's error if cancelled first, or
-// StopFailed if the group survives the SIGKILL escalation.
+// sig, waits up to grace for exit, then escalates to SIGKILL on the group —
+// at once when grace is not positive. It returns nil once the group has
+// exited, ctx's error if cancelled first, or StopFailed if the group survives
+// the SIGKILL escalation. The escalation sends SIGKILL again every
+// killResendInterval until the leader is reaped (killUntilReaped), so a
+// SIGKILL the kernel discarded does not leave Stop waiting for ever.
 func (h *handle) Stop(ctx context.Context, grace time.Duration, sig coreproc.Signal) error {
 	//: phase one — request graceful termination of the entire group.
 	if err := h.signalGroupAllowGone(sig); err != nil {
@@ -276,24 +293,88 @@ func (h *handle) Stop(ctx context.Context, grace time.Duration, sig coreproc.Sig
 		return err
 	}
 
-	//: wait for graceful exit, ctx cancellation, or the grace deadline.
-	settled, gracefulErr := h.awaitExit(ctx, grace)
-	//: a settled outcome (exited or ctx done) needs no escalation.
-	if settled {
-		//: return the graceful result without sending SIGKILL.
-		return gracefulErr
+	//: a positive grace is a window for a graceful exit; without one the
+	//: escalation follows at once, never an unbounded wait on sig alone.
+	if grace > 0 {
+		//: wait for graceful exit, ctx cancellation, or the grace deadline.
+		settled, gracefulErr := h.awaitExit(ctx, grace)
+		//: a settled outcome (exited or ctx done) needs no escalation.
+		if settled {
+			//: return the graceful result without sending SIGKILL.
+			return gracefulErr
+		}
 	}
 
-	//: phase two — grace elapsed; escalate to an unignorable group SIGKILL.
-	if err := h.signalGroupAllowGone(coreproc.Signal(syscall.SIGKILL)); err != nil {
-		//: a real escalation failure means the group could not be stopped.
-		return wrapStop(err, errs.Int("pgid", h.pgid))
-	}
+	//: phase two — escalate to an unignorable group SIGKILL, resent until the
+	//: leader is reaped.
+	return h.killUntilReaped(ctx)
+}
 
-	//: SIGKILL is unignorable — wait unbounded (bar ctx) for the final exit.
-	_, finalErr := h.awaitExit(ctx, 0)
-	//: return whatever the post-SIGKILL wait observed (exit or ctx cancel).
-	return finalErr
+// killUntilReaped sends SIGKILL to the group and waits for the leader's reap,
+// sending SIGKILL again every killResendInterval on the handle's clock until
+// the reap or ctx ends the wait. It returns nil once the leader is reaped,
+// ctx's error if cancelled first, or StopFailed if a SIGKILL cannot be
+// delivered for a reason other than the group being gone.
+//
+// A single SIGKILL is not enough: NetBSD up to 10.1 discards a signal posted
+// to a process still inside execve (PR kern/58091), and a child that Start
+// has just returned may be there. A SIGKILL that landed kills the child
+// within the first interval on every kernel, so the resend costs nothing
+// where the signal is never lost. The first SIGKILL is sent even when the
+// leader is already reaped — a private group can outlive its leader — but a
+// resend is not: once the reap is in hand there is nothing left to wait for.
+//
+// Goroutine lifecycle: it launches reapInBackground, which returns once the
+// leader is reaped; the resend is what guarantees that happens.
+func (h *handle) killUntilReaped(ctx context.Context) error {
+	//: reap in the background so the wait observes completion via h.done.
+	go h.reapInBackground()
+	//: one SIGKILL per interval until the reap or ctx ends the escalation.
+	for {
+		//: SIGKILL the group; a group already gone is no failure.
+		if err := h.signalGroupAllowGone(coreproc.Signal(syscall.SIGKILL)); err != nil {
+			//: a real escalation failure means the group could not be stopped.
+			return wrapStop(err, errs.Int("pgid", h.pgid))
+		}
+		//: a reap or a cancellation ends the escalation; an interval that
+		//: closed without either sends SIGKILL again.
+		if over, err := h.awaitKill(ctx); over {
+			//: nil once reaped, ctx's error once cancelled.
+			return err
+		}
+	}
+}
+
+// awaitKill waits one killResendInterval, on the handle's clock, for the reap
+// a SIGKILL should cause. over reports a terminal outcome — the leader reaped
+// (err nil) or ctx cancelled (err is ctx's error); false means the interval
+// closed with the leader unreaped, and the SIGKILL is due again. A reap that
+// landed as the interval closed is terminal, so it costs no extra signal.
+func (h *handle) awaitKill(ctx context.Context) (over bool, err error) {
+	//: the resend interval runs on the handle's clock, so a test closes it by
+	//: advancing a ManualClock rather than by sleeping through it.
+	resend := h.clk.NewTimer(killResendInterval)
+	defer resend.Stop()
+	//: race the reap against ctx and the resend interval.
+	select {
+	case <-h.done:
+		//: the leader is reaped — the escalation is over.
+		return true, nil
+	case <-ctx.Done():
+		//: the caller cancelled the wait before the reap.
+		return true, ctx.Err()
+	case <-resend.C():
+		//: no reap within the interval: the SIGKILL may have been lost.
+	}
+	//: the timer and the reap may have been ready together.
+	select {
+	case <-h.done:
+		//: reaped while the interval closed.
+		return true, nil
+	default:
+		//: still unreaped: the caller sends SIGKILL again.
+		return false, nil
+	}
 }
 
 // signalGroupAllowGone delivers sig to the group but treats an already-exited
@@ -339,9 +420,10 @@ func (h *handle) zombieGroupRefused(err error, reapedBefore bool) bool {
 	return h.leaderReaped() || leaderIsZombie(h.pid)
 }
 
-// awaitExit blocks until the process is reaped, ctx is cancelled, or (when grace
-// is positive) the grace timer fires. settled reports whether a terminal
-// outcome was reached; when false the caller must escalate.
+// awaitExit blocks until the process is reaped, ctx is cancelled, or the grace
+// timer fires. settled reports whether a terminal outcome was reached; when
+// false the caller must escalate. A non-positive grace closes the window at
+// once.
 //
 // Goroutine lifecycle: it launches reapInBackground, which drives the once-only
 // Wait and returns as soon as the reap completes (closing h.done). The goroutine
@@ -350,19 +432,6 @@ func (h *handle) zombieGroupRefused(err error, reapedBefore bool) bool {
 func (h *handle) awaitExit(ctx context.Context, grace time.Duration) (settled bool, err error) {
 	//: reap in the background so this select observes completion via h.done.
 	go h.reapInBackground()
-
-	//: a non-positive grace means "wait without a deadline" (post-SIGKILL path).
-	if grace <= 0 {
-		//: block on exit or ctx only — no timer arms.
-		select {
-		case <-h.done:
-			//: the process exited; the outcome is terminal.
-			return true, nil
-		case <-ctx.Done():
-			//: the caller cancelled the wait before exit.
-			return true, ctx.Err()
-		}
-	}
 
 	//: the grace window runs on the handle's clock, so a test closes it by
 	//: advancing a ManualClock rather than by sleeping through it.

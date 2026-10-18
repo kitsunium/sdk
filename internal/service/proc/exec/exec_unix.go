@@ -83,21 +83,17 @@ func Start(ctx context.Context, spec coreproc.Spec) (proc coreproc.Process, err 
 }
 
 // teardown kills and reaps a partially-configured child so a post-start
-// attribute failure leaves no leaked process or zombie behind.
+// attribute failure leaves no leaked process or zombie behind. The child has
+// just been started and may still be inside its execve, where NetBSD up to
+// 10.1 discards a signal (PR kern/58091): the SIGKILL is resent until the
+// reap (killUntilReaped), so the teardown cannot wait for ever on a signal
+// the kernel dropped.
 func teardown(live *handle) {
-	//: SIGKILL the whole group — the child may already have forked.
-	if err := live.SignalGroup(coreproc.Signal(syscall.SIGKILL)); err != nil {
-		//: a group already gone needs no reap; nothing more to do.
-		if processGone(err) {
-			//: the child exited before we could kill it — already clean.
-			return
-		}
-	}
-	//: drive the reap so the killed child does not linger as a zombie.
-	if _, err := live.Wait(); err != nil {
-		//: the reap fault is best-effort cleanup detail, not the caller's error.
-		return
-	}
+	//: SIGKILL the whole group — the child may already have forked — until the
+	//: leader is reaped. Nothing cancels a teardown: the resend bounds it by
+	//: the child's death. A delivery fault is cleanup detail, not the caller's
+	//: error, which is the attribute failure being reported.
+	swallowErr(live.killUntilReaped(context.Background()))
 }
 
 // spawn resolves the spawn target (direct or via the limits trampoline),
