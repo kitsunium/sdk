@@ -839,13 +839,6 @@ jobs:
             *) echo "::error::conformance is flaky on $(uname -sr): it failed, then passed on attempt $ok"; fail=1 ;;
           esac
           sh scripts/ci/run-test-binaries.sh bins || fail=1
-          # TEMPORARY DIAGNOSTIC (to be removed before merge): reproduce the
-          # queued-command flake many times in one run.
-          set -- $(grep ' framework/internal/app$' bins/manifest)
-          for n in 1 2 3 4 5 6 7 8 9 10; do
-            echo "== diagnostic run $n of framework/internal/app"
-            (cd "framework/internal/app" && "$OLDPWD/bins/$1" -test.timeout=10m 2>&1 | grep -v '^=== \|^--- PASS\|^    --- PASS\|^PASS$' | grep -A3000 -- '--- FAIL' | head -4000) || true
-          done
           exit $fail
 
   # ── illumos / Solaris via vmactions: cross-compile on host, run in the guest ─
