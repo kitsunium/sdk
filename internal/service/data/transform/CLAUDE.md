@@ -55,7 +55,7 @@ refactor that quietly turned one into the other would fail rather than ship.
 | `gzip.go`    | `GzipCompressor` singleton + `gzipCompressor` (Algorithm "gzip") |
 | `flate.go`   | `FlateCompressor` singleton + `flateCompressor` (Algorithm "flate") |
 | `zlib.go`    | `ZlibCompressor` singleton + `NewZlibCompressor(level)` + `zlibCompressor` (Algorithm "zlib") |
-| `pool.go`    | the recycled stdlib codecs — `take*`/`release*` per scheme, the per-level zlib pools, and `readerBox` |
+| `pool.go`    | the recycled stdlib codecs — `take*`/`release*` per scheme, the per-level zlib pools, and `readerBox`; `takeFlateReaderFrom` takes the pool as a `readerBoxPool` so the Reset-fault gate runs on a pool whose Get returns what Put stored — a `sync.Pool` guarantees no such thing (P migration, a collection), and a fixture it missed once poisoned a later flate decode under `bazel coverage` |
 | `bounded.go` | `readAllBounded` — the shared layer-local decompression bound |
 | `wrap.go`    | `gzipWrap` / `flateWrap` / `zlibWrap` — the WrapParams restating `core/data/transform`'s `GzipFailed` (0.3.26.1) / `FlateFailed` (0.3.26.2) / `ZlibFailed` (0.3.26.3) |
 

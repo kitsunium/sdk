@@ -997,6 +997,38 @@ func (failingFlateResetter) Close() error {
 	return nil
 }
 
+// stackBoxPool is a readerBoxPool whose Get returns exactly what Put stored,
+// last in first out, and a fresh empty box when it holds none — the factory's
+// answer. It is the deterministic pool the Reset-fault gate needs: a sync.Pool
+// may hand the injected box to no one (a Put sits in one P's private slot, out
+// of reach of a goroutine migrated to another P, and a collection may drop it),
+// and the fixture it then keeps poisons the next flate take in the process.
+type stackBoxPool struct {
+	// boxes holds what Put stored, the next Get's box last.
+	boxes []*readerBox
+	// gets counts the Get calls, so a take that bypassed the pool shows.
+	gets int
+}
+
+// Get pops the last box Put stored, or yields a fresh one on a miss.
+func (p *stackBoxPool) Get() *readerBox {
+	p.gets++
+	//: a miss is a fresh empty box, exactly as the real pool's factory answers.
+	if len(p.boxes) == 0 {
+		//: nothing stored — the factory's box.
+		return &readerBox{}
+	}
+	box := p.boxes[len(p.boxes)-1]
+	p.boxes = p.boxes[:len(p.boxes)-1]
+	//: the most recently stored box.
+	return box
+}
+
+// Put stores box for the next Get.
+func (p *stackBoxPool) Put(box *readerBox) {
+	p.boxes = append(p.boxes, box)
+}
+
 // TestFlateReaderPoolSurfacesAResetFault gates takeFlateReader's Reset-fault
 // branch — the one statement group in pool.go that no real stream can reach,
 // because compress/flate's Reset cannot fail. Production keeps it so that an
@@ -1005,19 +1037,22 @@ func (failingFlateResetter) Close() error {
 //
 // It is deliberately the only test in this file that fabricates a box state
 // production cannot produce — a flate scheme tag over a decoder no take would
-// have put there — which is precisely what lets it reach the branch. What it
-// asserts is the branch's contract and not its existence: the fault travels
-// back rather than being discarded, no box is handed to a caller who cannot
-// drain it, the box goes BACK to the pool instead of being dropped, and the
-// scheme keeps working afterwards.
+// have put there — which is precisely what lets it reach the branch. It does so
+// through takeFlateReaderFrom over a stackBoxPool, never through the process's
+// sync.Pool: there a Put-then-Get is not a certainty (P migration, a
+// collection), and a fixture the take missed stayed behind in another P's
+// private slot until a later flate decode on that P drew it and failed
+// FLATE_FAILED — the one-off failure seen under `bazel coverage`. What it asserts
+// is the branch's contract and not its existence: the fault travels back rather
+// than being discarded, no box is handed to a caller who cannot drain it, the
+// SAME box goes back to the pool instead of being dropped, and the process's
+// own flate pool, which the fixture never touched, keeps decoding.
 //
-// PROVEN TO BITE, on both halves, each as
-// `the Reset fault never came back with its box in 64 attempts`: swallowing the
-// Reset verdict in takeFlateReader (running the Reset but returning nil in its
-// place) makes the branch report success for a decoder that had just refused to
-// reinitialise, and deleting its `flateReaderPool.Put(held)` makes the branch
-// drop the box on the floor. Neither can produce the attributed outcome, so
-// both exhaust the loop rather than passing quietly.
+// PROVEN TO BITE, on both halves, every run: swallowing the Reset verdict in
+// takeFlateReaderFrom (running the Reset but returning nil in its place) fails
+// `the take returned err=<nil>, not the injected Reset fault`, and deleting its
+// `pool.Put(held)` fails `the pool holds 0 boxes after the fault, want the
+// injected one back`.
 func TestFlateReaderPoolSurfacesAResetFault(t *testing.T) {
 	type tc struct {
 		// name identifies the row in failure messages.
@@ -1028,32 +1063,27 @@ func TestFlateReaderPoolSurfacesAResetFault(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		sc := flateReaderCase(t)
-		for range poolHitAttempts {
-			emptyPool(t, sc)
-			sc.release(&readerBox{rc: failingFlateResetter{}, scheme: schemeFlate})
-			box, err := takeFlateReader(bytes.NewReader(sc.good))
-			//: the fault is its own attribution: no other box in this pool can
-			//: produce it, so an err that is NOT it means the take missed the
-			//: injected box entirely — a retry, never a verdict.
-			if !errors.Is(err, injectedResetFault{}) {
-				continue
-			}
-			//: a failed take hands back no box, since nothing may drain it.
-			if box != nil {
-				t.Errorf("%s: a failed take returned a box", c.name)
-			}
-			//: the box must be back in the pool rather than dropped on the
-			//: floor. A GC between production's Put and this count can lose it
-			//: to the victim cache, so an unattributable count is retried; a
-			//: production path that stopped recycling the box would never
-			//: produce the count and would exhaust the loop below.
-			if poolDepth(t, sc) != 1 {
-				continue
-			}
-			assertStillDecodes(t, sc)
-			return
+		injected := &readerBox{rc: failingFlateResetter{}, scheme: schemeFlate}
+		pool := &stackBoxPool{boxes: []*readerBox{injected}}
+		box, err := takeFlateReaderFrom(pool, bytes.NewReader(sc.good))
+		//: the take must have drawn its box from the pool it was handed.
+		if pool.gets != 1 {
+			t.Fatalf("%s: the take called Get %d times, want 1", c.name, pool.gets)
 		}
-		t.Fatalf("%s: the Reset fault never came back with its box in %d attempts", c.name, poolHitAttempts)
+		//: the injected fault is the only thing that can produce this error.
+		if !errors.Is(err, injectedResetFault{}) {
+			t.Fatalf("%s: the take returned err=%v, not the injected Reset fault", c.name, err)
+		}
+		//: a failed take hands back no box, since nothing may drain it.
+		if box != nil {
+			t.Errorf("%s: a failed take returned a box", c.name)
+		}
+		//: the box must be back in the pool rather than dropped on the floor.
+		if len(pool.boxes) != 1 || pool.boxes[0] != injected {
+			t.Fatalf("%s: the pool holds %d boxes after the fault, want the injected one back", c.name, len(pool.boxes))
+		}
+		//: the process's own pool never saw the fixture, and still decodes.
+		assertStillDecodes(t, sc)
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
