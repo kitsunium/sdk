@@ -346,7 +346,9 @@ func TestTCPCapsUnauthenticatedConnectionsPerAddress(t *testing.T) {
 	until := func(what string, cond func() bool) {
 		t.Helper()
 		deadline := time.Now().Add(5 * time.Second)
+		//: until the state is observed.
 		for !cond() {
+			//: past the bound, the state never came.
 			if time.Now().After(deadline) {
 				t.Fatalf("timed out waiting for %s", what)
 			}

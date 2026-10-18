@@ -311,6 +311,7 @@ func TestTruncateAndStaySilentRejoins(t *testing.T) {
 				l = dn
 			}
 		}
+		//: no leader within the bound is a failure, never a hang.
 		if l == nil && time.Now().After(leaderBy) {
 			t.Fatal("no leader among the two healthy nodes")
 		}

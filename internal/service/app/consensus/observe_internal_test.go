@@ -99,6 +99,7 @@ func TestObservability(t *testing.T) {
 	// span event and log line has been published — a state observed, not a
 	// pause guessed — then hold each to its shape below.
 	deadline := time.Now().Add(5 * time.Second)
+	//: poll until everything is published, or the bound passes.
 	for !observed(meter, tr, lg, gauges, histograms) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -139,12 +140,16 @@ func TestObservability(t *testing.T) {
 // both log lines.
 func observed(meter coremetrics.FullMeter, tr *fakeTracer, lg *fakeLogger, gauges, histograms []string) bool {
 	snap := meter.Collect()
+	//: every gauge named must be published.
 	for _, name := range gauges {
+		//: one missing is not yet observed.
 		if _, ok := snap.Gauges[name]; !ok {
 			return false
 		}
 	}
+	//: every histogram named must be published.
 	for _, name := range histograms {
+		//: one missing is not yet observed.
 		if _, ok := snap.Histograms[name]; !ok {
 			return false
 		}
@@ -152,6 +157,7 @@ func observed(meter coremetrics.FullMeter, tr *fakeTracer, lg *fakeLogger, gauge
 	tr.mu.Lock()
 	ev := strings.Join(tr.events, ",")
 	tr.mu.Unlock()
+	//: the proposal's span, its applied event and its end.
 	if !strings.Contains(ev, "start:consensus.Propose") || !strings.Contains(ev, "event:applied") || !strings.Contains(ev, "end") {
 		return false
 	}
