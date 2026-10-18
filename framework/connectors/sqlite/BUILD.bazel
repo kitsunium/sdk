@@ -10,6 +10,7 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "sqlite",
     srcs = [
+        "busy.go",
         "codes_gen.go",
         "doc.go",
         "driver.go",
@@ -79,6 +80,7 @@ go_test(
         "api_gen_test.go",
         "catchup_test.go",
         "datacopy_test.go",
+        "driver_platform_test.go",
         "filestore_test.go",
         "floor_test.go",
         "former_journal_test.go",
@@ -108,7 +110,9 @@ go_test(
         "//framework/model",
         "//pkg/v1/app/mail",
         "//pkg/v1/data/queue",
+        "//pkg/v1/data/vfs",
         "//pkg/v1/errs",
+        "//pkg/v1/proc",
         "//pkg/v1/security/secret",
     ],
 )

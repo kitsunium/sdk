@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"net/url"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +25,7 @@ func TestTheURLsParametersWin(t *testing.T) {
 		want map[string]string
 	}{
 		{"/data/archive.sqlite", 0, map[string]string{"_journal_mode": "WAL", "_busy_timeout": "5000", "_txlock": "immediate"}},
-		{"/data/archive.sqlite", 4500 * time.Millisecond, map[string]string{"_journal_mode": "WAL", "_busy_timeout": "4500", "_txlock": "immediate"}},
+		{"/data/archive.sqlite", 4500 * time.Millisecond, map[string]string{"_journal_mode": "WAL", "_busy_timeout": strconv.FormatInt(busyTimeout(4500*time.Millisecond).Milliseconds(), 10), "_txlock": "immediate"}},
 		{"file:/data/archive.sqlite?_busy_timeout=9000&_foreign_keys=1", 4500 * time.Millisecond, map[string]string{
 			"_journal_mode": "WAL", "_busy_timeout": "9000", "_txlock": "immediate", "_foreign_keys": "1",
 		}},
@@ -48,5 +50,63 @@ func TestTheURLsParametersWin(t *testing.T) {
 	}
 	if _, err := dsn("file:?x=1", 0); err == nil {
 		t.Error("a URL without a file")
+	}
+}
+
+// SQLite counts the busy sleeps it asked for, not the time that passed: the
+// timeout handed to it is kit's wait where a sleep ends when asked, and where
+// each ends late, the longest one whose sleeps and their overshoot still end
+// within the wait — one millisecond more would not —, zero when not even one
+// late sleep fits.
+func TestTheBusyTimeoutEndsWithinTheWaitOfWallTime(t *testing.T) {
+	if got := busySleeps(1750 * time.Millisecond); got != 27 {
+		t.Errorf("SQLite sleeps %d times in 1.75 s, want 27 (twelve, then 100 ms each, the last cut)", got)
+	}
+	const late = 12 * time.Millisecond
+	type tc struct {
+		name string
+		wait time.Duration
+		zero bool
+	}
+	tests := []tc{
+		{"under a millisecond", 500 * time.Microsecond, true},
+		{"shorter than one late sleep", 5 * time.Millisecond, true},
+		{"kit's floor", 250 * time.Millisecond, false},
+		{"a 2 s deadline", 1750 * time.Millisecond, false},
+		{"the default", 4500 * time.Millisecond, false},
+		{"a long one", 27 * time.Second, false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := busyTimeoutWith(c.wait, 0); got != c.wait {
+			t.Errorf("busyTimeoutWith(%s, 0) = %s, want the wait itself", c.wait, got)
+		}
+		got := busyTimeoutWith(c.wait, late)
+		if c.zero {
+			if got != 0 {
+				t.Errorf("busyTimeoutWith(%s, %s) = %s, want 0: not one late sleep fits", c.wait, late, got)
+			}
+			return
+		}
+		if spent := got + time.Duration(busySleeps(got))*late; got <= 0 || spent > c.wait {
+			t.Errorf("busyTimeoutWith(%s, %s) = %s, which ends after %s", c.wait, late, got, spent)
+		}
+		next := got + time.Millisecond
+		if spent := next + time.Duration(busySleeps(next))*late; spent <= c.wait {
+			t.Errorf("busyTimeoutWith(%s, %s) = %s, and %s would still end by %s", c.wait, late, got, next, spent)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+	switch runtime.GOOS {
+	case "openbsd", "netbsd":
+		if sleepOvershoot() == 0 {
+			t.Errorf("%s's sleeps end on a 10 ms tick, and the overshoot is not counted", runtime.GOOS)
+		}
+	default:
+		if busyTimeout(4500*time.Millisecond) != 4500*time.Millisecond {
+			t.Errorf("busyTimeout on %s = %s, want kit's wait itself", runtime.GOOS, busyTimeout(4500*time.Millisecond))
+		}
 	}
 }

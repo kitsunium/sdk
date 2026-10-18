@@ -81,8 +81,8 @@ func (engine) OpenWaiting(u secret.Value, _ func(context.Context) (secret.Value,
 }
 
 // dsn is what the driver opens: the file, the URL's parameters, and the
-// engine's defaults the URL does not write — the busy timeout wait, in
-// milliseconds, when it is not zero.
+// engine's defaults the URL does not write — when wait is not zero, the busy
+// timeout that ends within wait of wall time (busyTimeout), in milliseconds.
 func dsn(raw string, wait time.Duration) (string, error) {
 	path, query, err := split(raw)
 	if err != nil {
@@ -94,7 +94,7 @@ func dsn(raw string, wait time.Duration) (string, error) {
 		}
 		value := d.value
 		if d.key == busyKey && wait > 0 {
-			value = strconv.FormatInt(wait.Milliseconds(), 10)
+			value = strconv.FormatInt(busyTimeout(wait).Milliseconds(), 10)
 		}
 		query.Set(d.key, value)
 	}

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:57:17Z -->
+<!-- updated: 2026-10-18T22:30:00Z -->
 # framework/connectors/sqlite — kit's SQLite engine
 
 The module `github.com/kitsunium/sdk/framework/connectors/sqlite`: the one a
@@ -11,6 +11,7 @@ product stays one static binary (CI builds the module with `CGO_ENABLED=0`).
 | File | Holds |
 |---|---|
 | `sqlite.go` | `Engine()`: `Dialect` (`app.DialectSQLite`, kit's own type — ADR 0179 Q5); the blank import of `framework/app/store`, the stores a database keeps (ADR 0179 §4); `Describe` — the file, and no address, user or password —; `Open` — the file, made if need be; `current` is never asked, a file has no credentials to rotate —; `OpenWaiting` — `app.LockWaiter`, the busy timeout kit gives —; `dsn` and `split`, which read a path or a `file:` URI and add the `defaults` the URL does not write under either spelling: `_journal_mode=WAL`, `_busy_timeout=5000` (or kit's wait), `_txlock=immediate` |
+| `busy.go` | `busyTimeout`: the busy timeout handed to SQLite for kit's wait. SQLite counts the sleeps it asked for (`busyDelays`, its own schedule), not the time that passed; where a sleep ends on a 100 Hz tick — OpenBSD, NetBSD, `sleepOvershoot` 12 ms — the timeout is the longest whose sleeps and overshoot still end within the wait (`TestTheBusyTimeoutEndsWithinTheWaitOfWallTime`), elsewhere the wait itself |
 | `driver.go` / `driver_none.go` | the blank import of modernc.org/sqlite, on every GOOS it has a port to; on dragonfly, illumos and solaris (its libc excludes them) `driverLinked` is false and `Open` refuses with `proc.UnsupportedPlatform`, so the module still builds there (the cross-build lane) |
 
 Rules:
@@ -26,10 +27,13 @@ Rules:
   and kit opens it with `OpenWaiting` and `B = T − max(250ms, T/10)`, `T`
   being `<name>-timeout` — 4.5 s for the default 5 s —, so a lost race on the
   write lock comes back as SQLite's refusal before the call's deadline
-  (`TestALostLockComesBackBeforeTheCallsDeadline`). kit refuses at start a
-  `T` under 500 ms and a URL whose own busy timeout reaches `T`
+  (`TestALostLockComesBackBeforeTheCallsDeadline`). kit refuses at start a `T` under 500 ms
+  and a URL whose own busy timeout reaches `T`
   (`database.sqlite-busy-timeout`), and never rewrites it; `Open` alone
   keeps the engine's 5 s.
+- `B` is wall time. On OpenBSD and NetBSD the parameter SQLite is given is
+  less, by its sleeps' overshoot (`busy.go`): handed `B` itself, it gave up
+  2.04 s to 2.10 s into a 2 s deadline there.
 - kit's consumer queues live on the database that keeps their service
   (ADR 0178 C1): `queue_test.go` runs the outbox on a real file — a
   publication, a queued dispatch and a watch's notice written in the

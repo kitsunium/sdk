@@ -33,6 +33,7 @@ go_test(
     deps = [
         ":consensus",
         "//internal/core/app/consensus",
+        "//internal/core/proc",
         "//internal/service/app/consensus",
     ],
 )

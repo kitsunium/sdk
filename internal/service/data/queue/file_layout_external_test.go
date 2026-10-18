@@ -103,11 +103,8 @@ func TestTheDurableBrokerRefusesADirectoryAnyAccountCouldDrain(t *testing.T) {
 	if chmodErr := os.Chmod(dir, 0o777|os.ModeSticky); chmodErr != nil {
 		t.Fatalf("Chmod(sticky) = %v, want nil", chmodErr)
 	}
-	if _, stickyErr := svcqueue.NewFile(svcqueue.FileConfig{
-		Dir: dir, Policy: defaultPolicy(),
-	}); stickyErr != nil {
-		t.Fatalf("NewFile(sticky) = %v, want nil", stickyErr)
-	}
+	_, stickyErr := svcqueue.NewFile(svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
+	builtOrRefused(t, "NewFile(sticky)", stickyErr)
 }
 
 // TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust applies the root's
@@ -209,14 +206,15 @@ func TestTheDurableBrokerCreatesItsStatesOwnerOnlyAndReopensThem(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "queue")
 	for attempt := range 2 {
 		_, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: root, Policy: defaultPolicy()})
-		//: on Windows the states are created and CHECKED — the second time over
-		//: directories that already exist, the path every restart takes — and
-		//: then vfs refuses the platform: that refusal, not a verdict on the
-		//: directories the broker made, is what must come back.
-		if runtime.GOOS == "windows" {
+		//: where vfs refuses the platform (Windows, illumos, Solaris) the states
+		//: are created and CHECKED — the second time over directories that
+		//: already exist, the path every restart takes — and then vfs refuses:
+		//: that refusal, not a verdict on the directories the broker made, is
+		//: what must come back.
+		if diskRefused() {
 			//: the platform's refusal, by its typed code.
 			if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
-				t.Fatalf("NewFile() on construction %d on windows = %v, want UNSUPPORTED_PLATFORM", attempt+1, err)
+				t.Fatalf("NewFile() on construction %d on %s = %v, want UNSUPPORTED_PLATFORM", attempt+1, runtime.GOOS, err)
 			}
 			continue
 		}
@@ -256,9 +254,8 @@ func TestTheDurableBrokerAcceptsStatesSharedThroughAGroup(t *testing.T) {
 	for _, state := range []string{"ready", "inflight", "dead"} {
 		mkdirMode(t, filepath.Join(root, state), 0o770)
 	}
-	if _, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: root, Policy: defaultPolicy()}); err != nil {
-		t.Fatalf("NewFile(group-writable root and states) = %v, want nil", err)
-	}
+	_, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: root, Policy: defaultPolicy()})
+	builtOrRefused(t, "NewFile(group-writable root and states)", err)
 }
 
 // mkdirMode creates dir with exactly mode: Mkdir applies the process umask, so

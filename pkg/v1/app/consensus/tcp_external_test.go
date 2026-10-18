@@ -8,15 +8,18 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/pkg/v1/app/consensus"
 )
 
@@ -114,6 +117,14 @@ func TestFacadeThreeNodesOverPEMAndDataDirs(t *testing.T) {
 		slot := fmt.Sprintf("site-%d", i)
 		spki := issue(t, p.dir, ca, caKey, consensus.SAN(cluster, slot))
 		dd, err := consensus.NewDataDir(filepath.Join(p.dir, "data"))
+		//: illumos and Solaris have no flock(2), so no data directory (ADR
+		//: 0144): the refusal is asserted, then the case skips.
+		if runtime.GOOS == "illumos" || runtime.GOOS == "solaris" {
+			if !errors.Is(err, coreproc.UnsupportedPlatform) {
+				t.Fatalf("NewDataDir on %s = %v, want UNSUPPORTED_PLATFORM", runtime.GOOS, err)
+			}
+			t.Skipf("%s has no flock(2), so a data directory is refused there (ADR 0144); the refusal is asserted above", runtime.GOOS)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

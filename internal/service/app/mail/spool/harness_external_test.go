@@ -147,20 +147,33 @@ func message(subject string) coremail.MessageValue {
 	}
 }
 
-// requireDiskSpool builds a spool over a directory. Windows refuses the
-// durable queue by design (ADR 0056): the refusal is asserted, then the case
-// is skipped.
+// requireDiskSpool builds a spool over a directory. Every GOOS but Linux,
+// macOS and the BSDs refuses the durable queue by design (ADR 0056; Windows,
+// illumos and Solaris, ADR 0144): the refusal is asserted, then the case is
+// skipped.
 func requireDiskSpool(t *testing.T, cfg spool.Config) *spool.Spool {
 	t.Helper()
 	s, err := spool.New(cfg)
-	if runtime.GOOS == "windows" {
+	if diskRefused() {
 		if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) || s != nil {
-			t.Fatalf("New over a directory on windows = (%v, %v), want (nil, UNSUPPORTED_PLATFORM)", s, err)
+			t.Fatalf("New over a directory on %s = (%v, %v), want (nil, UNSUPPORTED_PLATFORM)", runtime.GOOS, s, err)
 		}
-		t.Skip("the durable spool publishes through internal/service/data/vfs, which refuses windows by design (ADR 0018, ADR 0056); that refusal is asserted above")
+		t.Skipf("the durable spool publishes through internal/service/data/vfs, which refuses %s by design (ADR 0018, ADR 0056, ADR 0144); that refusal is asserted above", runtime.GOOS)
 	}
 	if err != nil {
 		t.Fatalf("New() = %v", err)
 	}
 	return s
+}
+
+// diskRefused reports whether internal/service/data/vfs refuses this GOOS by
+// design — every GOOS its osguard_unix.go does not name. Spelled out rather
+// than probed, so that a refusal on Linux, macOS or a BSD fails the suite
+// instead of skipping it.
+func diskRefused() bool {
+	switch runtime.GOOS {
+	case "linux", "android", "darwin", "ios", "freebsd", "openbsd", "netbsd", "dragonfly":
+		return false
+	}
+	return true
 }

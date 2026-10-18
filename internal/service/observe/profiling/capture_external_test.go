@@ -54,6 +54,15 @@ func TestACPUProfileChargesTheLabelledBurner(t *testing.T) {
 	if p.Duration < 900*time.Millisecond || p.Period <= 0 || p.PeriodType.Type != "cpu" {
 		t.Fatalf("header: %+v", p)
 	}
+	//: the capture itself holds everywhere; what the samples say does not.
+	//: Where the kernel's profiling signal is process-wide, it lands on any
+	//: thread, so a sample may miss the goroutine that burned the time, or
+	//: never come: zero samples on illumos and Solaris, unlabelled ones on
+	//: NetBSD, measured on this lane's guests. Go's own suites skip the same
+	//: list (runtime/pprof's cpuProfilingBroken, golang.org/issue/13841).
+	if cpuProfilingBroken() {
+		t.Skipf("the CPU profile's samples are not reliable on %s/%s (golang.org/issue/13841); the capture's header is asserted above", runtime.GOOS, runtime.GOARCH)
+	}
 	f, err := profiling.Fold(p, profiling.FoldConfig{Attribute: byNode})
 	if err != nil {
 		t.Fatal(err)
@@ -72,6 +81,19 @@ func TestACPUProfileChargesTheLabelledBurner(t *testing.T) {
 	if sum != f.Total {
 		t.Errorf("owners and unattributed add up to %d, total %d", sum, f.Total)
 	}
+}
+
+// cpuProfilingBroken is the list runtime/pprof's own tests read
+// (cpuProfilingBroken, cmd/pprof's mustHaveCPUProfiling): the platforms whose
+// CPU profile Go does not vouch for.
+func cpuProfilingBroken() bool {
+	switch runtime.GOOS {
+	case "plan9", "aix", "ios", "dragonfly", "netbsd", "illumos", "solaris":
+		return true
+	case "openbsd":
+		return runtime.GOARCH == "arm" || runtime.GOARCH == "arm64"
+	}
+	return false
 }
 
 // TestTheCPUProfilerIsOneAtATime pins ProfilerBusy against a profiler anyone

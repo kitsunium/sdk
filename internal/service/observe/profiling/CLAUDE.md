@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-05T00:00:00Z -->
+<!-- updated: 2026-10-18T22:00:00Z -->
 # internal/service/observe/profiling/
 
 ## Purpose
@@ -118,3 +118,11 @@ cd internal/service && GOWORK=off go test -run=NONE -fuzz=FuzzParse -fuzztime=30
 ```
 
 The CPU tests do not call `t.Parallel`: the process has one CPU profiler.
+
+Where Go does not vouch for the CPU profile — plan9, aix, ios, dragonfly,
+netbsd, illumos, solaris, openbsd/arm and arm64 (runtime/pprof's
+`cpuProfilingBroken`, golang.org/issue/13841) — the profiling signal is
+process-wide and a sample may land on a thread that burned nothing, or never
+come: `e2e-cross` measured zero samples on illumos and Solaris and unlabelled
+ones on NetBSD. `TestACPUProfileChargesTheLabelledBurner` asserts the
+capture's header there and skips the attribution, naming the issue.

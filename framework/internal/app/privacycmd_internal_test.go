@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -106,9 +105,7 @@ func lettersIn(t *testing.T, dir string) {
 }
 
 func TestThePrivacyCommand(t *testing.T) {
-	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
-		t.Skip("the SDK's file store needs file modes that are access lists")
-	}
+	needsFileStore(t)
 	dir := t.TempDir()
 	lettersIn(t, dir)
 	for _, step := range []privacyStep{

@@ -153,9 +153,14 @@ func TestResolveFallsThroughAPrunedOriginHEAD(t *testing.T) {
 	runGit(t, work, "config", "user.email", "test@example.com")
 	runGit(t, work, "config", "user.name", "Test")
 	//: The upstream renames its default branch; the clone prunes the old
-	//: remote-tracking ref and leaves origin/HEAD pointing at it.
+	//: remote-tracking ref and leaves origin/HEAD pointing at it. Since git
+	//: 2.48 a fetch may move origin/HEAD to the remote's (followRemoteHEAD),
+	//: and OmniOS's 2.49.1 did, which unmade the fixture: the clone this case
+	//: pins is one whose fetches never touch it, and its origin/HEAD is
+	//: written as such a clone holds it, whatever the local git would do.
 	runGit(t, up, "branch", "-m", "master", "main")
-	runGit(t, work, "fetch", "--quiet", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*")
+	runGit(t, work, "-c", "remote.origin.followRemoteHEAD=never", "fetch", "--quiet", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*")
+	runGit(t, work, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master")
 	runGit(t, work, "checkout", "-b", "feature")
 	writeRepoFile(t, work, "a.go", "package p\n\nfunc A() int { return 1 }\n\nfunc B() int { return 2 }\n")
 	runGit(t, work, "commit", "-am", "edit")

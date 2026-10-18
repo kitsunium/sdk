@@ -1,21 +1,37 @@
 name: Cross-platform runtime tests (real kernels)
 
-# ADR 0018 runtime bar, on GitHub-hosted runners only (ADR 0177). Every platform-sensitive proc
-# package's unit tests + the e2e conformance binary run on the REAL kernel of
-# each target OS, driven by `go test` — the uniform cross-platform driver,
-# because Bazel cannot host the BSDs (bazelisk #150 refuses freebsd; bazel
-# #9397/#10250 OpenBSD port unresolved). Bazel stays the canonical Linux gate in
-# bazel-ci.yml; this lane is the off-Linux runtime proof, never a duplicate unit
-# matrix.
+# ADR 0018 runtime bar, on GitHub-hosted runners only (ADR 0177). EVERY test of
+# EVERY module of the census (scripts/ci/go-modules.sh, ADR 0137) + the e2e
+# conformance binary run on the REAL kernel of each target OS, driven by
+# `go test` — the uniform cross-platform driver, because Bazel cannot host the
+# BSDs (bazelisk #150 refuses freebsd; bazel #9397/#10250 OpenBSD port
+# unresolved). Bazel stays the canonical Linux gate in bazel-ci.yml; this lane
+# is the off-Linux runtime proof.
 #
-#   - Linux / macOS / Windows : GitHub-hosted native runners (Go preinstalled),
-#     `go test` runs in place — Go auto-selects the build-tag variant per GOOS.
+#   - macOS / Windows : GitHub-hosted native runners (Go preinstalled),
+#     `go test ./...` in every module of the census, in place.
+#   - Linux : the native leg runs the kernel-sensitive packages below (Bazel
+#     runs every package, race on, and test-386 every module again); the
+#     linux-init job runs the same packages as root under a real init.
 #   - FreeBSD / OpenBSD / NetBSD : cross-platform-actions boots a real BSD kernel
-#     VM on the ubuntu host. We cross-compile `go test -c` binaries + conformance
-#     on the host (fast, exact Go version) and execute them inside the VM, so the
-#     guest needs no Go toolchain. (DragonFly intentionally omitted.)
+#     VM (KVM) on the ubuntu host. scripts/ci/test-binaries.sh cross-compiles a
+#     `go test -c` binary for EVERY package with tests, in every module, on the
+#     host (fast, exact Go version), and scripts/ci/run-test-binaries.sh runs
+#     each from its package directory inside the VM, so the guest needs no Go
+#     toolchain. (DragonFly has no guest here: cross-build compiles it.)
 #   - illumos / Solaris : the same cross-compile-and-run, in an OmniOS r151054
 #     and an Oracle Solaris 11.4 guest that vmactions boots (ADR 0144).
+#
+# No `-short` anywhere: a suite that shrinks itself under -short (the reaper's
+# hand-off count) runs its full size on every kernel, so no lane has to make up
+# for one that skipped (rule 12).
+#
+# The Go build cache (GOCACHE + GOMODCACHE) is kept per job and target by
+# actions/cache, keyed on every go.sum and the ISO week: restored on every run,
+# saved only by a push to main, so a branch reuses main's objects and the
+# repository's 10 GB cache is not filled by one entry per commit. vmactions'
+# own image cache is disabled (`disable-cache`): it saved 3 GB per BRANCH and
+# was evicting the Bazel disk cache the required job lives on.
 #
 # fail-fast: false everywhere — the point is to see ALL platforms' real behaviour
 # in one run, not stop at the first divergence.
@@ -38,16 +54,20 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Platform-sensitive packages whose RUNTIME behaviour must be proven per kernel.
-  # Pure-Go packages (codec/crypto/logger/errs) behave identically everywhere and
-  # are covered by the Linux Bazel gate, so they stay off this lane.
+  # Kernel-sensitive packages, run by the two LINUX jobs only — the native
+  # Linux leg and linux-init (as root, under systemd and OpenRC, on four
+  # distro kernels). Every other platform of this workflow runs every package
+  # of every module; on Linux the rest is Bazel's (bazel-ci.yml), race on, and
+  # test-386's. The reasons each package is here are kept below: they are why
+  # it must run as root under a real init too.
   #
   # `lock` joins them for the same reason: its file backend is a build-tag
   # split over a kernel primitive — flock(2) on Unix, LockFileEx on Windows
   # (ADR 0081) — and the two kernels give OPPOSITE answers to what a second
-  # lock inside one process does. A green cross-compile proves neither. This is
-  # the lane that executes internal/service/app/lock's Windows suite; the Linux
-  # Bazel gate compiles neither that suite nor the backend it covers.
+  # lock inside one process does. A green cross-compile proves neither. The
+  # Windows leg's every-package run executes internal/service/app/lock's
+  # Windows suite; the Linux Bazel gate compiles neither that suite nor the
+  # backend it covers.
   #
   # The primitive itself is a kernel package since ADR 0159 — `fs/flock`, which
   # session's file store takes too — and it joins for the same reason, with a
@@ -62,9 +82,10 @@ env:
   # destination another handle holds open — which is exactly what that cache's
   # own reader does from a second process. The defect was deferred twice (ADR
   # 0078, then ADR 0079) on the stated grounds that it was "not reachable from
-  # this CI matrix". Listing one more package here is what made that false. It
-  # is a package of the framework now (ADR 0158), so it is listed in
-  # FRAMEWORK_PKGS and run from framework/ rather than from internal/service.
+  # this CI matrix". Listing one more package here is what made that false;
+  # every platform's every-package run reaches it now. It is a package of the
+  # framework (ADR 0158), so it is listed in FRAMEWORK_PKGS and run from
+  # framework/ rather than from internal/service.
   #
   # `proc/childwait` joins them because the one wait4(-1) in the SDK lives
   # there, and which waiter a kernel hands a zombie to is exactly the per-kernel
@@ -96,24 +117,22 @@ env:
   # `fs/flock`. Its path suites (pathsafety_*_test.go) plant a link at a
   # record, at the lock file, at a parent of `Dir` and at `Dir` itself, and
   # assert what each Unix kernel does with it — every attack was first run, and
-  # worked, against the store as it shipped (ADR 0154, as built). The macOS and
-  # Windows jobs ran the package already, in their whole-suite step; listed
-  # here, it also runs on Linux's native gate and on the three BSDs, and on
-  # illumos and Solaris, where the store is not built, its suite pins that it
-  # is built only where the kernel can lock.
+  # worked, against the store as it shipped (ADR 0154, as built). Listed here,
+  # it also runs as root under a real init; on illumos and Solaris, where the
+  # store is not built, its suite pins that it is built only where the kernel
+  # can lock.
   KERNEL_PKGS: "./fs/flock ./fs/pathchain ./fs/winacl"
   CORE_PKGS: "./proc"
   SERVICE_PKGS: "./app/lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/internal/rlim ./proc/ipc ./proc/reaper ./proc/rlimit ./proc/self ./proc/signal ./proc/systemd/listen ./proc/systemd/notify ./security/session"
   # Unix file-security packages: their suites assert 0600 perms and inject
   # failures by chmod-freezing a directory — both are Unix mechanics. The
   # shared hardened open both sinks call, internal/logfile, carries the one
-  # O_NOFOLLOW proof (a link planted after the Lstat check) they used to copy. They run
-  # here on the Unix lanes (the BSDs compile them below as well); on Windows
-  # the whole-suite step runs them, and there their suites assert what a mode
-  # means on that platform (the one read-only bit, not an ACL) and skip the
-  # chmod injections, naming why (ADR 0095). Listing them for Windows here too
-  # would only run them twice. ACL hardening of the Windows file sinks — a
-  # security descriptor at creation — is named in their CLAUDE.md, not done.
+  # O_NOFOLLOW proof (a link planted after the Lstat check) they used to copy.
+  # Every other platform runs them in its every-package run; on Windows their
+  # suites assert what a mode means on that platform (the one read-only bit,
+  # not an ACL) and skip the chmod injections, naming why (ADR 0095). ACL
+  # hardening of the Windows file sinks — a security descriptor at creation —
+  # is named in their CLAUDE.md, not done.
   SERVICE_FILE_PKGS: "./observe/logger/sink/file ./observe/logger/writer/rotfile ./observe/logger/internal/logfile"
   # Framework packages whose runtime is a kernel question — see `entitlement`
   # above. Relative to framework/, a directory of the SDK module (ADR 0162),
@@ -123,30 +142,69 @@ env:
 jobs:
   # ── Native hosted runners: Go runs in place, no cross-compile ──────────────
   native:
-    name: ${{ matrix.name }}
+    name: ${{ matrix.name }}${{ matrix.shard && format(' ({0})', matrix.shard) || '' }}
     runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        # macOS and Windows run every module of the census in three shards,
+        # so the two modules that hold most of the packages — `internal` (the
+        # kernel, core and service layers) and `.` (the framework) — run
+        # beside the twenty-seven others rather than after them: the shards
+        # are `internal`, `root` and `rest`, and `rest` is the census minus
+        # the other two, so no module is left out by construction.
         include:
           - { name: linux, runs-on: ubuntu-latest }
           # macOS = darwin; proc syscall behaviour is arch-independent, so the
           # arm64 runner (macos-15) covers the darwin runtime bar. The Intel
           # runner (macos-13) is dropped: GitHub's Intel-mac pool is so contended
           # that the job sits queued indefinitely and never lets a run complete.
-          - { name: macos-arm64, runs-on: macos-15 }
-          - { name: windows, runs-on: windows-latest }
+          - { name: macos-arm64, runs-on: macos-15, shard: internal }
+          - { name: macos-arm64, runs-on: macos-15, shard: root }
+          - { name: macos-arm64, runs-on: macos-15, shard: rest }
+          - { name: windows, runs-on: windows-latest, shard: internal }
+          - { name: windows, runs-on: windows-latest, shard: root }
+          - { name: windows, runs-on: windows-latest, shard: rest }
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           persist-credentials: false
 
+      # The build cache is this workflow's own (see the header), so setup-go's
+      # — one key per runner OS, whichever job saved it first — is off.
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: go.mod
+          cache: false
 
-      - name: Unit tests — platform-sensitive packages on ${{ matrix.name }}
+      - name: Go cache paths and week
+        id: gocache
+        shell: bash
+        run: |
+          {
+            echo "build=$(go env GOCACHE)"
+            echo "mod=$(go env GOMODCACHE)"
+            echo "week=$(date -u +%G-W%V)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Go build cache
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.gocache.outputs.build }}
+            ${{ steps.gocache.outputs.mod }}
+          key: go-native-${{ matrix.name }}-${{ matrix.shard || 'kernel' }}-${{ hashFiles('**/go.sum') }}-${{ steps.gocache.outputs.week }}
+          restore-keys: |
+            go-native-${{ matrix.name }}-${{ matrix.shard || 'kernel' }}-${{ hashFiles('**/go.sum') }}-
+            go-native-${{ matrix.name }}-${{ matrix.shard || 'kernel' }}-
+
+      # Linux only: Bazel runs every package on Linux (bazel-ci.yml), so this
+      # leg runs the kernel-sensitive list — the same packages linux-init runs
+      # as root — and the conformance program below.
+      - name: Unit tests — kernel-sensitive packages on linux
+        if: matrix.name == 'linux'
         shell: bash
         env:
           GOWORK: "off"
@@ -155,65 +213,78 @@ jobs:
           set -uo pipefail
           fail=0
           echo "::group::internal/kernel $KERNEL_PKGS"
-          (cd internal/kernel  && go test -count=1 -short $KERNEL_PKGS)  || fail=1
+          (cd internal/kernel  && go test -count=1 $KERNEL_PKGS)  || fail=1
           echo "::endgroup::"
           echo "::group::internal/core $CORE_PKGS"
-          (cd internal/core    && go test -count=1 -short $CORE_PKGS)    || fail=1
+          (cd internal/core    && go test -count=1 $CORE_PKGS)    || fail=1
           echo "::endgroup::"
-          echo "::group::internal/service $SERVICE_PKGS"
-          (cd internal/service && go test -count=1 -short $SERVICE_PKGS) || fail=1
+          echo "::group::internal/service $SERVICE_PKGS $SERVICE_FILE_PKGS"
+          (cd internal/service && go test -count=1 $SERVICE_PKGS $SERVICE_FILE_PKGS) || fail=1
           echo "::endgroup::"
           echo "::group::framework $FRAMEWORK_PKGS"
-          (cd framework && go test -count=1 -short $FRAMEWORK_PKGS) || fail=1
+          (cd framework && go test -count=1 $FRAMEWORK_PKGS) || fail=1
           echo "::endgroup::"
-          # Unix-only file-security packages (see SERVICE_FILE_PKGS comment).
-          if [ "${{ matrix.name }}" != "windows" ]; then
-            echo "::group::internal/service $SERVICE_FILE_PKGS"
-            (cd internal/service && go test -count=1 -short $SERVICE_FILE_PKGS) || fail=1
-            echo "::endgroup::"
-          fi
           exit $fail
 
-      # Every package, not only the platform-sensitive ones. ADR 0018 kept the
+      # Every package, not only the kernel-sensitive ones. ADR 0018 kept the
       # pure-Go packages on the Linux lane because they "behave identically
       # everywhere"; their TESTS did not — on macOS a Unix socket path past the
-      # 104-byte sun_path, a temporary directory under a link (ADR 0094). The
-      # whole suite takes about two minutes on macOS and gates. It gates on
-      # Windows too: ADR 0094 ran it there as an inventory (continue-on-error)
-      # until a clean run, its first run failed in 19 packages, and ADR 0095
-      # records how each was resolved — production bugs fixed, Unix premises
-      # replaced by what Windows actually promises — and the first clean runs.
+      # 104-byte sun_path, a temporary directory under a link (ADR 0094). It
+      # gates on Windows too: ADR 0094 ran it there as an inventory
+      # (continue-on-error) until a clean run, its first run failed in 19
+      # packages, and ADR 0095 records how each was resolved — production bugs
+      # fixed, Unix premises replaced by what Windows actually promises — and
+      # the first clean runs. The kernel-sensitive list is a subset of this, so
+      # it is not run a second time here. No -short: every suite at full size.
       - name: Unit tests — every package on ${{ matrix.name }}
-        # !cancelled(): this runs even when the platform-sensitive gate above
-        # failed, so one run reports both; either failing fails the job.
-        if: ${{ !cancelled() && matrix.name != 'linux' }}
+        if: matrix.name != 'linux'
         # A test that hangs on a kernel it never ran on must not eat the job.
-        timeout-minutes: 12
+        timeout-minutes: 20
         shell: bash
         env:
           GOWORK: "off"
           CGO_ENABLED: "0"
+          SHARD: ${{ matrix.shard }}
         run: |
           set -uo pipefail
           fail=0
           # Every module of the census (ADR 0137) — this loop named six, and
           # tools/genindex and tools/sdkguard never ran on macOS or Windows.
           # The root is the SDK module (ADR 0162) and is tested like the rest.
-          modules="$(bash scripts/ci/go-modules.sh)" || { echo "::error::the module census failed"; exit 1; }
+          census="$(bash scripts/ci/go-modules.sh)" || { echo "::error::the module census failed"; exit 1; }
+          case "$SHARD" in
+            internal) modules="internal" ;;
+            root) modules="." ;;
+            rest) modules="$(printf '%s\n' "$census" | grep -vx -e internal -e '[.]')" ;;
+            *) echo "::error::unknown shard '$SHARD'"; exit 1 ;;
+          esac
           for mod in $modules; do
             echo "::group::$mod"
-            (cd "$mod" && go test -count=1 -short ./...) || { fail=1; echo "::error::$mod has failing tests on ${{ matrix.name }}"; }
+            (cd "$mod" && go test -count=1 ./...) || { fail=1; echo "::error::$mod has failing tests on ${{ matrix.name }}"; }
             echo "::endgroup::"
           done
           exit $fail
 
       - name: E2E conformance — whole public API on ${{ matrix.name }}
+        if: ${{ !cancelled() && (matrix.shard == '' || matrix.shard == 'rest') }}
         shell: bash
         env:
           GOWORK: "off"
         run: |
           set -uo pipefail
           cd e2e && go run .
+
+      # Saved by a push to main only, and only when this week's entry does
+      # not exist yet: a branch restores main's, and the 10 GB the repository
+      # shares is not spent on one entry per commit.
+      - name: Save the Go build cache
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.gocache.outputs.build }}
+            ${{ steps.gocache.outputs.mod }}
+          key: go-native-${{ matrix.name }}-${{ matrix.shard || 'kernel' }}-${{ hashFiles('**/go.sum') }}-${{ steps.gocache.outputs.week }}
 
   # ── Linux with a REAL init, and a real distro kernel: root, cgroup v2 delegated ──
   # Issue #118 / ADR 0177. The unprivileged `native` leg above cannot reach root,
@@ -339,7 +410,7 @@ jobs:
           retry ./bins/conformance.run || fail=1
           for b in bins/*.test; do
             echo "== $b =="
-            retry ./"$b" -test.v -test.short -test.timeout=3m || fail=1
+            retry ./"$b" -test.v -test.timeout=5m || fail=1
           done
           exit $fail
           SH
@@ -527,6 +598,13 @@ jobs:
   bsd:
     name: ${{ matrix.os }}
     runs-on: ubuntu-latest
+    # Two caps, because the job now does two different things. The tests of
+    # every package take what they take, and are capped by their own step
+    # (25 min) and this job (40 min). Booting the guest is the part that hangs,
+    # and the measurement below — taken when the job WAS little more than a
+    # boot (the platform-sensitive suites ran in under a minute) — is the cap
+    # of the boot step alone: 8 minutes.
+    #
     # Why 8 — and why neither 12 nor 5. Re-measured job-level over 100
     # consecutive runs / 300 BSD jobs, 2026-09-13T18:53Z .. 2026-09-15T07:51Z,
     # none of them re-triggered for the measurement (issue #127 carries the
@@ -606,7 +684,7 @@ jobs:
     # cross-platform-actions v1.2.0. The pin below is now v1.6.0, whose changelog
     # bounds exactly the loop these logs show. Re-measure before reusing these
     # numbers as current.
-    timeout-minutes: 8
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -622,9 +700,33 @@ jobs:
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: go.mod
+          cache: false
 
-      - name: Cross-compile test binaries + conformance for ${{ matrix.os }}
-        shell: bash
+      - name: Go cache paths and week
+        id: gocache
+        run: |
+          {
+            echo "build=$(go env GOCACHE)"
+            echo "mod=$(go env GOMODCACHE)"
+            echo "week=$(date -u +%G-W%V)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Go build cache
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.gocache.outputs.build }}
+            ${{ steps.gocache.outputs.mod }}
+          key: go-guest-${{ matrix.os }}-${{ hashFiles('**/go.sum') }}-${{ steps.gocache.outputs.week }}
+          restore-keys: |
+            go-guest-${{ matrix.os }}-${{ hashFiles('**/go.sum') }}-
+            go-guest-${{ matrix.os }}-
+
+      # Every package with tests, in every module of the census — not a list:
+      # the "platform-sensitive" list this lane compiled left 300 of 333 test
+      # packages unexecuted on the BSDs.
+      - name: Cross-compile every test binary + conformance for ${{ matrix.os }}
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: amd64
@@ -632,31 +734,23 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           set -euo pipefail
-          mkdir -p bins
-          compile() { # dir  pkg-list
-            local mod="$1"; shift
-            for pkg in $@; do
-              local out="bins/$(echo "${mod#internal/}_${pkg#./}" | tr '/ ' '__').test"
-              # A package with no _test.go produces no binary; tolerate that.
-              if (cd "$mod" && go test -c -o "$GITHUB_WORKSPACE/$out" "$pkg") 2>/tmp/c.log; then
-                [ -f "$out" ] && echo "built $out" || echo "no tests in $mod/$pkg (skip)"
-              else
-                echo "::error::compile $mod/$pkg for $GOOS failed"; cat /tmp/c.log; exit 1
-              fi
-            done
-          }
-          compile internal/kernel  $KERNEL_PKGS
-          compile internal/core    $CORE_PKGS
-          compile internal/service $SERVICE_PKGS
-          # BSD is Unix, so the file-security suites apply here too.
-          compile internal/service $SERVICE_FILE_PKGS
-          compile framework        $FRAMEWORK_PKGS
+          bash scripts/ci/test-binaries.sh bins
           # Conformance is a real program (not a -c suite): build it normally.
           (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
-          ls -la bins/
+
+      - name: Save the Go build cache
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.gocache.outputs.build }}
+            ${{ steps.gocache.outputs.mod }}
+          key: go-guest-${{ matrix.os }}-${{ hashFiles('**/go.sum') }}-${{ steps.gocache.outputs.week }}
 
       # Boots a real ${{ matrix.os }} kernel VM and syncs the workspace (incl.
-      # bins/) into it. pin to a SHA before promoting this lane to a PR gate.
+      # bins/) into it, once; the step below runs inside it through cpa.sh.
+      # The 8-minute cap measured above is this step's: a guest that never
+      # boots is cut here, without waiting for the tests' own budget.
       #
       # v1.2.0 -> v1.6.0 because v1.2.0 waits for the guest by COUNTING SSH
       # attempts, with no clock on the loop. That is the shape of every overrun
@@ -681,43 +775,55 @@ jobs:
       # This pin is a cause-shaped fix, not a measured one: the failure runs at
       # ~9% on netbsd, so no single green run can confirm it. What the next
       # weeks measure is whether overruns stop, not whether one run passed.
-      - name: Run on real ${{ matrix.os }} kernel
+      - name: Boot the real ${{ matrix.os }} kernel
+        timeout-minutes: 8
         uses: cross-platform-actions/action@e0b9770014ba65d5e0815f15b74031c3a635f641 # v1.6.0
         with:
           operating_system: ${{ matrix.os }}
           version: ${{ matrix.version }}
-          # The BSD guests run under QEMU/TCG (no KVM on hosted runners), so they
-          # execute far slower than a native kernel. Give them the runner's full
-          # core count + memory to keep timing-sensitive proc tests (stdio
-          # pumping, the trampoline handshake, signal-relay deadlines) from
-          # flaking on emulation latency rather than a real defect.
+          # KVM-accelerated on hosted runners (the action's log: "falling back
+          # to KVM"); the runner's four cores and 6 GB keep the timing-sensitive
+          # proc suites (stdio pumping, the trampoline handshake, signal-relay
+          # deadlines) off the hypervisor's latency.
           cpu_count: 4
           memory: 6G
-          shell: bash
-          run: |
-            set -uo pipefail
-            # Under QEMU/TCG (no KVM on hosted runners) a timing-sensitive test
-            # occasionally flakes on emulation latency; a real defect fails every
-            # attempt. Retry each binary up to 3x so a transient hiccup does not
-            # red the lane, while a genuine bug still surfaces.
-            retry() {
-              local i
-              for i in 1 2 3; do
-                "$@" && return 0
-                echo "  (attempt $i failed on ${{ matrix.os }}, retrying)"
-              done
-              return 1
-            }
-            fail=0
-            echo "== conformance on ${{ matrix.os }} =="
-            retry ./bins/conformance.run || fail=1
-            for b in bins/*.test; do
-              echo "== $b =="
-              # -test.short keeps each per-OS run quick; suites self-gate on
-              # UnsupportedPlatform / missing /bin/sh and skip cleanly.
-              retry ./"$b" -test.v -test.short || fail=1
-            done
-            exit $fail
+          sync_files: runner-to-vm
+
+      # framework/internal/service/git hardens the git invocations it makes,
+      # and its suites build their fixtures with git itself: a guest without
+      # it cannot run them. The images ship none, so the guest's own package
+      # manager installs it — the suite then runs on this kernel's git.
+      # NetBSD's `git` is a meta-package that pulls perl and 28 others (29 MB,
+      # 138 s); `git-base` is the git binary alone.
+      - name: git in the ${{ matrix.os }} guest
+        timeout-minutes: 5
+        shell: cpa.sh {0} --sync-files none
+        run: |
+          set -e
+          if ! command -v git >/dev/null 2>&1; then
+            case "$(uname -s)" in
+              FreeBSD) sudo env ASSUME_ALWAYS_YES=yes pkg install -y git ;;
+              OpenBSD) sudo pkg_add git ;;
+              NetBSD) sudo pkgin -y install git-base ;;
+            esac
+          fi
+          git --version
+
+      - name: Every test on the real ${{ matrix.os }} kernel
+        timeout-minutes: 25
+        shell: cpa.sh {0} --sync-files none
+        run: |
+          set -u
+          fail=0
+          echo "== conformance on ${{ matrix.os }} =="
+          ok=0
+          for i in 1 2 3; do
+            ./bins/conformance.run && { ok=1; break; }
+            echo "  (attempt $i of conformance failed, retrying)"
+          done
+          [ "$ok" -eq 1 ] || fail=1
+          sh scripts/ci/run-test-binaries.sh bins || fail=1
+          exit $fail
 
   # ── illumos / Solaris via vmactions: cross-compile on host, run in the guest ─
   # ADR 0144. cross-platform-actions ships no illumos or Solaris image; vmactions
@@ -727,18 +833,19 @@ jobs:
   # kernels through libc), synced into the guest and executed there as root.
   # The two kernels are separate GOOS values (runtime.GOOS is "illumos" on the
   # first, "solaris" on the second) and diverge below libc, so each gets its own
-  # leg. The pkg/v1/proc module's root suite runs here too: it asserts the capability matrix
-  # for the GOOS it runs on, which is the claim this lane exists to back.
+  # leg. Every package of every module runs here, the pkg/v1/proc module's root
+  # suite among them: it asserts the capability matrix for the GOOS it runs on,
+  # which is the claim this lane exists to back.
   #
-  # 15 min rests on ONE green run per kernel: 3m17s on OmniOS, 3m01s on
-  # Solaris, of which about 1m45s / 1m30s boot the guest and about 50s run every
-  # suite — a x4.5 margin. A red leg takes longer than a green one: the reaper
+  # The boot step is capped at 8 min: the one green run per kernel this lane
+  # was sized on booted in about 1m45s (OmniOS) and 1m30s (Solaris). The tests
+  # of every package have their own step cap (25 min) and the job 40: measure
+  # before moving them. A red leg takes longer than a green one: the reaper
   # suite's cases wait 30s for a collection before failing, three attempts each.
-  # Measure before moving it.
   solarish:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -753,9 +860,33 @@ jobs:
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: go.mod
+          cache: false
 
-      - name: Cross-compile test binaries + conformance for ${{ matrix.goos }}
-        shell: bash
+      - name: Go cache paths and week
+        id: gocache
+        run: |
+          {
+            echo "build=$(go env GOCACHE)"
+            echo "mod=$(go env GOMODCACHE)"
+            echo "week=$(date -u +%G-W%V)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Go build cache
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.gocache.outputs.build }}
+            ${{ steps.gocache.outputs.mod }}
+          key: go-guest-${{ matrix.goos }}-${{ hashFiles('**/go.sum') }}-${{ steps.gocache.outputs.week }}
+          restore-keys: |
+            go-guest-${{ matrix.goos }}-${{ hashFiles('**/go.sum') }}-
+            go-guest-${{ matrix.goos }}-
+
+      # Every package with tests, in every module of the census — the
+      # pkg/v1/proc module's root suite among them, which asserts the
+      # capability matrix for the GOOS it runs on.
+      - name: Cross-compile every test binary + conformance for ${{ matrix.goos }}
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: amd64
@@ -763,66 +894,71 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           set -euo pipefail
-          mkdir -p bins
-          compile() { # dir  pkg-list
-            local mod="$1"; shift
-            for pkg in $@; do
-              local out="bins/$(echo "${mod#internal/}_${pkg#./}" | tr '/ ' '__').test"
-              # A package with no _test.go produces no binary; tolerate that.
-              if (cd "$mod" && go test -c -o "$GITHUB_WORKSPACE/$out" "$pkg") 2>/tmp/c.log; then
-                [ -f "$out" ] && echo "built $out" || echo "no tests in $mod/$pkg (skip)"
-              else
-                echo "::error::compile $mod/$pkg for $GOOS failed"; cat /tmp/c.log; exit 1
-              fi
-            done
-          }
-          compile internal/kernel  $KERNEL_PKGS
-          compile internal/core    $CORE_PKGS
-          compile internal/service $SERVICE_PKGS
-          compile internal/service $SERVICE_FILE_PKGS
-          compile framework        $FRAMEWORK_PKGS
-          compile pkg/v1/proc      ./
+          bash scripts/ci/test-binaries.sh bins
           (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
-          # One copy of what the guest runs, for both guest steps below (a
-          # `uses:` takes no expression, so each guest is its own step). POSIX
-          # sh: it runs under the guest's shell, not this one. The retry is the
-          # BSD lane's: a transient hiccup passes on a later attempt, a real
-          # defect fails all three.
-          cat > bins/run.sh <<'SH'
-          set -u
-          kernel="$(uname -sv)"
-          retry() {
-            i=1
-            while [ "$i" -le 3 ]; do
-              "$@" && return 0
-              echo "  (attempt $i failed on $kernel, retrying)"
-              i=$((i + 1))
-            done
-            return 1
-          }
-          fail=0
-          echo "== conformance on $kernel =="
-          retry ./bins/conformance.run || fail=1
-          for b in bins/*.test; do
-            echo "== $b =="
-            retry ./"$b" -test.v -test.short || fail=1
-          done
-          exit $fail
-          SH
-          ls -la bins/
 
-      - name: Run in the OmniOS guest
+      - name: Save the Go build cache
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.gocache.outputs.build }}
+            ${{ steps.gocache.outputs.mod }}
+          key: go-guest-${{ matrix.goos }}-${{ hashFiles('**/go.sum') }}-${{ steps.gocache.outputs.week }}
+
+      # Boot only; the tests run in the step after, through the `guest` shell
+      # both actions install (`custom-shell-name`), each step with its own cap.
+      # disable-cache: the image is downloaded rather than kept in the
+      # repository's Actions cache, where it took 3 GB per branch.
+      - name: Boot the OmniOS guest
         if: matrix.guest == 'omnios'
+        timeout-minutes: 8
         uses: vmactions/omnios-vm@9576f0b6d15e7696548409baa533bc0a339caf42 # v1.3.7
         with:
           release: ${{ matrix.release }}
+          cpu: 4
           copyback: false
-          run: sh bins/run.sh
+          disable-cache: true
+          custom-shell-name: guest
 
-      - name: Run in the Oracle Solaris guest
+      - name: Boot the Oracle Solaris guest
         if: matrix.guest == 'solaris'
+        timeout-minutes: 8
         uses: vmactions/solaris-vm@87d3c436511cef802cd1637f86f73b1a97715c8c # v1.4.1
         with:
           release: ${{ matrix.release }}
+          cpu: 4
           copyback: false
-          run: sh bins/run.sh
+          disable-cache: true
+          custom-shell-name: guest
+
+      # framework/internal/service/git's suites build their fixtures with git
+      # (see the bsd job). OmniOS ships it in its own publisher; Solaris 11.4
+      # in Oracle's, with OpenCSW's as the fallback the action documents.
+      - name: git in the ${{ matrix.name }} guest
+        timeout-minutes: 5
+        shell: guest {0}
+        run: |
+          set -e
+          if ! command -v git >/dev/null 2>&1; then
+            pkg install -q developer/versioning/git || pkgutil -y -i git
+          fi
+          PATH="$PATH:/opt/csw/bin" git --version
+
+      - name: Every test on the ${{ matrix.name }} kernel
+        timeout-minutes: 25
+        shell: guest {0}
+        run: |
+          set -u
+          PATH="$PATH:/opt/csw/bin"
+          export PATH
+          fail=0
+          echo "== conformance on $(uname -sv) =="
+          ok=0
+          for i in 1 2 3; do
+            ./bins/conformance.run && { ok=1; break; }
+            echo "  (attempt $i of conformance failed, retrying)"
+          done
+          [ "$ok" -eq 1 ] || fail=1
+          sh scripts/ci/run-test-binaries.sh bins || fail=1
+          exit $fail

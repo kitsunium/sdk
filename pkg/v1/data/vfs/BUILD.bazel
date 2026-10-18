@@ -33,6 +33,7 @@ go_test(
         ":vfs",
         "//internal/core/data/vfs",
         "//pkg/v1/errs",
+        "//pkg/v1/proc",
     ],
 )
 

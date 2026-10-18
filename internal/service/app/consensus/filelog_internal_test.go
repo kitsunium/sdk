@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/kernel/fs/flock"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
@@ -28,6 +31,17 @@ func ents(from, to, term uint64) []coreconsensus.EntryValue {
 func openDir(t *testing.T, dir string, seg int64) DataDir {
 	t.Helper()
 	d, err := NewDataDirWith(dir, DataDirOptions{SegmentBytes: seg})
+	//: no flock(2), no data directory (illumos, Solaris): the refusal is
+	//: asserted, then the case skips — it needs a directory that exists.
+	if !flock.Native {
+		if !errors.Is(err, coreproc.UnsupportedPlatform) {
+			t.Fatalf("NewDataDirWith on %s = %v, want UNSUPPORTED_PLATFORM", runtime.GOOS, err)
+		}
+		if _, statErr := os.Stat(dir + "/" + fileLock); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("a refused data directory was written to: %v", statErr)
+		}
+		t.Skipf("%s has no flock(2), so a data directory is refused there (ADR 0144); the refusal is asserted above", runtime.GOOS)
+	}
 	if err != nil {
 		t.Fatalf("open: %v %v", err, errs.FieldsOf(err))
 	}
