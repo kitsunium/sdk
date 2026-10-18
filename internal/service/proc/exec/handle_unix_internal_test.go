@@ -54,6 +54,9 @@ func startChild(t *testing.T, setpgid bool, program string) *handle {
 	}
 	h := newHandle(started, claim, setpgid, sio)
 	t.Cleanup(func() {
+		//: a test may have put the handle on a manual clock nobody advances
+		//: any more; SignalGroup may wait for a darwin group to drain.
+		h.clk = clock.System
 		//: whatever the test did, leave nothing running or unreaped. Both
 		//: calls routinely fail on an already-reaped child, which is the
 		//: outcome we wanted, so they are logged rather than asserted.
@@ -552,10 +555,12 @@ func awaitZombie(t *testing.T, pid int) {
 
 // Test_handle_zombieGroupRefused pins when an EPERM from the group kill means
 // "gone". It is darwin's answer for a group holding nothing alive, so it is
-// read as gone only when the leader was unreaped when the signal left and is
-// dead now; every other EPERM is a real refusal — above all a LIVE leader this
-// process may not signal, which reporting as gone would turn into a Stop that
-// claims success while the process runs on.
+// read as gone only on darwin, and only when what is left is dead: a leader
+// unreaped when the signal left and dead now, or — once the leader was
+// collected — a group that empties as init reaps its orphans. Every other
+// EPERM is a real refusal — above all a LIVE member this process may not
+// signal, which reporting as gone would turn into a Stop that claims success
+// while the process runs on.
 func Test_handle_zombieGroupRefused(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -580,9 +585,10 @@ func Test_handle_zombieGroupRefused(t *testing.T) {
 		{"an ESRCH is processGone's, not this rule's", live, wrapSignal(syscall.ESRCH), false, false},
 		{"an EPERM without a private group", func(t *testing.T) *handle { return startChild(t, false, shellOnlyWait(t)) }, wrapSignal(syscall.EPERM), false, false},
 		{"an EPERM from a live leader stays a refusal", live, wrapSignal(syscall.EPERM), false, false},
-		{"an EPERM sent after the leader was collected stays a refusal", collected, wrapSignal(syscall.EPERM), true, false},
+		{"an EPERM after the leader was collected, from a group that emptied", collected, wrapSignal(syscall.EPERM), true, darwin},
+		{"an EPERM after the leader was collected, from a group with a live member, stays a refusal", startOrphanedMember, wrapSignal(syscall.EPERM), true, false},
 		{"an EPERM that is not a signal failure", collected, wrapSpawn(syscall.EPERM), false, false},
-		{"an EPERM, and the leader collected during the signal", collected, wrapSignal(syscall.EPERM), false, true},
+		{"an EPERM, and the leader collected during the signal", collected, wrapSignal(syscall.EPERM), false, darwin},
 		{"an EPERM while the leader is an unreaped zombie", startZombieLeader, wrapSignal(syscall.EPERM), false, darwin},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -590,6 +596,152 @@ func Test_handle_zombieGroupRefused(t *testing.T) {
 		h := c.start(t)
 		if got := h.zombieGroupRefused(c.err, c.reapedBefore); got != c.want {
 			t.Errorf("zombieGroupRefused(%v, reapedBefore=%t) = %t, want %t", c.err, c.reapedBefore, got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// startForkingLeader spawns a group leader that has forked a subshell — no
+// execve, so no signal is lost to NetBSD's kern/58091 — blocked on a FIFO,
+// and returns once the fork is done.
+func startForkingLeader(t *testing.T) *handle {
+	t.Helper()
+	forked := filepath.Join(t.TempDir(), "forked")
+	return startChildAfter(t, "("+shellOnlyWait(t)+") & : > '"+forked+"'; wait", forked)
+}
+
+// startChildAfter is startChild for a private group, returning once the
+// child has also created marker.
+func startChildAfter(t *testing.T, program, marker string) *handle {
+	t.Helper()
+	h := startChild(t, true, program)
+	awaitMarker(t, marker, "the child never forked")
+	return h
+}
+
+// startOrphanedMember returns a handle whose leader has been killed and
+// reaped while a member it forked lives on in the group: an orphan alive,
+// which no EPERM may make "gone".
+func startOrphanedMember(t *testing.T) *handle {
+	t.Helper()
+	h := startForkingLeader(t)
+	//: the leader alone; its subshell lives on in the group.
+	if err := syscall.Kill(h.pid, syscall.SIGKILL); err != nil {
+		t.Fatalf("killing the leader: %v", err)
+	}
+	if _, err := h.Wait(); err != nil {
+		t.Fatalf("reaping the leader: %v", err)
+	}
+	return h
+}
+
+// Test_handle_reapedLeadersOrphans pins the group that is dead in fact once
+// its leader was reaped: the leader forked, the group was killed, and the
+// leader reaped — what is left are its orphans, zombies until init reaps
+// them. darwin's kill(-pgid) answers that group EPERM, and SignalGroup and
+// Stop reported SIGNAL_FAILED for it (the macos-arm64 failure of
+// Test_handle_signalGroupAllowGone, whose fixture forked a sleep); they must
+// report it gone on every kernel, whether init has reaped the orphans yet or
+// not.
+//
+// The window in which the orphan is still a zombie is init's to close, so on
+// darwin a broken rule fails this test only when the call lands inside it —
+// most runs, since the call follows the reap at once. The rule itself is
+// pinned without the race by Test_handle_zombieGroupRefused, and the watch
+// by Test_handle_groupDrains on every kernel.
+func Test_handle_reapedLeadersOrphans(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		// call is the signal under test, on a group whose leader is reaped.
+		call func(t *testing.T, h *handle) error
+	}
+	tests := []tc{
+		{"SignalGroup reports the group gone", func(_ *testing.T, h *handle) error {
+			err := h.SignalGroup(coreproc.Signal(syscall.SIGTERM))
+			//: success (the orphan's zombie counted) or ESRCH, never a refusal.
+			if err != nil && !processGone(err) {
+				return err
+			}
+			return nil
+		}},
+		{"the escalation's SIGKILL", func(_ *testing.T, h *handle) error {
+			return h.signalGroupAllowGone(coreproc.Signal(syscall.SIGKILL))
+		}},
+		{"Stop on a handle already waited", func(t *testing.T, h *handle) error {
+			return h.Stop(t.Context(), time.Second, coreproc.Signal(syscall.SIGTERM))
+		}},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		h := startForkingLeader(t)
+		if err := h.SignalGroup(coreproc.Signal(syscall.SIGKILL)); err != nil {
+			t.Fatalf("killing the group: %v", err)
+		}
+		if _, err := h.Wait(); err != nil {
+			t.Fatalf("reaping the leader: %v", err)
+		}
+		if err := c.call(t, h); err != nil {
+			t.Errorf("on a group whose leader is reaped and whose orphan is dead = %v, want it gone", err)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_handle_groupDrains pins the bounded watch zombieGroupRefused runs on
+// darwin once the leader is reaped: the group is gone when kill(-pgid, 0)
+// comes to answer ESRCH, as init reaps the orphans; a member that answers is
+// not gone; and a refusal that never ends — a live member this process may
+// not signal — stays one after drainPolls probes, rather than wait for ever.
+// The kill(2) double answers in turn from the row's script, the last answer
+// repeating, so the watch runs on every kernel.
+func Test_handle_groupDrains(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		answers []error
+		want    bool
+		// probes is how many kill(2) calls the watch must make.
+		probes int
+	}
+	tests := []tc{
+		{"a group already empty", []error{syscall.ESRCH}, true, 1},
+		{"a group init empties", []error{syscall.EPERM, syscall.EPERM, syscall.ESRCH}, true, 3},
+		{"a member that answers", []error{syscall.EPERM, nil}, false, 2},
+		{"a refusal that never ends", []error{syscall.EPERM}, false, drainPolls},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var mu sync.Mutex
+		calls := 0
+		h := &handle{pid: 4242, pgid: 4242, setpgid: true, done: make(chan struct{}), clk: clock.System}
+		h.kill = func(pid int, sig syscall.Signal) error {
+			mu.Lock()
+			defer mu.Unlock()
+			if pid != -4242 || sig != 0 {
+				t.Errorf("probe kill(%d, %d), want kill(-4242, 0)", pid, sig)
+			}
+			answer := c.answers[min(calls, len(c.answers)-1)]
+			calls++
+			return answer
+		}
+		if got := h.groupDrains(); got != c.want {
+			t.Errorf("groupDrains = %t, want %t", got, c.want)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if calls != c.probes {
+			t.Errorf("%d probes, want %d", calls, c.probes)
 		}
 	}
 	for _, c := range tests {

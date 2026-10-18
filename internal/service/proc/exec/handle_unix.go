@@ -29,6 +29,15 @@ const signalledCode int = -1
 // kernel the reap comes first and nothing is ever resent.
 const killResendInterval time.Duration = 100 * time.Millisecond
 
+// drainPoll and drainPolls bound how long SignalGroup watches a group that
+// darwin refused with EPERM after its leader was reaped (groupDrains): a
+// group of zombies empties as soon as init reaps them, which launchd does
+// within milliseconds, while a live member this process may not signal stays.
+const (
+	drainPoll  time.Duration = 10 * time.Millisecond
+	drainPolls int           = 100
+)
+
 // maxRSSKB (in maxrss_rss64_unix.go / maxrss_rss32_unix.go) reports the peak
 // resident set size in KiB from the wait4 rusage. Rusage.Maxrss is int64
 // on a 64-bit GOARCH but int32 on 386/arm, so the widening lives in a per-width
@@ -259,10 +268,18 @@ func (h *handle) Signal(sig coreproc.Signal) error {
 // forked grandchildren (the control-group analogue). Without a private group it
 // degrades to the leader process alone, so it never signals the supervisor's
 // inherited group — and once that leader is reaped it reports ESRCH rather
-// than signal a pid another process may now hold.
+// than signal a pid another process may now hold. A group that holds nothing
+// alive is reported ESRCH too on darwin, whose kill(2) answers it EPERM
+// (zombieGroupRefused): the answer Linux and the BSDs give once the group is
+// reaped, never a SIGNAL_FAILED a caller would read as a live process it may
+// not signal.
 func (h *handle) SignalGroup(sig coreproc.Signal) error {
 	//: resolve the group target (-pgid with Setpgid, else the leader pid).
 	target := h.groupTarget()
+	//: whether the leader was collected BEFORE the signal decides what a
+	//: darwin EPERM can mean, so it is read first — and only where the
+	//: kernel refuses zombies, so no other kernel pays for it.
+	reapedBefore := zombiesRefused && h.leaderReaped()
 	//: without a private group the target is the leader's pid, which may belong
 	//: to another process once the leader is reaped: report it gone instead. A
 	//: private group is still addressed — it can outlive its leader.
@@ -272,8 +289,14 @@ func (h *handle) SignalGroup(sig coreproc.Signal) error {
 	}
 	//: one kill(2) reaches the whole group (negative) or the leader (positive).
 	if err := h.kill(target, syscall.Signal(sig.Int())); err != nil {
-		//: wrap the group kill(2) cause under the central SIGNAL_FAILED fields.
-		return wrapSignal(err, errs.Int("target", target), errs.Int("signal", sig.Int()))
+		failed := wrapSignal(err, errs.Int("target", target), errs.Int("signal", sig.Int()))
+		//: darwin's EPERM for a group with nothing alive is a group gone.
+		if h.zombieGroupRefused(failed, reapedBefore) {
+			//: the verdict the other kernels give an emptied group.
+			return wrapSignal(syscall.ESRCH, errs.Int("target", target), errs.Int("signal", sig.Int()))
+		}
+		//: the group kill(2) cause under the central SIGNAL_FAILED fields.
+		return failed
 	}
 	//: the signal was accepted for delivery to the resolved target.
 	return nil
@@ -379,16 +402,12 @@ func (h *handle) awaitKill(ctx context.Context) (over bool, err error) {
 
 // signalGroupAllowGone delivers sig to the group but treats an already-exited
 // group as success, since a vanished target needs no further signal: ESRCH on
-// every kernel, and darwin's EPERM for a group whose leader died before it was
-// reaped (zombieGroupRefused).
+// every kernel — darwin's EPERM for a group holding nothing alive included,
+// which SignalGroup reports as ESRCH (zombieGroupRefused).
 func (h *handle) signalGroupAllowGone(sig coreproc.Signal) error {
-	//: whether the leader was collected BEFORE the signal decides what an
-	//: EPERM can mean, so it is read first.
-	reapedBefore := h.leaderReaped()
 	err := h.SignalGroup(sig)
-	//: a group already gone is success — nothing left to signal: ESRCH, or a
-	//: group that holds nothing alive however the kernel says it.
-	if err != nil && (processGone(err) || h.zombieGroupRefused(err, reapedBefore)) {
+	//: a group already gone is success — nothing left to signal.
+	if err != nil && processGone(err) {
 		//: swallow the benign race; Stop's wait collects a dead leader.
 		return nil
 	}
@@ -397,27 +416,67 @@ func (h *handle) signalGroupAllowGone(sig coreproc.Signal) error {
 }
 
 // zombieGroupRefused reports whether err is darwin's answer for a process
-// group none of whose members is alive. kill(-pgid) there skips zombies and,
-// finding nobody left to signal, answers EPERM — POSIX's "no process could be
-// signalled" — where Linux and the BSDs count the zombie and report success.
-// So a leader that died inside the grace window, before the reaper collected
-// it, made Stop's escalation report SIGNAL_FAILED for a group that was already
-// gone.
+// group none of whose members is alive. XNU's kill(-pgid) skips zombies and,
+// finding no live member it may signal, answers EPERM (killpg1: "nfound" is
+// 0, so EPERM under POSIX semantics), where Linux and the BSDs count the
+// zombie and report success. darwin's EPERM therefore means "nothing alive
+// this process may signal": a group of zombies, or live members it may not
+// signal — a leader that changed its credentials, a setuid program — and
+// only the first is gone. It holds in two states:
 //
-// It reads EPERM as gone only when the leader was still unreaped when the
-// signal was sent and is dead now: collected since (leaderReaped), or a zombie
-// the kernel no longer lists (leaderIsZombie, darwin's own probe). An EPERM
-// from a group whose LIVE members this process may not signal — a leader that
-// changed its credentials — or one sent after the leader was collected, stays
-// the SIGNAL_FAILED it is.
+//   - the leader was unreaped when the signal left and is dead now: collected
+//     since (leaderReaped), or a zombie the kernel no longer lists
+//     (leaderIsZombie, darwin's own probe). A leader that died inside the
+//     grace window, before the reaper collected it, made Stop's escalation
+//     report SIGNAL_FAILED for a group that was already gone;
+//   - the leader was collected before the signal, and what is left are its
+//     orphans — dead, but zombies until init reaps them, since the leader
+//     that would have is gone. The group empties when init reaps them, so
+//     groupDrains watches it for a bounded time: ESRCH is gone, while a live
+//     member this process may not signal keeps it EPERM, and the refusal
+//     stands. Stop on a handle already waited, or an escalation that follows
+//     a leader the background reap had just collected, answered SIGNAL_FAILED
+//     for a dead group whenever the child had forked.
+//
+// It is false on every kernel but darwin (zombiesRefused).
 func (h *handle) zombieGroupRefused(err error, reapedBefore bool) bool {
-	//: only a private group's refusal, and only while its leader was unreaped.
-	if !h.setpgid || reapedBefore || !errs.HasCode(err, coreproc.CodeSignalFailed) || !errors.Is(err, syscall.EPERM) {
+	//: only darwin's EPERM, and only for a private group's signal.
+	if !zombiesRefused || !h.setpgid || !errs.HasCode(err, coreproc.CodeSignalFailed) || !errors.Is(err, syscall.EPERM) {
 		//: not the zombie-only group this rule is about.
 		return false
 	}
+	//: the leader's orphans may be zombies awaiting init.
+	if reapedBefore {
+		//: gone once init has reaped them; a live member never drains.
+		return h.groupDrains()
+	}
 	//: dead either way: collected since the signal, or a zombie awaiting it.
 	return h.leaderReaped() || leaderIsZombie(h.pid)
+}
+
+// groupDrains reports whether the private group empties within drainPolls
+// polls drainPoll apart on the handle's clock: kill(-pgid, 0) answering
+// ESRCH. Any other answer than EPERM — a live member it may signal after all —
+// ends the watch: the group is not gone.
+func (h *handle) groupDrains() bool {
+	//: a bounded watch; the zombies' reap is init's, not this process's.
+	for range drainPolls {
+		err := h.kill(-h.pgid, 0)
+		//: the group is gone: init reaped what was left of it.
+		if errors.Is(err, syscall.ESRCH) {
+			//: nothing left in the group.
+			return true
+		}
+		//: anything but "nothing alive this process may signal" is not gone.
+		if !errors.Is(err, syscall.EPERM) {
+			//: a member answered.
+			return false
+		}
+		//: give init the time to reap the zombies, on the handle's clock.
+		h.clk.Sleep(drainPoll)
+	}
+	//: still refused: a live member this process may not signal.
+	return false
 }
 
 // awaitExit blocks until the process is reaped, ctx is cancelled, or the grace

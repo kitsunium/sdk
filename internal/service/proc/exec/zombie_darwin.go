@@ -5,6 +5,10 @@ import (
 	"syscall"
 )
 
+// zombiesRefused is true on darwin, whose kill(-pgid) answers EPERM for a
+// group holding only zombies (zombieGroupRefused).
+const zombiesRefused bool = true
+
 // leaderIsZombie reports whether pid — a child of this process that it has
 // not reaped — has exited. XNU's getpgid(2) looks the pid up with proc_find,
 // which skips a process once it has exited, so it answers ESRCH for a zombie;

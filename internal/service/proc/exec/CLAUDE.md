@@ -122,10 +122,32 @@ now: collected since, or a zombie by `leaderIsZombie` (darwin's `getpgid(2)`
 answers ESRCH for one, measured on darwin 25.6, while a live child answers with
 its group; the pid cannot be reused while unreaped). An EPERM from a LIVE
 member this process may not signal — a leader that changed its credentials —
-or one sent after the leader was collected stays `SIGNAL_FAILED`.
-`Test_handle_StopOnALeaderThatDiedUnreaped` and
+stays `SIGNAL_FAILED`. `Test_handle_StopOnALeaderThatDiedUnreaped` and
 `Test_handle_zombieGroupRefused` pin both sides, with an oracle independent of
 the probe (darwin: the group's own EPERM; Linux: `/proc`'s state letter).
+
+**And after the leader is reaped.** XNU's `killpg1` counts only the live
+members it may signal and answers EPERM when there is none, so a group whose
+leader was collected, and whose forked members died with it, answers EPERM
+until init reaps those orphans — they are zombies, and their parent is gone.
+`Stop` on a handle already waited, or an escalation right after the
+background reap took the leader, reported `SIGNAL_FAILED` for that dead group
+whenever the child had forked (macos-arm64, `Test_handle_signalGroupAllowGone`
+when its fixture forked a `sleep`). `zombieGroupRefused` now reads that EPERM
+too, through `groupDrains`: `kill(-pgid, 0)` every `drainPoll` (10 ms, on the
+handle's clock) up to `drainPolls` (100) times — ESRCH once init has reaped
+them is gone, a member that answers is not, and an EPERM that lasts the
+second is a live member this process may not signal, whose refusal stands.
+The rule lives in `SignalGroup` itself, which reports such a group ESRCH —
+the answer Linux and the BSDs give once a group is reaped — so `Stop`'s
+`processGone` and any caller read it as gone. `zombiesRefused` is false on
+every other kernel, where neither the probe nor the read before the kill is
+made. `Test_handle_reapedLeadersOrphans` runs `SignalGroup`, the escalation
+and `Stop` on such a group on every OS, `Test_handle_zombieGroupRefused` the
+rule (a group that emptied is gone on darwin; one with a live orphan is not),
+and `Test_handle_groupDrains` the watch through a `kill(2)` double. A test
+that puts a handle on a `ManualClock` is put back on `clock.System` by
+`startChild`'s cleanup, so its SIGKILL never waits on a clock nobody advances.
 
 The grace window is a timer on the handle's clock — `clock.System` from
 `newHandle`, on Unix and on Windows alike — so `Test_handle_graceOnInjectedClock`
