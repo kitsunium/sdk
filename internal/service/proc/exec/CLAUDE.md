@@ -249,7 +249,19 @@ back from inside the child, trampoline failures arriving typed (`RlimitFailed`
 white-box in `handle_unix_internal_test.go`: `Stop` escalates
 `SIGTERM`→`SIGKILL` for a child that ignores `SIGTERM`, `SignalGroup` reaches a
 grandchild, `Wait` is memoised, a signalled exit reports code −1, and a leader
-that died unreaped stops cleanly on darwin too (§Stop);
+that died unreaped stops cleanly on darwin too (§Stop). Every child those
+tests spawn comes from `startChild`, which returns only once the shell has
+written a marker — code that runs after its `execve` — and appends `:` so the
+shell never execs the program's last command in place: `Start` returns from
+inside the child's `execve` (the close-on-exec pipe closes there), and NetBSD
+up to 10.1 discards a signal posted to a process still in `execve` (PR
+kern/58091, fixed in 10.2 and 11.0), so a `SIGKILL` sent at once was lost
+and `Test_handle_SignalGroup` / `Test_handle_graceOnInjectedClock` waited out
+the child's 30 s on one NetBSD run in four. A caller that signals a child it
+has just started on such a kernel can lose the signal the same way. The
+shell therefore stays the leader, so a fixture without a private group runs
+`shellOnlyWait` — a read from a FIFO the test made, nothing beneath the
+shell — since its cleanup kills the leader's pid alone;
 `creds_unix_internal_test.go` pins `UnknownUser` / `UnknownGroup`.
 `exec_windows_test.go` covers the Windows backend (skipped where `cmd.exe` is
 not found) and `exec_other_test.go` the `UnsupportedPlatform` stub;
