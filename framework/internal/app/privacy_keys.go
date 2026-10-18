@@ -26,7 +26,7 @@ const (
 	// can have a colon in its name.
 	subjectIndex = "kit:subject"
 	// indexSecret is kit's generated secret the references are keyed by:
-	// <PRODUCT>_INDEX_KEY, or kit-index-key in the environment's store. It is
+	// <PRODUCT>_INDEX_KEY, or app-index-key in the environment's store. It is
 	// never rotated.
 	indexSecret = "index-key"
 	// indexKeyBytes is the size of the index key kit generates.
@@ -53,7 +53,7 @@ type referenceKeys struct {
 }
 
 // referenceKeys derives the subkeys of index-key once per run: <PRODUCT>_INDEX_KEY
-// when the environment pins it, else kit-index-key in the environment's
+// when the environment pins it, else app-index-key in the environment's
 // store, made on first use.
 func (a *App) referenceKeys(ctx context.Context) (*referenceKeys, error) {
 	k, made, err := a.deriveKeys(ctx)
@@ -133,7 +133,7 @@ func (a *App) makeIndexKey(ctx context.Context) ([]byte, error) {
 	value, err := secret.Random(indexKeyBytes)()
 	if err == nil {
 		var kept secret.Versioned
-		if kept, err = st.kept.Put(ctx, kitSecretPrefix+indexSecret, value); err == nil {
+		if kept, err = st.kept.Put(ctx, ownSecretPrefix+indexSecret, value); err == nil {
 			return kept.Value.Reveal(), nil
 		}
 	}

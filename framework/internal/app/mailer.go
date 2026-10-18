@@ -70,7 +70,7 @@ const defaultMailAttempts int = 6
 //
 // Credentials never leave the mailer. The SMTP URL is the mail connector's
 // secret, smtp-url: <PRODUCT>_SMTP_URL, or the file <PRODUCT>_SMTP_URL_FILE names, or
-// kit-smtp-url in the environment's store (secretstore.go). It is parsed where
+// app-smtp-url in the environment's store (secretstore.go). It is parsed where
 // the transport is built and nowhere else; the graph, the Studio and the logs
 // see the relay's host and port, the TLS mode and the sender — never the user
 // or the password, and never the URL.
@@ -564,7 +564,7 @@ func (m *Mailer) openTransport(ctx context.Context, a *App) (transport plug.Mail
 	case errors.Is(err, secret.EnvRefused):
 		return nil, nil, smtpRelay{}, explain(CodeMailConfig, "MAIL_CONFIG", "set <PRODUCT>_SMTP_URL or <PRODUCT>_SMTP_URL_FILE, not both", err, errs.String("mailer", m.id))
 	case err != nil:
-		return nil, nil, smtpRelay{}, explain(CodeMailConfig, "MAIL_CONFIG", "the SMTP URL cannot be read: <PRODUCT>_SMTP_URL_FILE, or kit-smtp-url in the secret store", err, errs.String("mailer", m.id))
+		return nil, nil, smtpRelay{}, explain(CodeMailConfig, "MAIL_CONFIG", "the SMTP URL cannot be read: <PRODUCT>_SMTP_URL_FILE, or app-smtp-url in the secret store", err, errs.String("mailer", m.id))
 	}
 	t, relay, problem, err := smtpTransport(v.Value)
 	relay.url = v.Value

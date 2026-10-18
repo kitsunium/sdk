@@ -81,6 +81,8 @@ go_test(
         "datacopy_test.go",
         "filestore_test.go",
         "floor_test.go",
+        "former_keys_move_test.go",
+        "former_keys_test.go",
         "former_move_test.go",
         "former_test.go",
         "keys_test.go",

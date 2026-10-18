@@ -31,6 +31,7 @@ const privacyUsageFormat string = `usage:
   %[1]s privacy retention [-dry-run]     the stores' retention, run once now
   %[1]s privacy seal STORE…              what a store keeps in clear — written before its fields were sealed — sealed now
   %[1]s privacy seal -all                the same, for every store that seals at rest
+  %[1]s privacy rewrap [-back]           the data keys moved under the present data-key now, or back under the former one
 Every sub-command but register opens the data directory: stop the product first.
 `
 
@@ -46,6 +47,7 @@ Every sub-command but register opens the data directory: stop the product first.
 //	privacy retention [-dry-run]       the stores' retention, run once now
 //	privacy seal STORE…                what a store keeps in clear, sealed now
 //	privacy seal -all                  the same, for every store that seals at rest
+//	privacy rewrap [-back]             the data keys moved under the present data-key, or back
 //
 // A store belongs to one process: every sub-command but register opens the
 // data directory itself, and refuses while the product answers on its
@@ -84,6 +86,7 @@ func (a *App) privacyCommands(stdout, stderr io.Writer) map[string]func(ctx cont
 		"journal":   func(ctx context.Context, args []string) int { return a.journalCommand(ctx, args, stdout, stderr) },
 		"retention": func(ctx context.Context, args []string) int { return a.retentionCommand(ctx, args, stdout, stderr) },
 		"seal":      func(ctx context.Context, args []string) int { return a.sealCommand(ctx, args, stdout, stderr) },
+		"rewrap":    func(ctx context.Context, args []string) int { return a.rewrapCommand(ctx, args, stdout, stderr) },
 	}
 }
 

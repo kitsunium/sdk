@@ -1,0 +1,7 @@
+SEQ  AT                    OP      STORE                   RECORD                            SUBJECT                           BY
+1    2026-10-18T04:57:19Z  erase   atelier/store/cases     6c8fc11ab32006d679f2b1f2748d1e1d  0b1a8d37d8ed1bace8cb7c11032d06a9  atelier/command/forget
+2    2026-10-18T04:57:19Z  shred   app.privacy/store/keys  -                                 0b1a8d37d8ed1bace8cb7c11032d06a9  atelier/command/forget
+3    2026-10-18T04:57:19Z  hold    atelier/store/cases     d79e330985143c4a93458235019fcb69  57aaf2aad6646d5932aed4d4ee50bfb8  app
+4    2026-10-18T04:57:19Z  hold    atelier/store/tally     c74ceb4a0ec064db6529b25bae4cf9d5  -                                 app
+5    2026-10-18T04:57:19Z  export  atelier/store/cases     -                                 57aaf2aad6646d5932aed4d4ee50bfb8  atelier/command/export
+the chain holds: 5 entries

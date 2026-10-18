@@ -38,6 +38,7 @@ go_test(
         "api_gen_test.go",
         "app_test.go",
         "database_test.go",
+        "former_keys_test.go",
         "former_test.go",
         "postgres_test.go",
         "server_test.go",

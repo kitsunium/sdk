@@ -25,7 +25,7 @@ package comment, which kit writes from the design (ADR 0167).
 | `KeyFile(path) (crypto.Key, error)` | the machine-local key for `FileConfig.Key`: 32 raw bytes, created on first use (0600, directory 0700) and published by hard link so concurrent first uses agree on one key |
 | `Keyring`, `NewKeyring` | versions as keys |
 | `Policy`, `Random`, `Rotator`, `RotatorConfig`, `NewRotator` | rotation |
-| `SubjectKeys`, `SubjectKeysConfig`, `NewSubjectKeys` | one data key per subject under a rotating root: `Seal` / `Open` / `Destroy` / `Rewrap` / `OldestRoot` (ADR 0142) |
+| `SubjectKeys`, `SubjectKeysConfig`, `NewSubjectKeys` | one data key per subject under a rotating root: `Seal` / `Open` / `Destroy` / `Rewrap` / `OldestRoot` (ADR 0142); `SubjectKeysConfig.Former`, the root a renamed root secret replaces — what it wrapped opens, `Rewrap` moves it (ADR 0180 step 5b) |
 | `SubjectKeyStore`, `WrappedKey`, `NewMemorySubjectKeyStore` | the frozen five-method port a caller implements (atomic `Insert` and `Replace`), what it yields, and the memory one |
 | `RewrapReport`, `SubjectOf`, `ValidateSubject`, `MaxSubjectLen` | a pass's report, a box's subject, the reference grammar (lowercase, 1–128 bytes) |
 | `NotFound` … `SubjectKeyUnreadable` | the eighteen sentinels — the port's eight and the engines' ten, all aliasing `internal/core/security/secret` (ADR 0160) (`InvalidSubject`, `KeyDestroyed`, `SubjectKeyUnreadable` added by ADR 0142) |

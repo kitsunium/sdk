@@ -21,8 +21,9 @@ import (
 
 // Where an environment keeps its secrets. The environment itself is read
 // first — the product's variables (TODO_STRIPE_KEY, or TODO_STRIPE_KEY_FILE
-// naming a file) and kit's (<PRODUCT>_SMTP_URL) — and then the store it keeps,
-// where kit writes the secrets it generates and `secrets set` the ones an
+// naming a file) and the framework's (<PRODUCT>_SMTP_URL) — and then the
+// store it keeps, where the framework writes the secrets it generates — its
+// own under app-…, renamed_secrets.go — and `secrets set` the ones an
 // operator gives it. <PRODUCT>_SECRETS chooses that store:
 //
 //	(unset)     the secrets follow the data: an encrypted file store beside
@@ -215,6 +216,14 @@ func (a *App) openSecrets(ctx context.Context) error {
 		}
 	default:
 		// The environment alone, as envStores opened it.
+	}
+	// What a former release kept under the tool's prefix is copied to the
+	// framework's before anything reads it (ADR 0180 step 5b).
+	if err := a.moveFormerSecrets(ctx, st.kept); err != nil {
+		if closeErr := st.close(); closeErr != nil {
+			return errors.Join(err, closeErr)
+		}
+		return err
 	}
 	a.secrets.Store(st)
 	return nil
@@ -468,18 +477,26 @@ func (st *secretStores) find(ctx context.Context, env secret.Store, name, keptNa
 	return st.kept, st.from, nil
 }
 
-// kitSecret returns one of kit's own secrets — the mail connector's SMTP URL
-// — as it is now: <APP>_<NAME> first, then kit-<name> in the kept store. It
-// reports secret.NotFound when neither holds it.
+// kitSecret returns one of the framework's own secrets — the mail
+// connector's SMTP URL, the index key — as it is now: <APP>_<NAME> first,
+// then app-<name> in the kept store, then kit-<name> where a former release
+// kept it and the copy to its present name is not made yet (ADR 0180 step
+// 5b). It reports secret.NotFound when none holds it.
 func (a *App) kitSecret(ctx context.Context, name string) (secret.Versioned, string, error) {
 	st := a.secretsNow()
-	store, from, err := st.find(ctx, st.kitEnv, name, kitSecretPrefix+name)
+	store, from, err := st.find(ctx, st.kitEnv, name, ownSecretPrefix+name)
+	stored := ownSecretPrefix + name
+	if errors.Is(err, secret.NotFound) && st.kept != nil {
+		stored = formerSecretPrefix + name
+		if _, ferr := st.kept.Get(ctx, stored); ferr == nil || !errors.Is(ferr, secret.NotFound) {
+			store, from, err = st.kept, st.from, ferr
+		}
+	}
 	if err != nil {
 		return secret.Versioned{}, from, err
 	}
-	stored := name
-	if from != model.SecretFromEnv {
-		stored = kitSecretPrefix + name
+	if from == model.SecretFromEnv {
+		stored = name
 	}
 	v, err := store.Get(ctx, stored)
 	return v, from, err

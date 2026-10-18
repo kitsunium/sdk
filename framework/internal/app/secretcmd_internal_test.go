@@ -45,7 +45,7 @@ func TestTheSecretsCommand(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "secrets")
 	code, out, _ := secretsCmd(t, dir, "", "list")
 	for _, want := range []string{
-		"api-token", "nowhere", "VAULT_API_TOKEN", "seal-key", "not made yet", "kit-smtp-url", "VAULT_SMTP_URL",
+		"api-token", "nowhere", "VAULT_API_TOKEN", "seal-key", "not made yet", "app-smtp-url", "VAULT_SMTP_URL",
 		"partner-token  operator, optional  absent  VAULT_PARTNER_TOKEN",
 	} {
 		if code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), strings.Join(strings.Fields(want), " ")) {
@@ -93,11 +93,15 @@ func TestTheSecretsCommand(t *testing.T) {
 
 	// kit's own secret is read from its own variable, VAULT_SMTP_URL.
 	t.Setenv("VAULT_SMTP_URL", "smtp://relay.example.com:2525?tls=none")
-	if _, out, _ := secretsCmd(t, dir, "", "list"); !strings.Contains(strings.Join(strings.Fields(out), " "), "kit-smtp-url operator env VAULT_SMTP_URL") {
-		t.Errorf("VAULT_SMTP_URL is not where the list finds kit-smtp-url:\n%s", out)
+	if _, out, _ := secretsCmd(t, dir, "", "list"); !strings.Contains(strings.Join(strings.Fields(out), " "), "app-smtp-url operator env VAULT_SMTP_URL") {
+		t.Errorf("VAULT_SMTP_URL is not where the list finds app-smtp-url:\n%s", out)
 	}
-	if _, _, errOut := secretsCmd(t, dir, "smtp://other.example.com:25?tls=none", "set", "kit-smtp-url"); !strings.Contains(errOut, "VAULT_SMTP_URL is set") {
+	if _, _, errOut := secretsCmd(t, dir, "smtp://other.example.com:25?tls=none", "set", "app-smtp-url"); !strings.Contains(errOut, "VAULT_SMTP_URL is set") {
 		t.Errorf("set under VAULT_SMTP_URL: %q", errOut)
+	}
+	// Its former name is refused, naming the present one (ADR 0180 step 5b).
+	if code, _, errOut := secretsCmd(t, dir, "smtp://other.example.com:25?tls=none", "set", "kit-smtp-url"); code != 2 || !strings.Contains(errOut, "kit-smtp-url is the name a former release kept it under, which the framework no longer writes: it is app-smtp-url") {
+		t.Errorf("set under the former name: %d %q", code, errOut)
 	}
 
 	// The variable wins over the store, and set says so.
@@ -215,19 +219,19 @@ func TestTheSecretsCommandListsKitsIndexKey(t *testing.T) {
 	app := NewApp("vault", svc).With(Env(EnvProduction), Logs(io.Discard))
 	line := func(out string) string {
 		for l := range strings.SplitSeq(out, "\n") {
-			if strings.HasPrefix(l, "kit-index-key") {
+			if strings.HasPrefix(l, "app-index-key") {
 				return strings.Join(strings.Fields(l), " ")
 			}
 		}
 		return ""
 	}
-	if code, out := secretsOf(t, app, "", "list"); code != 0 || line(out) != "kit-index-key app not made yet VAULT_INDEX_KEY - - -" {
+	if code, out := secretsOf(t, app, "", "list"); code != 0 || line(out) != "app-index-key app not made yet VAULT_INDEX_KEY - - -" {
 		t.Fatalf("list (%d):\n%s", code, out)
 	}
-	if code, out := secretsOf(t, app, "an index key of thirty-two bytes\n", "set", "kit-index-key"); code != 0 || out != "kit-index-key: version 1\n" {
+	if code, out := secretsOf(t, app, "an index key of thirty-two bytes\n", "set", "app-index-key"); code != 0 || out != "app-index-key: version 1\n" {
 		t.Fatalf("set where the store holds none: %d %q", code, out)
 	}
-	if code, out := secretsOf(t, app, "", "list"); code != 0 || !strings.HasPrefix(line(out), "kit-index-key app file VAULT_INDEX_KEY 1 ") ||
+	if code, out := secretsOf(t, app, "", "list"); code != 0 || !strings.HasPrefix(line(out), "app-index-key app file VAULT_INDEX_KEY 1 ") ||
 		!strings.HasSuffix(line(out), " never") {
 		t.Fatalf("list once made (%d):\n%s", code, out)
 	}
@@ -237,8 +241,8 @@ func TestTheSecretsCommandListsKitsIndexKey(t *testing.T) {
 		code  int
 		want  string
 	}{
-		{"another\n", []string{"set", "kit-index-key"}, 2, "made once and never replaced"},
-		{"", []string{"rotate", "kit-index-key"}, 2, "never rotated"},
+		{"another\n", []string{"set", "app-index-key"}, 2, "made once and never replaced"},
+		{"", []string{"rotate", "app-index-key"}, 2, "never rotated"},
 		{"", []string{"rotate", "-all"}, 1, "the product generates no secret"},
 	} {
 		if code, out := secretsOf(t, app, c.stdin, c.args...); code != c.code || !strings.Contains(out, c.want) {

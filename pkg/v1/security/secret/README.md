@@ -715,6 +715,11 @@ type RewrapReport struct {
 	Current    int
 	// Rewrapped counts the keys the pass moved to Root.
 	Rewrapped  int
+	// FromFormer counts, among Rewrapped, the keys the pass moved from the
+	// root SubjectKeysConfig.Former names. A pass that returns no error and
+	// counts none left no key under it but one filed while it ran — the
+	// next pass moves those.
+	FromFormer int
 	// Skipped counts the keys destroyed, or re-wrapped by another writer,
 	// while the pass ran. They are left as they are: a re-wrap never brings
 	// back a destroyed key.
@@ -1108,6 +1113,14 @@ type SubjectKeysConfig struct {
 	// newest version, and RotatorConfig.InUse keeps a version from being
 	// pruned while a key is still wrapped under it. Required.
 	Root      *Keyring
+	// Former is the root this one replaces — a root secret renamed, whose
+	// name every key it wrapped is bound to —, or nil. A key wrapped under it
+	// still unwraps, under any version it keeps, so nothing it wrapped stops
+	// opening; no key is ever wrapped under it, and [SubjectKeys.Rewrap]
+	// moves every key it wrapped to Root's newest version. Nothing here
+	// rotates, prunes or deletes it: retiring it is the caller's, once a
+	// pass finds no key under it (RewrapValue.FromFormer, then zero).
+	Former    *Keyring
 	// Store keeps the wrapped keys, one per subject. Required.
 	Store     coresecret.SubjectKeyStore
 	// CacheSize is how many opened keys this process keeps, the least

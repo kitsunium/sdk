@@ -63759,8 +63759,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/security/secret",
       "name": "RewrapValue",
-      "spelled": "struct{Root int; Current int; Rewrapped int; Skipped int; Unreadable int}",
-      "canonical": "struct{Root int; Current int; Rewrapped int; Skipped int; Unreadable int}",
+      "spelled": "struct{Root int; Current int; Rewrapped int; FromFormer int; Skipped int; Unreadable int}",
+      "canonical": "struct{Root int; Current int; Rewrapped int; FromFormer int; Skipped int; Unreadable int}",
       "fields": [
         {
           "name": "Root",
@@ -63776,6 +63776,11 @@
           "name": "Rewrapped",
           "type": "int",
           "doc": "Rewrapped counts the keys the pass moved to Root.\n"
+        },
+        {
+          "name": "FromFormer",
+          "type": "int",
+          "doc": "FromFormer counts, among Rewrapped, the keys the pass moved from the\nroot SubjectKeysConfig.Former names. A pass that returns no error and\ncounts none left no key under it but one filed while it ran — the\nnext pass moves those.\n"
         },
         {
           "name": "Skipped",
@@ -64001,13 +64006,18 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/security/secret",
       "name": "SubjectKeysConfig",
-      "spelled": "struct{Root *Keyring; Store coresecret.SubjectKeyStore; CacheSize int; CacheTTL time.Duration; Clock clock.Clock}",
-      "canonical": "struct{Root *github.com/kitsunium/sdk/internal/service/security/secret.Keyring; Store github.com/kitsunium/sdk/internal/core/security/secret.SubjectKeyStore; CacheSize int; CacheTTL time.Duration; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock}",
+      "spelled": "struct{Root *Keyring; Former *Keyring; Store coresecret.SubjectKeyStore; CacheSize int; CacheTTL time.Duration; Clock clock.Clock}",
+      "canonical": "struct{Root *github.com/kitsunium/sdk/internal/service/security/secret.Keyring; Former *github.com/kitsunium/sdk/internal/service/security/secret.Keyring; Store github.com/kitsunium/sdk/internal/core/security/secret.SubjectKeyStore; CacheSize int; CacheTTL time.Duration; Clock github.com/kitsunium/sdk/internal/kernel/clock.Clock}",
       "fields": [
         {
           "name": "Root",
           "type": "*Keyring",
           "doc": "Root wraps every data key: a Keyring over the root secret. Its newest\nversion wraps each new key and every kept version unwraps, so a\nrotation breaks nothing; [SubjectKeys.Rewrap] moves every key to the\nnewest version, and RotatorConfig.InUse keeps a version from being\npruned while a key is still wrapped under it. Required.\n"
+        },
+        {
+          "name": "Former",
+          "type": "*Keyring",
+          "doc": "Former is the root this one replaces — a root secret renamed, whose\nname every key it wrapped is bound to —, or nil. A key wrapped under it\nstill unwraps, under any version it keeps, so nothing it wrapped stops\nopening; no key is ever wrapped under it, and [SubjectKeys.Rewrap]\nmoves every key it wrapped to Root's newest version. Nothing here\nrotates, prunes or deletes it: retiring it is the caller's, once a\npass finds no key under it (RewrapValue.FromFormer, then zero).\n"
         },
         {
           "name": "Store",

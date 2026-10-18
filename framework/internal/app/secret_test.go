@@ -441,6 +441,7 @@ func TestSecretDeclarationProblems(t *testing.T) {
 	bad.Secret("Upper_Case")
 	bad.Secret("token-file")
 	bad.Secret("kit-mine")
+	bad.Secret("app-mine")
 	bad.Secret("too-short", app.Generated(8))
 	bad.Secret("provided", app.RotateEvery(time.Hour))
 	bad.Secret("one-version", app.Generated(32), app.KeepVersions(1))
@@ -453,6 +454,7 @@ func TestSecretDeclarationProblems(t *testing.T) {
 		`secret name "Upper_Case" must be 1 to 63 lower-case letters`,
 		`secret name "token-file" must not end in -file`,
 		`secret name "kit-mine" must not start with "kit-"`,
+		`secret name "app-mine" must not start with "app-"`,
 		`secret "too-short": Generated takes 16 to 4096 bytes`,
 		`secret "provided" is provided: RotateEvery and KeepVersions apply to a Generated one`,
 		`secret "one-version": KeepVersions needs at least 2`,
