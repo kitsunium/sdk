@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-13T12:00:00Z -->
+<!-- updated: 2026-10-18T15:00:00Z -->
 # pkg/v1/app/consensus/
 
 ## Purpose
@@ -6,7 +6,9 @@
 Public facade of the consensus domain (ADR 0152 D14), written by kit into
 `facade_gen.go` from `design/app/consensus.yaml`: aliases for every type a
 published port speaks, `NewNode`, `Bootstrap`, the data directory and its
-offline operations, `NewTCPTransport` and `NewTCPTransportFromPEM`, the
+offline operations — `ImportObserved` and `OpenSnapshot` among them, what a
+non-member observer rebuilds from beside `Node.ReadCommitted` —,
+`NewTCPTransport` and `NewTCPTransportFromPEM`, the
 memory doubles, the wire codecs and the sentinels of both ranges.
 
 ## Conventions

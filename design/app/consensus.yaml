@@ -2393,10 +2393,11 @@ packages:
           a saved snapshot and the committed tail an observer read after it: the
           tail is checked against the snapshot (consecutive indexes from its
           position, terms that never decrease, each payload's BodySum and the
-          ChainSum chained from the snapshot's ChainTip), replayed through m from
-          the snapshot, and the state it reaches is restored as RestoreSnapshot
-          does, its last entry the index the new history kept. An empty tail is
-          RestoreSnapshot itself. opt.Expected is the snapshot's metadata.
+          ChainSum chained from the snapshot's ChainTip), replayed through
+          p.Machine from the snapshot, and the state it reaches is restored as
+          RestoreSnapshot does, its last entry the index the new history kept. An
+          empty tail is RestoreSnapshot itself. opt.Expected is the snapshot's
+          metadata.
 
           A tail that raises the cluster version, changes the timing contract or
           the no-space alarm is refused: the restored metadata could not carry it;
@@ -2405,12 +2406,8 @@ packages:
         in:
           - name: d
             type: DataDir
-          - name: snap
-            type: io.Reader
-          - name: tail
-            type: "[]coreconsensus.EntryValue"
-          - name: m
-            type: coreconsensus.StateMachine
+          - name: p
+            type: "*ImportParams"
           - name: newCluster
             type: coreconsensus.ClusterID
           - name: members
@@ -3351,6 +3348,23 @@ packages:
             - doc: Codec decodes the chunks; nil is flate.
               name: Codec
               type: coretransform.BoundedDecompressor
+      - doc: |-
+          ImportParams are what ImportObserved rebuilds a state from: the
+          snapshot an observer saved, the committed tail it read after it, and the
+          state machine that replays the one over the other. Snapshot and Machine
+          are required.
+        name: ImportParams
+        struct:
+          fields:
+            - doc: Snapshot is the saved snapshot's encoded stream, as SaveSnapshot wrote it.
+              name: Snapshot
+              type: io.Reader
+            - doc: Tail is the committed entries read after the snapshot, in log order.
+              name: Tail
+              type: "[]coreconsensus.EntryValue"
+            - doc: Machine is a fresh state machine; the snapshot is restored into it and the tail applied.
+              name: Machine
+              type: coreconsensus.StateMachine
       - doc: |-
           PEMIdentity is a node identity read from PEM files: the certificate (its
           chain may follow it), the key, and the consensus CA. It is the
@@ -4587,6 +4601,8 @@ packages:
             target: svcconsensus.RecoverOptions
           - name: RestoreOptions
             target: svcconsensus.RestoreOptions
+          - name: ImportParams
+            target: svcconsensus.ImportParams
           - name: TransportConfig
             target: svcconsensus.TransportConfig
           - name: TCPTransport
@@ -4741,12 +4757,8 @@ packages:
           in:
             - name: d
               type: DataDir
-            - name: snap
-              type: io.Reader
-            - name: tail
-              type: "[]EntryValue"
-            - name: m
-              type: StateMachine
+            - name: p
+              type: "*ImportParams"
             - name: newCluster
               type: ClusterID
             - name: members

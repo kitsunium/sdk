@@ -45246,9 +45246,38 @@
       "kind": "func",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
       "name": "ImportObserved",
-      "spelled": "func(d DataDir, snap io.Reader, tail []coreconsensus.EntryValue, m coreconsensus.StateMachine, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) (coreconsensus.SnapshotMetaValue, error)",
-      "canonical": "func(d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir, snap io.Reader, tail []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue, m github.com/kitsunium/sdk/internal/core/app/consensus.StateMachine, newCluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID, members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue, opt *github.com/kitsunium/sdk/internal/service/app/consensus.RestoreOptions) (github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue, error)",
-      "doc": "ImportObserved starts a new history on an empty, joining directory from\na saved snapshot and the committed tail an observer read after it: the\ntail is checked against the snapshot (consecutive indexes from its\nposition, terms that never decrease, each payload's BodySum and the\nChainSum chained from the snapshot's ChainTip), replayed through m from\nthe snapshot, and the state it reaches is restored as RestoreSnapshot\ndoes, its last entry the index the new history kept. An empty tail is\nRestoreSnapshot itself. opt.Expected is the snapshot's metadata.\n\nA tail that raises the cluster version, changes the timing contract or\nthe no-space alarm is refused: the restored metadata could not carry it;\nimport from a snapshot cut after it. Membership entries are checked and\npassed over: the new history has its own members.\n",
+      "spelled": "func(d DataDir, p *ImportParams, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) (coreconsensus.SnapshotMetaValue, error)",
+      "canonical": "func(d github.com/kitsunium/sdk/internal/service/app/consensus.DataDir, p *github.com/kitsunium/sdk/internal/service/app/consensus.ImportParams, newCluster github.com/kitsunium/sdk/internal/core/app/consensus.ClusterID, members []github.com/kitsunium/sdk/internal/core/app/consensus.MemberValue, opt *github.com/kitsunium/sdk/internal/service/app/consensus.RestoreOptions) (github.com/kitsunium/sdk/internal/core/app/consensus.SnapshotMetaValue, error)",
+      "doc": "ImportObserved starts a new history on an empty, joining directory from\na saved snapshot and the committed tail an observer read after it: the\ntail is checked against the snapshot (consecutive indexes from its\nposition, terms that never decrease, each payload's BodySum and the\nChainSum chained from the snapshot's ChainTip), replayed through\np.Machine from the snapshot, and the state it reaches is restored as\nRestoreSnapshot does, its last entry the index the new history kept. An\nempty tail is RestoreSnapshot itself. opt.Expected is the snapshot's\nmetadata.\n\nA tail that raises the cluster version, changes the timing contract or\nthe no-space alarm is refused: the restored metadata could not carry it;\nimport from a snapshot cut after it. Membership entries are checked and\npassed over: the new history has its own members.\n",
+      "file": "service/app/consensus/observed.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus.ImportParams",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus",
+      "name": "ImportParams",
+      "spelled": "struct{Snapshot io.Reader; Tail []coreconsensus.EntryValue; Machine coreconsensus.StateMachine}",
+      "canonical": "struct{Snapshot io.Reader; Tail []github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue; Machine github.com/kitsunium/sdk/internal/core/app/consensus.StateMachine}",
+      "fields": [
+        {
+          "name": "Snapshot",
+          "type": "io.Reader",
+          "doc": "Snapshot is the saved snapshot's encoded stream, as SaveSnapshot wrote it.\n"
+        },
+        {
+          "name": "Tail",
+          "type": "[]coreconsensus.EntryValue",
+          "doc": "Tail is the committed entries read after the snapshot, in log order.\n"
+        },
+        {
+          "name": "Machine",
+          "type": "coreconsensus.StateMachine",
+          "doc": "Machine is a fresh state machine; the snapshot is restored into it and the tail applied.\n"
+        }
+      ],
+      "doc": "ImportParams are what ImportObserved rebuilds a state from: the\nsnapshot an observer saved, the committed tail it read after it, and the\nstate machine that replays the one over the other. Snapshot and Machine\nare required.\n",
       "file": "service/app/consensus/observed.go",
       "layer": "service",
       "family": "app"

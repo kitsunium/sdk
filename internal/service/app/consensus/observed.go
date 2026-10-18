@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
@@ -67,6 +68,9 @@ type snapshotReader struct {
 	meta coreconsensus.SnapshotMetaValue
 }
 
+// Read implements io.Reader: the chunk reader's bytes, and at its end the
+// sizes and the SHA-256 compared with the metadata, SNAPSHOT_CORRUPT on a
+// difference instead of io.EOF.
 func (s *snapshotReader) Read(p []byte) (int, error) {
 	n, err := s.cr.Read(p)
 	if !errors.Is(err, io.EOF) {
@@ -83,67 +87,102 @@ func (s *snapshotReader) Read(p []byte) (int, error) {
 	return n, io.EOF
 }
 
+// ImportParams are what ImportObserved rebuilds a state from: the
+// snapshot an observer saved, the committed tail it read after it, and the
+// state machine that replays the one over the other. Snapshot and Machine
+// are required.
+type ImportParams struct {
+	// Snapshot is the saved snapshot's encoded stream, as SaveSnapshot wrote it.
+	Snapshot io.Reader
+	// Tail is the committed entries read after the snapshot, in log order.
+	Tail []coreconsensus.EntryValue
+	// Machine is a fresh state machine; the snapshot is restored into it and the tail applied.
+	Machine coreconsensus.StateMachine
+}
+
 // ImportObserved starts a new history on an empty, joining directory from
 // a saved snapshot and the committed tail an observer read after it: the
 // tail is checked against the snapshot (consecutive indexes from its
 // position, terms that never decrease, each payload's BodySum and the
-// ChainSum chained from the snapshot's ChainTip), replayed through m from
-// the snapshot, and the state it reaches is restored as RestoreSnapshot
-// does, its last entry the index the new history kept. An empty tail is
-// RestoreSnapshot itself. opt.Expected is the snapshot's metadata.
+// ChainSum chained from the snapshot's ChainTip), replayed through
+// p.Machine from the snapshot, and the state it reaches is restored as
+// RestoreSnapshot does, its last entry the index the new history kept. An
+// empty tail is RestoreSnapshot itself. opt.Expected is the snapshot's
+// metadata.
 //
 // A tail that raises the cluster version, changes the timing contract or
 // the no-space alarm is refused: the restored metadata could not carry it;
 // import from a snapshot cut after it. Membership entries are checked and
 // passed over: the new history has its own members.
-func ImportObserved(d DataDir, snap io.Reader, tail []coreconsensus.EntryValue, m coreconsensus.StateMachine, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) (coreconsensus.SnapshotMetaValue, error) {
-	if opt == nil || m == nil {
-		return coreconsensus.SnapshotMetaValue{}, restoreRefused("no options or no state machine")
+func ImportObserved(d DataDir, p *ImportParams, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RestoreOptions) (coreconsensus.SnapshotMetaValue, error) {
+	if opt == nil || p == nil || p.Snapshot == nil || p.Machine == nil {
+		return coreconsensus.SnapshotMetaValue{}, restoreRefused("no options, no snapshot or no state machine")
 	}
-	if len(tail) == 0 {
-		return RestoreSnapshot(d, snap, newCluster, members, opt)
+	if len(p.Tail) == 0 {
+		return RestoreSnapshot(d, p.Snapshot, newCluster, members, opt)
 	}
-	exp := opt.Expected
-	if err := checkObservedTail(&exp, tail); err != nil {
+	if err := checkObservedTail(&opt.Expected, p.Tail); err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
 	codec, err := restoreCodec(opt)
 	if err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
-	r, err := OpenSnapshot(snap, opt)
+	if err := replayObserved(p, opt); err != nil {
+		return coreconsensus.SnapshotMetaValue{}, err
+	}
+	encoded, meta, err := encodeObserved(p, codec, opt.Expected)
 	if err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
-	if err := m.Restore(r, exp); err != nil {
-		return coreconsensus.SnapshotMetaValue{}, err
+	o := *opt
+	o.Expected = meta
+	return RestoreSnapshot(d, bytes.NewReader(encoded), newCluster, members, &o)
+}
+
+// replayObserved restores p.Snapshot into p.Machine, reads the stream to its
+// digest whatever the machine left unread, then applies the tail's commands
+// with the tokens the snapshot's lineage gives them.
+func replayObserved(p *ImportParams, opt *RestoreOptions) error {
+	r, err := OpenSnapshot(p.Snapshot, opt)
+	if err != nil {
+		return err
 	}
-	// Whatever the machine left unread is read here, to the digest.
+	exp := opt.Expected
+	if err := p.Machine.Restore(r, exp); err != nil {
+		return err
+	}
 	if _, err := io.Copy(io.Discard, r); err != nil {
-		return coreconsensus.SnapshotMetaValue{}, err
+		return err
 	}
-	for i := range tail {
-		e := tail[i]
+	for i := range p.Tail {
+		e := p.Tail[i]
 		if e.Kind != coreconsensus.EntryCommand {
 			continue
 		}
 		e.Token = coreconsensus.TokenValue{Cluster: exp.Log.Cluster, Epoch: exp.Log.Epoch, Term: e.Position.Term, Index: e.Position.Index}
-		m.Apply(e)
+		p.Machine.Apply(e)
 	}
-	s, err := m.Snapshot()
+	return nil
+}
+
+// encodeObserved encodes the state p.Machine reached as a snapshot stream,
+// and the metadata that describes it: exp's, moved to the tail's last entry.
+func encodeObserved(p *ImportParams, codec coretransform.BoundedDecompressor, exp coreconsensus.SnapshotMetaValue) ([]byte, coreconsensus.SnapshotMetaValue, error) {
+	s, err := p.Machine.Snapshot()
 	if err != nil {
-		return coreconsensus.SnapshotMetaValue{}, err
+		return nil, coreconsensus.SnapshotMetaValue{}, err
 	}
 	defer s.Release()
 	var buf bytes.Buffer
 	cw := newChunkWriter(&buf, codec, defaultChunkSize)
 	if _, err := s.WriteTo(cw); err != nil {
-		return coreconsensus.SnapshotMetaValue{}, err
+		return nil, coreconsensus.SnapshotMetaValue{}, err
 	}
 	if err := cw.Close(); err != nil {
-		return coreconsensus.SnapshotMetaValue{}, err
+		return nil, coreconsensus.SnapshotMetaValue{}, err
 	}
-	last := tail[len(tail)-1]
+	last := p.Tail[len(p.Tail)-1]
 	meta := exp
 	meta.ID = fmt.Sprintf("%020d-%020d", last.Position.Index, last.Position.Term)
 	meta.Position, meta.ChainTip = last.Position, last.ChainSum
@@ -151,9 +190,7 @@ func ImportObserved(d DataDir, snap io.Reader, tail []coreconsensus.EntryValue, 
 	meta.EncodedSize, meta.DecodedSize = cw.encoded, cw.decoded
 	copy(meta.SHA256[:], cw.sum.Sum(nil))
 	meta.Membership.Index = last.Position.Index
-	o := *opt
-	o.Expected = meta
-	return RestoreSnapshot(d, bytes.NewReader(buf.Bytes()), newCluster, members, &o)
+	return buf.Bytes(), meta, nil
 }
 
 // checkObservedTail checks that a tail continues a snapshot, entry by entry.

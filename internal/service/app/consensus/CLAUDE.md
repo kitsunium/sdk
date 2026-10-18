@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-18T12:00:00Z -->
+<!-- updated: 2026-10-18T15:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -8,7 +8,12 @@ step function (`raft/`), the storage actor, the apply goroutine, snapshots
 in checksummed chunks, the segmented file log and its recovery procedure,
 the file snapshot store, the data directory with its lock, stamp and stop
 markers, the offline operations (`Init`, `Recover`, `RestoreSnapshot`,
-`Inspect`, `ClearQuarantine`), the mTLS TCP transport over `net/tlsid` and
+`Inspect`, `ClearQuarantine`), what a non-member observer reads and
+rebuilds from (`Node.ReadCommitted`, COMPACTED below the log's first
+index; `OpenSnapshot`, SNAPSHOT_CORRUPT at the end of a stream that
+differs from its metadata; `ImportObserved`, a snapshot and the tail read
+after it, its chain checked from the snapshot's `ChainTip` before anything
+is written, grouped as an `ImportParams`), the mTLS TCP transport over `net/tlsid` and
 `net/server.Admission` (ADR 0174), and the in-memory doubles. It declares no
 code: it raises the core's.
 

@@ -172,7 +172,7 @@ func TestImportObservedReplaysAVerifiedTail(t *testing.T) {
 	next := coreconsensus.ClusterID{9}
 	fresh, self := freshJoining(t, next)
 	opt := &RestoreOptions{Expected: meta, Confirm: next.String(), Operator: "op:import", MaxEncoded: 1 << 30, MaxDecoded: 1 << 30}
-	got, err := ImportObserved(fresh.dd, bytes.NewReader(snap), tail, newKV(), next, []coreconsensus.MemberValue{self}, opt)
+	got, err := ImportObserved(fresh.dd, &ImportParams{Snapshot: bytes.NewReader(snap), Tail: tail, Machine: newKV()}, next, []coreconsensus.MemberValue{self}, opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestImportObservedRefusesATamperedTail(t *testing.T) {
 	for name, mutate := range cases {
 		fresh, self := freshJoining(t, next)
 		opt := &RestoreOptions{Expected: meta, Confirm: next.String(), Operator: "op:import", MaxEncoded: 1 << 30, MaxDecoded: 1 << 30}
-		_, err := ImportObserved(fresh.dd, bytes.NewReader(snap), mutate(clone()), newKV(), next, []coreconsensus.MemberValue{self}, opt)
+		_, err := ImportObserved(fresh.dd, &ImportParams{Snapshot: bytes.NewReader(snap), Tail: mutate(clone()), Machine: newKV()}, next, []coreconsensus.MemberValue{self}, opt)
 		if !errors.Is(err, coreconsensus.RestoreRefused) {
 			t.Fatalf("%s: %v", name, err)
 		}
