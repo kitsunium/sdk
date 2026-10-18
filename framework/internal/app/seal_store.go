@@ -161,7 +161,7 @@ func (e *sealedEngine) opened(ctx context.Context, key string, d plug.DocumentVa
 // whose class changed reads what it held.
 func (e *sealedEngine) openDoc(ctx context.Context, key string, raw []byte) ([]byte, error) {
 	doc, _, err := boxWalk(raw, e.s.plan().rules, "", false, func(at memberAt, value []byte) ([]byte, bool, error) {
-		plain, err := e.z.open(ctx, value, sealedAs(e.s.id), key, at.pointer)
+		plain, err := e.openMember(ctx, value, key, at.pointer)
 		switch {
 		case errors.Is(err, errErased):
 			return nil, true, nil
@@ -175,6 +175,18 @@ func (e *sealedEngine) openDoc(ctx context.Context, key string, raw []byte) ([]b
 		return plain, false, nil
 	})
 	return doc, err
+}
+
+// openMember opens a member's box of the record under key, at pointer: bound
+// where the store seals now (sealedIn), else where a former release sealed
+// it — an entry of the privacy journal it closed, bound to kit.privacy's id,
+// read for as long as it is kept (ADR 0180 step 5c).
+func (e *sealedEngine) openMember(ctx context.Context, value []byte, key, pointer string) ([]byte, error) {
+	present, former := sealedIn(e.s.id), sealedAs(e.s.id)
+	if present == former {
+		return e.z.open(ctx, value, present, key, pointer)
+	}
+	return e.z.openIn(ctx, value, []string{present, key, pointer}, []string{former, key, pointer})
 }
 
 // sealRecord is d, a record opened, as the store keeps it at rest: its
@@ -287,7 +299,7 @@ func (e *sealedEngine) seal(ctx context.Context, raw []byte, key, ref string, cl
 		case isNull(value), !at.inList && clear[at.pointer], erasing && zeroJSON(value, at.f.typ):
 			return value, false, nil
 		}
-		box, err := e.z.seal(ctx, ref, value, sealedAs(e.s.id), key, at.pointer)
+		box, err := e.z.seal(ctx, ref, value, sealedIn(e.s.id), key, at.pointer)
 		return box, false, err
 	})
 	return out, err

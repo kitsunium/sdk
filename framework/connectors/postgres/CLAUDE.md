@@ -44,4 +44,10 @@ the default database, and a proxy a test takes away and brings back;
 an unreachable server, credentials that never leak, a rotated credential
 reaching the next connection — the two roles may create in `kit_test`'s
 schema, where kit makes the store's table —, and the stores' conformance
-suite (`app/storetest`).
+suite (`app/storetest`). ADR 0180's steps on a former release's layout:
+`former_test.go` (the names at rest moved, step 5a), `former_keys_test.go`
+(the data keys re-wrapped, step 5b) and `former_journal_test.go` (step
+5c-1: a former journal written into app.privacy's table, its chain
+computed as the journal documents it, closed as it is by the next entry,
+`privacy journal -verify` holding across the two and breaking where a
+former entry is changed).

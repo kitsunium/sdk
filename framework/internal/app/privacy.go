@@ -75,8 +75,8 @@ type privacyRun struct {
 	own     any
 	dataKey *Secret
 	// keys are the reference keys, derived from index-key the first time a
-	// run needs them.
-	keys *referenceKeys
+	// run needs them: those at rest and the journal's.
+	keys *derivedKeys
 	// sealer seals and opens, made the first time a run needs it (seal.go);
 	// locks order the writes sealing under a data key and its destruction.
 	sealer *sealer
@@ -87,11 +87,22 @@ type privacyRun struct {
 	// holdLocks are the stores' hold locks, by store ID (hold.go).
 	holdLocks sync.Map
 
-	// chain guards the journal's last entry: its number and its hash.
-	chain  sync.Mutex
-	loaded bool
-	seq    int64
-	last   string
+	// chain guards the journal's last entry: its number, its hash, and the
+	// labels it says its references are made under — none when a former
+	// release wrote it, and the next entry closes its journal (ADR 0180
+	// step 5c).
+	chain    sync.Mutex
+	loaded   bool
+	seq      int64
+	last     string
+	lastRefs string
+}
+
+// formerJournal reports whether the journal's last entry is a former
+// release's: the next entry closes its journal. The caller holds the chain's
+// lock, the chain loaded.
+func (p *privacyRun) formerJournal() bool {
+	return p.seq > 0 && p.lastRefs != journalRefLabels
 }
 
 // privacyStore is a store, whatever its entity type, as kit's privacy sees

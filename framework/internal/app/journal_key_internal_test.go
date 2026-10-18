@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -143,16 +144,18 @@ func TestAnEntrySealedUnderItsOwnKeyStillOpens(t *testing.T) {
 	recs, err := app.Records(cards.id)
 	must(t, err)
 	must(t, recs.EraseFields(ctx, "c1", "written after", "/note"))
+	// The old entry says no labels: a former release's, its journal closed
+	// by the next entry (ADR 0180 step 5c), which seals nothing.
 	refs := journalRefs(t, app)
-	if len(refs) != 2 || refs[0] != keys.ownRef(j.id, old.key()) || refs[1] != "j:2031-03" {
-		t.Fatalf("the entries' boxes name %q, want the old entry's own key then the month's", refs)
+	if len(refs) != 3 || refs[0] != keys.ownRef(j.id, old.key()) || refs[1] != "" || refs[2] != "j:2031-03" {
+		t.Fatalf("the entries' boxes name %q, want the old entry's own key, nothing, then the month's", refs)
 	}
 	all, err := app.allJournal(ctx)
 	must(t, err)
-	if all[0].Reason != "written before the month's key" || all[1].Reason != "written after" {
-		t.Errorf("the reasons read %q and %q", all[0].Reason, all[1].Reason)
+	if all[0].Reason != "written before the month's key" || all[2].Reason != "written after" {
+		t.Errorf("the reasons read %q and %q", all[0].Reason, all[2].Reason)
 	}
-	if check := verifyChain(all); check.BrokenAt != 0 || check.Entries != 2 {
+	if check := verifyChain(all); check.BrokenAt != 0 || check.Entries != 3 || !slices.Equal(check.Closed, []int64{1}) {
 		t.Errorf("the chain across the two keys: %+v", check)
 	}
 }

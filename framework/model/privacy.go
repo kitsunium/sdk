@@ -60,6 +60,7 @@ const (
 	JournalHold        string = core.JournalHold        // a hold placed on a record
 	JournalRelease     string = core.JournalRelease     // a hold lifted
 	JournalShred       string = core.JournalShred       // a subject's data key destroyed (ADR 0006, step 3)
+	JournalContinue    string = core.JournalContinue    // a journal opened after the one before it closed, naming its last hash (ADR 0180 step 5c)
 )
 
 type (

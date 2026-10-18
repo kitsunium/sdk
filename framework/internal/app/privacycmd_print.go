@@ -66,6 +66,9 @@ func (a *App) printJournal(ctx context.Context, w io.Writer, verify bool) error 
 		fmt.Fprintf(w, "the chain breaks at entry %d: an entry was changed, or one before it removed\n", check.BrokenAt)
 		return failure(CodePrivacyJournal, "JOURNAL_BROKEN", fmt.Sprintf("the privacy journal's chain breaks at entry %d", check.BrokenAt), nil)
 	}
+	for _, closed := range check.Closed {
+		fmt.Fprintf(w, "a journal closed at entry %d: entry %d names its hash and continues it\n", closed, closed+1)
+	}
 	fmt.Fprintf(w, "the chain holds: %d entries\n", check.Entries)
 	return nil
 }

@@ -1730,6 +1730,10 @@ packages:
         name: JournalShred
         type: string
         value: "\"shred\""
+      - blockDoc: The operations of the privacy journal.
+        name: JournalContinue
+        type: string
+        value: "\"continue\""
       - blockDoc: Profile kinds.
         name: ProfileCPU
         type: string
@@ -3428,6 +3432,9 @@ packages:
       - blockDoc: The operations of the privacy journal.
         name: JournalShred
         value: "\"shred\""
+      - blockDoc: The operations of the privacy journal.
+        name: JournalContinue
+        value: "\"continue\""
       - blockDoc: Profile kinds.
         name: ProfileCPU
         value: "\"cpu\""
@@ -6840,8 +6847,16 @@ packages:
               tag: json:"by"
               type: string
             - doc: |-
+                Follows is set on a JournalContinue entry alone: the hash of the
+                last entry of the journal it continues, which closed there. Its
+                own chain starts again from it (ADR 0180 step 5c).
+              name: Follows
+              tag: json:"follows,omitempty"
+              type: string
+            - doc: |-
                 Hash is the entry's link in the chain: SHA-256 of the previous
-                entry's hash and this entry.
+                entry's hash and this entry — of nothing and this entry for a
+                JournalContinue entry, which opens a chain.
               name: Hash
               tag: json:"hash"
               type: string
@@ -6857,10 +6872,19 @@ packages:
               type: int
             - doc: |-
                 BrokenAt is the sequence number where the chain breaks: an entry
-                changed, or one removed before it. Zero when the chain holds.
+                changed, or one removed before it, or a JournalContinue entry
+                that does not name the hash of the entry before it. Zero when the
+                chain holds.
               name: BrokenAt
               tag: json:"brokenAt,omitempty"
               type: int64
+            - doc: |-
+                Closed are the last entries of the journals the journal closed,
+                each followed by the JournalContinue entry that names its hash:
+                the chain holds across them, journal after journal.
+              name: Closed
+              tag: json:"closed,omitempty"
+              type: "[]int64"
       - doc: |-
           RecordFormerMessage is the former values of one exported record's fields.
           A personal or special field's former values are redacted, never exported in
