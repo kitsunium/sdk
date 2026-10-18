@@ -83,7 +83,7 @@ var (
 	_ plug.DocumentSource = (*sealedEngine)(nil)
 	_ copyDocs            = (*jsonDocs)(nil)
 
-	_ plug.Transaction = kitTransaction{}
+	_ plug.Transaction = frameworkTransaction{}
 
 	_ copyPartser   = (*StoreService[struct{}])(nil)
 	_ journalParter = (*WorkflowService[struct{}, string])(nil)

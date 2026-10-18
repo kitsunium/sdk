@@ -189,7 +189,7 @@ func (s *StoreService[T]) declareIndexes(svc *Service, opts []indexOption) {
 // declares, or kit's subject index (privacy_keys.go) — what a database's
 // table files under kit's index key.
 func (s *storeCore) indexed() bool {
-	return len(s.decls) > 0 || (s.plan().subject != nil && !kitOwn(s.svc))
+	return len(s.decls) > 0 || (s.plan().subject != nil && !frameworkOwn(s.svc))
 }
 
 // specs are the declared indexes as the engine takes them, over documents:

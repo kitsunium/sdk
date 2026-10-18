@@ -388,7 +388,7 @@ func (m *Mailer) describeTransport(a *App, info *model.MailerInfo) {
 		info.Transport, info.Server, info.TLS = model.TransportSMTP, relay.server, relay.tls
 	case running:
 	default:
-		v, _, err := a.kitSecret(context.Background(), smtpSecret)
+		v, _, err := a.frameworkSecret(context.Background(), smtpSecret)
 		if err != nil {
 			return
 		}
@@ -506,7 +506,7 @@ func (m *Mailer) start(ctx context.Context, a *App) error {
 		return failure(CodeMailQueue, "OUTBOX_OPEN", "a mailer's outbox cannot be opened", err, errs.String("mailer", m.id))
 	}
 	dead, deadErr := spool.DeadLetters(ctx, maxDeadLetters)
-	loop := a.kitLoop(m.id+" outbox", m.id, model.LoopConsumer, consumerHow, loopOrigin{model.ProvenanceLibrary, "sdk/v1/app/mail/spool"})
+	loop := a.frameworkLoop(m.id+" outbox", m.id, model.LoopConsumer, consumerHow, loopOrigin{model.ProvenanceLibrary, "sdk/v1/app/mail/spool"})
 	ctx, cancel := context.WithCancel(context.WithoutCancel(a.baseCtx))
 	done := make(chan struct{})
 	m.mu.Lock()
@@ -553,7 +553,7 @@ func (m *Mailer) stop(ctx context.Context, a *App) error {
 // the SMTP URL is set, the capture transport otherwise. It runs once the
 // start found the mail subsystem.
 func (m *Mailer) openTransport(ctx context.Context, a *App) (transport plug.MailSink, full plug.MailCaptureSource, relay smtpRelay, err error) {
-	v, _, err := a.kitSecret(ctx, smtpSecret)
+	v, _, err := a.frameworkSecret(ctx, smtpSecret)
 	switch {
 	case errors.Is(err, secret.NotFound):
 		// One delivery kept: transmit reads it at once, and the mailbox
@@ -607,7 +607,7 @@ func smtpProblem(url revealStringer) phrase {
 // URL changed since the transport was built. A URL that went missing or no
 // longer builds a transport leaves the one in use, and is logged once.
 func (m *Mailer) current(ctx context.Context, a *App, transport plug.MailSink, relay smtpRelay) plug.MailSink {
-	v, _, err := a.kitSecret(ctx, smtpSecret)
+	v, _, err := a.frameworkSecret(ctx, smtpSecret)
 	if err == nil && v.Value.Equal(relay.url) {
 		return transport
 	}
@@ -960,7 +960,7 @@ func (m *Mailer) senderProblem() phrase {
 
 // smtpState says whether the SMTP URL is set, and what is wrong with it.
 func (a *App) smtpState() (set bool, problem phrase) {
-	v, _, err := a.kitSecret(context.Background(), smtpSecret)
+	v, _, err := a.frameworkSecret(context.Background(), smtpSecret)
 	switch {
 	case err == nil:
 		return true, smtpProblem(v.Value)

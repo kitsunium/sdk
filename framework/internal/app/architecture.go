@@ -126,7 +126,7 @@ func (an *archNodes) user(product string) (model.Person, bool) {
 // product declares it.
 func (a *App) processContainer(g *model.Graph, an *archNodes, dev bool) model.Container {
 	productHTTP := slices.ContainsFunc(g.Connectors, func(c model.Connector) bool { return c.ID == model.ConnectorHTTP })
-	technology := goRelease() + " · kit"
+	technology := goRelease() + " · " + frameworkName
 	if productHTTP {
 		technology += " · net/http"
 	}

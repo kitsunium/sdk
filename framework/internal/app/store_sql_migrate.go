@@ -34,17 +34,17 @@ import (
 // release kept them under kit_* names, which renamed_rest.go moves first.
 
 const (
-	// setKit is the framework's own set.
-	setKit = frameworkName
-	// tableKit is the version table of the framework's own set.
-	tableKit = frameworkName + "_migrations"
-	// kitTablesTable is the framework's registry of its tables.
-	kitTablesTable = frameworkName + "_tables"
+	// setFramework is the framework's own set.
+	setFramework = frameworkName
+	// tableFramework is the version table of the framework's own set.
+	tableFramework = frameworkName + "_migrations"
+	// frameworkTablesTable is the framework's registry of its tables.
+	frameworkTablesTable = frameworkName + "_tables"
 	// registryVersion is the registry's migration, first of kit's set.
 	registryVersion uint64 = 1
-	// kitSetAttempts bounds how often kit gives new tables the next
+	// frameworkSetAttempts bounds how often kit gives new tables the next
 	// generation, while other processes apply theirs.
-	kitSetAttempts int = 5
+	frameworkSetAttempts int = 5
 )
 
 // tableRecord is one table in kit's registry: the version its migration was
@@ -79,7 +79,7 @@ func (g *tableRegistry) get(table string) (tableRecord, bool) {
 func (g *tableRegistry) put(ctx context.Context, rec tableRecord) error {
 	raw, err := json.Marshal(rec)
 	if err != nil {
-		return unencodable(kitTablesTable, err)
+		return unencodable(frameworkTablesTable, err)
 	}
 	if err := g.store.Write(ctx, plug.DocumentValue{JSON: raw, Value: rec}, plug.WriteUpsert); err != nil {
 		return err
@@ -101,16 +101,16 @@ func (g *tableRegistry) drop(ctx context.Context, table string) error {
 	return nil
 }
 
-// kitSet is kit's own set on one database, as this build resolves it: every
+// frameworkSet is kit's own set on one database, as this build resolves it: every
 // migration, and the tables it gives a version for the first time.
-type kitSet struct {
+type frameworkSet struct {
 	set   migrationSet
 	fresh []tableRecord
 }
 
 // registryMigration is the registry's migration.
 func registryMigration(dialect Dialect) (plug.MigrationValue, error) {
-	return tableMigration(dialect, kitTable{name: kitTablesTable}, registryVersion)
+	return tableMigration(dialect, frameworkTable{name: frameworkTablesTable}, registryVersion)
 }
 
 // registryConfig is the engine of kit's registry: its records, keyed by
@@ -123,7 +123,7 @@ var registryConfig = &engineConfig{
 	decode: func(raw json.RawMessage) (any, error) {
 		var rec tableRecord
 		if err := json.Unmarshal(raw, &rec); err != nil {
-			return nil, undecodable(kitTablesTable, err)
+			return nil, undecodable(frameworkTablesTable, err)
 		}
 		return rec, nil
 	},
@@ -137,12 +137,12 @@ func openRegistry(ctx context.Context, d *database, db plug.Database, apply bool
 	if err != nil {
 		return nil, err
 	}
-	m, err := migratorOf(db, migrationSet{name: setKit, table: tableKit, migrations: []plug.MigrationValue{first}})
+	m, err := migratorOf(db, migrationSet{name: setFramework, table: tableFramework, migrations: []plug.MigrationValue{first}})
 	if err != nil {
 		return nil, err
 	}
-	sc := registryConfig.storeConfig(kitTablesTable, versionsOn{})
-	sc.Database, sc.Table = db, kitTablesTable
+	sc := registryConfig.storeConfig(frameworkTablesTable, versionsOn{})
+	sc.Database, sc.Table = db, frameworkTablesTable
 	store, err := openEngine(sc)
 	if err != nil {
 		return nil, err
@@ -183,22 +183,22 @@ func tableRecordOf(d plug.DocumentValue) (tableRecord, error) {
 	return rec, nil
 }
 
-// resolveKitSet is kit's set on d: the registry's migration, each table the
+// resolveFrameworkSet is kit's set on d: the registry's migration, each table the
 // registry knows at its version, and each new one at gen, the generation
 // given.
-func (a *App) resolveKitSet(d *database, g *tableRegistry, gen uint64) (kitSet, error) {
+func (a *App) resolveFrameworkSet(d *database, g *tableRegistry, gen uint64) (frameworkSet, error) {
 	first, err := registryMigration(d.dialect())
 	if err != nil {
-		return kitSet{}, err
+		return frameworkSet{}, err
 	}
-	out := kitSet{set: migrationSet{name: setKit, table: tableKit, migrations: []plug.MigrationValue{first}}}
+	out := frameworkSet{set: migrationSet{name: setFramework, table: tableFramework, migrations: []plug.MigrationValue{first}}}
 	used := map[uint64]bool{registryVersion: true}
-	known, fresh, tables := a.kitTablesOf(d, g)
+	known, fresh, tables := a.frameworkTablesOf(d, g)
 	for _, rec := range known {
 		used[rec.Version] = true
 		m, err := tableMigration(d.dialect(), tables[rec.Table], rec.Version)
 		if err != nil {
-			return kitSet{}, err
+			return frameworkSet{}, err
 		}
 		out.set.migrations = append(out.set.migrations, m)
 	}
@@ -206,7 +206,7 @@ func (a *App) resolveKitSet(d *database, g *tableRegistry, gen uint64) (kitSet, 
 		v := freeVersion(used, gen<<32|uint64(nameDigest(name)))
 		m, err := tableMigration(d.dialect(), tables[name], v)
 		if err != nil {
-			return kitSet{}, err
+			return frameworkSet{}, err
 		}
 		out.set.migrations = append(out.set.migrations, m)
 		out.fresh = append(out.fresh, tableRecord{Table: name, Version: v})
@@ -214,12 +214,12 @@ func (a *App) resolveKitSet(d *database, g *tableRegistry, gen uint64) (kitSet, 
 	return out, nil
 }
 
-// kitTablesOf are kit's tables on d: those g records, with their record,
+// frameworkTablesOf are kit's tables on d: those g records, with their record,
 // and the new ones, sorted; and each table by its name, which says what
 // makes it.
-func (a *App) kitTablesOf(d *database, g *tableRegistry) (known []tableRecord, fresh []string, tables map[string]kitTable) {
-	tables = map[string]kitTable{}
-	for _, t := range a.kitTables(d) {
+func (a *App) frameworkTablesOf(d *database, g *tableRegistry) (known []tableRecord, fresh []string, tables map[string]frameworkTable) {
+	tables = map[string]frameworkTable{}
+	for _, t := range a.frameworkTables(d) {
 		tables[t.name] = t
 		if rec, ok := g.get(t.name); ok {
 			known = append(known, rec)
@@ -248,7 +248,7 @@ func freeVersion(used map[uint64]bool, v uint64) uint64 {
 // store's versions the table of versions beside the store's, which the SDK
 // names from it; as the queue subsystem writes it, for a consumer's queue,
 // the SQL broker's one table (ADR 0178 C1).
-func tableMigration(dialect Dialect, t kitTable, version uint64) (plug.MigrationValue, error) {
+func tableMigration(dialect Dialect, t frameworkTable, version uint64) (plug.MigrationValue, error) {
 	if t.queue {
 		queues := plug.Queues.Load()
 		if queues == nil || queues.TableMigration == nil {
@@ -282,15 +282,15 @@ func nextGeneration(g *tableRegistry) uint64 {
 	return gen
 }
 
-// applyKitSet applies kit's set on d — its registry first, its new tables
+// applyFrameworkSet applies kit's set on d — its registry first, its new tables
 // at the next generation, the one after when another process applied a
 // newer one meanwhile — and records the new tables. It returns the set as
 // it applied it.
-func (a *App) applyKitSet(ctx context.Context, d *database, db plug.Database, g *tableRegistry) (migrationSet, error) {
+func (a *App) applyFrameworkSet(ctx context.Context, d *database, db plug.Database, g *tableRegistry) (migrationSet, error) {
 	gen := nextGeneration(g)
 	var last error
-	for range kitSetAttempts {
-		set, next, err := a.applyKitSetAt(ctx, d, db, g, gen)
+	for range frameworkSetAttempts {
+		set, next, err := a.applyFrameworkSetAt(ctx, d, db, g, gen)
 		if next == 0 {
 			return set, err
 		}
@@ -299,11 +299,11 @@ func (a *App) applyKitSet(ctx context.Context, d *database, db plug.Database, g 
 	return migrationSet{}, last
 }
 
-// applyKitSetAt applies kit's set on d with its new tables at generation
+// applyFrameworkSetAt applies kit's set on d with its new tables at generation
 // gen, and records them. next is the generation to try again at when
 // another process applied a newer one meanwhile, zero otherwise.
-func (a *App) applyKitSetAt(ctx context.Context, d *database, db plug.Database, g *tableRegistry, gen uint64) (set migrationSet, next uint64, err error) {
-	ks, err := a.resolveKitSet(d, g, gen)
+func (a *App) applyFrameworkSetAt(ctx context.Context, d *database, db plug.Database, g *tableRegistry, gen uint64) (set migrationSet, next uint64, err error) {
+	ks, err := a.resolveFrameworkSet(d, g, gen)
 	if err != nil {
 		return migrationSet{}, 0, err
 	}
@@ -336,10 +336,10 @@ func laterGeneration(gen uint64, err error) uint64 {
 	return max(gen+1, applied>>32+1)
 }
 
-// planKitSet is kit's set on d as `migrate status` shows it and a manual
+// planFrameworkSet is kit's set on d as `migrate status` shows it and a manual
 // start judges it: what is applied, and what is pending, applying nothing.
-func (a *App) planKitSet(d *database, g *tableRegistry) (migrationSet, error) {
-	ks, err := a.resolveKitSet(d, g, nextGeneration(g))
+func (a *App) planFrameworkSet(d *database, g *tableRegistry) (migrationSet, error) {
+	ks, err := a.resolveFrameworkSet(d, g, nextGeneration(g))
 	return ks.set, err
 }
 

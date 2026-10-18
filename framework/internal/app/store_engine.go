@@ -35,7 +35,7 @@ import (
 // call on the transaction the context carries for it and within its
 // timeout (sqlCall); the document store records, in a transaction of the
 // data's, what a write replaced, and holds the write's hooks until the
-// commit (kitTransaction). The port grows by sibling interfaces an engine
+// commit (frameworkTransaction). The port grows by sibling interfaces an engine
 // may implement, never by a method (the SDK's ADR 0039).
 //
 // A document an engine returns holds the record as the store's caller reads
@@ -70,7 +70,7 @@ type engineConfig struct {
 func (c *engineConfig) storeConfig(name string, vs versionsOn) plug.StoreConfig {
 	cfg := plug.StoreConfig{
 		Name: name, Key: c.key, KeyAtRest: c.keyAtRest, Decode: c.decode, Indexes: c.indexes,
-		Transaction: kitTransaction{}, Stamp: stampOf,
+		Transaction: frameworkTransaction{}, Stamp: stampOf,
 	}
 	if vs.keep > 0 {
 		cfg.Versions, cfg.Held = vs.keep, vs.held
@@ -112,29 +112,29 @@ func storesMissing() error {
 		errs.String("packages", storePackage))
 }
 
-// kitTransaction is kit's transaction as a store's engine takes part in it
+// frameworkTransaction is kit's transaction as a store's engine takes part in it
 // (plug.Transaction): the undo log of the data's local transactions, the
 // write hooks held until the commit, the announcements a rollback on a
 // database makes again.
-type kitTransaction struct{}
+type frameworkTransaction struct{}
 
 // Local reports whether ctx runs in a transaction that holds the data's
 // writer turn.
-func (kitTransaction) Local(ctx context.Context) bool { return inLocal(ctx) }
+func (frameworkTransaction) Local(ctx context.Context) bool { return inLocal(ctx) }
 
 // Undo keeps restore, which a rollback of the transaction ctx carries runs,
 // with the entity the funnel named (undoKeyed).
-func (kitTransaction) Undo(ctx context.Context, store string, restore func(ctx context.Context) error) {
+func (frameworkTransaction) Undo(ctx context.Context, store string, restore func(ctx context.Context) error) {
 	key, _ := ctx.Value(undoKeyOf{}).(string)
 	recordUndo(ctx, undoStep{store: store, key: key, restore: restore})
 }
 
 // AtCommit holds fn until the transaction ctx carries commits: an effect
 // that stays in the process, a store's write hook.
-func (kitTransaction) AtCommit(ctx context.Context, fn func()) bool {
+func (frameworkTransaction) AtCommit(ctx context.Context, fn func()) bool {
 	return hold(ctx, heldEffect{release: func(context.Context) error { fn(); return nil }, inside: true})
 }
 
 // Retell keeps fn, which announces a write on a database again when the
 // transaction ctx carries rolls it back.
-func (kitTransaction) Retell(ctx context.Context, fn func()) { retell(ctx, fn) }
+func (frameworkTransaction) Retell(ctx context.Context, fn func()) { retell(ctx, fn) }

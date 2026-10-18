@@ -217,9 +217,9 @@ func TestTheFormerSecretsAreReadUntilCopied(t *testing.T) {
 		must(t, err)
 	}
 	a := NewApp("former")
-	a.secrets.Store(&secretStores{kept: kept, from: "memory", kitEnv: secret.NewMemory(secret.MemoryConfig{})})
+	a.secrets.Store(&secretStores{kept: kept, from: "memory", frameworkEnv: secret.NewMemory(secret.MemoryConfig{})})
 	for name, want := range map[string]string{indexSecret: "a former index key of 32 bytes..", smtpSecret: "smtp://former.test:25"} {
-		v, _, err := a.kitSecret(ctx, name)
+		v, _, err := a.frameworkSecret(ctx, name)
 		if err != nil || v.Value.RevealString() != want {
 			t.Errorf("%s before the copy: %v %v", name, v.Value.RevealString(), err)
 		}
@@ -235,14 +235,14 @@ func TestTheFormerSecretsAreReadUntilCopied(t *testing.T) {
 	_, err := kept.Put(ctx, "app-smtp-url", secret.FromString("smtp://present.test:25"))
 	must(t, err)
 	must(t, a.moveFormerSecrets(ctx, kept))
-	if v, _, _ := a.kitSecret(ctx, smtpSecret); v.Value.RevealString() != "smtp://present.test:25" {
+	if v, _, _ := a.frameworkSecret(ctx, smtpSecret); v.Value.RevealString() != "smtp://present.test:25" {
 		t.Errorf("an older former SMTP URL replaced the present one: %s", v.Value.RevealString())
 	}
 	clk.Advance(time.Hour)
 	_, err = kept.Put(ctx, "kit-smtp-url", secret.FromString("smtp://set-by-the-former-release.test:25"))
 	must(t, err)
 	must(t, a.moveFormerSecrets(ctx, kept))
-	if v, _, _ := a.kitSecret(ctx, smtpSecret); v.Value.RevealString() != "smtp://set-by-the-former-release.test:25" {
+	if v, _, _ := a.frameworkSecret(ctx, smtpSecret); v.Value.RevealString() != "smtp://set-by-the-former-release.test:25" {
 		t.Errorf("a newer former SMTP URL was not copied: %s", v.Value.RevealString())
 	}
 	_, err = kept.Put(ctx, "kit-index-key", secret.FromString("another index key, of 32 bytes."))

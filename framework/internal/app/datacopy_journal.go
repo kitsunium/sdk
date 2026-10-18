@@ -90,7 +90,7 @@ func (*jsonDocs) VersionList(_ context.Context, _ string) ([]plug.VersionValue, 
 func (j *jsonDocs) Current(_ context.Context, key string) (json.RawMessage, error) {
 	raw, ok := j.docs[key]
 	if !ok {
-		return nil, kitRefusal(plug.RefusalNotFound, "workflow journal")
+		return nil, frameworkRefusal(plug.RefusalNotFound, "workflow journal")
 	}
 	return raw, nil
 }

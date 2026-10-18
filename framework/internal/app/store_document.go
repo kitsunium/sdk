@@ -41,11 +41,11 @@ func unencodable(store string, err error) error {
 		errs.String("store", store), errs.String("cause", encodeCause(err))))
 }
 
-// kitRefusal is a refusal of kind kit's core makes itself — an engine of its
+// frameworkRefusal is a refusal of kind kit's core makes itself — an engine of its
 // own that wraps the subsystem's, a file of its own —, for the store named
 // store: as an engine's, which its caller words (Store.said), and in kit's
 // words already where it is not.
-func kitRefusal(kind plug.Refusal, store string) error {
+func frameworkRefusal(kind plug.Refusal, store string) error {
 	var said *Error
 	switch kind {
 	case plug.RefusalNotFound:

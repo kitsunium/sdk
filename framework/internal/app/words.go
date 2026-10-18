@@ -276,9 +276,9 @@ func openOthers(cfg *plug.WordsConfig) (*otherWords, error) {
 	return o, nil
 }
 
-// kitLanguages are the languages kit speaks, English first — its
+// frameworkLanguages are the languages kit speaks, English first — its
 // terminal's —, then those of the catalogues the Studio plugged in.
-func kitLanguages() []string {
+func frameworkLanguages() []string {
 	langs := []string{"en"}
 	if o := translator(); o != nil {
 		langs = append(langs, o.langs...)
@@ -364,7 +364,7 @@ func (p phrase) spoken() (english string, texts map[string]string) {
 	if p.said == nil {
 		return "", nil
 	}
-	langs := kitLanguages()
+	langs := frameworkLanguages()
 	texts = make(map[string]string, len(langs))
 	for _, lang := range langs {
 		texts[lang] = p.said.in(lang)

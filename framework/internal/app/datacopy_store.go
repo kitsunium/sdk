@@ -72,12 +72,12 @@ func (s *storeCore) copyParts(ctx context.Context, a *App, r *databaseRun) ([]co
 // IFACE-OPAQUE: the engine is kit's own port — the SQL engine, or the
 // sealing one around it — as openSQL returns it.
 func (s *storeCore) openCopyTarget(ctx context.Context, a *App, r *databaseRun) (plug.StoreEngine, error) {
-	own, err := s.kitIndexes(ctx, a)
+	own, err := s.frameworkIndexes(ctx, a)
 	if err != nil {
 		return nil, err
 	}
 	specs := append(s.specs(), own...)
-	at := sqlTable{run: r, table: s.table(), store: s.id, own: kitOwn(s.svc), versions: s.versionsOn(a)}
+	at := sqlTable{run: r, table: s.table(), store: s.id, own: frameworkOwn(s.svc), versions: s.versionsOn(a)}
 	if len(specs) > 0 {
 		keys, err := a.referenceKeys(ctx)
 		if err != nil {

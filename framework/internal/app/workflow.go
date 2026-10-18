@@ -736,7 +736,7 @@ func (w *WorkflowService[E, S]) transitioned(a *App, c *plug.WorkflowChangeValue
 		from = ""
 	}
 	a.hub.publish(model.Event{Type: model.EventTransition, Time: c.At.UTC(), Transition: &model.TransitionEvent{
-		Workflow: w.id, Instance: c.Key, Event: c.Event, From: from, To: c.To, Trigger: kitTrigger(c.Trigger), Caller: c.Actor,
+		Workflow: w.id, Instance: c.Key, Event: c.Event, From: from, To: c.To, Trigger: frameworkTrigger(c.Trigger), Caller: c.Actor,
 	}})
 	w.publishCensus(a)
 }
@@ -746,7 +746,7 @@ func (w *WorkflowService[E, S]) transitioned(a *App, c *plug.WorkflowChangeValue
 func (w *WorkflowService[E, S]) changeOf(c *plug.WorkflowChangeValue) ChangeEvent[E, S] {
 	return ChangeEvent[E, S]{
 		Key: c.Key, Entity: w.entityOf(c.Entity), Event: c.Event, From: w.stateNamed(c.From), To: w.stateNamed(c.To),
-		Trigger: kitTrigger(c.Trigger), Caller: c.Actor, At: c.At.UTC(),
+		Trigger: frameworkTrigger(c.Trigger), Caller: c.Actor, At: c.At.UTC(),
 	}
 }
 
@@ -848,7 +848,7 @@ func (w *WorkflowService[E, S]) observe(a *App) func(context.Context, plug.Workf
 	return func(ctx context.Context, f plug.WorkflowFiringValue) (context.Context, func(error)) {
 		tctx, sp := a.begin(ctx, &spanStart{node: w.id, label: f.Event, op: model.OpTransition, name: f.Event})
 		sp.attr("instance", f.Key)
-		sp.attr("trigger", kitTrigger(f.Trigger))
+		sp.attr("trigger", frameworkTrigger(f.Trigger))
 		tctx = context.WithValue(tctx, transitionOf{}, firing{key: f.Key})
 		tctx, tx := beginTransaction(tctx, a)
 		return tctx, func(err error) {

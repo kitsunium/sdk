@@ -377,7 +377,7 @@ func recordOf(key string, inst *model.Instance, declared map[string]bool) (plug.
 func instanceOf(rec *plug.WorkflowRecordValue) model.Instance {
 	inst := model.Instance{ID: rec.Key, State: rec.State, EnteredAt: rec.Entered.UTC()}
 	for _, s := range rec.History {
-		step := model.Step{Event: s.Event, From: s.From, To: s.To, At: s.At.UTC(), Trigger: kitTrigger(s.Trigger), Caller: s.Actor}
+		step := model.Step{Event: s.Event, From: s.From, To: s.To, At: s.At.UTC(), Trigger: frameworkTrigger(s.Trigger), Caller: s.Actor}
 		if s.Trigger == plug.WorkflowTriggerStart {
 			step.From = ""
 		}
@@ -386,9 +386,9 @@ func instanceOf(rec *plug.WorkflowRecordValue) model.Instance {
 	return inst
 }
 
-// kitTrigger is what fired a transition, as the model says it: the engine's
+// frameworkTrigger is what fired a transition, as the model says it: the engine's
 // delays and deadlines are both timers.
-func kitTrigger(t plug.WorkflowTrigger) string {
+func frameworkTrigger(t plug.WorkflowTrigger) string {
 	switch t {
 	case plug.WorkflowTriggerStart:
 		return model.TriggerCreate

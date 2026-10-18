@@ -268,7 +268,7 @@ func (t *txn) undidOf(store, key string) uint64 {
 type undoKeyOf struct{}
 
 // undoKeyed is ctx for a funnel's write of key: in a local transaction,
-// marked with the key, which the write's undo step keeps (kitTransaction);
+// marked with the key, which the write's undo step keeps (frameworkTransaction);
 // unchanged elsewhere, where nothing is undone.
 func undoKeyed(ctx context.Context, key string) context.Context {
 	if !inLocal(ctx) {

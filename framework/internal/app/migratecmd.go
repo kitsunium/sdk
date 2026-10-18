@@ -149,7 +149,7 @@ func (r *migrateRun) all(ctx context.Context) int {
 // concerns says whether the command runs on d: a database with sets — kit's
 // own, when it keeps stores —, and down's own.
 func (r *migrateRun) concerns(d *database) bool {
-	return (len(r.a.migrationSets(d)) > 0 || len(r.a.kitTables(d)) > 0) && (r.target == nil || r.target.db == d)
+	return (len(r.a.migrationSets(d)) > 0 || len(r.a.frameworkTables(d)) > 0) && (r.target == nil || r.target.db == d)
 }
 
 // database runs the command on the sets of one database, opened for it, and
@@ -170,7 +170,7 @@ func (r *migrateRun) database(ctx context.Context, d *database) bool {
 			fmt.Fprintf(r.stderr, "%s: closing the pool: %s\n", d.name, errs.PublicOf(err))
 		}
 	}()
-	ok := r.target != nil || len(r.a.kitTables(d)) == 0 || (r.formerTables(ctx, d, o) && r.kitSet(ctx, d, o))
+	ok := r.target != nil || len(r.a.frameworkTables(d)) == 0 || (r.formerTables(ctx, d, o) && r.frameworkSet(ctx, d, o))
 	return r.sets(ctx, d, o) && ok
 }
 
@@ -180,7 +180,7 @@ func (r *migrateRun) database(ctx context.Context, d *database) bool {
 // reads them under their present ones. It reports whether it went through.
 func (r *migrateRun) formerTables(ctx context.Context, d *database, o *opened) bool {
 	fail := func(err error) bool {
-		fmt.Fprintf(r.stderr, "%s/%s: %s\n", d.name, setKit, errs.PublicOf(err))
+		fmt.Fprintf(r.stderr, "%s/%s: %s\n", d.name, setFramework, errs.PublicOf(err))
 		return false
 	}
 	if r.sub == "status" {
@@ -189,7 +189,7 @@ func (r *migrateRun) formerTables(ctx context.Context, d *database, o *opened) b
 			return fail(err)
 		}
 		if len(former) > 0 {
-			fmt.Fprintf(r.tw, "%s\t%s\t%s\t-\t%s\t%s\n", d.name, setKit, formerSetTable, "under former names: "+strings.Join(former, ", "), "pending")
+			fmt.Fprintf(r.tw, "%s\t%s\t%s\t-\t%s\t%s\n", d.name, setFramework, formerSetTable, "under former names: "+strings.Join(former, ", "), "pending")
 		}
 		return true
 	}
@@ -198,7 +198,7 @@ func (r *migrateRun) formerTables(ctx context.Context, d *database, o *opened) b
 		return fail(err)
 	}
 	if len(moved) > 0 {
-		fmt.Fprintf(r.tw, "%s/%s: moved to their present names: %s\n", d.name, setKit, strings.Join(moved, ", "))
+		fmt.Fprintf(r.tw, "%s/%s: moved to their present names: %s\n", d.name, setFramework, strings.Join(moved, ", "))
 	}
 	return true
 }
@@ -238,19 +238,19 @@ func (r *migrateRun) set(ctx context.Context, d *database, set migrationSet, o *
 	return true
 }
 
-// kitSet runs the command on kit's own set — status, or up —, and reports
+// frameworkSet runs the command on kit's own set — status, or up —, and reports
 // whether it went through: its registry read, its tables at the versions it
 // records, a new one at the next generation.
-func (r *migrateRun) kitSet(ctx context.Context, d *database, o *opened) bool {
+func (r *migrateRun) frameworkSet(ctx context.Context, d *database, o *opened) bool {
 	fail := func(set migrationSet, err error) bool {
-		fmt.Fprintf(r.stderr, "%s/%s: %s\n", d.name, setKit, errs.PublicOf(r.a.migrationFailure(d, set, err)))
+		fmt.Fprintf(r.stderr, "%s/%s: %s\n", d.name, setFramework, errs.PublicOf(r.a.migrationFailure(d, set, err)))
 		return false
 	}
 	g, err := r.registry(ctx, d, o, false)
 	if err != nil {
-		return fail(migrationSet{name: setKit, table: tableKit}, err)
+		return fail(migrationSet{name: setFramework, table: tableFramework}, err)
 	}
-	set, err := r.a.planKitSet(d, g)
+	set, err := r.a.planFrameworkSet(d, g)
 	if err != nil {
 		return fail(set, err)
 	}
@@ -269,15 +269,15 @@ func (r *migrateRun) kitSet(ctx context.Context, d *database, o *opened) bool {
 		return fail(set, err)
 	}
 	if g, err = r.registry(ctx, d, o, true); err == nil {
-		set, err = r.a.applyKitSet(ctx, d, o.db, g)
+		set, err = r.a.applyFrameworkSet(ctx, d, o.db, g)
 	}
 	switch {
 	case err != nil:
 		return fail(set, err)
 	case len(pending) == 0:
-		fmt.Fprintf(r.tw, "%s/%s: up to date\n", d.name, setKit)
+		fmt.Fprintf(r.tw, "%s/%s: up to date\n", d.name, setFramework)
 	default:
-		fmt.Fprintf(r.tw, "%s/%s: applied %s\n", d.name, setKit, versionsText(pending))
+		fmt.Fprintf(r.tw, "%s/%s: applied %s\n", d.name, setFramework, versionsText(pending))
 	}
 	return true
 }
@@ -290,7 +290,7 @@ func (r *migrateRun) registry(ctx context.Context, d *database, o *opened, apply
 	if err != nil || r.sub != "up" {
 		return g, err
 	}
-	return g, g.rekey(ctx, r.a.kitTables(d))
+	return g, g.rekey(ctx, r.a.frameworkTables(d))
 }
 
 // status prints what a set's version table records and what is pending.
@@ -366,7 +366,7 @@ func (a *App) findSet(name string) (setRef, error) {
 	if !qualified {
 		dbName, setName = "", name
 	}
-	if setName == setKit {
+	if setName == setFramework {
 		return setRef{}, failure(CodeMigrateRefused, "MIGRATE_REFUSED", "the framework's own set is not migrated down: its migrations drop the stores' tables, and every entity in them", nil)
 	}
 	found, all := a.matchingSets(dbName, setName)

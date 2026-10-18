@@ -275,7 +275,7 @@ func (s *Service) Setting[T SettingValue](name string, def T, opts ...SettingCon
 	case strings.HasSuffix(name, "-file"):
 		s.problem(st.decl, s.name, "setting.file-suffix", "name", name)
 	case reservedPrefixOf(name) != "":
-		s.problem(st.decl, s.name, "setting.kit-prefix", "name", name, "prefix", reservedPrefixOf(name))
+		s.problem(st.decl, s.name, "setting.own-prefix", "name", name, "prefix", reservedPrefixOf(name))
 	}
 	s.mu.Lock()
 	s.settings = append(s.settings, st)
@@ -861,7 +861,7 @@ func (a *App) declaredSecretNames() map[string]bool {
 		}
 		nodes, _ := svc.snapshot()
 		for _, n := range nodes {
-			if s, ok := n.(*Secret); ok && !s.kitOwn() {
+			if s, ok := n.(*Secret); ok && !s.frameworkOwn() {
 				names[s.key()] = true
 			}
 		}

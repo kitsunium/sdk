@@ -17,10 +17,10 @@ import (
 
 const (
 	// secretMark starts a token as it lies in a document: a JSON string
-	// whose text starts with a NUL, which no member kit wrote holds.
-	secretMark = `\u0000kit-secret:`
+	// whose text starts with a NUL, which no member the framework wrote holds.
+	secretMark = `\u0000app-secret:`
 	// secretToken starts a token as it is decoded.
-	secretToken = "\x00kit-secret:"
+	secretToken = "\x00app-secret:"
 )
 
 // What changed between two versions, and a version written back (ADR 0007

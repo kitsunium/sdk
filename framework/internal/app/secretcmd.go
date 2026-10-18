@@ -113,10 +113,10 @@ func (a *App) managedSecrets() []managedSecret {
 	out = append(out, own...)
 	if a.usesIndexKey() {
 		name := ownSecretPrefix + indexSecret
-		out = append(out, managedSecret{name: name, stored: name, env: st.kitEnv, envName: indexSecret, variable: secretVariable(prefix, indexSecret), index: true})
+		out = append(out, managedSecret{name: name, stored: name, env: st.frameworkEnv, envName: indexSecret, variable: secretVariable(prefix, indexSecret), index: true})
 	}
 	if a.hasMailer() {
-		out = append(out, managedSecret{name: ownSecretPrefix + smtpSecret, stored: ownSecretPrefix + smtpSecret, env: st.kitEnv, envName: smtpSecret, variable: secretVariable(prefix, smtpSecret)})
+		out = append(out, managedSecret{name: ownSecretPrefix + smtpSecret, stored: ownSecretPrefix + smtpSecret, env: st.frameworkEnv, envName: smtpSecret, variable: secretVariable(prefix, smtpSecret)})
 	}
 	return out
 }
@@ -133,8 +133,8 @@ func (a *App) managedDeclared(st *secretStores) (product, own []managedSecret) {
 			s, ok := n.(*Secret)
 			switch {
 			case !ok:
-			case s.kitOwn():
-				own = append(own, managedSecret{name: s.keptName(), stored: s.keptName(), env: st.kitEnv, envName: s.envName(), variable: s.variable(a), decl: s})
+			case s.frameworkOwn():
+				own = append(own, managedSecret{name: s.keptName(), stored: s.keptName(), env: st.frameworkEnv, envName: s.envName(), variable: s.variable(a), decl: s})
 			default:
 				product = append(product, managedSecret{name: s.key(), stored: s.keptName(), env: st.env, envName: s.envName(), variable: s.variable(a), decl: s})
 			}
@@ -143,10 +143,10 @@ func (a *App) managedDeclared(st *secretStores) (product, own []managedSecret) {
 	return product, own
 }
 
-// kitOwn reports whether kit rotates the secret with what depends on it:
+// frameworkOwn reports whether kit rotates the secret with what depends on it:
 // data-key, whose rotation re-wraps the data keys, is the running product's
 // to rotate.
-func (m *managedSecret) kitOwn() bool { return m.decl != nil && m.decl.kitOwn() }
+func (m *managedSecret) frameworkOwn() bool { return m.decl != nil && m.decl.frameworkOwn() }
 
 // listSecrets prints every secret: who makes it — an optional one says so —,
 // where it is found — absent, for an optional one set nowhere —, its
@@ -303,7 +303,7 @@ func (a *App) rotateSecrets(ctx context.Context, all []managedSecret, name strin
 func generatedTargets(all []managedSecret, stderr io.Writer) ([]managedSecret, int) {
 	var targets []managedSecret
 	for i := range all {
-		if all[i].generated() && !all[i].kitOwn() && !all[i].index {
+		if all[i].generated() && !all[i].frameworkOwn() && !all[i].index {
 			targets = append(targets, all[i])
 		}
 	}
@@ -332,7 +332,7 @@ func (a *App) rotationTargets(all []managedSecret, name string, stderr io.Writer
 	case m.index:
 		fmt.Fprintf(stderr, "%s is never rotated: another would make every reference the framework keeps under it unrecognisable — a person's records, the holds, the journal, the data keys' names\n", name)
 		return nil, 2
-	case m.kitOwn():
+	case m.frameworkOwn():
 		fmt.Fprintf(stderr, "%s is rotated by the running product, which keeps every version a data key is wrapped under and re-wraps them after: it is not rotated here\n", name)
 		return nil, 2
 	default:

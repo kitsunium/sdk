@@ -98,8 +98,8 @@ func (s *storeCore) remembers() bool { return len(s.keeps()) > 0 }
 // table of them beside its own.
 func (s *storeCore) keepsRevisions() bool { return s.revisions > 0 }
 
-// kitTable is one table kit keeps on a database, and what it is for.
-type kitTable struct {
+// frameworkTable is one table kit keeps on a database, and what it is for.
+type frameworkTable struct {
 	name string
 	// node is the node that has it: a store, a workflow.
 	node string
@@ -115,12 +115,12 @@ type kitTable struct {
 	queue bool
 }
 
-// kitTables are the tables kit keeps on d: each store it keeps, the former
+// frameworkTables are the tables kit keeps on d: each store it keeps, the former
 // values of those that remember, the journals of the workflows over them,
 // the queues of the consumers it keeps (ADR 0178 C1); in the order the app
 // mounts them.
-func (a *App) kitTables(d *database) []kitTable {
-	var out []kitTable
+func (a *App) frameworkTables(d *database) []frameworkTable {
+	var out []frameworkTable
 	for _, st := range a.placedStores() {
 		if t, ok := st.(tabled); ok && a.keptOn(st, d) {
 			out = append(out, storeTables(t, st.base())...)
@@ -134,16 +134,16 @@ func (a *App) kitTables(d *database) []kitTable {
 
 // nodeTables are the tables kit keeps on d for a node that is no store: a
 // workflow's journal, a consumer's queue.
-func (a *App) nodeTables(n node, d *database) []kitTable {
-	var out []kitTable
+func (a *App) nodeTables(n node, d *database) []frameworkTable {
+	var out []frameworkTable
 	if w, ok := n.(journaled); ok {
 		if st := w.journalStore(); st != nil && a.keptOn(st, d) {
-			out = append(out, kitTable{name: w.journalTable(), node: n.base().id}.withFormer(n.base(), workflowSuffix, ""))
+			out = append(out, frameworkTable{name: w.journalTable(), node: n.base().id}.withFormer(n.base(), workflowSuffix, ""))
 		}
 	}
 	if q, ok := n.(queueOwner); ok {
 		if under := q.queueUnder(); under != "" && a.queueKeptOn(q.base(), d) {
-			out = append(out, kitTable{name: queueTable(q.base(), under), node: q.base().id, former: formerQueueTable(q.base(), under), queue: true})
+			out = append(out, frameworkTable{name: queueTable(q.base(), under), node: q.base().id, former: formerQueueTable(q.base(), under), queue: true})
 		}
 	}
 	return out
@@ -158,14 +158,14 @@ func (a *App) keptOn(st placementSource, d *database) bool {
 // storeTables are the tables of the store t, node b: its own, its former
 // values' when it remembers, its versions' when it keeps revisions — each
 // with the name a former release gave it, when that differs.
-func storeTables(t tabled, b *nodeBase) []kitTable {
+func storeTables(t tabled, b *nodeBase) []frameworkTable {
 	id := b.id
-	out := []kitTable{kitTable{name: t.table(), node: id}.withFormer(b, "", "")}
+	out := []frameworkTable{frameworkTable{name: t.table(), node: id}.withFormer(b, "", "")}
 	if t.remembers() {
-		out = append(out, kitTable{name: t.historyTable(), node: id}.withFormer(b, historySuffix, ""))
+		out = append(out, frameworkTable{name: t.historyTable(), node: id}.withFormer(b, historySuffix, ""))
 	}
 	if t.keepsRevisions() {
-		out = append(out, kitTable{name: t.table() + versionsSuffix, node: id, versionsOf: t.table()}.withFormer(b, "", versionsSuffix))
+		out = append(out, frameworkTable{name: t.table() + versionsSuffix, node: id, versionsOf: t.table()}.withFormer(b, "", versionsSuffix))
 	}
 	return out
 }
@@ -174,7 +174,7 @@ func storeTables(t tabled, b *nodeBase) []kitTable {
 // is the privacy service's — whose tables were named after kit.privacy
 // before ADR 0180 step 5 —: the node's table ending with suffix, then tail;
 // every other node's table kept its name, and t is returned as it is.
-func (t kitTable) withFormer(b *nodeBase, suffix, tail string) kitTable {
+func (t frameworkTable) withFormer(b *nodeBase, suffix, tail string) frameworkTable {
 	if b.svc != nil && b.svc.name == privacyService {
 		t.former = tableName(formerPrivacyService, b.name, suffix) + tail
 	}
@@ -183,7 +183,7 @@ func (t kitTable) withFormer(b *nodeBase, suffix, tail string) kitTable {
 
 // reservedTables are the tables kit's own set keeps on every database.
 var reservedTables = map[string]string{
-	kitTablesTable: frameworkName, tableKit: frameworkName, tableProduct: frameworkName,
+	frameworkTablesTable: frameworkName, tableFramework: frameworkName, tableProduct: frameworkName,
 	formerTablesTable: frameworkName, formerSetTable: frameworkName,
 }
 
@@ -193,7 +193,7 @@ var reservedTables = map[string]string{
 func (a *App) tableProblems(d *database) []string {
 	seen := maps.Clone(reservedTables)
 	var out []string
-	for _, t := range a.kitTables(d) {
+	for _, t := range a.frameworkTables(d) {
 		if owner, taken := seen[t.name]; taken && owner != t.node {
 			out = append(out, fmt.Sprintf("%s (%s, %s)", t.name, owner, t.node))
 			continue
@@ -211,12 +211,12 @@ func (a *App) tableProblems(d *database) []string {
 // when their declarations or kit's index key changed since, its history
 // beside it.
 func (s *storeCore) startSQL(ctx context.Context, a *App, r *databaseRun) error {
-	own, err := s.kitIndexes(ctx, a)
+	own, err := s.frameworkIndexes(ctx, a)
 	if err != nil {
 		return err
 	}
 	specs := append(s.specs(), own...)
-	at := sqlTable{run: r, table: s.table(), store: s.id, own: kitOwn(s.svc), versions: s.versionsOn(a)}
+	at := sqlTable{run: r, table: s.table(), store: s.id, own: frameworkOwn(s.svc), versions: s.versionsOn(a)}
 	if len(specs) > 0 {
 		keys, err := a.referenceKeys(ctx)
 		if err != nil {

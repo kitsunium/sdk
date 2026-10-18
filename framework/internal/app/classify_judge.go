@@ -89,7 +89,7 @@ func (a *App) classificationProblems(explain bool) []model.Diagnostic {
 		nodes, _ := svc.snapshot()
 		for _, n := range nodes {
 			if tn, ok := n.(typeSource); ok {
-				j.judge(n.base(), tn.dataTypes(), explain && !kitOwn(svc))
+				j.judge(n.base(), tn.dataTypes(), explain && !frameworkOwn(svc))
 			}
 		}
 	}

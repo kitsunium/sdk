@@ -80,7 +80,7 @@ func TestArchitectureFollowsTheDeclarations(t *testing.T) {
 	}
 
 	proc := containerOf(arch, model.ContainerProcess)
-	if proc == nil || proc.Name != "web" || !strings.HasPrefix(proc.Technology, "Go 1.") || !strings.HasSuffix(proc.Technology, "· kit · net/http") ||
+	if proc == nil || proc.Name != "web" || !strings.HasPrefix(proc.Technology, "Go 1.") || !strings.HasSuffix(proc.Technology, "· app · net/http") ||
 		proc.Location != strings.TrimPrefix(a.URL(), "http://") || !slices.Equal(proc.Nodes, []string{"audit", "shop", "web"}) {
 		t.Errorf("process %+v", proc)
 	}

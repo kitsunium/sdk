@@ -86,7 +86,7 @@ func TestABadPolicyRefusesTheStart(t *testing.T) {
 	}
 	said := err.Error()
 	for _, want := range []string{
-		"is not tagged kit:\"secret\"", "MinLength(4)", "keeps fewer former values than NotReused(2)",
+		"is not tagged app:\"secret\"", "MinLength(4)", "keeps fewer former values than NotReused(2)",
 		"NotReused(101)", "has two password policies", "names no field of the entity", "passwords_writes_internal_test.go",
 	} {
 		if !strings.Contains(said, want) {

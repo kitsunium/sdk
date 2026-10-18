@@ -54,7 +54,7 @@ func (a *App) sealingProblems() []model.Diagnostic {
 func (a *App) sealingStores() []placementSource {
 	var sealed []placementSource
 	for _, st := range a.placedStores() {
-		if s, ok := st.(sealingSource); ok && !kitOwn(st.base().svc) && s.sealsAtRest(a) {
+		if s, ok := st.(sealingSource); ok && !frameworkOwn(st.base().svc) && s.sealsAtRest(a) {
 			sealed = append(sealed, st)
 		}
 	}
@@ -78,10 +78,10 @@ func (a *App) keysBeside(sealed []placementSource, db *database) []model.Diagnos
 // set: a keyring's version is 32 bytes, no more, no less.
 func (a *App) pinnedDataKey() (int, bool) {
 	st := a.secrets.Load()
-	if st == nil || st.kitEnv == nil {
+	if st == nil || st.frameworkEnv == nil {
 		return 0, false
 	}
-	v, err := st.kitEnv.Get(context.Background(), dataKeySecret)
+	v, err := st.frameworkEnv.Get(context.Background(), dataKeySecret)
 	if err != nil {
 		return 0, false
 	}
@@ -98,6 +98,6 @@ func (a *App) dataKeyInMemory() bool {
 	if st == nil || st.kept == nil || st.from != model.SecretFromMemory {
 		return false
 	}
-	_, err := st.kitEnv.Get(context.Background(), dataKeySecret)
+	_, err := st.frameworkEnv.Get(context.Background(), dataKeySecret)
 	return errors.Is(err, secret.NotFound)
 }

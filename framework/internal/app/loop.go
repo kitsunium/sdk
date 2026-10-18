@@ -357,7 +357,7 @@ func (l *Loop) start(_ context.Context, a *App) error {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(a.baseCtx))
 	r := &loopRun{
 		a:      a,
-		state:  a.kitLoop(l.id, l.id, model.LoopWake, l.schedule(), loopOrigin{model.ProvenanceApp, frameworkName}),
+		state:  a.frameworkLoop(l.id, l.id, model.LoopWake, l.schedule(), loopOrigin{model.ProvenanceApp, frameworkName}),
 		wake:   make(chan struct{}, 1),
 		cancel: cancel,
 		done:   make(chan struct{}),
@@ -640,7 +640,7 @@ func (r *Routine) describe(_ *App, out *model.Node) []model.Edge {
 
 // start runs the routine until stop.
 func (r *Routine) start(_ context.Context, a *App) error {
-	state := a.kitLoop(r.id, r.id, model.LoopRoutine, "supervised · restarts after 1s to 1m", loopOrigin{provenance: model.ProvenanceProduct})
+	state := a.frameworkLoop(r.id, r.id, model.LoopRoutine, "supervised · restarts after 1s to 1m", loopOrigin{provenance: model.ProvenanceProduct})
 	// The SDK's supervisor runs the function and restarts it after every
 	// early end, on the app's clock and kit's backoff; kit draws what it
 	// reports.
@@ -729,10 +729,10 @@ func (r *Routine) once(ctx context.Context, a *App) (err error) {
 	return r.run(ctx)
 }
 
-// kitLoop registers a loop with its provenance and the code that loops —
+// frameworkLoop registers a loop with its provenance and the code that loops —
 // which win over what its kind implies: a mailer's outbox is a consumer the
 // SDK's mail spool drives — and marks it waiting unless a.loop already did.
-func (a *App) kitLoop(name, node, kind, schedule string, origin loopOrigin) *loopState {
+func (a *App) frameworkLoop(name, node, kind, schedule string, origin loopOrigin) *loopState {
 	provenance, library := origin.provenance, origin.library
 	l := a.loop(name, node, kind, schedule)
 	a.mu.Lock()

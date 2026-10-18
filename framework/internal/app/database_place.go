@@ -66,7 +66,7 @@ func (a *App) keeperOf(s placementSource) *database {
 		return byService
 	case byModule != nil:
 		return byModule
-	case !kitOwn(s.base().svc):
+	case !frameworkOwn(s.base().svc):
 		// The default database. kit's own services (ADR 0006's app.Privacy)
 		// are never taken by it: they are placed by name only.
 		return byDefault
@@ -86,7 +86,7 @@ func (a *App) queueKeeper(b *nodeBase) *database {
 		return byService
 	case byModule != nil:
 		return byModule
-	case !kitOwn(b.svc):
+	case !frameworkOwn(b.svc):
 		return byDefault
 	}
 	return nil

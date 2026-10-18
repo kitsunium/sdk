@@ -201,7 +201,7 @@ func (a *App) mountPrivacyService() {
 	// A copy of an app (With) carries the services its original mounted,
 	// kit's own copy among them: this app mounts its own instead. app.Privacy
 	// itself, given to NewApp, stays — and is refused as mounted twice.
-	others := slices.DeleteFunc(slices.Clone(a.services), func(s *Service) bool { return s != Privacy && kitOwn(s) })
+	others := slices.DeleteFunc(slices.Clone(a.services), func(s *Service) bool { return s != Privacy && frameworkOwn(s) })
 	a.services = slices.Concat([]*Service{svc}, others)
 }
 
@@ -220,15 +220,15 @@ func (a *App) declareKeys(svc *Service) *StoreService[wrappedKey] {
 	return keys
 }
 
-// kitOwn reports whether svc is kit's own service: the copy of app.Privacy
+// frameworkOwn reports whether svc is kit's own service: the copy of app.Privacy
 // kit mounts in the app.
-func kitOwn(svc *Service) bool { return svc != nil && svc.name == privacyService }
+func frameworkOwn(svc *Service) bool { return svc != nil && svc.name == privacyService }
 
 // asKept is the service a database's Keeps names for svc: app.Privacy for
 // kit's own copy of it, which the product cannot name, svc itself
 // otherwise. ADR 0004's placement reads kit's own service by that name.
 func asKept(svc *Service) *Service {
-	if kitOwn(svc) {
+	if frameworkOwn(svc) {
 		return Privacy
 	}
 	return svc
@@ -285,7 +285,7 @@ func (a *App) keepsPersonalData() bool {
 func (a *App) productStores() []privacyStore {
 	var out []privacyStore
 	for _, svc := range a.services {
-		if svc == nil || kitOwn(svc) {
+		if svc == nil || frameworkOwn(svc) {
 			continue
 		}
 		nodes, _ := svc.snapshot()
@@ -334,18 +334,18 @@ func (a *App) privacySettings(ctx context.Context) []model.Setting {
 		out = append(out, a.retentionSetting())
 	}
 	if personal || seals {
-		out = append(out, model.Setting{Name: a.variable(varIndexKeyStem), Secret: true, From: a.kitSecretFrom(ctx, indexSecret)})
+		out = append(out, model.Setting{Name: a.variable(varIndexKeyStem), Secret: true, From: a.frameworkSecretFrom(ctx, indexSecret)})
 	}
 	if seals {
-		out = append(out, model.Setting{Name: a.variable(varDataKeyStem), Secret: true, From: a.kitSecretFrom(ctx, dataKeySecret)})
+		out = append(out, model.Setting{Name: a.variable(varDataKeyStem), Secret: true, From: a.frameworkSecretFrom(ctx, dataKeySecret)})
 	}
 	return out
 }
 
-// kitSecretFrom is where one of kit's own secrets is set, as a setting says
+// frameworkSecretFrom is where one of kit's own secrets is set, as a setting says
 // it: its variable, the environment's store, or nowhere yet.
-func (a *App) kitSecretFrom(ctx context.Context, name string) string {
-	_, from, err := a.kitSecret(ctx, name)
+func (a *App) frameworkSecretFrom(ctx context.Context, name string) string {
+	_, from, err := a.frameworkSecret(ctx, name)
 	if err != nil {
 		from = ""
 	}

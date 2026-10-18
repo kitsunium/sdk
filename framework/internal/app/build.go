@@ -25,9 +25,9 @@ var (
 	// kit dev restarts the process on every rebuild, and a test starts many
 	// apps.
 	gitCache sync.Map // dir → gitAnswer
-	// kitVersion is the version of this module in the product's build, read
+	// frameworkVersion is the version of this module in the product's build, read
 	// once.
-	kitVersion = sync.OnceValue(func() string {
+	frameworkVersion = sync.OnceValue(func() string {
 		bi := readBuild()
 		if bi == nil {
 			return "(unknown)"

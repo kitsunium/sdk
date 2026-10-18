@@ -39,7 +39,7 @@ func TestKitSpeaksEveryLanguage(t *testing.T) {
 	if _, err := openOthers(cfg); err != nil {
 		t.Fatal(err)
 	}
-	langs := kitLanguages()
+	langs := frameworkLanguages()
 	if len(langs) < 2 || langs[0] != "en" {
 		t.Fatalf("the framework speaks %v: English first, then the Studio's languages", langs)
 	}
@@ -266,7 +266,7 @@ func TestKitSpeaksEnglishAloneWithoutTheStudio(t *testing.T) {
 	if got := p.String(); got != english {
 		t.Errorf("en: %s", got)
 	}
-	if got := kitLanguages(); !slices.Equal(got, []string{"en"}) {
+	if got := frameworkLanguages(); !slices.Equal(got, []string{"en"}) {
 		t.Errorf("the framework speaks %v without the Studio", got)
 	}
 	if msg, got := p.spoken(); msg != english || !maps.Equal(got, map[string]string{"en": english}) {

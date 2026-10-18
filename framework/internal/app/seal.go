@@ -642,7 +642,7 @@ func (a *App) sealsAnything() bool {
 		return true
 	}
 	for _, svc := range a.services {
-		if svc == nil || kitOwn(svc) {
+		if svc == nil || frameworkOwn(svc) {
 			continue
 		}
 		nodes, _ := svc.snapshot()
