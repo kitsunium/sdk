@@ -615,3 +615,97 @@ drop_line() {
   run grep -c "if: steps.ktnoidc.outputs.run == 'true'" <<<"$body"
   [ "$output" = "2" ]
 }
+
+# ── run-test-binaries.sh: what every guest runs ─────────────────────────────
+
+# binaries_fixture — a repository root holding two package directories and a
+# BINDIR whose manifest names a "test binary" for each: a shell script that
+# records the directory it ran in and its arguments, then exits with the code
+# its marker file holds (0 when there is none).
+binaries_fixture() {
+  cd "$WORK"
+  mkdir -p a/pkg b/pkg bins
+  for n in a b; do
+    cat >"bins/$n.test" <<SH
+#!/bin/sh
+pwd >>"$WORK/$n.ran"
+echo "\$*" >>"$WORK/$n.args"
+c=0
+if [ -f "$WORK/$n.codes" ]; then
+  c=\$(head -n 1 "$WORK/$n.codes")
+  sed -i.bak 1d "$WORK/$n.codes"
+  [ -n "\$c" ] || c=0
+fi
+exit "\$c"
+SH
+    chmod +x "bins/$n.test"
+  done
+  printf 'a.test a/pkg\nb.test b/pkg\n' >bins/manifest
+}
+
+# A suite reads its testdata/ by relative path, so each binary runs from its
+# own package directory, as `go test` runs it; the flags reach every binary.
+@test "binaries: each runs from its package directory, with the flags given" {
+  binaries_fixture
+
+  run sh "$CI_DIR/run-test-binaries.sh" bins -test.v
+
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/a.ran")" = "$WORK/a/pkg" ]
+  [ "$(cat "$WORK/b.ran")" = "$WORK/b/pkg" ]
+  [[ "$(cat "$WORK/a.args")" == *"-test.timeout=10m -test.v"* ]]
+  [[ "$output" == *"2 suites on"* ]]
+}
+
+# A real defect fails every attempt: the run fails and names the package, and
+# the suites after it still run.
+@test "binaries: a suite failing every attempt fails the run, named, and the rest still run" {
+  binaries_fixture
+  printf '1\n1\n1\n' >"$WORK/a.codes"
+
+  run sh "$CI_DIR/run-test-binaries.sh" bins
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::error::a/pkg fails on"* ]]
+  [ "$(wc -l <"$WORK/a.ran" | tr -d ' ')" = "3" ]
+  [ -f "$WORK/b.ran" ]
+}
+
+# A retry that passes is not silent: the package is named as a flake.
+@test "binaries: a suite passing only on a retry passes, and is named as a flake" {
+  binaries_fixture
+  printf '1\n0\n' >"$WORK/b.codes"
+
+  run sh "$CI_DIR/run-test-binaries.sh" bins
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning::b/pkg passed only on a retry"* ]]
+}
+
+# A run that executed nothing must not pass.
+@test "binaries: an empty or missing manifest is refused" {
+  binaries_fixture
+  : >bins/manifest
+  run sh "$CI_DIR/run-test-binaries.sh" bins
+  [ "$status" -eq 1 ]
+  rm bins/manifest
+  run sh "$CI_DIR/run-test-binaries.sh" bins
+  [ "$status" -eq 1 ]
+}
+
+# The guests run EVERY package, compiled from the census by test-binaries.sh,
+# not a list of "platform-sensitive" packages that left 300 of 333 unexecuted;
+# and no job of the runtime lane shrinks a suite with -short (rule 12).
+@test "lanes: every guest job runs the census's test binaries, and nothing runs -short" {
+  local wf="$REPO_ROOT/.github/workflows/e2e-cross.yml"
+  for job in bsd solarish; do
+    body="$(job_body "$wf" "$job")"
+    [ -n "$body" ]
+    [[ "$body" == *"bash scripts/ci/test-binaries.sh bins"* ]]
+    [[ "$body" == *"sh scripts/ci/run-test-binaries.sh bins"* ]]
+    [[ "$body" != *'$SERVICE_PKGS'* ]]
+  done
+  # Comments name -short to say why it is gone; only the commands count.
+  run bash -c "grep -v '^[[:space:]]*#' '$wf' | grep -cE -- '-(test[.])?short'"
+  [ "$output" = "0" ]
+}
