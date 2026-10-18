@@ -316,13 +316,16 @@ has the map): before writing something generic here, look for it there.
   `sealDomain` (`app/v1 sealed at rest`) alone and opened under it, then
   under `formerSealDomain` by data-key's keyring and by `kit-data-key`'s
   (`openRoot`). A subject has one wrapped key, under one root: an erasure
-  destroys it and folds the store, so nothing either root opens is left.
+  destroys it and folds the store, so nothing either root opens is left in
+  what the product keeps. A copy outside it — a backup, a database's own
+  history — opens until the root version that wrapped it is pruned (ADR
+  0142's bound), under `app-data-key` as under `kit-data-key`.
   `kit-data-key` no longer rotates; after a clean pass that found nothing
   under it, each of its versions older than data-key's Keep × RotateEvery is
   pruned — a fresh version written first when all are
-  (`retireFormerDataKey`, `formerRetirement`) —, so a copy outside the store (a backup, a
-  database's own history) stops opening on ADR 0142's bound. Nothing else a
-  former release kept is written or deleted. `privacy rewrap [-back]` (`privacycmd_rewrap.go`) runs
+  (`retireFormerDataKey`, `formerRetirement`) —, so that bound holds for it
+  too. Nothing else a former release kept is written or deleted.
+  `privacy rewrap [-back]` (`privacycmd_rewrap.go`) runs
   the pass now, or moves every data key back under `kit-data-key` for the
   release before step 5b. Held by `connectors/sqlite`'s
   `testdata/former-keys` (written by the release before this step, its
