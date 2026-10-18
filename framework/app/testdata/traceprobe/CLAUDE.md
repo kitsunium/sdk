@@ -15,7 +15,8 @@ setting and a secret.
 build reads —, builds it as a release is built (`go build -trimpath`, no tag,
 no overlay) and reads the binary's symbols, string data and `go version -m`,
 then runs it — `-h`, `graph`, `graph -format mermaid`, `config`, `secrets
-list`, and served in production, its probes, its frontend, its operations, its
+list`, and served in production — its secrets in memory, its data key and
+index key pinned, the same on every platform —, its probes, its frontend, its operations, its
 webhook and the reserved route space asked — and refuses the tool's name
 everywhere but in the binary's former names the test's allow-list admits.
 

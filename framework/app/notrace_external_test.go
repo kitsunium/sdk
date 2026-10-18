@@ -3,7 +3,9 @@ package app_test
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"debug/elf"
+	"encoding/hex"
 	"encoding/json"
 	"go/ast"
 	"go/parser"
@@ -282,17 +284,22 @@ func executionCarriesNoTrace(t *testing.T, bin string, words [][]byte) {
 	}
 	answered := serve(t, bin, dir)
 	refuse(t, "what the served probe answered and logged", answered, words)
+	var made bytes.Buffer
 	err := filepath.WalkDir(dir, func(path string, _ fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		rel, _ := filepath.Rel(dir, path)
+		made.WriteString(filepath.ToSlash(rel) + "\n")
 		refuse(t, "the file the probe made "+rel, []byte(rel), words)
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The data the served probe kept, its store's and the privacy service's:
+	// the names read are those of the files it wrote.
+	mustSay(t, "the files the probe made", made.Bytes(), "data/shop/orders.json", "/journal.json", "/keys.json")
 }
 
 // served lists the requests the guard makes of the running probe: its
@@ -322,7 +329,7 @@ func serve(t *testing.T, bin, dir string) []byte {
 	var logs bytes.Buffer
 	cmd := exec.CommandContext(ctx, bin)
 	cmd.Dir = dir
-	cmd.Env = productEnv(productPrefix+"ADDR="+addr, productPrefix+"DATA_DIR="+filepath.Join(dir, "data"))
+	cmd.Env = productEnv(append([]string{productPrefix + "ADDR=" + addr, productPrefix + "DATA_DIR=" + filepath.Join(dir, "data")}, pinnedKeys(t)...)...)
 	cmd.Stdout, cmd.Stderr = &logs, &logs
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -358,6 +365,30 @@ func serve(t *testing.T, bin, dir string) []byte {
 	out.Write(logs.Bytes())
 	mustSay(t, "the served probe", out.Bytes(), "HTTP/1.1 200", "The shop.")
 	return out.Bytes()
+}
+
+// pinnedKeys is where the served probe keeps its secrets, the same on every
+// platform: in memory, with the two keys its sealed store and its references
+// need pinned by their variables — what an operator gives a product whose
+// secrets are not on disk. Left to the default, the secrets would follow the
+// data on a platform with a protected file store and live in memory on one
+// without (Windows), where the start refuses a sealed store whose data key
+// is made again at every start. Each key is fresh hexadecimal: 32 bytes, as
+// a keyring's version holds, written in no letter beyond f.
+func pinnedKeys(t *testing.T) []string {
+	t.Helper()
+	key := func() string {
+		raw := make([]byte, 16)
+		if _, err := rand.Read(raw); err != nil {
+			t.Fatal(err)
+		}
+		return hex.EncodeToString(raw)
+	}
+	return []string{
+		productPrefix + "SECRETS=memory",
+		productPrefix + "DATA_KEY=" + key(),
+		productPrefix + "INDEX_KEY=" + key(),
+	}
 }
 
 // ready waits until the probe's liveness probe answers 200.
