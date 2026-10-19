@@ -3,6 +3,7 @@ package raft
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -409,6 +410,37 @@ func checkChainVerified(mut mutation) error {
 	return nil
 }
 
+// forwardAnswers returns every answer to the forward ctx in the turns since
+// the last Ready.
+func forwardAnswers(r *Raft, ctx uint64) []core.MessageValue {
+	rd := r.Ready()
+	var out []core.MessageValue
+	for _, m := range append(rd.Messages, rd.AfterSync...) {
+		if (m.Kind == core.MsgForwardResp || m.Kind == core.MsgForwardAdminResp) && m.Context == ctx {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// checkForwardDeduped delivers one forward twice to a leader: one entry is
+// appended, and both deliveries are answered with its position (#401).
+func checkForwardDeduped(mut mutation) error {
+	r := leaderOf(2, 0, nil, mut, false)
+	last := r.log.lastIndex()
+	m := forwardCmd(2, 7, 10)
+	r.Step(r.now, m)
+	r.Step(r.now, m)
+	as := forwardAnswers(r, 7)
+	switch {
+	case r.log.lastIndex() != last+1:
+		return fmt.Errorf("one forward delivered twice appended %d entries", r.log.lastIndex()-last)
+	case len(as) != 2 || as[0].Reject || as[0].Index != last+1 || !reflect.DeepEqual(as[0], as[1]):
+		return fmt.Errorf("the two deliveries were answered %+v", as)
+	}
+	return nil
+}
+
 func checkSimSafety(mut mutation) error {
 	for seed := uint64(1); seed <= 8; seed++ {
 		s := newSim(simOptions{seed: seed, drop: 0.05, dup: 0.02, crashRate: 1, diskMax: 30 * time.Millisecond, mut: mut})
@@ -448,6 +480,7 @@ var checks = map[string]func(mutation) error{
 	"membership after no-op":        checkMembershipAfterNoOp,
 	"lease from acking minimum":     checkLeaseFromAckingMinimum,
 	"chain verified":                checkChainVerified,
+	"forward deduplicated":          checkForwardDeduped,
 	"simulated safety":              checkSimSafety,
 	"simulated linearizability":     checkSimLinearizable,
 	"deposed leader read":           checkDeposedLeaderRead,
@@ -492,6 +525,7 @@ func TestMutationsAreCaught(t *testing.T) {
 		"chain mismatch appended":         mutChainSkip,
 		"lease from the leader's view":    mutLeaseLeaderView,
 		"read without a round":            mutReadNoRound,
+		"forward proposed twice":          mutForwardNoDedupe,
 	}
 	for name, m := range muts {
 		caught := ""
@@ -620,6 +654,73 @@ func TestForwardedCommandsAreBounded(t *testing.T) {
 	r.Step(r.now, forwardCmd(2, 6, 10))
 	if a, ok := forwardAnswer(r, 6); !ok || !a.Reject || a.Code != core.CodeOverloaded {
 		t.Fatalf("forward under apply backpressure: %+v", a)
+	}
+}
+
+// A refusal is replayed too: a forward refused as OVERLOADED, its duplicate
+// delivered once the bound freed, is refused again and never appended, or
+// the follower, told nothing was appended, would retry a command already in
+// the log (#401).
+func TestADuplicatedForwardReplaysItsRefusal(t *testing.T) {
+	r := leaderOf(2, 0, nil, 0, false)
+	r.cfg.MaxForwardBytes = 50
+	last := r.log.lastIndex()
+	m := forwardCmd(2, 8, 100)
+	r.Step(r.now, m)
+	r.cfg.MaxForwardBytes = 1 << 20
+	r.Step(r.now, m)
+	as := forwardAnswers(r, 8)
+	if len(as) != 2 || !as[0].Reject || as[0].Code != core.CodeOverloaded || !reflect.DeepEqual(as[0], as[1]) {
+		t.Fatalf("answers %+v", as)
+	}
+	if r.log.lastIndex() != last {
+		t.Fatal("the duplicate of a refused forward was appended")
+	}
+	// A new submission id is a new submission: it is proposed.
+	r.Step(r.now, forwardCmd(2, 9, 100))
+	if as := forwardAnswers(r, 9); len(as) != 1 || as[0].Reject || r.log.lastIndex() != last+1 {
+		t.Fatalf("a new submission: %+v", as)
+	}
+}
+
+// The answers kept are bounded: past maxFwdAnswers the oldest is evicted
+// first, the newest kept.
+func TestForwardAnswersAreBounded(t *testing.T) {
+	f := newTest(2, testState{term: 1}, 0, false)
+	const extra = 5
+	for ctx := uint64(1); ctx <= uint64(maxFwdAnswers+extra); ctx++ {
+		f.Step(t0, forwardCmd(1, ctx, 1))
+	}
+	tab := &f.fwdAnswers
+	if len(tab.byKey) != maxFwdAnswers || len(tab.order) != maxFwdAnswers {
+		t.Fatalf("kept %d answers in a ring of %d, bound %d", len(tab.byKey), len(tab.order), maxFwdAnswers)
+	}
+	for ctx := uint64(1); ctx <= uint64(maxFwdAnswers+extra); ctx++ {
+		_, kept := tab.lookup(f.term, fwdKey{from: 2, ctx: ctx})
+		if kept != (ctx > extra) {
+			t.Fatalf("answer %d kept %v", ctx, kept)
+		}
+	}
+}
+
+// A new term empties the table: what the leader of term 2 answered is not
+// replayed at term 3, where the node follows and refuses as NOT_LEADER. (A
+// copy still carrying term 2 never reaches the table at term 3: an older
+// term's forward is dropped unanswered.)
+func TestANewTermEmptiesTheForwardAnswers(t *testing.T) {
+	r := leaderOf(2, 0, nil, 0, false)
+	r.Step(r.now, forwardCmd(2, 9, 10))
+	if as := forwardAnswers(r, 9); len(as) != 1 || as[0].Reject {
+		t.Fatalf("term 2: %+v", as)
+	}
+	r.Step(r.now, msg(core.MsgHeartbeat, 3, 1, 3))
+	r.Step(r.now, forwardCmd(3, 9, 10))
+	as := forwardAnswers(r, 9)
+	if len(as) != 1 || !as[0].Reject || as[0].Code != core.CodeNotLeader || as[0].RejectHint != 3 {
+		t.Fatalf("term 3: %+v", as)
+	}
+	if tab := &r.fwdAnswers; tab.term != 3 || len(tab.byKey) != 1 || len(tab.order) != 1 {
+		t.Fatalf("the table after the new term: term %d, %d answers", tab.term, len(tab.byKey))
 	}
 }
 

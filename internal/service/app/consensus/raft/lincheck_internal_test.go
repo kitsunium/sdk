@@ -200,10 +200,24 @@ type kvWorld struct {
 	reads  map[core.NodeID]map[uint64]*pendingRead
 	ctx    uint64
 	noLeas bool
+	// fwds are the writes forwarded and not answered yet, by follower and
+	// submission id; fctx numbers the submissions.
+	fwds map[[2]uint64]pendingFwd
+	fctx uint64
+	// firstApplied is when a command was first applied on any node, by its
+	// payload: every write's payload is unique.
+	firstApplied map[string]int64
+}
+
+// pendingFwd is a forwarded write waiting for the leader's answer, from the
+// follower's life that sent it.
+type pendingFwd struct {
+	op   int
+	life int
 }
 
 func newKVWorld() *kvWorld {
-	return &kvWorld{state: map[core.NodeID]map[string]string{}, reads: map[core.NodeID]map[uint64]*pendingRead{}}
+	return &kvWorld{state: map[core.NodeID]map[string]string{}, reads: map[core.NodeID]map[uint64]*pendingRead{}, fwds: map[[2]uint64]pendingFwd{}, firstApplied: map[string]int64{}}
 }
 
 func (w *kvWorld) restart(n *simNode) {
@@ -226,6 +240,9 @@ func (w *kvWorld) applied(s *sim, n *simNode, e *core.EntryValue) {
 	if e.Kind == core.EntryCommand {
 		k, v, _ := strings.Cut(string(e.Data), "=")
 		st[k] = v
+		if _, ok := w.firstApplied[string(e.Data)]; !ok {
+			w.firstApplied[string(e.Data)] = s.now.UnixNano()
+		}
 	}
 	for i := range w.writes {
 		pw := &w.writes[i]
@@ -283,6 +300,45 @@ func (w *kvWorld) write(s *sim, n *simNode, key, val string) {
 	s.process(n)
 }
 
+// writeForwarded submits a write on a follower, as the driver does: one
+// MsgForward to the leader it knows, under a submission id that never
+// repeats. The network may deliver it twice.
+func (w *kvWorld) writeForwarded(s *sim, f *simNode, key, val string) {
+	st := f.r.Status()
+	if st.Lead == 0 || st.Lead == f.id {
+		return // refused before anything was sent: not part of the history
+	}
+	w.fctx++
+	data := []byte(key + "=" + val)
+	m := core.MessageValue{
+		Version: 1, Group: 1, Kind: core.MsgForward, From: f.id, To: st.Lead, Term: st.Term, Context: w.fctx,
+		Entries: []core.EntryValue{{Kind: core.EntryCommand, BodySum: wire.BodySum(data), Data: data}},
+	}
+	w.ops = append(w.ops, kvOp{key: key, write: true, val: val, call: s.now.UnixNano(), ret: math.MaxInt64})
+	w.fwds[[2]uint64{uint64(f.id), w.fctx}] = pendingFwd{op: len(w.ops) - 1, life: f.life}
+	s.deliver(m)
+}
+
+// forwardAnswered takes the first answer to a forwarded write and drops any
+// other, as the driver does: a refusal says nothing was appended, a position
+// is waited on like a local write's. A follower that restarted since never
+// learns the outcome.
+func (w *kvWorld) forwardAnswered(n *simNode, m core.MessageValue) {
+	k := [2]uint64{uint64(n.id), m.Context}
+	pf, ok := w.fwds[k]
+	if !ok {
+		return
+	}
+	delete(w.fwds, k)
+	switch {
+	case pf.life != n.life:
+	case m.Reject:
+		w.ops[pf.op].ret = -1
+	default:
+		w.writes = append(w.writes, pendingWrite{op: pf.op, node: n.id, life: n.life, pos: core.PositionValue{Term: m.LogTerm, Index: m.Index}})
+	}
+}
+
 func (w *kvWorld) read(s *sim, n *simNode, key string) {
 	w.ctx++
 	w.ops = append(w.ops, kvOp{key: key, call: s.now.UnixNano(), ret: math.MaxInt64})
@@ -292,6 +348,25 @@ func (w *kvWorld) read(s *sim, n *simNode, key string) {
 	w.reads[n.id][w.ctx] = &pendingRead{op: len(w.ops) - 1, key: key}
 	n.r.ReadIndex(s.clock(n), w.ctx, w.noLeas)
 	s.process(n)
+}
+
+// settleUnknownWrites gives every write of unknown outcome the outcome the
+// cluster reached once it is quiet and caught up: it took effect by the
+// instant a node first applied it, or never if none did. Without it, the
+// writes whose forward or answer a fault lost leave the checker a search
+// exponential in their number.
+func (w *kvWorld) settleUnknownWrites() {
+	for i := range w.ops {
+		o := &w.ops[i]
+		if !o.write || o.ret != math.MaxInt64 {
+			continue
+		}
+		if at, ok := w.firstApplied[o.key+"="+o.val]; ok {
+			o.ret = at
+		} else {
+			o.ret = -1
+		}
+	}
 }
 
 // history returns the operations: returned ones, and writes of unknown
@@ -499,6 +574,103 @@ func checkDeposedLeaderRead(mut mutation) error {
 	}
 	if ok, key := linearizable(s.kv.history()); !ok {
 		return fmt.Errorf("a deposed leader served a stale read of %q", key)
+	}
+	return nil
+}
+
+// TestForwardedWritesUnderDuplicationAreAppliedOnce writes through followers'
+// forwards on a network that delivers a message twice in four, with drops,
+// partitions and crashes: every message kind is duplicated — appends and
+// their answers, votes, heartbeats, reads, forwards and their answers — and
+// the history stays linearizable, with no command applied twice (#401).
+func TestForwardedWritesUnderDuplicationAreAppliedOnce(t *testing.T) {
+	eachSeed(t, seeds(t, 8), func(t *testing.T, seed uint64) {
+		if err := forwardedRun(seed, 0); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// TestForwardedDuplicatesAreCaught is the scenario's negative control: with
+// the leader proposing every delivery of a forward, some command is applied
+// twice, and the run says so.
+func TestForwardedDuplicatesAreCaught(t *testing.T) {
+	for seed := uint64(1); seed <= 8; seed++ {
+		if err := forwardedRun(seed, mutForwardNoDedupe); err != nil {
+			t.Logf("caught: %v", err)
+			return
+		}
+	}
+	t.Fatal("no seed applied a duplicated forward twice with the deduplication off")
+}
+
+// forwardedRun runs one seed of the forwarded workload, then checks that no
+// command was applied twice and that the history is linearizable.
+func forwardedRun(seed uint64, mut mutation) error {
+	s := newSim(simOptions{seed: seed, drop: 0.03, dup: 0.25, crashRate: 0.3, mut: mut})
+	s.kv = newKVWorld()
+	s.kv.noLeas = true
+	for _, id := range s.ids {
+		s.kv.restart(s.nodes[id])
+	}
+	keys := []string{"a", "b", "c"}
+	step := 0
+	for k := 0; k < 6 && s.err == nil; k++ {
+		switch k % 3 {
+		case 0:
+			s.partition([]core.NodeID{core.NodeID(k%3 + 1)}, nil)
+		case 1:
+			s.heal()
+		}
+		end := s.after(3 * time.Second)
+		for s.now.Before(end) && s.err == nil {
+			s.run(s.after(15*time.Millisecond), false)
+			step++
+			n := s.nodes[s.ids[step%len(s.ids)]]
+			if !n.alive {
+				continue
+			}
+			key := keys[step%len(keys)]
+			switch {
+			case step%2 == 1:
+				s.kv.read(s, n, key)
+			case n.r.Status().Role == core.RoleLeader:
+				s.kv.write(s, n, key, fmt.Sprint(step))
+			default:
+				s.kv.writeForwarded(s, n, key, fmt.Sprint(step))
+			}
+		}
+	}
+	// Quiet and whole again, every node catches up: what is committed is
+	// applied everywhere, and what is not never will be.
+	s.heal()
+	s.opt.crashRate, s.opt.drop, s.opt.dup = 0, 0, 0
+	for _, id := range s.ids {
+		if !s.nodes[id].alive {
+			s.start(s.nodes[id])
+		}
+	}
+	s.run(s.after(5*time.Second), true)
+	if s.err != nil {
+		return fmt.Errorf("seed %d: %w", seed, s.err)
+	}
+	s.kv.settleUnknownWrites()
+	if s.kv.fctx < 50 {
+		return fmt.Errorf("seed %d: only %d writes forwarded", seed, s.kv.fctx)
+	}
+	seen := map[uint32]uint64{}
+	for _, i := range slices.Sorted(maps.Keys(s.applied)) {
+		k := s.applied[i]
+		if k.kind != core.EntryCommand {
+			continue
+		}
+		if j, ok := seen[k.sum]; ok {
+			return fmt.Errorf("seed %d: one command applied at %d and at %d", seed, j, i)
+		}
+		seen[k.sum] = i
+	}
+	if ok, key := linearizable(s.kv.history()); !ok {
+		return fmt.Errorf("seed %d: history of key %q is not linearizable", seed, key)
 	}
 	return nil
 }

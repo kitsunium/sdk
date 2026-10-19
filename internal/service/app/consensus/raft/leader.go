@@ -13,6 +13,11 @@ import (
 // it answers with a code rather than an error, so a refusal costs no
 // allocation on the event loop.
 const (
+	// maxFwdAnswers bounds the answers a node keeps of the forwards it
+	// received in its term. A duplicate is a frame a transport resent with
+	// its batch on a fresh connection, right behind its original (#377,
+	// #401): the newest answers are the ones kept, the oldest go first.
+	maxFwdAnswers int = 4096
 	// codeNotLeader refuses what only the leader of this term may do.
 	codeNotLeader errs.Code = core.CodeNotLeader
 	// codeChangePending refuses a membership change while another is not
@@ -697,44 +702,115 @@ func (r *Raft) activeMajority(m core.MembershipValue) bool {
 	return len(vs) > 0 && n >= len(vs)/2+1
 }
 
-// handleForward proposes the one entry a follower forwarded and answers
-// with its position or a refusal. The entry is copied out of the frame
-// first, and a body that does not match its checksum is never proposed.
+// fwdKey names one submission: the follower that forwarded it and its
+// submission id, which never repeats across the follower's restarts (R7-23).
+// Two frames with one key are one submission delivered twice.
+type fwdKey struct {
+	from core.NodeID
+	ctx  uint64
+}
+
+// fwdAnswer is what a forward was answered: the position its entry was
+// appended at, or a refusal with its code and the leader hinted.
+type fwdAnswer struct {
+	reject  bool
+	code    errs.Code
+	hint    uint64
+	index   uint64
+	logTerm uint64
+}
+
+// fwdTable keeps the answers given in one term, bounded by
+// maxFwdAnswers, the oldest evicted first; a new term empties it.
+type fwdTable struct {
+	term  uint64
+	byKey map[fwdKey]fwdAnswer
+	// order is a ring of the kept keys, oldest at next once it is full.
+	order []fwdKey
+	next  int
+}
+
+// lookup returns the answer kept for k in term.
+func (a *fwdTable) lookup(term uint64, k fwdKey) (fwdAnswer, bool) {
+	if a.term != term {
+		return fwdAnswer{}, false
+	}
+	v, ok := a.byKey[k]
+	return v, ok
+}
+
+// remember keeps v for k in term, emptying the table when term is a new
+// one and evicting the oldest answer when limit are kept.
+func (a *fwdTable) remember(term uint64, k fwdKey, v fwdAnswer, limit int) {
+	if a.term != term {
+		clear(a.byKey)
+		a.order, a.next, a.term = a.order[:0], 0, term
+	}
+	if a.byKey == nil {
+		a.byKey = map[fwdKey]fwdAnswer{}
+	}
+	if len(a.order) < limit {
+		a.order = append(a.order, k)
+	} else {
+		delete(a.byKey, a.order[a.next])
+		a.order[a.next] = k
+		a.next = (a.next + 1) % limit
+	}
+	a.byKey[k] = v
+}
+
+// handleForward answers a forward once per submission. A transport that
+// resends a batch on a fresh connection can deliver a forward twice (#377);
+// proposed twice, its command would be applied twice, the follower having
+// taken the first answer and dropped the second (#401). A forward already
+// answered in this term is answered again with the same answer, position or
+// refusal, and nothing is proposed.
 func (r *Raft) handleForward(m core.MessageValue) {
+	key := fwdKey{from: m.From, ctx: m.Context}
+	a, ok := r.fwdAnswers.lookup(r.term, key)
+	if !ok || r.mutated(mutForwardNoDedupe) {
+		a = r.answerForward(m)
+		r.fwdAnswers.remember(r.term, key, a, maxFwdAnswers)
+	}
 	resp := core.MsgForwardResp
 	if m.Kind == core.MsgForwardAdmin {
 		resp = core.MsgForwardAdminResp
 	}
+	r.send(core.MessageValue{
+		Kind: resp, To: m.From, Context: m.Context,
+		Reject: a.reject, Code: a.code, RejectHint: a.hint, Index: a.index, LogTerm: a.logTerm,
+	})
+}
+
+// answerForward proposes the one entry a follower forwarded and returns its
+// position or a refusal. The entry is copied out of the frame first, and a
+// body that does not match its checksum is never proposed.
+func (r *Raft) answerForward(m core.MessageValue) fwdAnswer {
 	if r.role != core.RoleLeader || len(m.Entries) != 1 {
-		r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: codeNotLeader, RejectHint: uint64(r.lead)})
-		return
+		return fwdAnswer{reject: true, code: codeNotLeader, hint: uint64(r.lead)}
 	}
 	e := m.Entries[0]
 	e.Data = ownCopy(e.Data)
 	if wire.BodySum(e.Data) != e.BodySum {
-		r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: core.CodeFrameInvalid})
-		return
+		return fwdAnswer{reject: true, code: core.CodeFrameInvalid}
 	}
 	if (m.Kind == core.MsgForward) != (e.Kind == core.EntryCommand) {
-		r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: codeVersion})
-		return
+		return fwdAnswer{reject: true, code: codeVersion}
 	}
 	if e.Kind == core.EntryCommand {
 		if code := r.admitForward(len(e.Data)); code != 0 {
-			r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: code})
-			return
+			return fwdAnswer{reject: true, code: code}
 		}
 	}
 	pos, code := r.Propose(r.now, []core.EntryValue{e})
 	if code != 0 {
-		r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Reject: true, Code: code, RejectHint: uint64(r.lead)})
-		return
+		return fwdAnswer{reject: true, code: code, hint: uint64(r.lead)}
 	}
 	if e.Kind == core.EntryCommand {
 		r.fwd = append(r.fwd, fwdEntry{index: pos[0].Index, size: int64(len(e.Data))})
 		r.fwdBytes += int64(len(e.Data))
 	}
-	r.send(core.MessageValue{Kind: resp, To: m.From, Context: m.Context, Index: pos[0].Index, LogTerm: pos[0].Term})
+	return fwdAnswer{index: pos[0].Index, logTerm: pos[0].Term}
 }
 
 // admitForward applies to a forwarded command the bounds the driver applies

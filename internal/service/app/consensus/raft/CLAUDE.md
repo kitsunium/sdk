@@ -32,3 +32,11 @@ under coverage before touching `shard_count`.
   `Ready.Unsupported` (review M3).
 - Admit a forwarded command without the bounds of a local one
   (`admitForward`, review M2).
+- Propose a forward each time it is delivered: the TCP transport resends a
+  batch whose write failed on a reused connection (#377), so a frame can
+  arrive twice. `handleForward` keeps the answers of the term by
+  `(From, Context)` — the submission id never repeats, R7-23 — in a ring of
+  `maxFwdAnswers`, and answers a duplicate with the recorded answer,
+  position or refusal (#401, `mutForwardNoDedupe`,
+  `TestForwardedWritesUnderDuplicationAreAppliedOnce`). Every other kind
+  is idempotent under duplication, which that scenario exercises.
