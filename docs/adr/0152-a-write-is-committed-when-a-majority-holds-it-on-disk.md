@@ -2654,6 +2654,35 @@ node, under the directory lock.
     precondition (forgejo-raft through `ExpectRev`). The runbook picks the
     survivor whose log reaches furthest (`Inspect`'s `Last`); a write no
     survivor received is one no choice of survivor can keep.
+  - **An interrupted `Recover` never starts under the old cluster, and is
+    completed by running it again ([issue
+    #405](https://github.com/kitsunium/sdk/issues/405)).** `Recover` makes
+    two durable writes: the forced configuration entry, then the new stamp.
+    Between them the directory holds the NEW members' configuration under
+    the OLD cluster's stamp, and a start there ran that configuration in the
+    old cluster, beside voters fenced only for the new one. So the order is:
+    the audit record; the stop marker `STOP-RECOVER`, written and synced,
+    which names the new cluster and the last index kept; the forced entry;
+    the new stamp; then the marker's removal and a directory sync.
+    - While the marker is there, a start is refused (`STOP_MARKER_PRESENT`,
+      as every stop marker is, D4), and its detail names the command to run:
+      `Recover` again, to the cluster the marker names.
+    - A `Recover` to another cluster is refused (`RECOVER_REFUSED`): the
+      witnesses' receipts were signed for the first one.
+    - A `Recover` to the same cluster, while the stamp is still the old
+      cluster's, RESUMES: every precondition and every fence is checked
+      again, against the configuration at the index the marker kept — never
+      against the interrupted forced entry, which would read the new members
+      as the old voters and ask for no fence — and the log is cut back to
+      that index, the forced entry written again, then the stamp. The audit
+      record says `resumed`.
+    - A `Recover` to the same cluster once the new stamp is durable only
+      removes the marker, confirmed and audited (`completed`); nothing else
+      is decided again.
+    - Inverting the two writes is not the answer: a new stamp over a log
+      without its forced entry starts the new cluster on the OLD
+      configuration, the one `Recover` was run to replace, and nothing on
+      disk would say a `Recover` was left half done.
   - **The probe cannot detect a partition, and the text says so (R4-04).** A
     seed cut off from this node still runs, and can still serve. So
     `Recover` requires an operator attestation,
