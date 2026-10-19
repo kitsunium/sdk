@@ -48,6 +48,15 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   `wmu`, readers must not wait for the disk (review L6).
 - Take a JOIN answer from an unpinned peer (`JoinConfig.Pins`, review M4),
   or admit a key two members share (review M5).
+- Cut `Recover`'s log back to the commit the survivor persisted: that commit
+  lags the cluster's, and the entries past it may be writes the old cluster
+  acknowledged. `adoptedEnd` keeps every entry whose `BodySum` and
+  `ChainSum` verify from the chain at that commit and cuts at the first
+  broken link; the audit line reports how many were adopted. The price,
+  stated in ADR 0152 D17: an entry refused `ENTRY_SUPERSEDED` may be applied
+  in the new history, a duplicate and never a loss (#399,
+  `TestRecoverAdoptsTheVerifiedSuffixPastThePersistedCommit`,
+  `TestRecoverCutsTheSuffixAtTheFirstBrokenLink`).
 - Report a refused transfer as done on the node's own view that the target
   leads: a deposed leader that has not heard its successor still names
   itself. `confirmLeader` makes the view a fact with a barrier first.
