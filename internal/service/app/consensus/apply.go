@@ -163,7 +163,12 @@ func (n *Node) applyCommands(batcher coreconsensus.BatchingStateMachine, batchin
 	return j, true
 }
 
-// forceCut cuts a snapshot at the applied index whatever SnapshotEvery says.
+// forceCut cuts a snapshot at the applied index whatever SnapshotEvery says:
+// a cut requested by a peer that needs one (requestCut), or one a trigger
+// coalesced (cutPending). Its failure goes through cutFailed like every other
+// cut's: written here, on the apply goroutine, when the machine pauses apply
+// to cut, a failed sync of the spool used to be dropped, and the node went on
+// over a disk that had just failed an fsync (#404, D4).
 func (n *Node) forceCut() {
 	n.am.Lock()
 	idx, term := n.applied, n.appliedTerm
@@ -178,8 +183,9 @@ func (n *Node) forceCut() {
 	ss.mu.Unlock()
 	if err := n.cut(idx, term, nil); err != nil {
 		ss.mu.Lock()
-		ss.inFlight = false
+		ss.inFlight, ss.pending = false, false
 		ss.mu.Unlock()
+		n.cutFailed(err)
 	}
 }
 

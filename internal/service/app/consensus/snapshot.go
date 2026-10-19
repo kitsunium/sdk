@@ -553,6 +553,12 @@ func (n *Node) install(req coreconsensus.InstallParams) error {
 		return origin(coreconsensus.AdminPreconditionFailed, errs.String("why", "the offer is no longer fresh"))
 	}
 	if err := sink.Commit(meta); err != nil {
+		if errs.HasCode(err, coreconsensus.CodeStorageFailed) {
+			// The spool's fsync, rename or .meta failed: this node's disk,
+			// as a cut's, and D4 never retries one. It used to wait for the
+			// next offer and keep voting and appending on it (#404).
+			n.stop(err, true)
+		}
 		return err
 	}
 	if n.crashAfterPublish.Load() {

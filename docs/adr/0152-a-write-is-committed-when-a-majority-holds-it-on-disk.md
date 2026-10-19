@@ -1346,6 +1346,18 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
   `SnapshotMeta` beside `Position`, `Membership`, the snapshot format version
   and the compression id (R1-22). Only one snapshot is in flight; a trigger
   during one is coalesced.
+- **A snapshot's failed write or sync stops the node, as the log's does
+  (D4, [#404](https://github.com/kitsunium/sdk/issues/404)).** The snapshot
+  directory sits on the node's one disk, whose page cache may now lie about
+  the log as well. Every path that publishes a snapshot obeys it: a cut on
+  its trigger, a coalesced or requested one (a peer that needs a snapshot the
+  leader has not cut), written aside or on the apply goroutine
+  (`SnapshotPausesApply`), an operator's `SaveSnapshot`, and an install,
+  whose spool's `fsync`, rename or `.meta` publication fails. The node stops
+  with `STORAGE_FAILED` and never retries; an install still answers the
+  leader with that error. Any other failure of a cut (the machine's
+  `Snapshot`, its encoding) is logged and the next cut tries again, and any
+  other failure of an install leaves the leader to offer again.
 - **The engine's own replicated state rides in the snapshot (R2-12).**
   `SnapshotMeta` is versioned and carries the committed cluster version, the
   committed timing contract, the no-space alarm, a reserved alarm field

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-18T22:00:00Z -->
+<!-- updated: 2026-10-19T12:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -39,6 +39,14 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 
 - Let the event loop wait on storage or a socket (D5b).
 - Retry a failed sync: the node stops (D4).
+- Return a snapshot's STORAGE_FAILED without stopping the node: every cut
+  ends in `cutFailed` (on its trigger, coalesced, requested by a peer, saved,
+  aside or on the apply goroutine), and an install whose `Commit` fails it
+  stops the node before it answers the leader. A requested cut written on the apply goroutine and an
+  install used to drop it, and the node kept voting, acknowledging and
+  appending on a disk that had failed an fsync (#404,
+  `TestARequestedCutWhoseSyncFailsStopsTheNode`,
+  `TestAnInstallWhoseSyncFailsStopsTheNode`).
 - Truncate a hole before every segment is classified (R8-02, R9-03).
 - Seal a segment again in recovery: a durable seal only needs the next
   segment published (`publishNext`, review H2).
