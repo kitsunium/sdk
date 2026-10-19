@@ -17,6 +17,13 @@ const (
 	// errImpossible is the cause of an answer a store must never give.
 	errImpossible cause = "impossible answer"
 
+	// errUnknownCompactTerm is the cause of a compaction past the log's end
+	// whose term the caller did not give (#415).
+	errUnknownCompactTerm cause = "compaction past the end of the log with no term"
+	// errUnknownBaseTerm is the cause of a start with no table whose base
+	// term neither the log nor a snapshot's metadata knows (#415).
+	errUnknownBaseTerm cause = "no term known for the log's base"
+
 	// errPinned is the cause of a Remove refused while a handle is open.
 	errPinned cause = "snapshot pinned by an open handle"
 	// errSilenceLength is the cause of a silence condition of a length this

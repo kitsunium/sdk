@@ -1351,6 +1351,15 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
     at or below its own commit index is accepted. Its may-campaign gate is
     closed while it holds no table, so it can vote but never lead. A test
     corrupts every snapshot and cold-restarts (R6-02).
+    **Its base term is never guessed ([#415](https://github.com/kitsunium/sdk/issues/415)).**
+    It votes on the term of its log's compaction point, so that term must be
+    the snapshot's. An install past the end of the log compacts the store
+    to an index it holds no entry for: the engine passes the term it holds
+    there, and the store refuses a compaction past its end without one (it
+    used to record 0, and the node granted its vote to any candidate whose
+    last term was 1 or more). At a start with no table the base takes the
+    term of the snapshot metadata at that index when the log answers 0, and
+    the node refuses to start when neither knows it.
   - **integrity checks beyond the checksum never gate start-up.** ADR 0173
     may add anchors on top of these snapshots without changing that rule.
 - **Cut:** `StateMachine.Snapshot` on the apply goroutine; `WriteTo` streams

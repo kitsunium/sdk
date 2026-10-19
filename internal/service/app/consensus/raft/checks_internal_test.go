@@ -911,3 +911,19 @@ func TestEngineAtIsTheStateTheCommittedEntriesThroughTheIndexLeft(t *testing.T) 
 		t.Fatalf("after compacting through 4, %d records kept, want 2", len(f.engines))
 	}
 }
+
+// A node with no table votes on its base: a base term that is the term of
+// its compaction point refuses a candidate whose log ends in an older term,
+// however long that log is (#415: the store used to record 0 there).
+func TestANoTableNodeVotesOnItsBaseTerm(t *testing.T) {
+	cfg := &Config{
+		ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
+		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, MaxChainRefusals: 3, NoTable: true,
+	}
+	base := core.SnapshotMetaValue{Position: core.PositionValue{Term: 5, Index: 100}, Membership: testConf(1, 2, 3)}
+	f := NewRaft(cfg, &StartState{HardState: core.HardState{Term: 6, Commit: 100}, Snapshot: base, Now: t0})
+	f.Step(t0.Add(5*time.Second), voteFrom(core.MsgVote, 3, 7, 3, 400))
+	if granted(f.Ready(), core.MsgVoteResp) {
+		t.Fatal("a node with no table granted its vote to a candidate whose last term is below its base's")
+	}
+}

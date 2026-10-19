@@ -189,6 +189,26 @@ type readResult struct {
 
 type storeReq struct {
 	rd raft.ReadyValue
+	// compactTerm is the term of rd.Compact as the step function held it
+	// when the Ready was taken: past the end of the log the store has no
+	// entry to read it from (#415).
+	compactTerm uint64
+}
+
+// termCompactor is a LogStore that takes the term of the compaction point
+// from its caller, which an install past the end of the log needs. Both
+// shipped stores are; another store compacts by CompactPrefix alone.
+type termCompactor interface {
+	compactPrefixAt(through, term uint64) error
+}
+
+// compactLog compacts log through index through, whose term is term (0 when
+// unknown), by the store's compactPrefixAt when it has one.
+func compactLog(log coreconsensus.LogStore, through, term uint64) error {
+	if c, ok := log.(termCompactor); ok {
+		return c.compactPrefixAt(through, term)
+	}
+	return log.CompactPrefix(through)
 }
 
 type storeDone struct {
@@ -497,7 +517,7 @@ func (n *Node) finishInstall(base *coreconsensus.SnapshotMetaValue, first, last 
 	if match && snapIdx <= last {
 		return first, last, nil
 	}
-	if err := n.cfg.Log.CompactPrefix(snapIdx); err != nil {
+	if err := compactLog(n.cfg.Log, snapIdx, base.Position.Term); err != nil {
 		return first, last, storageFailed("compact", err)
 	}
 	if err := n.cfg.Log.Sync(); err != nil {
@@ -545,14 +565,19 @@ func (n *Node) startApplied(base *coreconsensus.SnapshotMetaValue, durIdx uint64
 //
 // The term at first-1 is the log's own compaction term, which every LogStore
 // answers; a store that cannot is one whose base this node must not guess,
-// since a wrong term there is a log-matching check answered falsely.
+// since a wrong term there is a log-matching check answered falsely. The
+// metadata of a snapshot at first-1 records that term too, and answers when
+// the log says 0, which a compaction past the end recorded before #415. A
+// base above index 0 whose term is 0 by both is refused: the node would
+// grant its vote to any candidate whose last term is 1 or more.
 func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMetaValue, first uint64) (coreconsensus.SnapshotMetaValue, error) {
 	var b coreconsensus.SnapshotMetaValue
+	matched := false
 	if len(metas) > 0 {
 		b = metas[0]
 		for _, m := range metas {
 			if m.Position.Index == first-1 {
-				b = m
+				b, matched = m, true
 			}
 		}
 	}
@@ -560,6 +585,15 @@ func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMetaV
 	term, err := log.Term(first - 1)
 	if err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
+	}
+	switch {
+	case matched && term != 0 && term != b.Position.Term:
+		return coreconsensus.SnapshotMetaValue{}, errImpossible
+	case matched:
+		term = b.Position.Term
+	}
+	if term == 0 && first > 1 {
+		return coreconsensus.SnapshotMetaValue{}, errUnknownBaseTerm
 	}
 	b.Position.Term = term
 	return b, nil
@@ -908,7 +942,13 @@ func (n *Node) handleOne(rd *raft.ReadyValue) {
 	}
 	n.reportNotices(rd)
 	if rd.NeedsWrite() {
-		n.sq.push(storeReq{rd: *rd})
+		q := storeReq{rd: *rd}
+		if rd.Compact != 0 {
+			// The step function is compacted to rd.Compact already: its base
+			// holds the term, the store may not (#415).
+			q.compactTerm, _ = n.r.TermAt(rd.Compact)
+		}
+		n.sq.push(q)
 	}
 	n.queueApply(rd.Apply)
 	for _, f := range rd.Fetch {
@@ -1221,7 +1261,7 @@ func (n *Node) write(q *storeReq, synced *uint64) bool {
 		return false
 	}
 	if rd.Compact != 0 {
-		if err := n.cfg.Log.CompactPrefix(rd.Compact); err != nil {
+		if err := compactLog(n.cfg.Log, rd.Compact, q.compactTerm); err != nil {
 			n.stop(storageFailed("compact", err), true)
 			return false
 		}

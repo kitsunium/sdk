@@ -54,6 +54,13 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   `syncAtOpen` fdatasyncs every segment and syncs the log, data and
   snapshot directories before anything is trusted (#414,
   `TestRecoverySyncsWhatItTrustsBeforeServing`).
+- Compact the store past its end without the term: it holds no entry to read
+  it from, and a node restarted with no table votes on that term. The engine
+  passes it (`storeReq.compactTerm`, `compactLog`), the file log refuses a
+  compaction past its end without one, and `noTableBase` never takes a term
+  of 0 above index 0 (#415,
+  `TestACompactionPastTheEndRecordsTheTermItIsGiven`,
+  `TestANoTableBaseNeverTakesATermOfZero`).
 - Seal a segment again in recovery: a durable seal only needs the next
   segment published (`publishNext`, review H2).
 - Restore a snapshot the machine has applied past, or install one whose

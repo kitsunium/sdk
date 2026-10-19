@@ -127,7 +127,12 @@ func TestFileLogPersistsAcrossReopen(t *testing.T) {
 	if len(after) >= len(segs) {
 		t.Fatalf("no segment dropped: %d then %d", len(segs), len(after))
 	}
-	if err := l.CompactPrefix(90); err != nil {
+	// Past the end there is no entry to read the term from: refused
+	// without one, recorded with the one the engine gives (#415).
+	if err := l.CompactPrefix(90); !errors.Is(err, coreconsensus.StorageFailed) {
+		t.Fatalf("a compaction past the end with no term: %v", err)
+	}
+	if err := d.d.log.compactPrefixAt(90, 4); err != nil {
 		t.Fatal(err)
 	}
 	mustSync(t, l)
@@ -508,5 +513,85 @@ func TestRecoverySyncsWhatItTrustsBeforeServing(t *testing.T) {
 	got := nd.d.log
 	if got.syncedAtOpen != len(got.segs) || got.syncedAtOpen == 0 {
 		t.Fatalf("recovery trusted %d segment(s) and synced %d before serving them", len(got.segs), got.syncedAtOpen)
+	}
+}
+
+// An install past the end of the log truncates it and compacts it to the
+// snapshot's index. The store holds no entry there to read the term from:
+// it used to record 0, and a node that restarted with no table then based
+// its vote on a last term of 0 and granted it to a stale candidate. The
+// term comes from the engine, and a compaction past the end without one is
+// refused (#415).
+func TestACompactionPastTheEndRecordsTheTermItIsGiven(t *testing.T) {
+	dir, d := base(t)
+	l := d.d.log
+	if err := l.compactPrefixAt(2, 7); !errors.Is(err, coreconsensus.StorageFailed) {
+		t.Fatalf("a term that disagrees with the log's: %v", err)
+	}
+	if err := l.TruncateSuffix(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.CompactPrefix(100); !errors.Is(err, coreconsensus.StorageFailed) {
+		t.Fatalf("a compaction past the end with no term: %v", err)
+	}
+	if err := l.compactPrefixAt(100, 5); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, l)
+	nd := reopenExpect(t, dir, d, false)
+	defer nd.Close()
+	if f, la := nd.Log().Bounds(); f != 101 || la != 100 {
+		t.Fatalf("bounds %d %d, want 101 100", f, la)
+	}
+	if tm, err := nd.Log().Term(100); err != nil || tm != 5 {
+		t.Fatalf("Term(100) = %d %v, want 5", tm, err)
+	}
+	base, err := noTableBase(nd.Log(), nil, 101)
+	if err != nil || base.Position != (coreconsensus.PositionValue{Term: 5, Index: 100}) {
+		t.Fatalf("no-table base %+v %v, want (100, term 5)", base.Position, err)
+	}
+}
+
+// A log compacted past its end before #415 answers a term of 0 at its base.
+// A node with no table takes the term of the snapshot metadata at that
+// index, which stays readable when the bytes do not, and refuses to start
+// when there is none: a base term of 0 grants a vote to any candidate.
+func TestANoTableBaseNeverTakesATermOfZero(t *testing.T) {
+	log := NewMemoryLog()
+	if err := log.Append(ents(1, 3, 1), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.TruncateSuffix(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.CompactPrefix(100); err != nil {
+		t.Fatal(err)
+	}
+	if tm, _ := log.Term(100); tm != 0 {
+		t.Fatalf("setup: the base term is %d, want the 0 a compaction with no term leaves", tm)
+	}
+	at := func(index, term uint64) coreconsensus.SnapshotMetaValue {
+		return coreconsensus.SnapshotMetaValue{ID: fmt.Sprintf("s%d", index), Position: coreconsensus.PositionValue{Term: term, Index: index}}
+	}
+	got, err := noTableBase(log, []coreconsensus.SnapshotMetaValue{at(100, 5), at(60, 4)}, 101)
+	if err != nil || got.Position != (coreconsensus.PositionValue{Term: 5, Index: 100}) {
+		t.Fatalf("base %+v %v, want the metadata's term 5", got.Position, err)
+	}
+	if got, err := noTableBase(log, []coreconsensus.SnapshotMetaValue{at(60, 4)}, 101); err == nil {
+		t.Fatalf("a base of term 0 at index 100 was accepted: %+v", got.Position)
+	}
+	if got, err := noTableBase(log, nil, 101); err == nil {
+		t.Fatalf("a base of term 0 at index 100 was accepted: %+v", got.Position)
+	}
+	if _, err := noTableBase(NewMemoryLog(), nil, 1); err != nil {
+		t.Fatalf("an empty log's base (0, 0): %v", err)
+	}
+	// The engine gives the term: the base answers it.
+	given := NewMemoryLog()
+	if err := given.compactPrefixAt(100, 5); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := noTableBase(given, nil, 101); err != nil || got.Position.Term != 5 {
+		t.Fatalf("base %+v %v, want term 5", got.Position, err)
 	}
 }

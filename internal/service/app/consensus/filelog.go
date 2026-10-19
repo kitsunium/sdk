@@ -1204,8 +1204,17 @@ func (l *fileLog) TruncateSuffix(from uint64) error {
 
 // CompactPrefix implements LogStore: a compact record, then whole segments
 // whose entries the next checkpoint already supersedes are deleted, as a
-// prefix, with a directory fsync after the unlinks (D4 step 6).
-func (l *fileLog) CompactPrefix(through uint64) error {
+// prefix, with a directory fsync after the unlinks (D4 step 6). Past the end
+// of the log there is no entry to read the compaction point's term from, and
+// a guessed one is a log-matching check answered falsely: that compaction is
+// refused, and the engine makes it with compactPrefixAt (#415).
+func (l *fileLog) CompactPrefix(through uint64) error { return l.compactPrefixAt(through, 0) }
+
+// compactPrefixAt is CompactPrefix with the term of the compaction point as
+// the caller knows it, 0 when it does not. The log's own term wins where it
+// holds the entry, and must agree with a known one; past its end the
+// caller's term is recorded, and an unknown one refuses the compaction.
+func (l *fileLog) compactPrefixAt(through, term uint64) error {
 	l.wmu.Lock()
 	defer l.wmu.Unlock()
 	l.mu.Lock()
@@ -1217,7 +1226,10 @@ func (l *fileLog) CompactPrefix(through uint64) error {
 		return nil
 	}
 	last := l.first + uint64(len(l.slots)) - 1
-	t := l.termLocked(through)
+	t, err := compactionTerm(through, last, l.termLocked(through), term)
+	if err != nil {
+		return err
+	}
 	l.add(&record{kind: recCompact, batch: l.batch, index: through, term: t})
 	if through >= last {
 		l.slots = nil
@@ -1227,6 +1239,23 @@ func (l *fileLog) CompactPrefix(through uint64) error {
 	l.first, l.prevTerm = through+1, t
 	l.compact, l.compactTerm = through, t
 	return nil
+}
+
+// compactionTerm is the term a compaction through index through records,
+// over a log whose last index is last and which answers held for that
+// index: the log's own where it holds the entry, the caller's past its end.
+// A caller's term that disagrees with the log's, or none past the end, is
+// refused: the term recorded there is what a node with no table votes on.
+func compactionTerm(through, last, held, given uint64) (uint64, error) {
+	switch {
+	case through <= last && given != 0 && given != held:
+		return 0, storageFailed("compact", errImpossible)
+	case through <= last:
+		return held, nil
+	case given == 0:
+		return 0, storageFailed("compact", errUnknownCompactTerm)
+	}
+	return given, nil
 }
 
 // dropSegmentsLocked deletes the prefix of sealed segments whose every
