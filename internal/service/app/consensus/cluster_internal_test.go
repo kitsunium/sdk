@@ -1490,3 +1490,29 @@ func TestARestoredSnapshotAnswersTheProposalsItCovers(t *testing.T) {
 	f.node.am.Unlock()
 	f.node.pendingBytes.Add(-int64(len("orphan")))
 }
+
+// A Propose that passed the stopped check just before a stop finds propc
+// and stopc both ready, and Go picks one at random. When it picked propc
+// after failAllOnStop drained it for the last time, nothing answered the
+// proposal: the caller waited its whole deadline, forever without one. It
+// is answered NODE_STOPPED once the loop is gone (#420).
+func TestAProposeThatRacesAStopIsAnswered(t *testing.T) {
+	c := newCluster(t, 1, 0)
+	l := c.leader(5 * time.Second)
+	n := l.node
+	c.kill(l)
+	<-n.loopDone
+	// The race, made certain: the stopped check passes, then the select
+	// finds propc's buffer free and stopc closed.
+	n.stopped.Store(false)
+	defer n.stopped.Store(true)
+	for i := range 64 {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		start := time.Now()
+		_, _, err := n.Propose(ctx, []byte("a=1"))
+		cancel()
+		if !errors.Is(err, coreconsensus.NodeStopped) || time.Since(start) > time.Second {
+			t.Fatalf("Propose %d on a stopped node: %v after %v, want NODE_STOPPED at once", i, err, time.Since(start))
+		}
+	}
+}

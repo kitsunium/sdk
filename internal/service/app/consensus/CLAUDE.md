@@ -93,6 +93,10 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   never runs at their indexes and `sweepWaiters` answers only above the
   commit. `answerCovered` answers them OUTCOME_UNKNOWN and releases their
   pending bytes (#419, `TestARestoredSnapshotAnswersTheProposalsItCovers`).
+- Wait for a proposal's answer on `p.done` and the context alone: a submit
+  racing a stop can land in `propc` after the loop drained it for the last
+  time. `awaitProposal` also waits for `loopDone` (#420,
+  `TestAProposeThatRacesAStopIsAnswered`).
 - Take a JOIN answer from an unpinned peer (`JoinConfig.Pins`, review M4),
   or admit a key two members share (review M5).
 - Cut `Recover`'s log back to the commit the survivor persisted: that commit
