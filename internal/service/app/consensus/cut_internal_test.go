@@ -50,9 +50,17 @@ func TestARetentionWhoseRemoveFailsStopsTheNode(t *testing.T) {
 	c.configure = func(tn *testNode, cfg *Config) { cfg.Snapshots = removeFailingSnapshots{tn.snaps} }
 	newClusterWith(t, c)
 	n := c.leader(5 * time.Second).node
-	for i := 0; i < 40; i++ {
+	// Proposed until the node stops, not a fixed count: triggers that land
+	// while a cut is in flight coalesce into one cut, so a slow runner can
+	// apply a fixed number of entries over two cuts and never reach the
+	// third snapshot, whose retention removes the first.
+	deadline := time.Now().Add(20 * time.Second)
+	for i := 0; ; i++ {
 		if _, stopped := n.StopReason(); stopped {
 			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the node did not stop after %d entries: a failed removal of an old snapshot left it running", i)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		// Only the cuts these entries trigger matter: an entry the stop
@@ -60,10 +68,6 @@ func TestARetentionWhoseRemoveFailsStopsTheNode(t *testing.T) {
 		_, _, _ = n.Propose(ctx, fmt.Appendf(nil, "k%d=%d", i, i))
 		cancel()
 	}
-	waitFor(t, "the node stops on the failed removal", func() bool {
-		_, ok := n.StopReason()
-		return ok
-	})
 	if r, _ := n.StopReason(); !errs.HasCode(r.Err, coreconsensus.CodeStorageFailed) || r.ExitCode() != 74 {
 		t.Fatalf("stopped on %v (exit %d), want STORAGE_FAILED (exit 74)", r.Err, r.ExitCode())
 	}
