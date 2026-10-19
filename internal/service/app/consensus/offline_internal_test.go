@@ -13,6 +13,7 @@ import (
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
@@ -539,4 +540,247 @@ func TestBootstrapRefusesASharedKey(t *testing.T) {
 	if err := Bootstrap(context.Background(), &Config{Log: d.Log(), Cluster: cl, ID: id}, []coreconsensus.MemberValue{self, twin}); !errors.Is(err, coreconsensus.BootstrapRefused) {
 		t.Fatalf("bootstrap with a shared key: %v", err)
 	}
+}
+
+// recoverArgs are the members and options of a Recover of keep alone into
+// next, every other node attested fenced by one witness.
+func recoverArgs(t *testing.T, c *cluster, nodes []*diskNode, keep *diskNode, next coreconsensus.ClusterID) ([]coreconsensus.MemberValue, *RecoverOptions) {
+	t.Helper()
+	st := must(keep.dd.Log().Stamp())(t)
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	self := coreconsensus.MemberValue{ID: keep.id, Incarnation: st.Incarnation, Slot: st.Slot, SPKI: MemorySPKI(keep.id), Voter: true}
+	opt := RecoverOptions{Confirm: next.String(), Operator: "op:recover", WitnessKeys: []ed25519.PublicKey{pub}}
+	for _, dn := range nodes {
+		if dn != keep {
+			opt.Fenced = append(opt.Fenced, coreconsensus.FencedAttestationValue{
+				Voter: dn.id, Method: "powered-off",
+				Receipts: [][]byte{ed25519.Sign(priv, ReceiptMessage(c.cid, next, dn.id))},
+			})
+		}
+	}
+	return []coreconsensus.MemberValue{self}, &opt
+}
+
+// refusedStart asserts that keep, started under c's cluster, is refused by
+// the STOP-RECOVER marker, with a detail that names the command to run again.
+func refusedStart(t *testing.T, c *cluster, keep *diskNode, next coreconsensus.ClusterID) {
+	t.Helper()
+	keep.sm = newKV()
+	cfg := diskConfig(c, keep)
+	cfg.MinVoters = 1
+	n, err := NewNode(cfg)
+	if err == nil {
+		keep.node = n
+		t.Fatalf("a directory with a Recover in progress started under cluster %s", c.cid)
+	}
+	if !errors.Is(err, coreconsensus.StopMarkerPresent) {
+		t.Fatalf("a start with a Recover in progress: %v, want STOP_MARKER_PRESENT", err)
+	}
+	fields := map[string]string{}
+	for _, f := range errs.FieldsOf(err) {
+		fields[f.Key()] = f.StringValue()
+	}
+	if fields["marker"] != markerRecover || !strings.Contains(fields["detail"], "run Recover again to cluster "+next.String()) {
+		t.Fatalf("the refusal names marker %q, detail %q: want %s and the command to run again", fields["marker"], fields["detail"], markerRecover)
+	}
+}
+
+// startRecovered starts keep alone under next and checks it holds the old
+// history it kept, the entries adopted past the persisted commit included.
+func startRecovered(t *testing.T, c *cluster, keep *diskNode, next coreconsensus.ClusterID, want map[string]string) {
+	t.Helper()
+	c.cid = next
+	keep.sm = newKV()
+	cfg := diskConfig(c, keep)
+	cfg.MinVoters = 1
+	n, err := NewNode(cfg)
+	if err != nil {
+		t.Fatalf("the recovered node does not start: %v", err)
+	}
+	keep.node = n
+	if tok := propose(t, n, "after=recover"); tok.Cluster != next {
+		t.Fatalf("new history token %v", tok)
+	}
+	for k, v := range want {
+		if got, _ := keep.sm.get(k); got != v {
+			t.Fatalf("after Recover, %s = %q, want %q", k, got, v)
+		}
+	}
+}
+
+// TestAnInterruptedRecoverRefusesAStartAndResumes pins #405. Recover writes
+// the forced configuration of the new members, then the new stamp; between
+// the two, the directory used to start as a member of the OLD cluster
+// running the NEW configuration. STOP-RECOVER, durable before the forced
+// entry, refuses that start, naming the command to run again. A Recover to
+// another cluster is refused; one to the same cluster still asks for the
+// fence of the old voters — the interrupted forced entry is never read as
+// the old configuration — then resumes from the index the first one kept,
+// and the node starts under the new cluster with its state.
+func TestAnInterruptedRecoverRefusesAStartAndResumes(t *testing.T) {
+	type tc struct {
+		name           string
+		beforeTheEntry bool
+	}
+	runCase := func(t *testing.T, tcase tc) {
+		c, nodes := threeOnDisk(t, 30)
+		for _, dn := range nodes {
+			dn.crash(t, c)
+		}
+		keep := nodes[0]
+		keep.dd = openDir(t, keep.dir, 16<<10)
+		last, _ := appendPastCommit(t, keep.dd, []string{"acked0=a", "acked1=b"}, -1)
+		old := must(keep.dd.Log().Stamp())(t).Log.Cluster
+		next := coreconsensus.ClusterID{11}
+		members, opt := recoverArgs(t, c, nodes, keep, next)
+		if tcase.beforeTheEntry {
+			// The marker is durable, nothing else is written yet.
+			if err := keep.dd.writeRecoverIntent(&recoverIntent{cluster: next, kept: last}); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			interruptBeforeTheStamp(t, keep, next, members, opt, last)
+		}
+		// The machine restarts.
+		if err := keep.dd.Close(); err != nil {
+			t.Fatal(err)
+		}
+		keep.dd = openDir(t, keep.dir, 16<<10)
+		defer func() {
+			if keep.node != nil {
+				keep.crash(t, c)
+				return
+			}
+			if err := keep.dd.Close(); err != nil {
+				t.Error(err)
+			}
+		}()
+		refusedStart(t, c, keep, next)
+		other := coreconsensus.ClusterID{12}
+		otherMembers, otherOpt := recoverArgs(t, c, nodes, keep, other)
+		if err := Recover(keep.dd, other, otherMembers, otherOpt); !errors.Is(err, coreconsensus.RecoverRefused) {
+			t.Fatalf("a Recover to another cluster while one is in progress: %v", err)
+		}
+		unfenced := *opt
+		unfenced.Fenced = nil
+		if err := Recover(keep.dd, next, members, &unfenced); !errors.Is(err, coreconsensus.RecoverRefused) {
+			t.Fatalf("a resumed Recover without the fence of the old voters: %v", err)
+		}
+		if err := Recover(keep.dd, next, members, opt); err != nil {
+			t.Fatalf("resuming the interrupted Recover: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(keep.dir, markerRecover)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("the marker outlived the Recover that completed: %v", err)
+		}
+		if got, want := recoverReport(t, keep), fmt.Sprintf("op:recover recover %s resumed kept %d", next, last); got != want {
+			t.Fatalf("Recover reported %q, want %q", got, want)
+		}
+		st := must(keep.dd.Log().Stamp())(t)
+		if st.Log.Cluster != next || st.Log.Predecessor != old || st.Log.KeptIndex != last {
+			t.Fatalf("stamp %+v, want cluster %s after %s keeping %d", st.Log, next, old, last)
+		}
+		startRecovered(t, c, keep, next, map[string]string{"k29": "v29", "acked0": "a", "acked1": "b"})
+	}
+	for _, tcase := range []tc{{name: "before the forced entry", beforeTheEntry: true}, {name: "between the forced entry and the stamp"}} {
+		t.Run(tcase.name, func(t *testing.T) { runCase(t, tcase) })
+	}
+}
+
+// interruptBeforeTheStamp runs a Recover of keep into next whose stamp
+// cannot be written, a directory standing where its temporary goes: the
+// forced entry is durable, the stamp is the old cluster's, and the marker is
+// there. The obstacle is removed afterwards, as a repaired disk would be.
+func interruptBeforeTheStamp(t *testing.T, keep *diskNode, next coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions, kept uint64) {
+	t.Helper()
+	old := must(keep.dd.Log().Stamp())(t)
+	block := filepath.Join(keep.dir, fileStamp+".tmp")
+	if err := os.Mkdir(block, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := Recover(keep.dd, next, members, opt); err == nil {
+		t.Fatal("Recover wrote its stamp through a directory in the way")
+	}
+	if err := os.Remove(block); err != nil {
+		t.Fatal(err)
+	}
+	if st := must(keep.dd.Log().Stamp())(t); st.Log != old.Log {
+		t.Fatalf("setup: the stamp moved to %+v", st.Log)
+	}
+	_, last := keep.dd.Log().Bounds()
+	e := must(keep.dd.Log().Entries(last, last+1, 1, nil))(t)[0]
+	if last != kept+1 || e.Kind != coreconsensus.EntryMembership {
+		t.Fatalf("setup: the log ends at %d with a %v entry, want the forced configuration at %d", last, e.Kind, kept+1)
+	}
+	if _, err := os.Stat(filepath.Join(keep.dir, markerRecover)); err != nil {
+		t.Fatalf("setup: no marker after the forced entry: %v", err)
+	}
+}
+
+// TestARecoverInterruptedAfterItsStampIsCompleted pins the last window of
+// #405: the new stamp is durable and the marker not yet removed. The start
+// is refused all the same, a Recover to another cluster too, and a Recover
+// to the same cluster, confirmed and audited, only removes the marker: the
+// cluster it names is no longer new, and nothing else is decided again.
+func TestARecoverInterruptedAfterItsStampIsCompleted(t *testing.T) {
+	c, nodes := threeOnDisk(t, 30)
+	for _, dn := range nodes {
+		dn.crash(t, c)
+	}
+	keep := nodes[0]
+	keep.dd = openDir(t, keep.dir, 16<<10)
+	next := coreconsensus.ClusterID{13}
+	members, opt := recoverArgs(t, c, nodes, keep, next)
+	if err := Recover(keep.dd, next, members, opt); err != nil {
+		t.Fatal(err)
+	}
+	stamp := must(keep.dd.Log().Stamp())(t)
+	_, last := keep.dd.Log().Bounds()
+	// The crash came before the marker's removal was durable.
+	if err := keep.dd.writeRecoverIntent(&recoverIntent{cluster: next, kept: stamp.Log.KeptIndex}); err != nil {
+		t.Fatal(err)
+	}
+	if err := keep.dd.Close(); err != nil {
+		t.Fatal(err)
+	}
+	keep.dd = openDir(t, keep.dir, 16<<10)
+	defer func() {
+		if keep.node != nil {
+			keep.crash(t, c)
+			return
+		}
+		if err := keep.dd.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	c.cid = next
+	refusedStart(t, c, keep, next)
+	other := coreconsensus.ClusterID{14}
+	otherMembers, otherOpt := recoverArgs(t, c, nodes, keep, other)
+	if err := Recover(keep.dd, other, otherMembers, otherOpt); !errors.Is(err, coreconsensus.RecoverRefused) {
+		t.Fatalf("a Recover to another cluster while one is in progress: %v", err)
+	}
+	unconfirmed := *opt
+	unconfirmed.Confirm = ""
+	if err := Recover(keep.dd, next, members, &unconfirmed); !errors.Is(err, coreconsensus.RecoverRefused) {
+		t.Fatalf("an unconfirmed completion: %v", err)
+	}
+	if err := Recover(keep.dd, next, members, opt); err != nil {
+		t.Fatalf("completing the interrupted Recover: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(keep.dir, markerRecover)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the marker is still there: %v", err)
+	}
+	if got, want := recoverReport(t, keep), fmt.Sprintf("op:recover recover %s completed", next); got != want {
+		t.Fatalf("Recover reported %q, want %q", got, want)
+	}
+	if st := must(keep.dd.Log().Stamp())(t); st != stamp {
+		t.Fatalf("completing rewrote the stamp: %+v, want %+v", st, stamp)
+	}
+	if _, now := keep.dd.Log().Bounds(); now != last {
+		t.Fatalf("completing moved the log from %d to %d", last, now)
+	}
+	startRecovered(t, c, keep, next, map[string]string{"k29": "v29"})
 }

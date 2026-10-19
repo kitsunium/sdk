@@ -3,6 +3,7 @@ package consensus
 import (
 	"crypto/ed25519"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -33,6 +34,12 @@ const (
 	fileSilent = "SILENT"
 	// fileAudit is the append-only record of every offline operation.
 	fileAudit = "AUDIT"
+	// markerRecover is the stop marker of a Recover in progress: written,
+	// synced, before the forced entry, and removed only once the new stamp is
+	// durable. It names the new cluster and the last index kept, so a start
+	// is refused while it is there and a Recover to that cluster resumes from
+	// what the first one decided (#405).
+	markerRecover = markerStopPrefix + "RECOVER"
 )
 
 // The offline functions work on the shipped layout, and only on it (D17,
@@ -290,6 +297,11 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 // and a forced configuration. The audit file records how many entries past
 // the persisted commit were adopted. Every old voter left out must be
 // attested fenced by every witness; without witness keys it fails closed.
+// A stop marker, STOP-RECOVER, is durable before the forced entry and
+// removed once the new stamp is: a Recover interrupted between the two
+// refuses a start, and is completed by running Recover again to the same
+// new cluster, which resumes from the index the first one kept; one to
+// another cluster is refused.
 func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions) error {
 	if err := d.offline(); err != nil {
 		return err
@@ -299,46 +311,191 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 		return recoverRefused("quarantined log")
 	}
 	stamp := flog.stamp
+	intent, err := d.readRecoverIntent()
+	if err != nil {
+		return err
+	}
+	if intent != nil {
+		if intent.cluster != newCluster {
+			return recoverRefused("an interrupted Recover names cluster " + intent.cluster.String() + ": run it again to that cluster")
+		}
+		if stamp.Log.Cluster == newCluster {
+			// Interrupted after its stamp: only the marker is left.
+			return d.finishRecover(newCluster, opt)
+		}
+	}
 	if err := checkRecover(&stamp, newCluster, opt); err != nil {
 		return err
 	}
 	if err := checkRecoverMembers(&stamp, members); err != nil {
 		return err
 	}
-	hard, err := flog.HardState()
+	plan, err := d.planRecover(&stamp, newCluster, members, opt, intent)
 	if err != nil {
 		return err
 	}
-	// The new history keeps every entry this survivor holds whose chain
-	// verifies, not only those up to its persisted commit (issue #399).
-	kept, err := d.adoptedEnd(hard.Commit)
+	return d.writeRecover(&stamp, newCluster, members, opt.Operator, &plan)
+}
+
+// recoverIntent is what STOP-RECOVER records of the Recover that wrote it:
+// the new cluster, and the last index of the old history it keeps.
+type recoverIntent struct {
+	cluster coreconsensus.ClusterID
+	kept    uint64
+}
+
+// recoverPlan is what Recover decided before it writes the new history: the
+// hard state to force from, the last index kept, the configuration in force
+// there, and whether the marker is already durable.
+type recoverPlan struct {
+	hard    coreconsensus.HardState
+	kept    uint64
+	old     coreconsensus.MembershipValue
+	resumed bool
+}
+
+// planRecover decides what the new history keeps, checks the fence of every
+// old voter left out against the configuration in force there, and audits
+// the operation, before anything else is written. A first Recover keeps the
+// verified suffix past the persisted commit; a resumed one keeps what the
+// first decided, read from its marker. Its forced entry, durable or not, is
+// never read as the old configuration, so the fences are asked for again.
+func (d DataDir) planRecover(stamp *coreconsensus.StampValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions, intent *recoverIntent) (recoverPlan, error) {
+	var p recoverPlan
+	hard, err := d.d.log.HardState()
 	if err != nil {
-		return err
+		return p, err
+	}
+	p.hard, p.resumed = hard, intent != nil
+	if p.resumed {
+		p.kept, err = d.resumedKept(intent)
+	} else {
+		// The new history keeps every entry this survivor holds whose chain
+		// verifies, not only those up to its persisted commit (issue #399).
+		p.kept, err = d.adoptedEnd(hard.Commit)
+	}
+	if err != nil {
+		return p, err
 	}
 	// The old configuration decides which voters must be attested fenced:
 	// one that could not be read fails Recover closed, never open. It is
 	// the configuration of the last entry kept: an adopted change counts.
-	old, err := lastMembership(flog, d.d.snaps, kept)
-	if err != nil {
-		return err
+	if p.old, err = lastMembership(d.d.log, d.d.snaps, p.kept); err != nil {
+		return p, err
 	}
-	if err := checkFenced(old.Voters(), members, opt, stamp.Log.Cluster, newCluster); err != nil {
-		return err
+	if err := checkFenced(p.old.Voters(), members, opt, stamp.Log.Cluster, newCluster); err != nil {
+		return p, err
 	}
-	// The audit line is Recover's report: the index kept, the persisted
-	// commit, and how many entries past that commit the new history adopts.
-	what := fmt.Sprintf("recover %s kept %d commit %d adopted %d", newCluster, kept, hard.Commit, kept-hard.Commit)
-	if err := d.audit(opt.Operator, what); err != nil {
-		return err
+	return p, d.audit(opt.Operator, recoverAuditLine(newCluster, &p))
+}
+
+// recoverAuditLine is Recover's audit line: the index kept, the persisted
+// commit, and how many entries past that commit the new history adopts. A
+// resumed Recover reports the index its marker kept, the forced entry it
+// writes again replacing any the interrupted one left.
+func recoverAuditLine(newCluster coreconsensus.ClusterID, p *recoverPlan) string {
+	if p.resumed {
+		return fmt.Sprintf("recover %s resumed kept %d", newCluster, p.kept)
 	}
-	if err := d.appendForced(new(coreconsensus.HardState{Term: hard.Term, Commit: kept}), members, &old, opt.Operator); err != nil {
+	return fmt.Sprintf("recover %s kept %d commit %d adopted %d", newCluster, p.kept, p.hard.Commit, p.kept-p.hard.Commit)
+}
+
+// resumedKept is the index an interrupted Recover kept, refused when the log
+// no longer holds it: the forced entry follows it, and nothing else may.
+func (d DataDir) resumedKept(intent *recoverIntent) (uint64, error) {
+	if _, last := d.d.log.Bounds(); intent.kept > last {
+		return 0, recoverRefused("the interrupted Recover kept an index past the log")
+	}
+	return intent.kept, nil
+}
+
+// writeRecover writes the plan: the marker, unless it is already durable,
+// then the forced entry, the new stamp, and the marker's removal. Between
+// the forced entry and the stamp, the directory holds the new members'
+// configuration under the OLD cluster's identity: started then, the node
+// would run it in the old cluster, beside voters only fenced for the new
+// one. The marker refuses that start (#405).
+func (d DataDir) writeRecover(stamp *coreconsensus.StampValue, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, op coreconsensus.Operator, p *recoverPlan) error {
+	if !p.resumed {
+		if err := d.writeRecoverIntent(&recoverIntent{cluster: newCluster, kept: p.kept}); err != nil {
+			return err
+		}
+	}
+	if err := d.appendForced(new(coreconsensus.HardState{Term: p.hard.Term, Commit: p.kept}), members, &p.old, op); err != nil {
 		return err
 	}
 	stamp.Log = coreconsensus.LogIdentityValue{
 		Cluster: newCluster, Epoch: 1, Predecessor: stamp.Log.Cluster,
-		PredecessorEpoch: stamp.Log.Epoch, KeptIndex: kept,
+		PredecessorEpoch: stamp.Log.Epoch, KeptIndex: p.kept,
 	}
-	return flog.WriteStamp(stamp)
+	if err := d.d.log.WriteStamp(*stamp); err != nil {
+		return err
+	}
+	return d.clearRecoverIntent()
+}
+
+// finishRecover completes a Recover interrupted after its new stamp, of
+// which only the marker is left: confirmed and audited like the rest, then
+// the marker is removed. Nothing else is decided again.
+func (d DataDir) finishRecover(newCluster coreconsensus.ClusterID, opt *RecoverOptions) error {
+	switch {
+	case !opt.Operator.Valid():
+		return recoverRefused("operator")
+	case opt.Confirm != newCluster.String():
+		return recoverRefused("confirmation does not name the new cluster")
+	}
+	if err := d.audit(opt.Operator, fmt.Sprintf("recover %s completed", newCluster)); err != nil {
+		return err
+	}
+	return d.clearRecoverIntent()
+}
+
+// writeRecoverIntent publishes STOP-RECOVER, durably. Its first two lines
+// are what Recover reads back; the third is what a refused start shows the
+// operator, as the detail of STOP_MARKER_PRESENT.
+func (d DataDir) writeRecoverIntent(in *recoverIntent) error {
+	body := fmt.Sprintf("cluster=%s\nkept=%d\nRecover to cluster %s was interrupted: run Recover again to cluster %s to complete it\n",
+		in.cluster, in.kept, in.cluster, in.cluster)
+	if err := writeFileSync(filepath.Join(d.d.dir, markerRecover), []byte(body)); err != nil {
+		return storageFailed("recover marker", err)
+	}
+	return nil
+}
+
+// readRecoverIntent reads STOP-RECOVER: nil when there is none. A marker that
+// cannot be read is a STORAGE_FAILED, and one that does not parse refuses
+// Recover: neither is read as no Recover in progress.
+func (d DataDir) readRecoverIntent() (*recoverIntent, error) {
+	b, err := os.ReadFile(filepath.Join(d.d.dir, markerRecover))
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return nil, nil
+	case err != nil:
+		return nil, storageFailed("recover marker", err)
+	}
+	var cluster string
+	in := &recoverIntent{}
+	if _, err := fmt.Sscanf(string(b), "cluster=%s\nkept=%d\n", &cluster, &in.kept); err != nil {
+		return nil, recoverRefused("unreadable " + markerRecover + " marker")
+	}
+	raw, err := hex.DecodeString(cluster)
+	if err != nil || len(raw) != len(in.cluster) {
+		return nil, recoverRefused("unreadable " + markerRecover + " marker")
+	}
+	copy(in.cluster[:], raw)
+	return in, nil
+}
+
+// clearRecoverIntent removes STOP-RECOVER once the new stamp is durable,
+// and syncs the directory, so the removal is as durable as the stamp.
+func (d DataDir) clearRecoverIntent() error {
+	if err := os.Remove(filepath.Join(d.d.dir, markerRecover)); err != nil {
+		return storageFailed("recover marker", err)
+	}
+	if err := syncDir(d.d.dir); err != nil {
+		return storageFailed("recover marker", err)
+	}
+	return nil
 }
 
 // recoverRefused is Recover's refusal, its reason in the why field.
