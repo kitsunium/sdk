@@ -36,11 +36,11 @@ go_test(
     name = "file_test",
     srcs = [
         "allocwindow_test.go",
-        "api_gen_test.go",
         "file_alloc_external_test.go",
         "file_external_test.go",
         "file_internal_test.go",
         "file_linux_bench_test.go",
+        "gen_api_test.go",
     ],
     embed = [":file"],
     deps = [

@@ -1,6 +1,6 @@
 package semver
 
-// isValid is IsValid's body: decl_gen.go writes IsValid, from the
+// isValid is IsValid's body: gen_decls.go writes IsValid, from the
 // design, as one call of it.
 func isValid(v string) bool {
 	_, ok := parse(v)
@@ -42,7 +42,7 @@ func Compare(v, w string) int {
 	return comparePrereleases(left.prerelease, right.prerelease)
 }
 
-// prerelease is Prerelease's body: decl_gen.go writes Prerelease, from the
+// prerelease is Prerelease's body: gen_decls.go writes Prerelease, from the
 // design, as one call of it.
 func prerelease(v string) string {
 	parts, _ := parse(v)

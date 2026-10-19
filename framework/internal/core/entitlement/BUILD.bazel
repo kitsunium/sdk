@@ -5,9 +5,9 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "entitlement",
     srcs = [
-        "codes_gen.go",
         "doc.go",
         "entitlement.go",
+        "gen_codes.go",
         "grant.go",
         "origin.go",
         "roster.go",
@@ -32,7 +32,7 @@ alias(
 go_test(
     name = "entitlement_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "grant_internal_test.go",
         "port_internal_test.go",
         "roster_internal_test.go",

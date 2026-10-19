@@ -64,7 +64,7 @@ The backend is cgroup v2 on Linux, a Job Object on Windows and rctl(8) on FreeBS
 - [type Option](<#Option>)
 
 <a name="Available"></a>
-## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/facade_gen.go>)
+## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
 
 ```go
 func Available() bool
@@ -73,7 +73,7 @@ func Available() bool
 Available reports whether a kernel-enforced control-group backend is usable: on Linux, that the unified cgroup v2 hierarchy is mounted AND a sub-group can be created under it by the caller; on Windows, that Job Objects are available (always true); on FreeBSD, that the kernel carries RACCT. It returns false on platforms with no backend (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris), on cgroup v1, and on a Linux host where the hierarchy is read-only.
 
 <a name="Create"></a>
-## func [Create](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/facade_gen.go>)
+## func [Create](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
 
 ```go
 func Create(name string, opts ...Option) (g Group, err error)
@@ -91,7 +91,7 @@ func MustCreate(name string, opts ...Option) Group
 MustCreate is like [Create](#Create) but panics with the typed error when creation fails — UnsupportedPlatform on a platform with no control-group backend (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris), or CgroupUnavailable when the Linux hierarchy is not delegated. It is the idiomatic Go MustX opt-in (like [regexp.MustCompile](https://pkg.go.dev/regexp#MustCompile)) for a consumer that chooses crash-on-unsupported at its own startup; the SDK itself never panics, and [Create](#Create) is the non-panicking form for normal use. The panic value is the typed error, so a top-level recover() can classify it via errs.CodeOf / HasCode.
 
 <a name="WithRoot"></a>
-## func [WithRoot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/facade_gen.go>)
+## func [WithRoot](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
 
 ```go
 func WithRoot(root string) Option
@@ -100,7 +100,7 @@ func WithRoot(root string) Option
 WithRoot overrides the parent directory under which Create makes the new control group, targeting a delegated sub-tree instead of the top-level mount. It is a cgroup v2 path: on Windows and FreeBSD, whose backends have no hierarchy, it is accepted and ignored.
 
 <a name="Group"></a>
-## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/facade_gen.go>)
+## type [Group](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
 
 Group is a handle to a cgroup v2 control group: set controller ceilings, attach processes, and remove the group. It aliases the core proc.Group port.
 
@@ -145,7 +145,7 @@ type Group interface {
 ```
 
 <a name="Group.Add"></a>
-### func \(Group\) [Add](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Group\) [Add](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Group) Add(pid int) error
@@ -154,7 +154,7 @@ func (Group) Add(pid int) error
 Add moves the process pid into this group by writing cgroup.procs.
 
 <a name="Group.Delete"></a>
-### func \(Group\) [Delete](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Group\) [Delete](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Group) Delete() error
@@ -163,7 +163,7 @@ func (Group) Delete() error
 Delete removes the (empty) control group; callers move processes out first.
 
 <a name="Group.Freeze"></a>
-### func \(Group\) [Freeze](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Group\) [Freeze](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Group) Freeze() error
@@ -172,7 +172,7 @@ func (Group) Freeze() error
 Freeze quiesces the whole group by writing "1" to cgroup.freeze (kernel >= 5.2), stopping every member so a consistent signal sweep or snapshot can run. Returns UnsupportedPlatform when cgroup.freeze is absent. Idempotent.
 
 <a name="Group.Kill"></a>
-### func \(Group\) [Kill](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Group\) [Kill](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Group) Kill() error
@@ -181,7 +181,7 @@ func (Group) Kill() error
 Kill atomically SIGKILLs every process in the group by writing "1" to cgroup.kill (systemd KillMode=control-group; kernel >= 5.14). Unlike a process-group kill, nothing escapes — a member that called setsid is still in the control group. Returns UnsupportedPlatform when cgroup.kill is absent (older kernels), so callers can fall back to SignalGroup.
 
 <a name="Group.SetCPUMax"></a>
-### func \(Group\) [SetCPUMax](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Group\) [SetCPUMax](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Group) SetCPUMax(quota int64, period int64) error
@@ -190,7 +190,7 @@ func (Group) SetCPUMax(quota int64, period int64) error
 SetCPUMax writes cpu.max as "quota period" (systemd CPUQuota=); a negative quota means "max".
 
 <a name="Group.SetIOMax"></a>
-### func \(Group\) [SetIOMax](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Group\) [SetIOMax](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Group) SetIOMax(spec string) error
@@ -199,7 +199,7 @@ func (Group) SetIOMax(spec string) error
 SetIOMax writes one io.max line verbatim (systemd IO\*Max=), e.g. "8:0 rbps=1048576".
 
 <a name="Group.SetMemoryMax"></a>
-### func \(Group\) [SetMemoryMax](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Group\) [SetMemoryMax](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Group) SetMemoryMax(bytes int64) error
@@ -208,7 +208,7 @@ func (Group) SetMemoryMax(bytes int64) error
 SetMemoryMax writes memory.max (systemd MemoryMax=); a negative value means "max" (no limit).
 
 <a name="Group.SetPidsMax"></a>
-### func \(Group\) [SetPidsMax](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Group\) [SetPidsMax](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Group) SetPidsMax(n int64) error
@@ -217,7 +217,7 @@ func (Group) SetPidsMax(n int64) error
 SetPidsMax writes pids.max (systemd TasksMax=); a negative value means "max".
 
 <a name="Group.Thaw"></a>
-### func \(Group\) [Thaw](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Group\) [Thaw](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Group) Thaw() error
@@ -226,7 +226,7 @@ func (Group) Thaw() error
 Thaw resumes a frozen group by writing "0" to cgroup.freeze. Returns UnsupportedPlatform when cgroup.freeze is absent. Idempotent.
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/facade_gen.go>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/cgroup/gen_facade.go>)
 
 Option customises a Create call (functional-option pattern). It aliases the service Option type; construct options with WithRoot.
 

@@ -1,7 +1,7 @@
 //go:build !race
 
 // The fixture of buffer's performance contract (design/sdk.yaml, budgets):
-// it sets one call up and returns it, and the perf_gen_test.go kit gen
+// it sets one call up and returns it, and the gen_perf_test.go kit gen
 // writes beside this file counts its allocations against its budget.
 //
 // It was held twice, bound 0 both times: by the kernel's zero-allocation

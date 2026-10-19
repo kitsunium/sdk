@@ -8,9 +8,9 @@ go_library(
         "cli.go",
         "cli_command.go",
         "cli_invocation.go",
-        "codes_gen.go",
-        "design_gen.go",
         "doc.go",
+        "gen_codes.go",
+        "gen_ports.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/cli",
     visibility = [
@@ -33,8 +33,8 @@ go_test(
     name = "cli_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "cli_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":cli",

@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// newManualClock is NewManualClock's body: decl_gen.go writes NewManualClock, from the
+// newManualClock is NewManualClock's body: gen_decls.go writes NewManualClock, from the
 // design, as one call of it.
 func newManualClock(start time.Time) *ManualClock {
 	//: build first, then wire the cond to this instance's write lock.
@@ -40,7 +40,7 @@ func (m *ManualClock) After(d time.Duration) <-chan time.Time {
 	return m.NewTimer(d).C()
 }
 
-// newTimer is NewTimer's body: decl_gen.go writes ManualClock.NewTimer, from the
+// newTimer is NewTimer's body: gen_decls.go writes ManualClock.NewTimer, from the
 // design, as one call of it.
 func (m *ManualClock) newTimer(d time.Duration) Timer {
 	//: a zero period marks the wait as one-shot.
@@ -56,7 +56,7 @@ func (m *ManualClock) NewTicker(d time.Duration) Ticker {
 	return &manualTicker{clk: m, w: m.register(d, d)}
 }
 
-// sleep is Sleep's body: decl_gen.go writes ManualClock.Sleep, from the
+// sleep is Sleep's body: gen_decls.go writes ManualClock.Sleep, from the
 // design, as one call of it.
 func (m *ManualClock) sleep(d time.Duration) {
 	//: a sleep is a wait nobody can cancel; block on the timer's channel.

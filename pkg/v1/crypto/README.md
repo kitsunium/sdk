@@ -88,7 +88,7 @@ box, _ := crypto.SealAs(crypto.XChaCha20Poly1305, k, pt, aad)
 ```
 
 <a name="NewKey"></a>
-## func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/facade_gen.go>)
+## func [NewKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/gen_facade.go>)
 
 ```go
 func NewKey(raw []byte) (key Key, err error)
@@ -97,7 +97,7 @@ func NewKey(raw []byte) (key Key, err error)
 NewKey builds a Key from raw, which must be exactly KeyLen (32) bytes. A wrong length returns InvalidKey; the bytes are copied defensively.
 
 <a name="Open"></a>
-## func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/facade_gen.go>)
+## func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/gen_facade.go>)
 
 ```go
 func Open(k Key, box []byte, aad []byte) (plaintext []byte, err error)
@@ -142,7 +142,7 @@ func SealStream(dst io.Writer, k Key, aad []byte) (sealed io.WriteCloser, err er
 SealStream wraps dst so writes are sealed under k with aad in fixed 64 KiB authenticated chunks. The returned io.WriteCloser buffers and seals chunks as they fill; Close writes the final authenticated chunk and MUST be called to produce a valid stream. Pass nil aad when unused.
 
 <a name="UnwrapKey"></a>
-## func [UnwrapKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/facade_gen.go>)
+## func [UnwrapKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/gen_facade.go>)
 
 ```go
 func UnwrapKey(passphrase []byte, envelope string) (dek Key, err error)
@@ -151,7 +151,7 @@ func UnwrapKey(passphrase []byte, envelope string) (dek Key, err error)
 UnwrapKey recovers the data key sealed in envelope under passphrase. A structurally invalid envelope returns InvalidKeyEnvelope; a wrong passphrase returns the non-oracle DecryptionFailed.
 
 <a name="WrapKey"></a>
-## func [WrapKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/facade_gen.go>)
+## func [WrapKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/gen_facade.go>)
 
 ```go
 func WrapKey(passphrase []byte, dek Key) (envelope string, err error)
@@ -169,7 +169,7 @@ type Algorithm string
 ```
 
 <a name="Key"></a>
-## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/facade_gen.go>)
+## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/crypto/gen_facade.go>)
 
 Key is an opaque, redacting 256-bit symmetric key. Build one with NewKey; its String output is always "\<redacted>".
 

@@ -1,6 +1,6 @@
 // Package main — the pin markers: on each cell, the code's exported
 // (id, kind, canonical signature) set of a package equals the set the
-// `// go:<id> <kind> <canonical signature>` markers of its api_gen*_test.go
+// `// go:<id> <kind> <canonical signature>` markers of its gen_api*_test.go
 // pin files declare. kit writes the pins and the markers from the design;
 // genindex reads them with go/parser and never reads the design.
 //
@@ -37,7 +37,7 @@ const (
 	// digestLen is a sha256's length in hex.
 	digestLen int = 64
 	// pinGlob matches a pin file's name.
-	pinGlob string = "api_gen*_test.go"
+	pinGlob string = "gen_api*_test.go"
 )
 
 var (
@@ -65,7 +65,7 @@ type marker struct {
 	line int
 }
 
-// pinFile is one api_gen*_test.go file of a package directory.
+// pinFile is one gen_api*_test.go file of a package directory.
 type pinFile struct {
 	// name is its base name.
 	name string

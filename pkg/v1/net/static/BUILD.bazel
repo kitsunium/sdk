@@ -6,7 +6,7 @@ go_library(
     name = "static",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/net/static",
     visibility = ["//visibility:public"],
@@ -25,7 +25,7 @@ alias(
 go_test(
     name = "static_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "static_external_test.go",
     ],
     deps = [

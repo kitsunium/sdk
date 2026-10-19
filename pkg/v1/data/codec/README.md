@@ -432,7 +432,7 @@ UnknownFormat is returned when Marshal / Unmarshal / NewEncoder / NewDecoder rec
 Code `1.2.0.1` · reason `UNKNOWN_FORMAT` · public "codec format is not registered"
 
 <a name="Available"></a>
-## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/facade_gen.go>)
+## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/gen_facade.go>)
 
 ```go
 func Available() []Format
@@ -496,7 +496,7 @@ out, err := codec.MarshalMany(payload, codec.JSON, codec.CBOR, codec.MsgPack)
 ```
 
 <a name="MultipartContentType"></a>
-## func [MultipartContentType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/facade_gen.go>)
+## func [MultipartContentType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/gen_facade.go>)
 
 ```go
 func MultipartContentType(body []byte) (value string, err error)
@@ -543,7 +543,7 @@ func UnmarshalCompressed(box []byte, v any) error
 UnmarshalCompressed parses a frame produced by MarshalCompressed, decompresses the payload under a bomb guard, and decodes it into v using the inner Format the frame records. A malformed frame, an unknown algorithm id, or a payload that decompresses past the bomb guard returns CompressedFrameInvalid; codec and compressor faults are forwarded untouched.
 
 <a name="Codec"></a>
-## type [Codec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/facade_gen.go>)
+## type [Codec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/gen_facade.go>)
 
 Codec re-exports core/data/codec.Codec for consumers who want direct access.
 
@@ -564,42 +564,42 @@ type Codec interface {
 ```
 
 <a name="Codec.Extensions"></a>
-### func \(Codec\) [Extensions](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/design_gen.go>)
+### func \(Codec\) [Extensions](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/gen_ports.go>)
 
 ```go
 func (Codec) Extensions() []string
 ```
 
 <a name="Codec.MIMETypes"></a>
-### func \(Codec\) [MIMETypes](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/design_gen.go>)
+### func \(Codec\) [MIMETypes](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/gen_ports.go>)
 
 ```go
 func (Codec) MIMETypes() []string
 ```
 
 <a name="Codec.Marshal"></a>
-### func \(Codec\) [Marshal](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/design_gen.go>)
+### func \(Codec\) [Marshal](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/gen_ports.go>)
 
 ```go
 func (Codec) Marshal(v any) (data []byte, err error)
 ```
 
 <a name="Codec.Name"></a>
-### func \(Codec\) [Name](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/design_gen.go>)
+### func \(Codec\) [Name](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/gen_ports.go>)
 
 ```go
 func (Codec) Name() string
 ```
 
 <a name="Codec.Unmarshal"></a>
-### func \(Codec\) [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/design_gen.go>)
+### func \(Codec\) [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/gen_ports.go>)
 
 ```go
 func (Codec) Unmarshal(data []byte, v any) (err error)
 ```
 
 <a name="CompressAlgorithm"></a>
-## type [CompressAlgorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/facade_gen.go>)
+## type [CompressAlgorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/gen_facade.go>)
 
 CompressAlgorithm is the transform package's Algorithm, so consumers name a compressor without importing internal/\*. Use the Gzip / Flate constants.
 
@@ -632,7 +632,7 @@ func (CompressAlgorithm) String() string
 String implements fmt.Stringer and returns the raw identifier.
 
 <a name="Decoder"></a>
-## type [Decoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/facade_gen.go>)
+## type [Decoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/gen_facade.go>)
 
 Decoder re-exports core/data/codec.Decoder for streaming callers.
 
@@ -650,21 +650,21 @@ type Decoder interface {
 ```
 
 <a name="Decoder.Decode"></a>
-### func \(Decoder\) [Decode](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/design_gen.go>)
+### func \(Decoder\) [Decode](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/gen_ports.go>)
 
 ```go
 func (Decoder) Decode(v any) (err error)
 ```
 
 <a name="Decoder.More"></a>
-### func \(Decoder\) [More](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/design_gen.go>)
+### func \(Decoder\) [More](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/gen_ports.go>)
 
 ```go
 func (Decoder) More() (ok bool)
 ```
 
 <a name="Encoder"></a>
-## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/facade_gen.go>)
+## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/gen_facade.go>)
 
 Encoder re-exports core/data/codec.Encoder for streaming callers.
 
@@ -682,21 +682,21 @@ type Encoder interface {
 ```
 
 <a name="Encoder.Close"></a>
-### func \(Encoder\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/design_gen.go>)
+### func \(Encoder\) [Close](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/gen_ports.go>)
 
 ```go
 func (Encoder) Close() (err error)
 ```
 
 <a name="Encoder.Encode"></a>
-### func \(Encoder\) [Encode](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/design_gen.go>)
+### func \(Encoder\) [Encode](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/codec/gen_ports.go>)
 
 ```go
 func (Encoder) Encode(v any) (err error)
 ```
 
 <a name="Format"></a>
-## type [Format](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/facade_gen.go>)
+## type [Format](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/gen_facade.go>)
 
 Format re-exports core/data/codec.Format so consumers only depend on pkg/v1.
 
@@ -729,7 +729,7 @@ func (Format) String() string
 String implements fmt.Stringer and returns the raw identifier.
 
 <a name="MultipartForm"></a>
-## type [MultipartForm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/facade_gen.go>)
+## type [MultipartForm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/gen_facade.go>)
 
 MultipartForm is the native Go shape of the [Multipart](#Multipart) format: a whole multipart/form-data body — its RFC 2046 boundary and its parts, in wire order. Marshal one to build an upload; Unmarshal into a \*MultipartForm to read one. An empty Boundary asks Marshal to generate a delimiter; Unmarshal always fills it with the one it recovered, so a decode → encode round trip keeps the original delimiter — and reproduces the whole body byte for byte only for a body this codec encoded, since a part header other than the name, filename and media type is not carried through, and a filename is decoded to its last path element.
 
@@ -749,7 +749,7 @@ type MultipartForm struct {
 ```
 
 <a name="MultipartPart"></a>
-## type [MultipartPart](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/facade_gen.go>)
+## type [MultipartPart](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/gen_facade.go>)
 
 MultipartPart is one section of a [MultipartForm](#MultipartForm): a named field, optionally a filename and a media type, and the bytes themselves — a file upload is a part with FileName and ContentType set. Marshal also accepts a single MultipartPart or a \[]MultipartPart.
 

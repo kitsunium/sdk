@@ -6,7 +6,7 @@ go_library(
     name = "password",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
         "password.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/crypto/password",
@@ -27,7 +27,7 @@ alias(
 go_test(
     name = "password_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "password_bench_test.go",
         "password_external_test.go",
     ],

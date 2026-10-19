@@ -7,7 +7,7 @@ go_library(
     srcs = [
         "csv.go",
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/csv",
     visibility = ["//visibility:public"],
@@ -27,8 +27,8 @@ alias(
 go_test(
     name = "csv_test",
     srcs = [
-        "api_gen_test.go",
         "csv_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":csv",

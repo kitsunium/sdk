@@ -82,7 +82,6 @@ alias(
 go_test(
     name = "consensus_test",
     srcs = [
-        "api_gen_test.go",
         "cluster_internal_test.go",
         "cut_internal_test.go",
         "defects_internal_test.go",
@@ -92,6 +91,7 @@ go_test(
         "failclosed_unix_internal_test.go",
         "filelog_fuzz_internal_test.go",
         "filelog_internal_test.go",
+        "gen_api_test.go",
         "observe_internal_test.go",
         "observed_internal_test.go",
         "offline_internal_test.go",

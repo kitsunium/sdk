@@ -6,7 +6,7 @@ go_library(
     name = "buildinfo",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/proc/buildinfo",
     visibility = ["//visibility:public"],
@@ -22,8 +22,8 @@ alias(
 go_test(
     name = "buildinfo_test",
     srcs = [
-        "api_gen_test.go",
         "buildinfo_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":buildinfo",

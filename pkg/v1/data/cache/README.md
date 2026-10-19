@@ -166,7 +166,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/cache.CacheTierFai
 Code `0.3.48.2` · reason `CACHE_TIER_FAILED` · public "A tier of the cache chain could not serve the operation"
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
 ```go
 func New[K comparable, V any](cfg Config[K, V]) *Cache[K, V]
@@ -175,7 +175,7 @@ func New[K comparable, V any](cfg Config[K, V]) *Cache[K, V]
 New builds a [Cache](#Cache) from cfg. A nil cfg.Clock defaults to the system clock.
 
 <a name="NewChain"></a>
-## func [NewChain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go>)
+## func [NewChain](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
 ```go
 func NewChain[V any](cfg ChainConfig, tiers ...Store[V]) (store Store[V], err error)
@@ -186,7 +186,7 @@ NewChain puts each store in front of the next: tiers\[0] is consulted first, the
 Every tier must implement [EntryFetcher](#EntryFetcher) and [Tagger](#Tagger), checked here and refused rather than discovered per call: a value promoted without its tags is one [Tagger](#Tagger) can no longer reach, so an invalidation would report success while a nearer tier kept serving the entry.
 
 <a name="NewMemory"></a>
-## func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go>)
+## func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
 ```go
 func NewMemory[V any](cfg MemoryConfig) (store Store[V], err error)
@@ -199,7 +199,7 @@ The returned [Store](#Store) also implements [EntryFetcher](#EntryFetcher), [Tag
 A non-positive MaxEntries is REFUSED, not defaulted. A capacity is the whole statement of how much memory you are willing to spend, so any number chosen for you would be arbitrary — and the value a zero would naturally mean, unbounded, is the dangerous one.
 
 <a name="Cache"></a>
-## type [Cache](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go>)
+## type [Cache](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
 Cache is the public alias for the generic LRU+TTL primitive.
 
@@ -277,7 +277,7 @@ func (*Cache) Stats() StatsValue
 Stats returns a point-in-time copy of the hit/miss/eviction counters.
 
 <a name="ChainConfig"></a>
-## type [ChainConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go>)
+## type [ChainConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
 ChainConfig parameterises [NewChain](#NewChain).
 
@@ -302,7 +302,7 @@ type ChainConfig struct {
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
 Config is the public alias for the primitive's constructor configuration.
 
@@ -327,7 +327,7 @@ type Config[K comparable, V any] struct {
 ```
 
 <a name="Entry"></a>
-## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go>)
+## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
 Entry is what a caller stores: the value, its lifetime, and the tags by which it can later be invalidated in bulk.
 
@@ -363,7 +363,7 @@ type Entry[V any] struct {
 ```
 
 <a name="EntryFetcher"></a>
-## type [EntryFetcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go>)
+## type [EntryFetcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
 EntryFetcher is the sibling that returns the whole entry — value, REMAINING TTL, tags — rather than only the value. Both stores built here implement it.
 
@@ -380,7 +380,7 @@ type EntryFetcher[V any] interface {
 ```
 
 <a name="EntryFetcher.FetchEntry"></a>
-### func \(EntryFetcher\) [FetchEntry](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/design_gen.go>)
+### func \(EntryFetcher\) [FetchEntry](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/gen_ports.go>)
 
 ```go
 func (EntryFetcher) FetchEntry(ctx context.Context, key string) (EntryValue[V], bool, error)
@@ -391,7 +391,7 @@ FetchEntry is [Store.Fetch](#Store.Fetch) returning the stored entry — value, 
 The TTL it reports is the REMAINING time, not the one originally supplied: promoting an entry with its original TTL would extend its life every time it moved between tiers.
 
 <a name="Fill"></a>
-## type [Fill](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go>)
+## type [Fill](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
 Fill computes the entry for a key the cache does not hold: a query, a request, a derivation. It is your code.
 
@@ -406,7 +406,7 @@ type Fill[V any] func(ctx context.Context) (EntryValue[V], error)
 ```
 
 <a name="Loader"></a>
-## type [Loader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go>)
+## type [Loader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
 Loader is the sibling that fills a miss while collapsing concurrent misses on one key into a single fill — within one process, and not across replicas. See the package documentation before sizing an origin against it.
 
@@ -423,7 +423,7 @@ type Loader[V any] interface {
 ```
 
 <a name="Loader.Load"></a>
-### func \(Loader\) [Load](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/design_gen.go>)
+### func \(Loader\) [Load](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/gen_ports.go>)
 
 ```go
 func (Loader) Load(ctx context.Context, key string, fill Fill[V]) (V, error)
@@ -434,7 +434,7 @@ Load returns the value for key, calling fill exactly once across all concurrent 
 fill does NOT receive ctx. It receives the shared call's context: the first caller's values with every deadline removed, cancelled only once every waiting caller has gone. A caller whose own ctx ends while it waits gets its own ctx.Err() and leaves the fill running for the others.
 
 <a name="MemoryConfig"></a>
-## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go>)
+## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
 MemoryConfig parameterises [NewMemory](#NewMemory). Its zero value is NOT a working cache — MaxEntries must be stated, and is refused rather than defaulted.
 
@@ -461,7 +461,7 @@ type MemoryConfig struct {
 ```
 
 <a name="Stats"></a>
-## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go>)
+## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
 Stats is the public alias for the primitive's counters snapshot.
 
@@ -480,7 +480,7 @@ type Stats struct {
 ```
 
 <a name="Store"></a>
-## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go>)
+## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
 Store is the cache port: Fetch, Set, Delete.
 
@@ -501,7 +501,7 @@ type Store[V any] interface {
 ```
 
 <a name="Store.Delete"></a>
-### func \(Store\) [Delete](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/design_gen.go>)
+### func \(Store\) [Delete](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/gen_ports.go>)
 
 ```go
 func (Store) Delete(ctx context.Context, key string) error
@@ -510,7 +510,7 @@ func (Store) Delete(ctx context.Context, key string) error
 Delete removes key. It is idempotent: deleting a key that names nothing reports nil, because a caller who wanted it gone has got what they asked for.
 
 <a name="Store.Fetch"></a>
-### func \(Store\) [Fetch](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/design_gen.go>)
+### func \(Store\) [Fetch](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/gen_ports.go>)
 
 ```go
 func (Store) Fetch(ctx context.Context, key string) (V, bool, error)
@@ -519,7 +519,7 @@ func (Store) Fetch(ctx context.Context, key string) (V, bool, error)
 Fetch returns the value stored under key and whether it was present and unexpired. It MUTATES the store — recency, counters, lazy expiry — which is why it is not called Get. A miss is (zero, false, nil), never an error: a cache that does not hold something has done nothing wrong.
 
 <a name="Store.Set"></a>
-### func \(Store\) [Set](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/design_gen.go>)
+### func \(Store\) [Set](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/gen_ports.go>)
 
 ```go
 func (Store) Set(ctx context.Context, key string, entry EntryValue[V]) error
@@ -528,7 +528,7 @@ func (Store) Set(ctx context.Context, key string, entry EntryValue[V]) error
 Set stores entry under key, replacing whatever was there. An empty key, an empty tag, or a negative TTL that is not [NoExpiry](#NoExpiry) is refused with \[CacheEntryRejected] rather than stored.
 
 <a name="Tagger"></a>
-## type [Tagger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/facade_gen.go>)
+## type [Tagger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/cache/gen_facade.go>)
 
 Tagger is the sibling for invalidating every entry carrying a tag.
 
@@ -553,7 +553,7 @@ type Tagger interface {
 ```
 
 <a name="Tagger.InvalidateTag"></a>
-### func \(Tagger\) [InvalidateTag](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/design_gen.go>)
+### func \(Tagger\) [InvalidateTag](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/cache/gen_ports.go>)
 
 ```go
 func (Tagger) InvalidateTag(ctx context.Context, tag string) (removed int, err error)

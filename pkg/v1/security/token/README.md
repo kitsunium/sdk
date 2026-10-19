@@ -26,7 +26,7 @@ Package token — the constructor set, one per algorithm, plus the JWK loaders a
 
 Package token — the typed verdicts an issuer, a verifier or a key loader returns.
 
-Match them with errs.HasCode (the codes are re-exported in facade\_gen.go) or errs.HasReason. Their Public halves name WHICH check refused a token and never echo a value out of it — not an audience, not an issuer, not a key id, not a claim. The JWK\* verdicts are the key loaders' — ParseJWK and ParseJWKSet — and hold a key document to the same rule: they name the rule a member broke, never the member's value.
+Match them with errs.HasCode (the codes are re-exported in gen\_facade.go) or errs.HasReason. Their Public halves name WHICH check refused a token and never echo a value out of it — not an audience, not an issuer, not a key id, not a claim. The JWK\* verdicts are the key loaders' — ParseJWK and ParseJWKSet — and hold a key document to the same rule: they name the rule a member broke, never the member's value.
 
 Package token is the public facade for the SDK's security-token domain: JSON Web Tokens over JWS Compact Serialization (RFC 7519) and PASETO v4.public. It is stdlib-only and composes the SDK's own crypto schemes, so it adds no dependency to a consumer's build.
 
@@ -1004,7 +1004,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/security/token.TooLarge
 Code `0.2.13.10` · reason `TOO_LARGE` · public "The token exceeds the accepted size"
 
 <a name="NewClaims"></a>
-## func [NewClaims](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## func [NewClaims](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 ```go
 func NewClaims() Claims
@@ -1013,7 +1013,7 @@ func NewClaims() Claims
 NewClaims returns an empty claim set to build on with the With\* methods.
 
 <a name="NewES256Issuer"></a>
-## func [NewES256Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## func [NewES256Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 ```go
 func NewES256Issuer(priv *ecdsa.PrivateKey, cfg IssuerConfig) (issuer Issuer, err error)
@@ -1022,7 +1022,7 @@ func NewES256Issuer(priv *ecdsa.PrivateKey, cfg IssuerConfig) (issuer Issuer, er
 NewES256Issuer returns a JWT issuer signing with ECDSA P-256 + SHA-256, emitting the fixed-width R||S signature of RFC 7518 §3.4.
 
 <a name="NewES256Verifier"></a>
-## func [NewES256Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## func [NewES256Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 ```go
 func NewES256Verifier(pub *ecdsa.PublicKey, cfg VerifierConfig) (verifier Verifier, err error)
@@ -1031,7 +1031,7 @@ func NewES256Verifier(pub *ecdsa.PublicKey, cfg VerifierConfig) (verifier Verifi
 NewES256Verifier returns a JWT verifier bound to ECDSA P-256 under pub. The point is validated on the curve, not merely measured (RFC 8725 §3.4).
 
 <a name="NewEdDSAIssuer"></a>
-## func [NewEdDSAIssuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## func [NewEdDSAIssuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 ```go
 func NewEdDSAIssuer(priv ed25519.PrivateKey, cfg IssuerConfig) (issuer Issuer, err error)
@@ -1040,7 +1040,7 @@ func NewEdDSAIssuer(priv ed25519.PrivateKey, cfg IssuerConfig) (issuer Issuer, e
 NewEdDSAIssuer returns a JWT issuer signing with Ed25519 (JOSE "EdDSA").
 
 <a name="NewEdDSAVerifier"></a>
-## func [NewEdDSAVerifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## func [NewEdDSAVerifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 ```go
 func NewEdDSAVerifier(pub ed25519.PublicKey, cfg VerifierConfig) (verifier Verifier, err error)
@@ -1049,7 +1049,7 @@ func NewEdDSAVerifier(pub ed25519.PublicKey, cfg VerifierConfig) (verifier Verif
 NewEdDSAVerifier returns a JWT verifier bound to Ed25519 under pub.
 
 <a name="NewHS256Issuer"></a>
-## func [NewHS256Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## func [NewHS256Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 ```go
 func NewHS256Issuer(secret Key, cfg IssuerConfig) (issuer Issuer, err error)
@@ -1060,7 +1060,7 @@ NewHS256Issuer returns a JWT issuer signing with HMAC-SHA-256 under secret.
 HS256 is symmetric: everyone who can verify these tokens can also mint them. Reach for [NewES256Issuer](#NewES256Issuer) or [NewEdDSAIssuer](#NewEdDSAIssuer) the moment the verifier is not in the same trust domain as the issuer.
 
 <a name="NewHS256Verifier"></a>
-## func [NewHS256Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## func [NewHS256Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 ```go
 func NewHS256Verifier(secret Key, cfg VerifierConfig) (verifier Verifier, err error)
@@ -1069,7 +1069,7 @@ func NewHS256Verifier(secret Key, cfg VerifierConfig) (verifier Verifier, err er
 NewHS256Verifier returns a JWT verifier bound to HMAC-SHA-256 under secret. It accepts a [Key](#Key) and nothing else, which is what makes the HMAC half of algorithm confusion unwritable rather than merely documented.
 
 <a name="NewJWKSet"></a>
-## func [NewJWKSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## func [NewJWKSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 ```go
 func NewJWKSet(keys ...JWK) JWKSet
@@ -1078,7 +1078,7 @@ func NewJWKSet(keys ...JWK) JWKSet
 NewJWKSet assembles a [JWKSet](#JWKSet) from keys already parsed, in the given order — the order in which [NewSetVerifier](#NewSetVerifier) tries candidates sharing a "kid". It validates nothing further: the material of every non-zero JWK already passed [ParseJWK](#ParseJWK), and a zero JWK in a set can never verify a token.
 
 <a name="NewPasetoV4Issuer"></a>
-## func [NewPasetoV4Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## func [NewPasetoV4Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 ```go
 func NewPasetoV4Issuer(priv ed25519.PrivateKey, cfg PasetoIssuerConfig) (issuer Issuer, err error)
@@ -1087,7 +1087,7 @@ func NewPasetoV4Issuer(priv ed25519.PrivateKey, cfg PasetoIssuerConfig) (issuer 
 NewPasetoV4Issuer returns a PASETO v4.public issuer signing with Ed25519.
 
 <a name="NewPasetoV4Verifier"></a>
-## func [NewPasetoV4Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## func [NewPasetoV4Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 ```go
 func NewPasetoV4Verifier(pub ed25519.PublicKey, cfg PasetoVerifierConfig) (verifier Verifier, err error)
@@ -1096,7 +1096,7 @@ func NewPasetoV4Verifier(pub ed25519.PublicKey, cfg PasetoVerifierConfig) (verif
 NewPasetoV4Verifier returns a PASETO v4.public verifier bound to pub. A token of any other PASETO version or purpose — including v4.local — is refused with [SchemeUnsupported](#SchemeUnsupported).
 
 <a name="NewSetVerifier"></a>
-## func [NewSetVerifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## func [NewSetVerifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 ```go
 func NewSetVerifier(set JWKSet, cfg VerifierConfig) (verifier Verifier, err error)
@@ -1109,7 +1109,7 @@ The kid chooses which key to TRY; the signature decides whether the token is val
 A set no token could ever verify against is refused here, with [PolicyMisconfigured](#PolicyMisconfigured), rather than built into a verifier that refuses everything: an empty set, and one whose every member either carries no kid or is a key this package does not verify with (P-384, P-521). A single key published without a kid belongs to [NewVerifierFromJWK](#NewVerifierFromJWK).
 
 <a name="NewVerifierFromJWK"></a>
-## func [NewVerifierFromJWK](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## func [NewVerifierFromJWK](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 ```go
 func NewVerifierFromJWK(key JWK, cfg VerifierConfig) (verifier Verifier, err error)
@@ -1120,7 +1120,7 @@ NewVerifierFromJWK returns a JWT verifier bound to the algorithm key's own kty/c
 The key's advisory members are enforced: a "use" other than "sig", a "key\_ops" without "verify", or an "alg" contradicting the key type all refuse the key.
 
 <a name="ParseJWK"></a>
-## func [ParseJWK](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## func [ParseJWK](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 ```go
 func ParseJWK(document []byte) (key JWK, err error)
@@ -1133,7 +1133,7 @@ It is the only way to turn bytes into a JWK, and it validates before it returns 
 A refusal returns the zero JWK and an error carrying one of [CodeJWKMalformed](#CodeJWKMalformed), [CodeJWKMissingMember](#CodeJWKMissingMember), [CodeJWKUnsupportedKeyType](#CodeJWKUnsupportedKeyType), [CodeJWKUnsupportedCurve](#CodeJWKUnsupportedCurve), [CodeJWKInvalidEncoding](#CodeJWKInvalidEncoding) or [CodeJWKKeyMismatch](#CodeJWKKeyMismatch); its message names the rule that failed and never a member's value. An RSA key is refused here, with [CodeJWKUnsupportedKeyType](#CodeJWKUnsupportedKeyType), because the SDK verifies nothing with RSA.
 
 <a name="ParseJWKSet"></a>
-## func [ParseJWKSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## func [ParseJWKSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 ```go
 func ParseJWKSet(document []byte) (set JWKSet, err error)
@@ -1168,7 +1168,7 @@ func SetPrivateClaim[T any](claims Claims, name string, value T) (updated Claims
 SetPrivateClaim returns a copy of claims carrying name encoded as JSON. It refuses an empty name, one of the seven registered names, and a claim set already at its private-claim cap.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 Algorithm is the public alias for the signature algorithm a token issuer or verifier is bound to.
 
@@ -1201,7 +1201,7 @@ func (Algorithm) String() string
 String reports the wire name of a — the JOSE "alg" header value for the JWS algorithms, and the version+purpose header for PASETO. An unknown Algorithm renders "unknown", which matches no wire name, so a zero value can never be mistaken for a real header on either side of a comparison.
 
 <a name="Claims"></a>
-## type [Claims](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## type [Claims](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 Claims is the public alias for a token's immutable claim set.
 
@@ -1406,7 +1406,7 @@ func (Claims) WithSubject(sub string) ClaimsValue
 WithSubject returns a copy of c carrying sub. The empty string clears it.
 
 <a name="Curve"></a>
-## type [Curve](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## type [Curve](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 Curve is the public alias for a JWK's "crv" member, the curve [JWK](#JWK).Crv reports: [CurveP256](#CurveP256), [CurveP384](#CurveP384), [CurveP521](#CurveP521) or [CurveEd25519](#CurveEd25519). A symmetric key has no curve and reports the empty Curve.
 
@@ -1421,7 +1421,7 @@ type Curve string
 ```
 
 <a name="Issuer"></a>
-## type [Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## type [Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 Issuer is the public alias for the token-minting port.
 
@@ -1440,7 +1440,7 @@ type Issuer interface {
 ```
 
 <a name="Issuer.Issue"></a>
-### func \(Issuer\) [Issue](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/design_gen.go>)
+### func \(Issuer\) [Issue](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/gen_ports.go>)
 
 ```go
 func (Issuer) Issue(claims ClaimsValue) (string, error)
@@ -1449,7 +1449,7 @@ func (Issuer) Issue(claims ClaimsValue) (string, error)
 Issue renders claims as a token string, or returns a typed verdict (IssueFailed / ExpiryRequired / KeyUnsuitable) when it cannot.
 
 <a name="IssuerConfig"></a>
-## type [IssuerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## type [IssuerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 IssuerConfig is the public alias for the JWT issuing policy.
 
@@ -1487,7 +1487,7 @@ type IssuerConfig struct {
 ```
 
 <a name="JWK"></a>
-## type [JWK](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## type [JWK](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 JWK is the public alias for a parsed JSON Web Key (RFC 7517). Obtain one from [ParseJWK](#ParseJWK): the type has no exported field and deliberately no UnmarshalJSON, so json.Unmarshal decodes nothing into a JWK — and reports no error. A JWK field in a configuration struct therefore stays the zero JWK, which [NewVerifierFromJWK](#NewVerifierFromJWK) refuses with [KeyUnsuitable](#KeyUnsuitable); decode that field as a json.RawMessage and hand it to ParseJWK instead.
 
@@ -1746,7 +1746,7 @@ func (JWK) WithUse(use string) KeyValue
 WithUse returns a copy of k carrying use ("sig" / "enc"). The value is not validated — RFC 7517 §4.2 leaves the vocabulary open.
 
 <a name="JWKSet"></a>
-## type [JWKSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## type [JWKSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 JWKSet is the public alias for a parsed JSON Web Key Set (RFC 7517 §5). Obtain one from [ParseJWKSet](#ParseJWKSet), or assemble one from parsed keys with [NewJWKSet](#NewJWKSet).
 
@@ -1848,7 +1848,7 @@ func (JWKSet) String() string
 String implements fmt.Stringer and reports only counts, so a stray %v on a set of private keys prints a shape, never material.
 
 <a name="Key"></a>
-## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 Key is the public alias for the SDK's opaque, redacting 256-bit symmetric key — the only type NewHS256Issuer / NewHS256Verifier accept. Build one with pkg/v1/crypto.NewKey, or derive one with pkg/v1/crypto/kdf; never type one.
 
@@ -1899,7 +1899,7 @@ func (Key) Zeroize()
 Zeroize overwrites the key material with zeros. Because copies share one backing array, this clears the secret for every copy of the Key.
 
 <a name="KeyType"></a>
-## type [KeyType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## type [KeyType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 KeyType is the public alias for a JWK's "kty" member, the key-type family [JWK](#JWK).Kty reports: [KeyTypeEC](#KeyTypeEC), [KeyTypeOKP](#KeyTypeOKP) or [KeyTypeOct](#KeyTypeOct). The zero JWK reports the empty KeyType.
 
@@ -1914,7 +1914,7 @@ type KeyType string
 ```
 
 <a name="PasetoIssuerConfig"></a>
-## type [PasetoIssuerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## type [PasetoIssuerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 PasetoIssuerConfig is the public alias for the PASETO v4.public issuing policy. It is a separate type rather than [IssuerConfig](#IssuerConfig) plus two extras because PASETO has no header parameters: there is nothing for a Type or a KeyID to set, and publishing knobs the format ignores is how a configuration field ends up doing nothing. Its equivalent of a "kid" is the Footer, which the signature covers.
 
@@ -1950,7 +1950,7 @@ type PasetoIssuerConfig struct {
 ```
 
 <a name="PasetoVerifierConfig"></a>
-## type [PasetoVerifierConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## type [PasetoVerifierConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 PasetoVerifierConfig is the public alias for the PASETO v4.public verification policy. Same shape decision as its issuing counterpart: no RequireType, no MaxKeyCandidates, because PASETO has neither a "typ" to require nor a "kid" to select on.
 
@@ -1996,7 +1996,7 @@ type PasetoVerifierConfig struct {
 ```
 
 <a name="Verifier"></a>
-## type [Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## type [Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 Verifier is the public alias for the token-authenticating port.
 
@@ -2015,7 +2015,7 @@ type Verifier interface {
 ```
 
 <a name="Verifier.Verify"></a>
-### func \(Verifier\) [Verify](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/design_gen.go>)
+### func \(Verifier\) [Verify](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/token/gen_ports.go>)
 
 ```go
 func (Verifier) Verify(token string) (ClaimsValue, error)
@@ -2024,7 +2024,7 @@ func (Verifier) Verify(token string) (ClaimsValue, error)
 Verify authenticates token and returns its claims, or one of the typed verdicts declared in this package.
 
 <a name="VerifierConfig"></a>
-## type [VerifierConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/facade_gen.go>)
+## type [VerifierConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/token/gen_facade.go>)
 
 VerifierConfig is the public alias for the JWT verification policy.
 

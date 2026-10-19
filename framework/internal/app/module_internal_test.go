@@ -25,7 +25,7 @@ const toolsModule = "github.com/kitsunium/sdk/pkg/v1/clock"
 // toolsPos is a position in another Go module of the build: since ADR 0171
 // pkg/v1/clock is a Go module of its own, github.com/kitsunium/sdk/pkg/v1/clock,
 // and the position is clock.NewManualClock's, in a file at that module's root —
-// kit's facade_gen.go since ADR 0166, so the tests name the file the position
+// kit's gen_facade.go since ADR 0166, so the tests name the file the position
 // is in rather than spelling one. anotherGoModule still names it, for a build
 // whose information lists no dependency (a test binary built in the workspace).
 func toolsPos(t *testing.T) pos {

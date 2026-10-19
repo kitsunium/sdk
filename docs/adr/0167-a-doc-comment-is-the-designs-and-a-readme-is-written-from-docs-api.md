@@ -4,6 +4,7 @@
 - **Date**: 2026-10-05
 - **Deciders**: SDK maintainers (the owner's decision: stage 4 of "kit regenerates the Go SDK from its design" — "that kit be the tool that can generate the documentation and the (theoretical) code from which the most efficient code possible can be generated"; question 2, option b: gomarkdoc retired)
 - **Amends**: [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md) §1 (doc text recorded for generated declarations only), §2 (what kit writes), §3 (what CI checks), §4 ("a doc edit needs no kit") and §12 (the READMEs stay gomarkdoc's); [ADR 0008](0008-readme-from-code-generation.md) (READMEs from Go doc comments through gomarkdoc); [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) principle 28 (where a README comes from); [ADR 0166](0166-a-facade-is-the-designs-and-a-forwarders-form-is-measured.md) §Consequences (a doc edit on a hand-written declaration or a package comment needs no kit)
+- **Amended by**: [ADR 0181](0181-a-generated-files-name-opens-with-gen.md) — the generated files a doc digest covers are named `gen_*`
 - **Related**: [ADR 0164](0164-an-error-code-is-the-designs-and-kit-writes-it.md), [ADR 0165](0165-a-performance-contract-is-the-designs-kit-measures-what-the-compiler-decides-and-a-test-holds-the-rest.md), [ADR 0138](0138-a-doc-link-resolves-or-it-is-not-written.md) (doc links), [ADR 0153](0153-the-repository-carries-no-devcontainer-and-no-git-hooks.md)
 
 ## Context

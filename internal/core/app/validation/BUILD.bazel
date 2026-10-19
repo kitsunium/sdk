@@ -5,8 +5,8 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "validation",
     srcs = [
-        "codes_gen.go",
         "doc.go",
+        "gen_codes.go",
         "path.go",
         "report.go",
         "validation.go",
@@ -33,7 +33,7 @@ go_test(
     name = "validation_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "validation_external_test.go",
     ],
     deps = [

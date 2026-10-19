@@ -39,9 +39,9 @@ alias(
 go_test(
     name = "raft_test",
     srcs = [
-        "api_gen_test.go",
         "chainrefusal_internal_test.go",
         "checks_internal_test.go",
+        "gen_api_test.go",
         "lincheck_internal_test.go",
         "sim_internal_test.go",
         "sim_scenarios_internal_test.go",

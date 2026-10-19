@@ -21,7 +21,6 @@ go_library(
         "classify_walk.go",
         "classify_warn.go",
         "cli.go",
-        "codes_gen.go",
         "command.go",
         "config.go",
         "configcmd.go",
@@ -52,6 +51,7 @@ go_library(
         "errors.go",
         "expose.go",
         "expose_interface.go",
+        "gen_codes.go",
         "gomodule.go",
         "graph.go",
         "history.go",
@@ -240,7 +240,6 @@ alias(
 go_test(
     name = "app_test",
     srcs = [
-        "api_gen_test.go",
         "architecture_test.go",
         "auth_test.go",
         "bench_test.go",
@@ -278,6 +277,7 @@ go_test(
         "fifo_mknod_internal_test.go",
         "filestore_internal_test.go",
         "filestore_test.go",
+        "gen_api_test.go",
         "healthcheck_internal_test.go",
         "history_internal_test.go",
         "history_rights_test.go",

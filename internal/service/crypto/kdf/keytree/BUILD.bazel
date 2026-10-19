@@ -19,7 +19,7 @@ go_library(
 go_test(
     name = "keytree_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "keytree_external_test.go",
         "keytree_internal_test.go",
     ],

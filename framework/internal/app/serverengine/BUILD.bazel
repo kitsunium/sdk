@@ -36,7 +36,7 @@ alias(
 go_test(
     name = "serverengine_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "sampler_internal_test.go",
     ],
     embed = [":serverengine"],

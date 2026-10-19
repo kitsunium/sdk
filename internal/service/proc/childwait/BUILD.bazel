@@ -31,11 +31,11 @@ alias(
 go_test(
     name = "childwait_test",
     srcs = [
-        "api_gen_1_test.go",
-        "api_gen_2_test.go",
-        "api_gen_test.go",
         "childwait_internal_test.go",
         "childwait_unix_internal_test.go",
+        "gen_api_1_test.go",
+        "gen_api_2_test.go",
+        "gen_api_test.go",
     ],
     embed = [":childwait"],
 )

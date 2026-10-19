@@ -79,7 +79,7 @@ Initialised with `github.com/kitsunium/sdk/internal/kernel/concur/batcher.Batche
 Code `0.1.5.2` · reason `BATCHER_DELIVER_FAILED` · public "Batcher delivery failed"
 
 <a name="NewBatcher"></a>
-## func [NewBatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/facade_gen.go>)
+## func [NewBatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/gen_facade.go>)
 
 ```go
 func NewBatcher[T any](deliver Sink[T], cfg Config[T]) *Batcher[T]
@@ -119,7 +119,7 @@ if err := b.Close(ctx); err != nil {
 </details>
 
 <a name="Batcher"></a>
-## type [Batcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/facade_gen.go>)
+## type [Batcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/gen_facade.go>)
 
 Batcher coalesces added items into batches delivered through its [Sink](#Sink).
 
@@ -163,7 +163,7 @@ func (*Batcher) Flush(ctx context.Context) error
 Flush delivers the pending batch synchronously, returning any deliver error. It returns BatcherClosed if Close has run.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/facade_gen.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/gen_facade.go>)
 
 Config tunes a [Batcher](#Batcher): MaxItems and MaxWeight, the caps that deliver eagerly (non-positive disables each); WeightOf, an item's weight (nil counts items); FlushEvery, the background delivery interval (non-positive starts no ticker); Clock, the clock.Waiter that ticker runs on (nil is the wall clock); and OnError, which observes the ticker path's failures (nil ignores them). The zero Config is usable.
 
@@ -199,7 +199,7 @@ type Config[T any] struct {
 ```
 
 <a name="Sink"></a>
-## type [Sink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/facade_gen.go>)
+## type [Sink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/batcher/gen_facade.go>)
 
 Sink delivers one coalesced batch. A non-nil error fails the batch: it is returned to the caller of Add, Flush or Close that triggered the delivery, and handed to [Config](#Config).OnError on the ticker path. A Sink is never entered concurrently.
 

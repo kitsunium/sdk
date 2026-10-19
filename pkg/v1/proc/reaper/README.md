@@ -86,7 +86,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/proc.UnsupportedPlatfor
 Code `0.2.6.1` · reason `UNSUPPORTED_PLATFORM` · public "This operation is not supported on this platform"
 
 <a name="IsPID1"></a>
-## func [IsPID1](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/facade_gen.go>)
+## func [IsPID1](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/gen_facade.go>)
 
 ```go
 func IsPID1() bool
@@ -95,7 +95,7 @@ func IsPID1() bool
 IsPID1 reports whether the current process is the init process (pid 1). It is false on platforms where the convention does not apply.
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/gen_facade.go>)
 
 ```go
 func New(opts ...Option) Reaper
@@ -104,7 +104,7 @@ func New(opts ...Option) Reaper
 New returns a [Reaper](#Reaper) configured by opts. On Unix it is a SIGCHLD-driven waitpid loop; elsewhere it is a no-op. The reaper starts idle — call Start.
 
 <a name="SetChildSubreaper"></a>
-## func [SetChildSubreaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/facade_gen.go>)
+## func [SetChildSubreaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/gen_facade.go>)
 
 ```go
 func SetChildSubreaper() error
@@ -113,7 +113,7 @@ func SetChildSubreaper() error
 SetChildSubreaper marks the calling process as a child subreaper so orphaned descendants reparent to it rather than to PID1. It returns [SubreaperFailed](#SubreaperFailed) on a prctl error and [UnsupportedPlatform](#UnsupportedPlatform) off Unix.
 
 <a name="WithOnReap"></a>
-## func [WithOnReap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/facade_gen.go>)
+## func [WithOnReap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/gen_facade.go>)
 
 ```go
 func WithOnReap(fn func(int)) Option
@@ -122,7 +122,7 @@ func WithOnReap(fn func(int)) Option
 WithOnReap registers fn as a post-sweep observer receiving the number of children reaped in each sweep (including zero). fn must not block. On illumos and Solaris the loop also sweeps once a second, so there an idle reaper calls fn with zero once a second.
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/facade_gen.go>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/gen_facade.go>)
 
 Option configures a [Reaper](#Reaper) returned by [New](#New). It is an alias of the service option type so callers compose options without importing internal packages.
 
@@ -137,7 +137,7 @@ type Option func(*config)
 ```
 
 <a name="Reaper"></a>
-## type [Reaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/facade_gen.go>)
+## type [Reaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/reaper/gen_facade.go>)
 
 Reaper collects terminated child processes so they do not linger as zombies — the core duty of any PID1 or subreaper. It is an alias of the core port; the concrete value is platform-selected by [New](#New).
 
@@ -162,7 +162,7 @@ type Reaper interface {
 ```
 
 <a name="Reaper.ReapOnce"></a>
-### func \(Reaper\) [ReapOnce](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Reaper\) [ReapOnce](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Reaper) ReapOnce() (int, error)
@@ -171,7 +171,7 @@ func (Reaper) ReapOnce() (int, error)
 ReapOnce performs a single non-blocking sweep and reports how many children were reaped. It is safe to call concurrently with the loop.
 
 <a name="Reaper.Start"></a>
-### func \(Reaper\) [Start](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Reaper\) [Start](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Reaper) Start()
@@ -180,7 +180,7 @@ func (Reaper) Start()
 Start begins a background SIGCHLD-driven loop that reaps children as they exit. It is idempotent: a second Start while running is a no-op.
 
 <a name="Reaper.Stop"></a>
-### func \(Reaper\) [Stop](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/design_gen.go>)
+### func \(Reaper\) [Stop](<https://github.com/kitsunium/sdk/blob/main/internal/core/proc/gen_ports.go>)
 
 ```go
 func (Reaper) Stop()

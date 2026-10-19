@@ -6,7 +6,7 @@ go_library(
     name = "batcher",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/concur/batcher",
     visibility = ["//visibility:public"],
@@ -22,8 +22,8 @@ alias(
 go_test(
     name = "batcher_test",
     srcs = [
-        "api_gen_test.go",
         "batcher_external_test.go",
+        "gen_api_test.go",
     ],
     deps = [
         ":batcher",

@@ -47,7 +47,7 @@ Not for write-heavy state: every write copies the value. A map written as often 
   - [func \(\*Value\) Update\(fn func\(current \*T\) \(next \*T\)\)](<#Value.Update>)
 
 <a name="NewValue"></a>
-## func [NewValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/snapshot/facade_gen.go>)
+## func [NewValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/snapshot/gen_facade.go>)
 
 ```go
 func NewValue[T any](initial *T) *Value[T]
@@ -56,7 +56,7 @@ func NewValue[T any](initial *T) *Value[T]
 NewValue returns a [Value](#Value) holding initial — call-site sugar for a value known up front. A nil initial leaves it empty, as the zero value is.
 
 <a name="Value"></a>
-## type [Value](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/snapshot/facade_gen.go>)
+## type [Value](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/concur/snapshot/gen_facade.go>)
 
 Value is a copy-on-write container for a \*T. The zero value is ready to use and holds nil until the first Store.
 

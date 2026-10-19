@@ -42,7 +42,7 @@ alias(
 
 go_test(
     name = "storeengine_test",
-    srcs = ["api_gen_test.go"],
+    srcs = ["gen_api_test.go"],
     deps = [
         ":storeengine",
         "//framework/internal/app/plug",

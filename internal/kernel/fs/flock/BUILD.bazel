@@ -30,11 +30,11 @@ alias(
 go_test(
     name = "flock_test",
     srcs = [
-        "api_gen_1_test.go",
-        "api_gen_2_test.go",
-        "api_gen_3_test.go",
-        "api_gen_test.go",
         "flock_external_test.go",
+        "gen_api_1_test.go",
+        "gen_api_2_test.go",
+        "gen_api_3_test.go",
+        "gen_api_test.go",
     ],
     deps = [":flock"],
 )

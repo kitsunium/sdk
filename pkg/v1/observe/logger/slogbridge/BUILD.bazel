@@ -5,9 +5,9 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "slogbridge",
     srcs = [
-        "codes_gen.go",
         "convert.go",
         "doc.go",
+        "gen_codes.go",
         "handler.go",
         "slogbridge.go",
     ],
@@ -28,8 +28,8 @@ alias(
 go_test(
     name = "slogbridge_test",
     srcs = [
-        "api_gen_test.go",
         "convert_internal_test.go",
+        "gen_api_test.go",
         "handler_internal_test.go",
         "slogbridge_external_test.go",
     ],

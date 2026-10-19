@@ -651,7 +651,7 @@ STUB
   g commit -q --no-verify -m "chore(aws): the module"
   release_tag v0.1.0
   g tag third-party/aws/v0.1.0 "$(g rev-parse v0.1.0)"
-  echo "package s3" > third-party/aws/writer/s3/api_gen_test.go
+  echo "package s3" > third-party/aws/writer/s3/gen_api_test.go
   echo "{}" > third-party/aws/writer/s3/testdata/case.json
   g add -A
   g commit -q --no-verify -m "test(s3): the generated pins"

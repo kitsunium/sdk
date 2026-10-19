@@ -7,13 +7,13 @@ go_library(
     srcs = [
         "candidate.go",
         "checksum.go",
-        "codes_gen.go",
         "companions.go",
         "consent.go",
         "consent_product.go",
         "diagnose.go",
         "doc.go",
         "elevation.go",
+        "gen_codes.go",
         "interfaces.go",
         "keys.go",
         "osfilesystem.go",
@@ -58,7 +58,6 @@ alias(
 go_test(
     name = "selfupdate_test",
     srcs = [
-        "api_gen_test.go",
         "candidate_external_test.go",
         "candidate_internal_test.go",
         "checksum_external_test.go",
@@ -68,6 +67,7 @@ go_test(
         "consent_internal_test.go",
         "elevation_external_test.go",
         "elevation_internal_test.go",
+        "gen_api_test.go",
         "interfaces_external_test.go",
         "keys_internal_test.go",
         "nulldevice_internal_test.go",

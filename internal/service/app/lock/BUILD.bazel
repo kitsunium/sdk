@@ -60,7 +60,6 @@ go_test(
     name = "lock_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "backend_internal_test.go",
         "chain_posix_test.go",
         "chain_windows_test.go",
@@ -71,6 +70,7 @@ go_test(
         "file_contention_unix_test.go",
         "file_contention_windows_test.go",
         "file_external_test.go",
+        "gen_api_test.go",
         "identity_posix_test.go",
         "identity_windows_test.go",
         "keepalive_external_test.go",

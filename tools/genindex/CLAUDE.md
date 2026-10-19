@@ -30,9 +30,9 @@ modes:
   regenerates `docs/api` in memory and fails on any byte that differs, naming
   each record added, changed or removed. `-markers` adds, per cell, the code's
   (id, kind, canonical signature) set against the `// go:<id> <kind>
-  <canonical>` markers of the `api_gen*_test.go` pin files kit writes from
+  <canonical>` markers of the `gen_api*_test.go` pin files kit writes from
   `design/`; `-digests` adds every generated file's header digests (a pin, a
-  `design_gen.go` port) against its design file's bytes and its own body.
+  `gen_ports.go` port) against its design file's bytes and its own body.
   `make api-check` passes both, armed with the design and the pins in one
   change (ADR 0163): a symbol added in the code alone, a function turned
   variable, a constraint widened, a struct tag or a receiver fails the

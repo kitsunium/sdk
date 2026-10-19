@@ -327,7 +327,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/lifecycle.UnwindFai
 Code `0.3.49.4` · reason `UNWIND_FAILED` · public "Cleaning up after a failed start did not complete cleanly"
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 ```go
 func New(cfg Config) Lifecycle
@@ -336,7 +336,7 @@ func New(cfg Config) Lifecycle
 New returns a Lifecycle. It cannot fail: a nil cfg.Clock falls back to the wall clock, a non-positive cfg.StopTimeout to DefaultStopTimeout, and a nil cfg.OnTransition to no observation. What can fail fails at Add.
 
 <a name="NewSupervisor"></a>
-## func [NewSupervisor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## func [NewSupervisor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 ```go
 func NewSupervisor(name string, run func(ctx context.Context) error, cfg SupervisorConfig) (*Supervisor, error)
@@ -345,7 +345,7 @@ func NewSupervisor(name string, run func(ctx context.Context) error, cfg Supervi
 NewSupervisor builds a supervisor named name over run, tuned by cfg — whose zero value is a working supervisor. run must return when its context ends; returning earlier, or panicking, restarts it after the backoff. It starts nothing: Start does, or the Lifecycle it is a Component of.
 
 <a name="Run"></a>
-## func [Run](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## func [Run](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 ```go
 func Run(ctx context.Context, lc Lifecycle, cfg RunConfig) error
@@ -354,7 +354,7 @@ func Run(ctx context.Context, lc Lifecycle, cfg RunConfig) error
 Run starts every component, waits for ctx or one of cfg.Signals, then stops them in reverse order. See the package documentation for what the opt-in fields wire, and what the zero RunConfig deliberately does not.
 
 <a name="Component"></a>
-## type [Component](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## type [Component](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 Component is the public alias for one named Start/Stop registration.
 
@@ -378,7 +378,7 @@ type Component struct {
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 Config is the public alias for the engine's construction parameters.
 
@@ -431,7 +431,7 @@ type Config struct {
 ```
 
 <a name="Lifecycle"></a>
-## type [Lifecycle](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## type [Lifecycle](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 Lifecycle is the public alias for the ordered start/stop contract.
 
@@ -463,7 +463,7 @@ type Lifecycle interface {
 ```
 
 <a name="Lifecycle.Add"></a>
-### func \(Lifecycle\) [Add](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lifecycle/design_gen.go>)
+### func \(Lifecycle\) [Add](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lifecycle/gen_ports.go>)
 
 ```go
 func (Lifecycle) Add(component ComponentValue) error
@@ -472,7 +472,7 @@ func (Lifecycle) Add(component ComponentValue) error
 Add registers a component at the end of the order. It is refused while the Lifecycle is started ([LifecycleRunning](#LifecycleRunning)), on a name already registered ([DuplicateComponent](#DuplicateComponent)), and on a component that could never run — empty name, nil Start, nil Stop ([InvalidComponent](#InvalidComponent)).
 
 <a name="Lifecycle.Start"></a>
-### func \(Lifecycle\) [Start](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lifecycle/design_gen.go>)
+### func \(Lifecycle\) [Start](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lifecycle/gen_ports.go>)
 
 ```go
 func (Lifecycle) Start(ctx context.Context) error
@@ -481,7 +481,7 @@ func (Lifecycle) Start(ctx context.Context) error
 Start runs every registered Start in registration order and returns nil once all of them have. On the first failure it stops the components already up, in reverse order, and reports the failure; the Lifecycle is then back in its not-started state, so a caller may fix the cause, Add, and Start again.
 
 <a name="Lifecycle.Stop"></a>
-### func \(Lifecycle\) [Stop](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lifecycle/design_gen.go>)
+### func \(Lifecycle\) [Stop](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/lifecycle/gen_ports.go>)
 
 ```go
 func (Lifecycle) Stop(ctx context.Context) error
@@ -490,7 +490,7 @@ func (Lifecycle) Stop(ctx context.Context) error
 Stop runs the Stop of every component that started, in reverse of the order they started in, and reports what failed. It is idempotent: a Lifecycle that never started, or that has already stopped, returns nil without calling anything.
 
 <a name="Phase"></a>
-## type [Phase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## type [Phase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 Phase is the public alias for which half of a component a Transition reports.
 
@@ -514,7 +514,7 @@ func (Phase) String() string
 String renders the phase for a log line. An out-of-range value renders as "unknown" rather than a number, because a Phase reaching a log with a value this package never mints is a defect worth reading as one.
 
 <a name="RunConfig"></a>
-## type [RunConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## type [RunConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 RunConfig is the public alias for Run's opt-in supervision wiring.
 
@@ -546,7 +546,7 @@ type RunConfig struct {
 ```
 
 <a name="Signal"></a>
-## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 Signal is the public alias for a typed OS signal, re-exported here so a caller wiring RunConfig.Signals needs no second import.
 
@@ -597,7 +597,7 @@ func (Signal) String() string
 String reports the canonical upper-case name of s (e.g. "SIGTERM"). An unrecognised signal renders as "signal \<n>" so logs stay unambiguous.
 
 <a name="Start"></a>
-## type [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## type [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 Start is the public alias for the ctx-aware bring-up half of a component.
 
@@ -612,7 +612,7 @@ type Start func(ctx context.Context) error
 ```
 
 <a name="Stop"></a>
-## type [Stop](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## type [Stop](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 Stop is the public alias for the ctx-aware teardown half of a component.
 
@@ -627,7 +627,7 @@ type Stop func(ctx context.Context) error
 ```
 
 <a name="SupervisionEvent"></a>
-## type [SupervisionEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## type [SupervisionEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 SupervisionEvent is the public alias for one thing a supervisor did, as its observer is told.
 
@@ -667,7 +667,7 @@ type SupervisionEvent struct {
 ```
 
 <a name="SupervisionPhase"></a>
-## type [SupervisionPhase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## type [SupervisionPhase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 SupervisionPhase is the public alias for what a SupervisionEvent reports.
 
@@ -691,7 +691,7 @@ func (SupervisionPhase) String() string
 String renders the phase for a log line; a value this package never mints renders as "unknown".
 
 <a name="Supervisor"></a>
-## type [Supervisor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## type [Supervisor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 Supervisor is the public alias for a function run until stopped and restarted after every early end: Start, Stop, Component.
 
@@ -737,7 +737,7 @@ func (*Supervisor) Stop(ctx context.Context) error
 Stop ends the supervision: it cancels the running function's context and waits for the function to return and the supervision to end. ctx bounds the wait: when it ends first, Stop returns StopTimeout and the function is left running with its context cancelled — nothing is killed, and a later Stop waits again. A supervisor that is not running returns nil.
 
 <a name="SupervisorConfig"></a>
-## type [SupervisorConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## type [SupervisorConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 SupervisorConfig is the public alias for a supervisor's optional tuning: Clock, Observe, Backoff, HealthyAfter.
 
@@ -770,7 +770,7 @@ type SupervisorConfig struct {
 ```
 
 <a name="Transition"></a>
-## type [Transition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/facade_gen.go>)
+## type [Transition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/lifecycle/gen_facade.go>)
 
 Transition is the public alias for one reported component move.
 

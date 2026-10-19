@@ -6,12 +6,12 @@ go_library(
     name = "cloudwatch",
     srcs = [
         "client.go",
-        "codes_gen.go",
         "cred_adapter.go",
         "cw.go",
         "cwsink.go",
         "doc.go",
         "errors.go",
+        "gen_codes.go",
     ],
     importpath = "github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch",
     visibility = ["//visibility:public"],
@@ -37,13 +37,13 @@ alias(
 go_test(
     name = "cloudwatch_test",
     srcs = [
-        "api_gen_test.go",
         "client_internal_test.go",
         "cloudwatch_external_test.go",
         "cloudwatch_internal_test.go",
         "codes_external_test.go",
         "cred_adapter_internal_test.go",
         "cwsink_internal_test.go",
+        "gen_api_test.go",
     ],
     embed = [":cloudwatch"],
     deps = [

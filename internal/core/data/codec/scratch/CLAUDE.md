@@ -80,7 +80,7 @@ The design budgets three calls (ADR 0165): a warm `AcquireBuffer` /
 `ReleaseBuffer` round trip and a warm `AcquireReader` / `ReleaseReader` one
 allocate nothing, and `DetachBuffer` of a buffer under the cap allocates
 exactly once — the caller's clone. `perf_fixtures_test.go` (race off) sets
-each call up; `perf_gen_test.go`, written by kit gen, counts it; the alloc
+each call up; `gen_perf_test.go`, written by kit gen, counts it; the alloc
 lane runs both.
 
 ## Verification

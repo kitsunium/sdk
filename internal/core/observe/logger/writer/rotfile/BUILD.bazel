@@ -5,8 +5,8 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "rotfile",
     srcs = [
-        "codes_gen.go",
         "doc.go",
+        "gen_codes.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile",
     visibility = [
@@ -28,9 +28,9 @@ alias(
 go_test(
     name = "rotfile_test",
     srcs = [
-        "api_gen_test.go",
         "errors_external_test.go",
         "errors_internal_test.go",
+        "gen_api_test.go",
     ],
     embed = [":rotfile"],
     deps = ["//internal/kernel/errs"],

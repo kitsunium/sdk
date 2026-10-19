@@ -106,7 +106,7 @@ The three sublayers are directories of ONE module, `github.com/kitsunium/sdk/int
 - **Interface assertions live in `*_compliance.go`**: a compile-time `var _ Port = (*impl)(nil)` sits in a `<name>_compliance.go` file (or a test file), never beside the implementation — `KTN-IFACE-ASSERT-PLACEMENT` (19 such files under `internal/`).
 - **Dotted-quad code ranges.** Each emitter package owns a 256-slot `PP` octet (ADR 0005 + ADR 0006). The `Code` constants and the sentinels that name them are the
   design's since ADR 0164: the package's `codes:` and `sentinels:` in its domain's
-  design file, which `kit gen` writes into its `codes_gen.go`, every comment
+  design file, which `kit gen` writes into its `gen_codes.go`, every comment
   included. A sentinel's exit and HTTP statuses are its `exit:` and `http:`
   fields, and since ADR 0176 every sentinel is written `errs.Static(code,
   reason, public, private, http, exit)` — constants the linker initialises, no

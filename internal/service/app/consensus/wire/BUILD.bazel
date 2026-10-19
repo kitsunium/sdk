@@ -32,8 +32,8 @@ alias(
 go_test(
     name = "wire_test",
     srcs = [
-        "api_gen_test.go",
         "fuzz_external_test.go",
+        "gen_api_test.go",
     ],
     data = glob(["testdata/**"]),
     deps = [

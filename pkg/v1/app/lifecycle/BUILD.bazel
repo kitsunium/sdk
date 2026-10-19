@@ -6,7 +6,7 @@ go_library(
     name = "lifecycle",
     srcs = [
         "doc.go",
-        "facade_gen.go",
+        "gen_facade.go",
     ],
     importpath = "github.com/kitsunium/sdk/pkg/v1/app/lifecycle",
     visibility = ["//visibility:public"],
@@ -27,7 +27,7 @@ go_test(
     name = "lifecycle_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "lifecycle_bench_test.go",
         "lifecycle_external_test.go",
     ],

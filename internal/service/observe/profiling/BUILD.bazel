@@ -43,10 +43,10 @@ alias(
 go_test(
     name = "profiling_test",
     srcs = [
-        "api_gen_test.go",
         "capture_external_test.go",
         "capture_internal_test.go",
         "fold_external_test.go",
+        "gen_api_test.go",
         "goroutine_external_test.go",
         "group_external_test.go",
         "labels_internal_test.go",

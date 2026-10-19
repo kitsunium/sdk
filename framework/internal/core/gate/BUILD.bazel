@@ -5,10 +5,10 @@ package(default_visibility = ["//visibility:public"])
 go_library(
     name = "gate",
     srcs = [
-        "codes_gen.go",
         "decision.go",
         "doc.go",
         "errors.go",
+        "gen_codes.go",
         "policy.go",
         "update_action.go",
     ],
@@ -32,7 +32,7 @@ alias(
 go_test(
     name = "gate_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "policy_internal_test.go",
     ],
     embed = [":gate"],

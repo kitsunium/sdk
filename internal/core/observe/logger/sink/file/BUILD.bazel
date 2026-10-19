@@ -5,8 +5,8 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "file",
     srcs = [
-        "codes_gen.go",
         "doc.go",
+        "gen_codes.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/observe/logger/sink/file",
     visibility = [
@@ -34,7 +34,7 @@ filegroup(
 
 go_test(
     name = "file_test",
-    srcs = ["api_gen_test.go"],
+    srcs = ["gen_api_test.go"],
     deps = [
         ":file",
         "//internal/kernel/errs",

@@ -302,7 +302,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/observe/profiling.Windo
 Code `0.3.89.1` · reason `WINDOW_INVALID` · public "A CPU profile needs a window longer than zero and at most five minutes"
 
 <a name="CanonicalName"></a>
-## func [CanonicalName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## func [CanonicalName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 ```go
 func CanonicalName(name string) string
@@ -311,7 +311,7 @@ func CanonicalName(name string) string
 CanonicalName spells a function the same way whoever named it.
 
 <a name="CaptureCPU"></a>
-## func [CaptureCPU](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## func [CaptureCPU](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 ```go
 func CaptureCPU(ctx context.Context, window time.Duration) (*Profile, error)
@@ -320,7 +320,7 @@ func CaptureCPU(ctx context.Context, window time.Duration) (*Profile, error)
 CaptureCPU samples the process's CPU for window and returns the profile.
 
 <a name="CaptureHeap"></a>
-## func [CaptureHeap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## func [CaptureHeap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 ```go
 func CaptureHeap() (*Profile, error)
@@ -329,7 +329,7 @@ func CaptureHeap() (*Profile, error)
 CaptureHeap returns the live heap, after a garbage collection.
 
 <a name="Fold"></a>
-## func [Fold](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## func [Fold](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 ```go
 func Fold(p *Profile, cfg FoldConfig) (Folded, error)
@@ -338,7 +338,7 @@ func Fold(p *Profile, cfg FoldConfig) (Folded, error)
 Fold charges every sample of p to an owner and adds it all up.
 
 <a name="Goroutines"></a>
-## func [Goroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## func [Goroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 ```go
 func Goroutines() ([]Goroutine, error)
@@ -347,7 +347,7 @@ func Goroutines() ([]Goroutine, error)
 Goroutines returns every goroutine of the process.
 
 <a name="GroupGoroutines"></a>
-## func [GroupGoroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## func [GroupGoroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 ```go
 func GroupGoroutines(gs []Goroutine, cfg GroupConfig) []GoroutineGroup
@@ -356,7 +356,7 @@ func GroupGoroutines(gs []Goroutine, cfg GroupConfig) []GoroutineGroup
 GroupGoroutines groups goroutines by labels, state and top frame, largest first.
 
 <a name="Parse"></a>
-## func [Parse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## func [Parse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 ```go
 func Parse(data []byte) (*Profile, error)
@@ -365,7 +365,7 @@ func Parse(data []byte) (*Profile, error)
 Parse decodes a pprof profile, gzipped or not.
 
 <a name="ParseGoroutines"></a>
-## func [ParseGoroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## func [ParseGoroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 ```go
 func ParseGoroutines(dump []byte) []Goroutine
@@ -374,7 +374,7 @@ func ParseGoroutines(dump []byte) []Goroutine
 ParseGoroutines reads a goroutine dump; it never fails.
 
 <a name="FlameNode"></a>
-## type [FlameNode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## type [FlameNode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 FlameNode is one frame of a flame graph.
 
@@ -396,7 +396,7 @@ type FlameNode struct {
 ```
 
 <a name="FoldConfig"></a>
-## type [FoldConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## type [FoldConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 FoldConfig says how Fold reads a profile; every zero field has a default.
 
@@ -432,7 +432,7 @@ type FoldConfig struct {
 ```
 
 <a name="Folded"></a>
-## type [Folded](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## type [Folded](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 Folded is a profile folded, in the sample type's own unit.
 
@@ -463,7 +463,7 @@ type Folded struct {
 ```
 
 <a name="Frame"></a>
-## type [Frame](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## type [Frame](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 Frame is one frame of a stack.
 
@@ -493,7 +493,7 @@ type Frame struct {
 ```
 
 <a name="FunctionCost"></a>
-## type [FunctionCost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## type [FunctionCost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 FunctionCost is what one function cost.
 
@@ -520,7 +520,7 @@ type FunctionCost struct {
 ```
 
 <a name="Goroutine"></a>
-## type [Goroutine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## type [Goroutine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 Goroutine is one goroutine, as the runtime's dump describes it.
 
@@ -557,7 +557,7 @@ type Goroutine struct {
 ```
 
 <a name="GoroutineGroup"></a>
-## type [GoroutineGroup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## type [GoroutineGroup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 GoroutineGroup is goroutines sharing their labels, state and top frame.
 
@@ -586,7 +586,7 @@ type GoroutineGroup struct {
 ```
 
 <a name="GroupConfig"></a>
-## type [GroupConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## type [GroupConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 GroupConfig says how GroupGoroutines groups.
 
@@ -611,7 +611,7 @@ type GroupConfig struct {
 ```
 
 <a name="OwnerCost"></a>
-## type [OwnerCost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## type [OwnerCost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 OwnerCost is what one owner cost.
 
@@ -633,7 +633,7 @@ type OwnerCost struct {
 ```
 
 <a name="Profile"></a>
-## type [Profile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## type [Profile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 Profile is a decoded pprof profile.
 
@@ -669,7 +669,7 @@ type Profile struct {
 ```
 
 <a name="Sample"></a>
-## type [Sample](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## type [Sample](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 Sample is one sample: a stack, a value per sample type, and labels.
 
@@ -698,7 +698,7 @@ type Sample struct {
 ```
 
 <a name="SampleType"></a>
-## type [SampleType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/facade_gen.go>)
+## type [SampleType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/gen_facade.go>)
 
 SampleType names what a value measures and its unit.
 

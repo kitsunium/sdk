@@ -34,7 +34,7 @@ alias(
 go_test(
     name = "jobengine_test",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "jobengine_internal_test.go",
     ],
     embed = [":jobengine"],

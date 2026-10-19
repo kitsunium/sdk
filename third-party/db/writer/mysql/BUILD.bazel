@@ -12,9 +12,9 @@ go_library(
     name = "mysql",
     srcs = [
         "client.go",
-        "codes_gen.go",
         "doc.go",
         "errors.go",
+        "gen_codes.go",
         "mysql.go",
         "mysqlsink.go",
     ],
@@ -47,10 +47,10 @@ filegroup(
 go_test(
     name = "mysql_test",
     srcs = [
-        "api_gen_test.go",
         "client_internal_test.go",
         "errors_external_test.go",
         "errors_internal_test.go",
+        "gen_api_test.go",
         "mysql_external_test.go",
         "mysql_internal_test.go",
         "mysqlsink_internal_test.go",

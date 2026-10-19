@@ -67,7 +67,6 @@ go_test(
     name = "queue_test",
     size = "medium",
     srcs = [
-        "api_gen_test.go",
         "conformance_external_test.go",
         "consume_external_test.go",
         "deadletter_external_test.go",
@@ -76,6 +75,7 @@ go_test(
         "dirtrust_internal_windows_test.go",
         "file_layout_external_test.go",
         "file_layout_windows_test.go",
+        "gen_api_test.go",
         "harness_external_test.go",
         "message_copy_external_test.go",
         "order_external_test.go",

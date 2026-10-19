@@ -35,6 +35,6 @@ alias(
 
 go_test(
     name = "workflowengine_test",
-    srcs = ["api_gen_test.go"],
+    srcs = ["gen_api_test.go"],
     deps = [":workflowengine"],
 )

@@ -33,9 +33,9 @@ alias(
 go_test(
     name = "file_test",
     srcs = [
-        "api_gen_test.go",
         "file_external_test.go",
         "file_internal_test.go",
+        "gen_api_test.go",
     ],
     embed = [":file"],
     deps = [

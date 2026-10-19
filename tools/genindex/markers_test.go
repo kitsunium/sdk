@@ -186,8 +186,8 @@ func Test_compareCell(t *testing.T) {
 func Test_markerFindings_cells(t *testing.T) {
 	t.Parallel()
 	dir := stagePackage(t, map[string]string{
-		"api_gen_test.go":   "package p_test\n\n// go:example.com/p.F func func()\n",
-		"api_gen_1_test.go": "//go:build windows\n\npackage p_test\n\n// go:example.com/p.W func func()\n",
+		"gen_api_test.go":   "package p_test\n\n// go:example.com/p.F func func()\n",
+		"gen_api_1_test.go": "//go:build windows\n\npackage p_test\n\n// go:example.com/p.W func func()\n",
 		"other_test.go":     "package p_test\n\n// go:example.com/p.Ignored func func()\n",
 	})
 	cells := []platform{{goos: "linux", goarch: "amd64"}, {goos: "windows", goarch: "amd64"}}

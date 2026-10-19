@@ -5,11 +5,11 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "view",
     srcs = [
-        "codes_gen.go",
         "config.go",
-        "design_gen.go",
         "doc.go",
         "factory.go",
+        "gen_codes.go",
+        "gen_ports.go",
         "registry.go",
         "trusted.go",
         "view.go",
@@ -38,7 +38,7 @@ go_test(
     name = "view_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
+        "gen_api_test.go",
         "registry_external_test.go",
         "registry_guard_external_test.go",
         "view_external_test.go",

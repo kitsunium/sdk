@@ -56,7 +56,6 @@ go_test(
     name = "session_test",
     size = "small",
     srcs = [
-        "api_gen_test.go",
         "dirsync_internal_test.go",
         "encode_internal_test.go",
         "entropy_internal_test.go",
@@ -64,6 +63,7 @@ go_test(
         "file_store_external_test.go",
         "fixation_external_test.go",
         "fsguard_internal_test.go",
+        "gen_api_test.go",
         "pathsafety_external_test.go",
         "pathsafety_internal_test.go",
         "sealer_external_test.go",

@@ -41,11 +41,11 @@ alias(
 go_test(
     name = "nettransport_test",
     srcs = [
-        "api_gen_test.go",
         "client_internal_test.go",
         "config_external_test.go",
         "config_internal_test.go",
         "decode_internal_test.go",
+        "gen_api_test.go",
         "netsink_bench_test.go",
         "netsink_internal_test.go",
         "nettransport_external_test.go",

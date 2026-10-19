@@ -42,7 +42,7 @@ alias(
 
 go_test(
     name = "plug_test",
-    srcs = ["api_gen_test.go"],
+    srcs = ["gen_api_test.go"],
     deps = [
         ":plug",
         "//framework/model",

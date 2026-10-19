@@ -25,9 +25,9 @@ declaration lives in (ADR 0160 §3). Imports: `context`, `net` and
 
 **The ports are generated from the design** (ADR 0163): `Listener` and `Dialer`
 are declared, with their doc comments, under `ports:` in
-`design/proc/ipc.yaml`, and `kit gen` writes them into `design_gen.go`. A port
+`design/proc/ipc.yaml`, and `kit gen` writes them into `gen_ports.go`. A port
 or its doc comment changes in the design, then `kit gen`, then `make api` —
-never in `design_gen.go`, whose header digests `make api-check` verifies. They
+never in `gen_ports.go`, whose header digests `make api-check` verifies. They
 moved there from `ipc.go`, content moved and never deleted.
 
 ## Surface

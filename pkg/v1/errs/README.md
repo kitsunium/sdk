@@ -6,7 +6,7 @@
 import "github.com/kitsunium/sdk/pkg/v1/errs"
 ```
 
-Package errs is the public facade for SDK errors — both introspection (the Of-family accessors and the matchers, re-exported in facade\_gen.go, beside HasAnyCode and HasAnyReason in accessors.go) and construction ([New](#New), [Wrap](#Wrap) and the application Code range in construct.go, the Field helpers re-exported in facade\_gen.go).
+Package errs is the public facade for SDK errors — both introspection (the Of-family accessors and the matchers, re-exported in gen\_facade.go, beside HasAnyCode and HasAnyReason in accessors.go) and construction ([New](#New), [Wrap](#Wrap) and the application Code range in construct.go, the Field helpers re-exported in gen\_facade.go).
 
 Consumers receive \[error] values from the SDK and query them via the Of-family accessors below, and — since ADR 0019 — mint their own typed errors in the same model with [New](#New) / [Wrap](#Wrap). The concrete error type stays internal (callers see \[error], never \*errs.Error), so it cannot be forged by struct literal; construction goes through the validated constructors, which return a typed validation error on malformed input rather than panicking. Dashboards, retries, and structured logs branch on Code / Reason / HTTPStatus / ExitCode regardless of who built the error.
 
@@ -124,7 +124,7 @@ Safe to read is not safe to publish: fields are diagnostics, like [PrivateOf](#P
 
 Package errs — construction half of the public error API.
 
-facade\_gen.go re-exports the read-only introspection surface; construct.go and the Field helpers re-exported beside it are the \*construction\* surface, so that an external consumer (any module adopting this SDK, with no internal/ access) can mint typed SDK errors rather than only inspecting SDK-origin ones. Together they let a downstream codebase migrate off fmt.Errorf / errors.New onto the SDK error model wholesale — every error carrying a dotted-quad Code, a wire-safe Public message, and a log-only Private envelope.
+gen\_facade.go re-exports the read-only introspection surface; construct.go and the Field helpers re-exported beside it are the \*construction\* surface, so that an external consumer (any module adopting this SDK, with no internal/ access) can mint typed SDK errors rather than only inspecting SDK-origin ones. Together they let a downstream codebase migrate off fmt.Errorf / errors.New onto the SDK error model wholesale — every error carrying a dotted-quad Code, a wire-safe Public message, and a log-only Private envelope.
 
 ### Construction vs. Define
 
@@ -267,7 +267,7 @@ It is a variable bound to the kernel accessor rather than a forwarder like its s
 Initialised with `github.com/kitsunium/sdk/internal/kernel/errs.ReasonOf`.
 
 <a name="Bool"></a>
-## func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func Bool(key string, val bool) Field
@@ -276,7 +276,7 @@ func Bool(key string, val bool) Field
 Bool builds a Field holding a boolean value.
 
 <a name="CodeOf"></a>
-## func [CodeOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [CodeOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func CodeOf(err error) (code Code, ok bool)
@@ -285,7 +285,7 @@ func CodeOf(err error) (code Code, ok bool)
 CodeOf returns the deepest \*errs.Error's typed Code in err's chain, or (0, false) when no \*errs.Error is present.
 
 <a name="ExitCodeOf"></a>
-## func [ExitCodeOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [ExitCodeOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func ExitCodeOf(err error) int
@@ -294,7 +294,7 @@ func ExitCodeOf(err error) int
 ExitCodeOf returns the sysexits code mapped from the deepest \*errs.Error, defaulting to 70 (EX\_SOFTWARE) when no \*errs.Error is present.
 
 <a name="FieldsOf"></a>
-## func [FieldsOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [FieldsOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func FieldsOf(err error) []Field
@@ -305,7 +305,7 @@ FieldsOf returns every Field attached along err's chain, oldest cause first and 
 The values are clauses the emitters chose to attach — names, positions, reasons — never secrets: no SDK emitter attaches a value it was given to protect (mail.ParseURL never quotes the URL), which is what makes reading them safe. They are diagnostics nonetheless, like PrivateOf — keep them off the wire.
 
 <a name="Float"></a>
-## func [Float](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [Float](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func Float(key string, val float64) Field
@@ -314,7 +314,7 @@ func Float(key string, val float64) Field
 Float builds a Field holding a float64 value (shortest round-trip render).
 
 <a name="HTTPStatusOf"></a>
-## func [HTTPStatusOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [HTTPStatusOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func HTTPStatusOf(err error) int
@@ -359,7 +359,7 @@ if errs.HasAnyReason(err, "UNKNOWN_FORMAT", "STREAMING_UNSUPPORTED") {
 ```
 
 <a name="HasCode"></a>
-## func [HasCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [HasCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func HasCode(err error, code Code) bool
@@ -368,7 +368,7 @@ func HasCode(err error, code Code) bool
 HasCode walks the chain (including errors.Join subtrees) and reports whether any \*errs.Error carries code (origin or trail entry).
 
 <a name="HasReason"></a>
-## func [HasReason](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [HasReason](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func HasReason(err error, reason string) bool
@@ -377,7 +377,7 @@ func HasReason(err error, reason string) bool
 HasReason walks the chain and reports whether any \*errs.Error carries reason.
 
 <a name="Int"></a>
-## func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func Int(key string, val int) Field
@@ -386,7 +386,7 @@ func Int(key string, val int) Field
 Int builds a Field from a plain int (widened to int64 internally), matching the slog / zap Int(key, int) convention.
 
 <a name="Int64"></a>
-## func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func Int64(key string, val int64) Field
@@ -414,7 +414,7 @@ Arguments mirror the kernel sentinel contract:
 HTTP status defaults to 500 and exit code to 70 (EX\_SOFTWARE); a per-error exit override is available through Wrap's WrapParams.ExitCode.
 
 <a name="NewFieldValue"></a>
-## func [NewFieldValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [NewFieldValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func NewFieldValue(key string, val string) Field
@@ -423,7 +423,7 @@ func NewFieldValue(key string, val string) Field
 NewFieldValue builds a string-typed Field. Provided for tooling that expects a New-prefixed factory; prefer String for the common case.
 
 <a name="NewPrefixMatcher"></a>
-## func [NewPrefixMatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [NewPrefixMatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func NewPrefixMatcher(prefix Code, mask Code) *PrefixMatcher
@@ -432,7 +432,7 @@ func NewPrefixMatcher(prefix Code, mask Code) *PrefixMatcher
 NewPrefixMatcher builds an errors.Is target for CIDR-style Code matching.
 
 <a name="Pack"></a>
-## func [Pack](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [Pack](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func Pack(major Major, layer Layer, pkg PkgCode, serial Serial) Code
@@ -441,7 +441,7 @@ func Pack(major Major, layer Layer, pkg PkgCode, serial Serial) Code
 Pack constructs a Code from its four octets. Runtime only — sentinel constants in caller code MUST use hex literals to stay const-expressible.
 
 <a name="ParseCode"></a>
-## func [ParseCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [ParseCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func ParseCode(text string) (code Code, err error)
@@ -450,7 +450,7 @@ func ParseCode(text string) (code Code, err error)
 ParseCode parses the canonical "M.L.P.S" textual form.
 
 <a name="PrivateOf"></a>
-## func [PrivateOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [PrivateOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func PrivateOf(err error) string
@@ -459,7 +459,7 @@ func PrivateOf(err error) string
 PrivateOf returns the deepest \*errs.Error Private message. DIAGNOSTIC-ONLY.
 
 <a name="PublicOf"></a>
-## func [PublicOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [PublicOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func PublicOf(err error) string
@@ -468,7 +468,7 @@ func PublicOf(err error) string
 PublicOf returns the deepest \*errs.Error Public message, or "" when no \*errs.Error is in the chain.
 
 <a name="String"></a>
-## func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 ```go
 func String(key string, val string) Field
@@ -488,7 +488,7 @@ Wrap attaches a cause to a new error with origin-wins semantics and preserves th
 Declared as a function (not a var alias over the kernel Wrap) so the public signature returns error: the concrete \*errs.Error stays unexported, never leaking through the facade.
 
 <a name="Code"></a>
-## type [Code](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## type [Code](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 Code is the dotted-quad error identifier packed into uint32. See ADR 0005 for the registry and layout.
 
@@ -557,7 +557,7 @@ func (Code) String() string
 String returns the CANONICAL dotted form "M.L.P.S" (unpadded). This form is used for storage, logs, fixtures, and lookup keys.
 
 <a name="Field"></a>
-## type [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## type [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 Field is a single typed key/value pair attached to an error. Build one with String / Int / Int64 / Bool / Float (or NewFieldValue); the zero value is invalid and must never be passed across the API.
 
@@ -592,7 +592,7 @@ func (Field) StringValue() string
 StringValue returns a deterministic textual rendering of the payload suitable for log lines and error dumps. Not guaranteed to be machine- parseable back into the original type — by design the consumer contract stops at textual observation.
 
 <a name="Layer"></a>
-## type [Layer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## type [Layer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 Layer is the second octet of Code — SDK layer (0 = meta, 1 = kernel, 2 = core, 3 = service,...). See ADR 0005.
 
@@ -607,7 +607,7 @@ type Layer uint8
 ```
 
 <a name="Major"></a>
-## type [Major](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## type [Major](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 Major is the top octet of Code — SemVer major version (0 = internal, 1 = v1,...). See ADR 0005.
 
@@ -622,7 +622,7 @@ type Major uint8
 ```
 
 <a name="PkgCode"></a>
-## type [PkgCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## type [PkgCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 PkgCode is the third octet of Code — per-layer package slot. See ADR 0005 / 0006.
 
@@ -637,7 +637,7 @@ type PkgCode uint8
 ```
 
 <a name="PrefixMatcher"></a>
-## type [PrefixMatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## type [PrefixMatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 PrefixMatcher is the errors.Is target for CIDR-style Code matching. Construct via NewPrefixMatcher.
 
@@ -688,7 +688,7 @@ func (*PrefixMatcher) String() string
 String returns a diagnostic representation of the matcher.
 
 <a name="Serial"></a>
-## type [Serial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## type [Serial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 Serial is the low octet of Code — per-package serial. See ADR 0005.
 
@@ -703,7 +703,7 @@ type Serial uint8
 ```
 
 <a name="WrapParams"></a>
-## type [WrapParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/facade_gen.go>)
+## type [WrapParams](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/gen_facade.go>)
 
 WrapParams groups the metadata Wrap stamps onto the wrapping error when the cause is NOT already an SDK error. When the cause IS an SDK error, origin wins: Code/Reason/Public/Private are inherited from the cause and only params.Code is appended to the wrap trail (ADR 0005).
 

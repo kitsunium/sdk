@@ -4,6 +4,7 @@
 - **Date**: 2026-10-05
 - **Deciders**: SDK maintainers (the owner's decision: stage 5 of "kit regenerates the Go SDK from its design, aiming at the most performant code possible")
 - **Amends**: [ADR 0163](0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md) (what `budgets` holds and what kit writes from it)
+- **Amended by**: [ADR 0181](0181-a-generated-files-name-opens-with-gen.md) — the budgets' tests are `gen_perf_test.go`
 - **Related**: [ADR 0010](0010-kernel-recycler-primitive.md), [ADR 0011](0011-kernel-snapshot-primitive.md), [ADR 0062](0062-logger-trace-correlation.md), [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) §4, CLAUDE.md rules 9 and 12
 
 ## Context

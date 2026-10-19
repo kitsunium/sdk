@@ -400,7 +400,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/security/secret.ValueRe
 Code `0.2.37.5` · reason `VALUE_REFUSED` · public "A secret can only be decoded from a string, and never from its own placeholder"
 
 <a name="FromString"></a>
-## func [FromString](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## func [FromString](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 ```go
 func FromString(text string) Value
@@ -409,7 +409,7 @@ func FromString(text string) Value
 FromString returns a Value holding text.
 
 <a name="KeyFile"></a>
-## func [KeyFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## func [KeyFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 ```go
 func KeyFile(path string) (key crypto.Key, err error)
@@ -420,7 +420,7 @@ KeyFile returns the crypto.Key held in the file at path — exactly crypto.KeyLe
 It refuses content that is not exactly one key with [KeyFileInvalid](#KeyFileInvalid), an existing file other accounts can read with [InvalidConfig](#InvalidConfig), and — where the file store refuses, every platform outside the Unix family, because a mode is not an access list there — proc.UnsupportedPlatform. No error carries the key or a refused file's content.
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 ```go
 func New(raw []byte) Value
@@ -429,7 +429,7 @@ func New(raw []byte) Value
 New returns a Value holding a copy of raw.
 
 <a name="NewEnv"></a>
-## func [NewEnv](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## func [NewEnv](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 ```go
 func NewEnv(cfg EnvConfig) (store Store, err error)
@@ -438,7 +438,7 @@ func NewEnv(cfg EnvConfig) (store Store, err error)
 NewEnv returns a read-only Store over the process environment, honouring the NAME\_FILE convention. It refuses a prefix no shell could export.
 
 <a name="NewFile"></a>
-## func [NewFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## func [NewFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 ```go
 func NewFile(cfg FileConfig) (store Store, err error)
@@ -447,7 +447,7 @@ func NewFile(cfg FileConfig) (store Store, err error)
 NewFile returns a Store that keeps its versions in a directory it owns, sealed at rest when cfg.Key is set. It refuses a directory other accounts can read, and returns proc.UnsupportedPlatform where atomic publication or the file lock is unavailable. The store also implements io.Closer.
 
 <a name="NewKeyring"></a>
-## func [NewKeyring](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## func [NewKeyring](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 ```go
 func NewKeyring(store Store, name string) (keyring *Keyring, err error)
@@ -456,7 +456,7 @@ func NewKeyring(store Store, name string) (keyring *Keyring, err error)
 NewKeyring returns the keyring over the versions of name in store.
 
 <a name="NewMemory"></a>
-## func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 ```go
 func NewMemory(cfg MemoryConfig) Store
@@ -465,7 +465,7 @@ func NewMemory(cfg MemoryConfig) Store
 NewMemory returns a Store that keeps its versions in this process's memory.
 
 <a name="NewMemorySubjectKeyStore"></a>
-## func [NewMemorySubjectKeyStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## func [NewMemorySubjectKeyStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 ```go
 func NewMemorySubjectKeyStore() SubjectKeyStore
@@ -474,7 +474,7 @@ func NewMemorySubjectKeyStore() SubjectKeyStore
 NewMemorySubjectKeyStore returns a [SubjectKeyStore](#SubjectKeyStore) that keeps the wrapped keys in this process's memory — for tests and development, where the data they protect dies with the process too.
 
 <a name="NewRotator"></a>
-## func [NewRotator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## func [NewRotator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 ```go
 func NewRotator(cfg RotatorConfig) (rotator *Rotator, err error)
@@ -483,7 +483,7 @@ func NewRotator(cfg RotatorConfig) (rotator *Rotator, err error)
 NewRotator returns a rotator for cfg.Name in cfg.Store. It starts nothing.
 
 <a name="NewSubjectKeys"></a>
-## func [NewSubjectKeys](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## func [NewSubjectKeys](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 ```go
 func NewSubjectKeys(cfg SubjectKeysConfig) (keys *SubjectKeys, err error)
@@ -492,7 +492,7 @@ func NewSubjectKeys(cfg SubjectKeysConfig) (keys *SubjectKeys, err error)
 NewSubjectKeys returns the engine that keeps one data key per subject under cfg.Root, filed in cfg.Store. It refuses a nil root or store, a negative cache, and a cache without a TTL — the TTL bounds how long a key another process destroyed keeps opening here — with [InvalidConfig](#InvalidConfig).
 
 <a name="Random"></a>
-## func [Random](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## func [Random](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 ```go
 func Random(n int) func() (Value, error)
@@ -501,7 +501,7 @@ func Random(n int) func() (Value, error)
 Random returns a generator of n bytes from crypto/rand; a keyring's versions need n = 32. Below 16 bytes the generator refuses every call.
 
 <a name="SubjectOf"></a>
-## func [SubjectOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## func [SubjectOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 ```go
 func SubjectOf(box []byte) (subject string, err error)
@@ -510,7 +510,7 @@ func SubjectOf(box []byte) (subject string, err error)
 SubjectOf returns the subject a box sealed by [SubjectKeys](#SubjectKeys).Seal names, without opening it, or [SealInvalid](#SealInvalid) for anything that is not such a box.
 
 <a name="ValidateName"></a>
-## func [ValidateName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## func [ValidateName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 ```go
 func ValidateName(name string) error
@@ -519,7 +519,7 @@ func ValidateName(name string) error
 ValidateName reports whether name is a secret name, returning [InvalidName](#InvalidName) when it is not. Every store calls it; a caller may too, to refuse a name at the edge of its own input.
 
 <a name="ValidateSubject"></a>
-## func [ValidateSubject](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## func [ValidateSubject](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 ```go
 func ValidateSubject(subject string) error
@@ -528,7 +528,7 @@ func ValidateSubject(subject string) error
 ValidateSubject reports whether subject is a subject reference, returning [InvalidSubject](#InvalidSubject) when it is not: 1 to [MaxSubjectLen](#MaxSubjectLen) bytes of a-z, 0-9, '-', '\_', '.' and ':', starting with a letter or a digit. A subject is kept in clear, so it is a reference derived from an identity, never the identity.
 
 <a name="EnvConfig"></a>
-## type [EnvConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [EnvConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 EnvConfig parameterises [NewEnv](#NewEnv).
 
@@ -558,7 +558,7 @@ type EnvConfig struct {
 ```
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 FileConfig parameterises [NewFile](#NewFile).
 
@@ -596,7 +596,7 @@ type FileConfig struct {
 ```
 
 <a name="Keyring"></a>
-## type [Keyring](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [Keyring](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 Keyring sees the versions of one secret as keys: the newest seals and signs, every kept version opens and verifies.
 
@@ -647,7 +647,7 @@ func (*Keyring) Verify(ctx context.Context, message []byte, signature []byte) er
 Verify checks a signature Sign made, under the version it names, in constant time. Every failure that concerns the signature is the one \[coresecret.SignatureInvalid] verdict; a store that could not be read is reported as such.
 
 <a name="MemoryConfig"></a>
-## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 MemoryConfig parameterises [NewMemory](#NewMemory).
 
@@ -667,7 +667,7 @@ type MemoryConfig struct {
 ```
 
 <a name="Policy"></a>
-## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 Policy says how often a secret rotates, how many versions a rotation keeps, and how a new one is made.
 
@@ -695,7 +695,7 @@ type Policy struct {
 ```
 
 <a name="RewrapReport"></a>
-## type [RewrapReport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [RewrapReport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 RewrapReport says what one [SubjectKeys](#SubjectKeys).Rewrap pass did, key by key.
 
@@ -734,7 +734,7 @@ type RewrapReport struct {
 ```
 
 <a name="Rotator"></a>
-## type [Rotator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [Rotator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 Rotator mints new versions of one secret according to a [Policy](#Policy).
 
@@ -796,7 +796,7 @@ Run rotates the secret for as long as ctx lives: it ensures the secret exists, s
 It returns nil when ctx ends — a stop is not a failure — and the first error otherwise, without retrying: a store that went away is the supervisor's to retry with a backoff, not a loop's to spin on.
 
 <a name="RotatorConfig"></a>
-## type [RotatorConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [RotatorConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 RotatorConfig parameterises [NewRotator](#NewRotator).
 
@@ -848,7 +848,7 @@ type RotatorConfig struct {
 ```
 
 <a name="Store"></a>
-## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 Store keeps named secrets as numbered versions. It is frozen at five methods; a new capability arrives as a sibling interface.
 
@@ -884,7 +884,7 @@ type Store interface {
 ```
 
 <a name="Store.Get"></a>
-### func \(Store\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/design_gen.go>)
+### func \(Store\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/gen_ports.go>)
 
 ```go
 func (Store) Get(ctx context.Context, name string) (current VersionValue, err error)
@@ -893,7 +893,7 @@ func (Store) Get(ctx context.Context, name string) (current VersionValue, err er
 Get returns the CURRENT version of name — the highest number kept. It returns [NotFound](#NotFound) for a name that holds no version.
 
 <a name="Store.Names"></a>
-### func \(Store\) [Names](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/design_gen.go>)
+### func \(Store\) [Names](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/gen_ports.go>)
 
 ```go
 func (Store) Names(ctx context.Context) (names []string, err error)
@@ -902,7 +902,7 @@ func (Store) Names(ctx context.Context) (names []string, err error)
 Names lists every name holding at least one version, sorted. It never returns a value: a caller that wants one asks for it by name.
 
 <a name="Store.Prune"></a>
-### func \(Store\) [Prune](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/design_gen.go>)
+### func \(Store\) [Prune](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/gen_ports.go>)
 
 ```go
 func (Store) Prune(ctx context.Context, name string, keep int) error
@@ -911,7 +911,7 @@ func (Store) Prune(ctx context.Context, name string, keep int) error
 Prune drops every version of name except the newest keep. keep below 1 is refused with [InvalidKeep](#InvalidKeep): pruning never deletes a secret. Pruning a name that already holds no more than keep versions is not an error.
 
 <a name="Store.Put"></a>
-### func \(Store\) [Put](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/design_gen.go>)
+### func \(Store\) [Put](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/gen_ports.go>)
 
 ```go
 func (Store) Put(ctx context.Context, name string, value Value) (created VersionValue, err error)
@@ -920,7 +920,7 @@ func (Store) Put(ctx context.Context, name string, value Value) (created Version
 Put stores value as a new version of name — one past the highest ever kept, or 1 for a new name — and returns it. It refuses an empty value with [EmptyValue](#EmptyValue), and a store that only reads refuses every Put with [ReadOnly](#ReadOnly).
 
 <a name="Store.Versions"></a>
-### func \(Store\) [Versions](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/design_gen.go>)
+### func \(Store\) [Versions](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/gen_ports.go>)
 
 ```go
 func (Store) Versions(ctx context.Context, name string) (versions []VersionValue, err error)
@@ -929,7 +929,7 @@ func (Store) Versions(ctx context.Context, name string) (versions []VersionValue
 Versions returns every kept version of name, NEWEST FIRST, so the head of the slice is what Get returns. It returns [NotFound](#NotFound) for a name that holds no version, rather than an empty slice a caller might iterate over as if it had found a secret with no history.
 
 <a name="SubjectKeyStore"></a>
-## type [SubjectKeyStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [SubjectKeyStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 SubjectKeyStore keeps one wrapped data key per subject. The caller implements it over its own storage — Insert and Replace atomic across every process — or uses [NewMemorySubjectKeyStore](#NewMemorySubjectKeyStore). It is frozen at five methods; a new capability arrives as a sibling interface.
 
@@ -969,7 +969,7 @@ type SubjectKeyStore interface {
 ```
 
 <a name="SubjectKeyStore.All"></a>
-### func \(SubjectKeyStore\) [All](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/design_gen.go>)
+### func \(SubjectKeyStore\) [All](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/gen_ports.go>)
 
 ```go
 func (SubjectKeyStore) All(ctx context.Context) iter.Seq2[SubjectKeyValue, error]
@@ -978,7 +978,7 @@ func (SubjectKeyStore) All(ctx context.Context) iter.Seq2[SubjectKeyValue, error
 All yields every filed key once, then stops; an error ends the sequence. The engine replaces keys while it ranges, so an implementation holds no lock across a yield, and a key filed during the sequence may or may not be yielded.
 
 <a name="SubjectKeyStore.Delete"></a>
-### func \(SubjectKeyStore\) [Delete](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/design_gen.go>)
+### func \(SubjectKeyStore\) [Delete](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/gen_ports.go>)
 
 ```go
 func (SubjectKeyStore) Delete(ctx context.Context, subject string) (deleted bool, err error)
@@ -987,7 +987,7 @@ func (SubjectKeyStore) Delete(ctx context.Context, subject string) (deleted bool
 Delete removes the key filed under subject and reports whether there was one. It is the destruction a cryptographic erase rests on, so the key must leave the storage the store READS — a document store folds what it overwrote, a table deletes the row. Copies the backend keeps elsewhere — a write-ahead log, a replica, a backup — stay wrapped under the root version that sealed them, and open only while it is kept.
 
 <a name="SubjectKeyStore.Get"></a>
-### func \(SubjectKeyStore\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/design_gen.go>)
+### func \(SubjectKeyStore\) [Get](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/gen_ports.go>)
 
 ```go
 func (SubjectKeyStore) Get(ctx context.Context, subject string) (wrapped []byte, found bool, err error)
@@ -996,7 +996,7 @@ func (SubjectKeyStore) Get(ctx context.Context, subject string) (wrapped []byte,
 Get returns the wrapped key filed under subject, and found == false — with a nil error — when there is none.
 
 <a name="SubjectKeyStore.Insert"></a>
-### func \(SubjectKeyStore\) [Insert](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/design_gen.go>)
+### func \(SubjectKeyStore\) [Insert](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/gen_ports.go>)
 
 ```go
 func (SubjectKeyStore) Insert(ctx context.Context, subject string, wrapped []byte) (inserted bool, err error)
@@ -1005,7 +1005,7 @@ func (SubjectKeyStore) Insert(ctx context.Context, subject string, wrapped []byt
 Insert files wrapped under subject when no key is filed there. When one is, it stores nothing and reports inserted == false with a nil error.
 
 <a name="SubjectKeyStore.Replace"></a>
-### func \(SubjectKeyStore\) [Replace](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/design_gen.go>)
+### func \(SubjectKeyStore\) [Replace](<https://github.com/kitsunium/sdk/blob/main/internal/core/security/secret/gen_ports.go>)
 
 ```go
 func (SubjectKeyStore) Replace(ctx context.Context, subject string, current []byte, next []byte) (replaced bool, err error)
@@ -1014,7 +1014,7 @@ func (SubjectKeyStore) Replace(ctx context.Context, subject string, current []by
 Replace files next under subject only while subject still holds current, byte for byte. When it holds anything else — or nothing, because the key was destroyed meanwhile — it stores nothing and reports replaced == false with a nil error: a re-wrap never brings back a key an erasure destroyed.
 
 <a name="SubjectKeys"></a>
-## type [SubjectKeys](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [SubjectKeys](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 SubjectKeys keeps one data key per subject, wrapped by a root [Keyring](#Keyring): Seal and Open under a subject's key, Destroy to erase everything it sealed, Rewrap after the root rotates.
 
@@ -1095,7 +1095,7 @@ Seal encrypts plaintext under subject's data key — made, wrapped and filed by 
 It refuses a malformed subject with core/security/secret.InvalidSubject, returns core/security/secret.NotFound while the root has no version, and \[coresecret.SubjectKeyUnreadable] when subject's key is held and does not unwrap — it never replaces such a key.
 
 <a name="SubjectKeysConfig"></a>
-## type [SubjectKeysConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [SubjectKeysConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 SubjectKeysConfig parameterises [NewSubjectKeys](#NewSubjectKeys).
 
@@ -1138,7 +1138,7 @@ type SubjectKeysConfig struct {
 ```
 
 <a name="Value"></a>
-## type [Value](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [Value](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 Value is an immutable secret that renders as [Redacted](#Redacted) in every rendering; only Reveal and RevealString hand its bytes back.
 
@@ -1265,7 +1265,7 @@ func (*Value) UnmarshalText(text []byte) error
 UnmarshalText implements encoding.TextUnmarshaler. The text becomes the secret, copied — except [Redacted](#Redacted) itself, which is refused with [ValueRefused](#ValueRefused): every rendering of a Value writes it, so finding it on the way in means a rendered configuration was loaded as a real one, and every secret in it would otherwise silently become the placeholder.
 
 <a name="Versioned"></a>
-## type [Versioned](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [Versioned](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 Versioned is one version of one secret: name, number, value, and when the store recorded it.
 
@@ -1292,7 +1292,7 @@ type Versioned struct {
 ```
 
 <a name="WrappedKey"></a>
-## type [WrappedKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/facade_gen.go>)
+## type [WrappedKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/secret/gen_facade.go>)
 
 WrappedKey is one subject's wrapped data key, as a [SubjectKeyStore](#SubjectKeyStore) keeps it.
 

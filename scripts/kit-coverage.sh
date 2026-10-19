@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # kit-coverage.sh — how much of the SDK its design rebuilds (`make
 # kit-coverage`; ADR 0169): per package, the exported declarations kit writes
-# (decl_gen.go's types and wrappers, facade_gen.go's re-exports, codes_gen.go's
-# sentinels, design_gen.go's ports) against those written by hand, read by
+# (gen_decls.go's types and wrappers, gen_facade.go's re-exports, gen_codes.go's
+# sentinels, gen_ports.go's ports) against those written by hand, read by
 # `kit design coverage` from the files alone, then the total and the packages
 # with the most declared by hand.
 #

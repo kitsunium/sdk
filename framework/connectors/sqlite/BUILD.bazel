@@ -11,10 +11,10 @@ go_library(
     name = "sqlite",
     srcs = [
         "busy.go",
-        "codes_gen.go",
         "doc.go",
         "driver.go",
         "driver_none.go",
+        "gen_codes.go",
         "sqlite.go",
     ],
     importpath = "github.com/kitsunium/sdk/framework/connectors/sqlite",
@@ -77,7 +77,6 @@ alias(
 go_test(
     name = "sqlite_test",
     srcs = [
-        "api_gen_test.go",
         "catchup_test.go",
         "datacopy_test.go",
         "driver_platform_test.go",
@@ -90,6 +89,7 @@ go_test(
         "former_move_test.go",
         "former_refs_test.go",
         "former_test.go",
+        "gen_api_test.go",
         "keys_test.go",
         "mail_test.go",
         "queue_test.go",

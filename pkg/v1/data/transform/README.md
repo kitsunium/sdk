@@ -215,7 +215,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/data/transform.ZlibFail
 Code `0.3.26.3` · reason `ZLIB_FAILED` · public "zlib transform failed"
 
 <a name="Available"></a>
-## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/facade_gen.go>)
+## func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/gen_facade.go>)
 
 ```go
 func Available() []Algorithm
@@ -253,7 +253,7 @@ DecompressBounded decompresses src with the scheme registered under algo and app
 A scheme implementing BoundedDecompressor stops at limit, so the work is bounded too. A scheme that does not — a consumer's own, or one of the third-party module's — is decompressed under its own backstop and judged afterwards: declining to tighten the work can never change the verdict, only the bytes touched reaching it.
 
 <a name="Lookup"></a>
-## func [Lookup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/facade_gen.go>)
+## func [Lookup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/gen_facade.go>)
 
 ```go
 func Lookup(algo Algorithm) (c Compressor, ok bool)
@@ -262,7 +262,7 @@ func Lookup(algo Algorithm) (c Compressor, ok bool)
 Lookup returns the Compressor registered under algo.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/facade_gen.go>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/gen_facade.go>)
 
 Algorithm is the name a Compressor registers under. The zero value is reserved as invalid.
 
@@ -295,7 +295,7 @@ func (Algorithm) String() string
 String implements fmt.Stringer and returns the raw identifier.
 
 <a name="BoundedDecompressor"></a>
-## type [BoundedDecompressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/facade_gen.go>)
+## type [BoundedDecompressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/gen_facade.go>)
 
 BoundedDecompressor is the optional extension of a Compressor that can be told how much plaintext it may produce; DecompressBounded uses it when the scheme has it.
 
@@ -313,14 +313,14 @@ type BoundedDecompressor interface {
 ```
 
 <a name="BoundedDecompressor.DecompressBounded"></a>
-### func \(BoundedDecompressor\) [DecompressBounded](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/transform/design_gen.go>)
+### func \(BoundedDecompressor\) [DecompressBounded](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/transform/gen_ports.go>)
 
 ```go
 func (BoundedDecompressor) DecompressBounded(dst []byte, src []byte, max int64) (out []byte, err error)
 ```
 
 <a name="Compressor"></a>
-## type [Compressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/facade_gen.go>)
+## type [Compressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/gen_facade.go>)
 
 Compressor is one compression scheme: Compress and Decompress append to dst. Implementations are safe for concurrent use.
 
@@ -339,21 +339,21 @@ type Compressor interface {
 ```
 
 <a name="Compressor.Algorithm"></a>
-### func \(Compressor\) [Algorithm](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/transform/design_gen.go>)
+### func \(Compressor\) [Algorithm](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/transform/gen_ports.go>)
 
 ```go
 func (Compressor) Algorithm() Algorithm
 ```
 
 <a name="Compressor.Compress"></a>
-### func \(Compressor\) [Compress](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/transform/design_gen.go>)
+### func \(Compressor\) [Compress](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/transform/gen_ports.go>)
 
 ```go
 func (Compressor) Compress(dst []byte, src []byte) (out []byte, err error)
 ```
 
 <a name="Compressor.Decompress"></a>
-### func \(Compressor\) [Decompress](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/transform/design_gen.go>)
+### func \(Compressor\) [Decompress](<https://github.com/kitsunium/sdk/blob/main/internal/core/data/transform/gen_ports.go>)
 
 ```go
 func (Compressor) Decompress(dst []byte, src []byte) (out []byte, err error)

@@ -6,11 +6,11 @@ go_library(
     name = "metrics",
     srcs = [
         "attrs.go",
-        "codes_gen.go",
-        "design_gen.go",
         "doc.go",
         "exporter.go",
         "gauge_value.go",
+        "gen_codes.go",
+        "gen_ports.go",
         "histogram_value.go",
         "observable.go",
         "scope.go",
@@ -49,9 +49,9 @@ filegroup(
 go_test(
     name = "metrics_test",
     srcs = [
-        "api_gen_test.go",
         "describer_external_test.go",
         "exporter_external_test.go",
+        "gen_api_test.go",
         "model_external_test.go",
         "registry_guard_external_test.go",
     ],

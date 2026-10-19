@@ -5,7 +5,6 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "writer",
     srcs = [
-        "codes_gen.go",
         "config_clickhouse.go",
         "config_cloudwatch.go",
         "config_console.go",
@@ -15,9 +14,10 @@ go_library(
         "config_rotfile.go",
         "config_s3.go",
         "credentials.go",
-        "design_gen.go",
         "doc.go",
         "errors.go",
+        "gen_codes.go",
+        "gen_ports.go",
         "registry.go",
         "writer.go",
         "writer_spec.go",
@@ -48,9 +48,9 @@ alias(
 go_test(
     name = "writer_test",
     srcs = [
-        "api_gen_test.go",
         "config_decoder_external_test.go",
         "credentials_external_test.go",
+        "gen_api_test.go",
         "registry_external_test.go",
         "registry_guard_external_test.go",
         "registry_internal_test.go",

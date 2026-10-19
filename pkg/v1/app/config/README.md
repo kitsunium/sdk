@@ -251,7 +251,7 @@ Initialised with `github.com/kitsunium/sdk/internal/core/app/config.ConfigWatchF
 Code `0.2.10.4` · reason `CONFIG_WATCH_FAILED` · public "The configuration watcher could not observe its source"
 
 <a name="EnvSource"></a>
-## func [EnvSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## func [EnvSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 ```go
 func EnvSource(prefix string) Source
@@ -284,7 +284,7 @@ func FileSource(format string, path string) Source
 FileSource returns a Source reading path and parsing it as format (the codec must be registered — blank-import its package, e.g. pkg/v1/data/codec).
 
 <a name="Load"></a>
-## func [Load](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## func [Load](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 ```go
 func Load[T any](target *T, sources ...Source) error
@@ -295,7 +295,7 @@ Load merges sources into target (later overrides earlier), decodes, and validate
 It declares no schema: nothing is required, nothing is defaulted, and a key the target cannot address is dropped exactly as encoding/json drops it. Use [LoadSchema](#LoadSchema) to have those caught.
 
 <a name="LoadSchema"></a>
-## func [LoadSchema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## func [LoadSchema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 ```go
 func LoadSchema[T any](target *T, schema *Schema[T], sources ...Source) error
@@ -306,7 +306,7 @@ LoadSchema is [Load](#Load) with a compiled [Schema](#Schema): the schema's type
 The layer order is default \< file \< env \< any later source. A missing required key and an unaddressable key are reported together, each naming all of its keys, so one restart tells the whole truth. A nil schema is refused by name rather than silently loading nothing.
 
 <a name="LoadSchemaWithOrigins"></a>
-## func [LoadSchemaWithOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## func [LoadSchemaWithOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 ```go
 func LoadSchemaWithOrigins[T any](target *T, schema *Schema[T], sources ...Source) (origins []Origin, err error)
@@ -315,7 +315,7 @@ func LoadSchemaWithOrigins[T any](target *T, schema *Schema[T], sources ...Sourc
 LoadSchemaWithOrigins is [LoadSchema](#LoadSchema) with the origins [LoadWithOrigins](#LoadWithOrigins) returns; a key the schema defaulted is reported as [LayerDefault](#LayerDefault).
 
 <a name="LoadWithOrigins"></a>
-## func [LoadWithOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## func [LoadWithOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 ```go
 func LoadWithOrigins[T any](target *T, sources ...Source) (origins []Origin, err error)
@@ -324,7 +324,7 @@ func LoadWithOrigins[T any](target *T, sources ...Source) (origins []Origin, err
 LoadWithOrigins is [Load](#Load), and it also returns one [Origin](#Origin) per leaf key of T, sorted by key: which layer supplied the key's final value and the detail behind it — never the value itself. On a failure no origin is returned.
 
 <a name="NewSchema"></a>
-## func [NewSchema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## func [NewSchema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 ```go
 func NewSchema[T any](spec SchemaSpec[T]) (schema *Schema[T], err error)
@@ -333,7 +333,7 @@ func NewSchema[T any](spec SchemaSpec[T]) (schema *Schema[T], err error)
 NewSchema compiles spec into a [Schema](#Schema), refusing at construction every declaration that could not work: a malformed key, a key naming no field of T, a duplicate, a key declared both required and with a default, a default the decode cannot carry, and — the one that matters — a default that violates the constraint the schema itself declares for that key. A tag the validation engine refuses surfaces THAT engine's error, whose fields already name the field, the rule and the clause.
 
 <a name="PollWatcher"></a>
-## func [PollWatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## func [PollWatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 ```go
 func PollWatcher(path string, interval time.Duration) Watcher
@@ -342,7 +342,7 @@ func PollWatcher(path string, interval time.Duration) Watcher
 PollWatcher returns a cross-OS Watcher that polls path every interval.
 
 <a name="Default"></a>
-## type [Default](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## type [Default](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 Default is the public alias for one declared key and the typed value it takes when NO source supplied it. A defaulted key is never also required.
 
@@ -379,7 +379,7 @@ type Default struct {
 ```
 
 <a name="Describer"></a>
-## type [Describer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## type [Describer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 Describer is the public alias for the optional sibling of [Source](#Source) through which a source names its layer and, per key, the detail behind it. EnvSource, FileSource, FSSource and Schema.Source implement it.
 
@@ -398,7 +398,7 @@ type Describer interface {
 ```
 
 <a name="Describer.Describe"></a>
-### func \(Describer\) [Describe](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/config/design_gen.go>)
+### func \(Describer\) [Describe](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/config/gen_ports.go>)
 
 ```go
 func (Describer) Describe(key string) (layer string, detail string)
@@ -407,7 +407,7 @@ func (Describer) Describe(key string) (layer string, detail string)
 Describe reports the kind of layer this source contributes and, for one dotted key it supplied in its last Load, the detail an operator acts on.
 
 <a name="Origin"></a>
-## type [Origin](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## type [Origin](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 Origin is the public alias for one key's provenance in a traced load: the layer that supplied its final value, the detail an operator acts on, and whether the key holds a secret. It never carries the value.
 
@@ -438,7 +438,7 @@ type Origin struct {
 ```
 
 <a name="Schema"></a>
-## type [Schema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## type [Schema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 Schema is the public alias for a compiled configuration shape: the default layer it contributes, the keys it requires, the vocabulary it accepts, and the constraints it enforces. Build one with [NewSchema](#NewSchema).
 
@@ -483,7 +483,7 @@ Source returns the default LAYER as an ordinary \[coreconfig.Source]. It is expo
 Each Load returns a fresh copy, so a caller that mutates the map it was handed cannot change what the next load sees.
 
 <a name="SchemaSpec"></a>
-## type [SchemaSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## type [SchemaSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 SchemaSpec is the public alias for a schema declaration. Its zero value is a legitimate schema: nothing required, nothing defaulted, no extra rule — but the \`validate\` tags of T still apply and an unknown key is still refused.
 
@@ -552,7 +552,7 @@ type SchemaSpec[T any] struct {
 ```
 
 <a name="Source"></a>
-## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 Source is the public alias for a configuration layer producer.
 
@@ -570,7 +570,7 @@ type Source interface {
 ```
 
 <a name="Source.Load"></a>
-### func \(Source\) [Load](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/config/design_gen.go>)
+### func \(Source\) [Load](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/config/gen_ports.go>)
 
 ```go
 func (Source) Load() (values map[string]any, err error)
@@ -579,7 +579,7 @@ func (Source) Load() (values map[string]any, err error)
 Load reads the source and returns its key→value map (nil map = empty layer).
 
 <a name="Validator"></a>
-## type [Validator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## type [Validator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 Validator is the public alias for a decoded config's self-check.
 
@@ -597,7 +597,7 @@ type Validator interface {
 ```
 
 <a name="Validator.Validate"></a>
-### func \(Validator\) [Validate](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/config/design_gen.go>)
+### func \(Validator\) [Validate](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/config/gen_ports.go>)
 
 ```go
 func (Validator) Validate() error
@@ -606,7 +606,7 @@ func (Validator) Validate() error
 Validate reports whether the decoded configuration is internally consistent.
 
 <a name="Watcher"></a>
-## type [Watcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/facade_gen.go>)
+## type [Watcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/config/gen_facade.go>)
 
 Watcher is the public alias for a change observer.
 
@@ -624,7 +624,7 @@ type Watcher interface {
 ```
 
 <a name="Watcher.Watch"></a>
-### func \(Watcher\) [Watch](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/config/design_gen.go>)
+### func \(Watcher\) [Watch](<https://github.com/kitsunium/sdk/blob/main/internal/core/app/config/gen_ports.go>)
 
 ```go
 func (Watcher) Watch(ctx context.Context, onChange func()) error
