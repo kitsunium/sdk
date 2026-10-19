@@ -268,3 +268,47 @@ func TestACutWhoseSyncFailsStopsTheNode(t *testing.T) {
 		})
 	}
 }
+
+// A cut's metadata carries the engine state at the cut index, not the one
+// standing when the cut is made: a timing contract committed after the
+// index is absent from a snapshot cut there, and present in one cut at or
+// past it (#402).
+func TestACutCarriesTheEngineStateAtItsIndex(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	l := c.leader(5 * time.Second)
+	tok := propose(t, l.node, "a=1")
+	var old coreconsensus.TimingContractSpec
+	if !l.node.exec(func() { old = l.node.r.Status().Timing }) {
+		t.Fatal("the node stopped")
+	}
+	next := testTimingFast()
+	next.HeartbeatInterval = 7 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	pre := coreconsensus.PreconditionSpec{Log: l.node.ident, Generation: old.Generation}
+	if err := l.node.ProposeTimingContract(ctx, "op:test", pre, next); err != nil {
+		t.Fatal(err)
+	}
+	after := propose(t, l.node, "b=2")
+	var now coreconsensus.TimingContractSpec
+	if !l.node.exec(func() { now = l.node.r.Status().Timing }) {
+		t.Fatal("the node stopped")
+	}
+	if now.Generation != old.Generation+1 {
+		t.Fatalf("setup: the contract did not commit: generation %d", now.Generation)
+	}
+	meta, ok := l.node.metaAt(tok.Index, tok.Term)
+	if !ok {
+		t.Fatal("the node stopped")
+	}
+	if meta.Timing != old {
+		t.Fatalf("a cut at %d, before the contract, carries timing %+v, want %+v", tok.Index, meta.Timing, old)
+	}
+	meta, ok = l.node.metaAt(after.Index, after.Term)
+	if !ok {
+		t.Fatal("the node stopped")
+	}
+	if meta.Timing.Generation != old.Generation+1 || meta.Timing.HeartbeatInterval != next.HeartbeatInterval {
+		t.Fatalf("a cut at %d, past the contract, carries timing %+v", after.Index, meta.Timing)
+	}
+}

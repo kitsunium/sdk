@@ -100,20 +100,24 @@ func (n *Node) cutFailed(err error) {
 }
 
 // metaAt builds, on the event loop, the metadata of a snapshot at idx: the
-// configuration and chain tip in force there, and the timing, versions and
-// no-space alarm as they stand now. It reports false when the node stopped
-// before the loop could answer.
+// configuration, chain tip, timing, versions and no-space alarm in force
+// there. The engine state is the one the committed entries through idx left
+// (raft's EngineAt), never the one standing now: the engine applies its
+// entries at commit, ahead of the applied index a cut is made at, and a
+// node that installed the snapshot and was then truncated back would carry
+// a contract whose entry it never applied (#402). It reports false when the
+// node stopped before the loop could answer.
 func (n *Node) metaAt(idx, term uint64) (coreconsensus.SnapshotMetaValue, bool) {
 	var meta coreconsensus.SnapshotMetaValue
 	ok := n.exec(func() {
-		st := n.r.Status()
+		eng := n.r.EngineAt(idx)
 		conf := n.r.ConfAt(idx)
 		conf.Index = idx
 		meta = coreconsensus.SnapshotMetaValue{
 			ID: fmt.Sprintf("%020d-%020d", idx, term), Version: 1,
 			Position: coreconsensus.PositionValue{Term: term, Index: idx}, Log: n.ident, Membership: conf,
 			ChainTip: n.r.ChainAt(idx), Codec: string(n.cfg.SnapshotCodec.Algorithm()), ChunkSize: defaultChunkSize,
-			Timing: st.Timing, ClusterVersion: st.Cluster, ClusterGeneration: st.ClusterG, NoSpace: st.NoSpace,
+			Timing: eng.Timing, ClusterVersion: eng.Cluster, ClusterGeneration: eng.ClusterG, NoSpace: eng.NoSpace,
 		}
 	})
 	return meta, ok

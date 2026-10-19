@@ -581,9 +581,12 @@ func (s *sim) cutSnapshot(n *simNode, force bool) {
 	}
 	simTrace("t=%v n%d cut %d base=%d last=%d", s.now.Sub(time.Unix(1_700_000_000, 0)), n.id, c, n.base.Position.Index, n.last())
 	n.ents = slices.Clone(n.ents[c-n.base.Position.Index:])
+	// The engine state at the cut, as the driver's metaAt reads it (#402).
+	eng := n.r.EngineAt(c)
 	n.base = core.SnapshotMetaValue{
 		ID: fmt.Sprintf("s-%d-%d", n.id, c), Position: e.Position, ChainTip: e.ChainSum,
-		Membership: n.r.ConfAt(c), Timing: s.timing,
+		Membership: n.r.ConfAt(c), Timing: eng.Timing, ClusterVersion: eng.Cluster,
+		ClusterGeneration: eng.ClusterG, NoSpace: eng.NoSpace,
 	}
 	n.r.Compact(c)
 }

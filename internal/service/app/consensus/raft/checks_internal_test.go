@@ -832,3 +832,82 @@ func checkNoTableBase(mut mutation) error {
 	}
 	return nil
 }
+
+// engineEntry is the engine entry of kind at index, of term 1, chained on
+// prev, carrying admin.
+func engineEntry(prev uint32, index uint64, kind core.EntryKind, admin *wire.AdminValue) core.EntryValue {
+	data := wire.AppendAdmin(nil, admin)
+	e := core.EntryValue{Position: core.PositionValue{Term: 1, Index: index}, Kind: kind, BodySum: wire.BodySum(data), Data: data}
+	e.ChainSum = wire.ChainSum(prev, &e)
+	return e
+}
+
+// A snapshot cut at an index carries the engine state as the committed
+// entries through that index left it. The engine applies its entries at
+// commit, ahead of the applied index a cut is made at: the state as it
+// stands now named a contract, a cluster version and an alarm committed
+// past the cut, and a node that installed that snapshot and was truncated
+// back carried a contract whose entry it never applied (#402).
+func TestEngineAtIsTheStateTheCommittedEntriesThroughTheIndexLeft(t *testing.T) {
+	f := newTest(2, testState{term: 1, commit: 3, ents: chainEntries(0, 1, 1, 1, 1)}, 0, false)
+	before := f.EngineAt(3)
+	next := testTiming()
+	next.HeartbeatInterval = 50 * time.Millisecond
+	e4 := engineEntry(f.log.chain(3), 4, core.EntryTimingContract, &wire.AdminValue{Pre: core.PreconditionSpec{Generation: 1}, Contract: next})
+	e5 := engineEntry(e4.ChainSum, 5, core.EntryNoSpaceRaise, &wire.AdminValue{})
+	e6 := engineEntry(e5.ChainSum, 6, core.EntryClusterVersion, &wire.AdminValue{ClusterVersion: ProtocolMax})
+	m := msg(core.MsgApp, 1, 2, 1)
+	m.Index, m.LogTerm, m.Commit, m.Entries = 3, 1, 6, []core.EntryValue{e4, e5, e6}
+	f.Step(t0, m)
+	if f.log.committed != 6 {
+		t.Fatalf("setup: committed %d, want 6", f.log.committed)
+	}
+	if st := f.Status(); st.Timing.Generation != 2 || st.NoSpace != 5 || st.Cluster != ProtocolMax {
+		t.Fatalf("setup: the engine entries did not apply: %+v", st)
+	}
+	if got := f.EngineAt(3); got != before || got.Timing.Generation != 1 || got.NoSpace != 0 || got.Cluster != 0 {
+		t.Fatalf("EngineAt(3) = %+v, want the state before the engine entries %+v", got, before)
+	}
+	if got := f.EngineAt(4); got.Timing.Generation != 2 || got.Timing.HeartbeatInterval != next.HeartbeatInterval || got.NoSpace != 0 || got.Cluster != 0 {
+		t.Fatalf("EngineAt(4) = %+v, want the contract alone", got)
+	}
+	if got := f.EngineAt(5); got.Timing.Generation != 2 || got.NoSpace != 5 || got.Cluster != 0 {
+		t.Fatalf("EngineAt(5) = %+v, want the contract and the alarm", got)
+	}
+	if got := f.EngineAt(6); got != (EngineValue{Timing: f.timing, Cluster: f.clusterVer, ClusterG: f.clusterGen, NoSpace: f.noSpace}) {
+		t.Fatalf("EngineAt(6) = %+v, want the state as it stands", got)
+	}
+	// A node that installs the snapshot cut at 3, and restarts on it with
+	// its log truncated back, holds no contract it never applied.
+	eng := f.EngineAt(3)
+	meta := core.SnapshotMetaValue{
+		Position: core.PositionValue{Term: 1, Index: 3}, ChainTip: f.log.chain(3), Membership: testConf(1, 2, 3),
+		Timing: eng.Timing, ClusterVersion: eng.Cluster, ClusterGeneration: eng.ClusterG, NoSpace: eng.NoSpace,
+	}
+	g := newTest(3, testState{term: 1}, 0, false)
+	g.InstallSnapshot(meta)
+	if st := g.Status(); st.Timing.Generation != 1 || st.NoSpace != 0 || st.Cluster != 0 {
+		t.Fatalf("an install of the cut at 3 carries %+v", st)
+	}
+	if got := g.EngineAt(3); got != g.engine() {
+		t.Fatalf("after an install, EngineAt(3) = %+v, want the installed state %+v", got, g.engine())
+	}
+	cfg := g.cfg
+	h := NewRaft(&cfg, &StartState{HardState: core.HardState{Term: 1, Commit: 3}, Snapshot: meta, Now: t0})
+	if st := h.Status(); st.Timing.Generation != 1 || st.NoSpace != 0 || st.Cluster != 0 {
+		t.Fatalf("a restart on the cut at 3 carries %+v", st)
+	}
+	// Compaction folds the records it passes into the base, and keeps the
+	// answer for every index above it.
+	f.log.applied = 6
+	f.Compact(4)
+	if got := f.EngineAt(4); got.Timing.Generation != 2 || got.NoSpace != 0 {
+		t.Fatalf("after compacting through 4, EngineAt(4) = %+v", got)
+	}
+	if got := f.EngineAt(5); got.NoSpace != 5 || got.Cluster != 0 {
+		t.Fatalf("after compacting through 4, EngineAt(5) = %+v", got)
+	}
+	if len(f.engines) != 2 {
+		t.Fatalf("after compacting through 4, %d records kept, want 2", len(f.engines))
+	}
+}

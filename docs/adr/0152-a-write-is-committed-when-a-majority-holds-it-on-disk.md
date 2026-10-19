@@ -587,6 +587,21 @@ vote or resurrecting an entry a later record truncated (`storage.js:35-37`,
   `SnapshotMeta` holds the authenticated chain tip at the snapshot's index,
   and the bytes of the retained suffix are preserved as written. A fixed
   seed is used only at genesis, or after a replicated chain reset.
+- **The engine state a snapshot carries is the one at its index ([issue
+  #402](https://github.com/kitsunium/sdk/issues/402)).** Like the
+  configuration and the chain tip, the timing contract, the cluster version
+  and its generation, and the no-space alarm in `SnapshotMeta` are those the
+  committed entries through the cut index left, never those standing when
+  the cut is made. The engine applies its own entries at commit, ahead of
+  the applied index a cut is made at; metadata read from the current state
+  named a contract committed past the cut, and a node that installed that
+  snapshot and was then truncated back carried a contract whose entry it
+  never applied. The step function keeps one record per engine entry that
+  changed the state above its log's base (`EngineAt`), folded into the base
+  as the log compacts. Deferring the cut while an engine entry sits between
+  the applied index and the commit was the alternative; it was not taken,
+  because a steady stream of alarms or contracts would starve the cut, and
+  `SaveSnapshot` would refuse for a reason the operator cannot act on.
 - **No silent loop (R6-05, R7-19).** After N identical chain refusals at the
   same index, a follower stops answering that leader's heartbeats for the
   rest of the term. N defaults to 3, provisional, and zero is refused. Each

@@ -47050,6 +47050,36 @@
       "family": "app"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.EngineValue",
+      "kind": "type",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "EngineValue",
+      "spelled": "struct{Timing core.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace core.AlarmID}",
+      "canonical": "struct{Timing github.com/kitsunium/sdk/internal/core/app/consensus.TimingContractSpec; Cluster uint32; ClusterG uint64; NoSpace github.com/kitsunium/sdk/internal/core/app/consensus.AlarmID}",
+      "fields": [
+        {
+          "name": "Timing",
+          "type": "core.TimingContractSpec"
+        },
+        {
+          "name": "Cluster",
+          "type": "uint32"
+        },
+        {
+          "name": "ClusterG",
+          "type": "uint64"
+        },
+        {
+          "name": "NoSpace",
+          "type": "core.AlarmID"
+        }
+      ],
+      "doc": "EngineValue is the engine's own replicated state: the timing contract, the\ncluster version and its generation, and the no-space alarm.\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.FetchSpec",
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
@@ -47262,6 +47292,19 @@
       "spelled": "func()",
       "canonical": "func()",
       "doc": "DropLease drops the lease for the rest of the term: a loop turn longer than\nthe drift budget (D9).\n",
+      "file": "service/app/consensus/raft/raft.go",
+      "layer": "service",
+      "family": "app"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/internal/service/app/consensus/raft.(*Raft).EngineAt",
+      "kind": "method",
+      "package": "github.com/kitsunium/sdk/internal/service/app/consensus/raft",
+      "name": "EngineAt",
+      "recv": "Raft",
+      "spelled": "func(i uint64) EngineValue",
+      "canonical": "func(i uint64) github.com/kitsunium/sdk/internal/service/app/consensus/raft.EngineValue",
+      "doc": "EngineAt returns the engine's own replicated state as the committed\nentries through index i left it: the state a snapshot cut at i carries,\nnever one an engine entry committed past i set (#402). An index at or\nbelow the log's base answers the state at the base.\n",
       "file": "service/app/consensus/raft/raft.go",
       "layer": "service",
       "family": "app"

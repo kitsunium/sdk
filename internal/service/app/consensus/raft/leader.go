@@ -1098,6 +1098,7 @@ func (r *Raft) InstallSnapshot(meta core.SnapshotMetaValue) {
 		r.voteWindow = meta.Timing.ElectionTimeoutMin
 	}
 	r.clusterVer, r.clusterGen, r.noSpace = meta.ClusterVersion, meta.ClusterGeneration, meta.NoSpace
+	r.resetEngines()
 	r.cfg.NoTable = false
 	r.confChanged()
 	// The install proves the prefix up to idx only: a kept suffix may be

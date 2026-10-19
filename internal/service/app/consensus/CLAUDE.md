@@ -68,6 +68,11 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 - Report a refused transfer as done on the node's own view that the target
   leads: a deposed leader that has not heard its successor still names
   itself. `confirmLeader` makes the view a fact with a barrier first.
+- Fill a cut's metadata from the engine state standing now: `metaAt`
+  reads `raft.EngineAt(idx)`, the timing, cluster version and alarm the
+  committed entries through the cut left. An engine entry commits ahead of
+  the applied index, and a snapshot carrying it named a contract its
+  installer never applied (#402, `TestACutCarriesTheEngineStateAtItsIndex`).
 - Publish a snapshot without `retain` after it: a cut and an install both
   keep the two newest (D7, R6-02). An install used to skip it and left three
   until the node's next cut (#304, `TestAnInstallKeepsTheTwoNewestSnapshots`).
