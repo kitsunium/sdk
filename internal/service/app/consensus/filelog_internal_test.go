@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -436,8 +437,9 @@ func TestReadersDoNotWaitForASync(t *testing.T) {
 		t.Fatal(err)
 	}
 	in, out := make(chan struct{}), make(chan struct{})
+	var first sync.Once
 	l.duringSync = func() {
-		close(in)
+		first.Do(func() { close(in) })
 		<-out
 	}
 	done := make(chan error, 1)
@@ -594,4 +596,54 @@ func TestANoTableBaseNeverTakesATermOfZero(t *testing.T) {
 	if got, err := noTableBase(given, nil, 101); err != nil || got.Position.Term != 5 {
 		t.Fatalf("base %+v %v, want term 5", got.Position, err)
 	}
+}
+
+// A power cut during a batch's fdatasync may persist any subset of its
+// pages, the end record's without an earlier one's. With one sync per batch
+// a batch never acknowledged then read as damage inside a completed batch,
+// and was quarantined. The end record is written only once the rest of its
+// batch is durable, so a valid end record after a hole is damage to synced
+// data and nothing else (#417).
+func TestTheEndRecordIsWrittenOnceTheRestOfItsBatchIsDurable(t *testing.T) {
+	_, d := base(t)
+	defer d.Close()
+	l := d.d.log
+	if err := l.Append(ents(4, 6, 1), nil); err != nil {
+		t.Fatal(err)
+	}
+	batch, off := l.batch, l.off
+	seg := filepath.Join(l.logDir(), segName(l.segs[len(l.segs)-1].n))
+	type seen struct{ recs, ends int }
+	var syncs []seen
+	l.duringSync = func() {
+		b, err := os.ReadFile(seg)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		var s seen
+		for o := int(off); o+recHeader+recFixed <= len(b); {
+			r, ok := parseRecord(b[o:])
+			if !ok || r.batch != batch {
+				break
+			}
+			s.recs++
+			if r.end {
+				s.ends++
+			}
+			o += r.length
+		}
+		syncs = append(syncs, s)
+	}
+	mustSync(t, l)
+	if len(syncs) != 2 {
+		t.Fatalf("%d fdatasync(s) for a batch of three records (%+v), want the body's then the end record's", len(syncs), syncs)
+	}
+	if syncs[0].ends != 0 || syncs[0].recs != 2 {
+		t.Fatalf("before the body was durable the disk held %+v, want its two records and no end record", syncs[0])
+	}
+	if syncs[1].ends != 1 || syncs[1].recs != 3 {
+		t.Fatalf("the end record's write left %+v, want three records, the last ending the batch", syncs[1])
+	}
+	checkEntries(t, d.Log(), 1, 6, 1)
 }

@@ -719,8 +719,21 @@ R7's rules contradicted each other.
        write through dm-crypt leaves.
      - When its end-of-batch record IS valid, the batch may have been
        acknowledged. A bad CRC inside it is quarantined, never truncated.
-     - **The residual, stated:** a device that persists the end record but
-       not an earlier chunk of the same batch, while reporting the sync, is
+     - **The end record is written last, on its own
+       ([#417](https://github.com/kitsunium/sdk/issues/417)).** A batch is
+       made durable in two steps: every record before the last, then its
+       `fdatasync`; then the last record, which carries the end-of-batch
+       flag, then its `fdatasync`. With one `fdatasync` per batch a power
+       cut DURING it could persist any subset of the batch's dirty pages
+       (neither the page cache, the block layer nor the disk orders the
+       pages of one file, ALICE, OSDI 2014): the end record's page without
+       an earlier one's, a batch never acknowledged, quarantined, and two
+       nodes cut together waiting for an operator. Telling such a tear by
+       zeroed sectors does not work through dm-crypt, which leaves random
+       bytes. Written last, a valid end record proves that the rest of its
+       batch was durable before it.
+     - **The residual, stated:** a device that loses a chunk of a batch
+       after reporting that chunk's sync, then persists the end record, is
        outside the crash-only model. That case is quarantined, so it loses
        availability, never data.
      - **A second residual, stated (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), L7):** damage to
@@ -766,8 +779,10 @@ R7's rules contradicted each other.
   because a second seal is invisible to the next recovery and leaves a hole
   in the batch sequence (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), H2; the dm-crypt lane cuts in
   that window and reopens twice).
-- **Nothing else changes.** D5b's sync-done still means "data durable", and
-  D16 keeps one `fsync` per side.
+- **Nothing else changes.** D5b's sync-done still means "data durable".
+  D16 counts two `fdatasync` per batch on each side since
+  [#417](https://github.com/kitsunium/sdk/issues/417), the fallback stated
+  below: the end record waits for the rest of its batch.
 - *Tests:* crashes between a batch's write, its sync, the next batch's write
   and the acknowledgement, in every order the kernel allows. A shorter
   overwrite, then a crash. A crash that persists a RANDOM SUBSET of the
@@ -776,7 +791,10 @@ R7's rules contradicted each other.
   (R8-02).
 - **Fallback, stated in advance:** if the batch fields are not adopted, or
   review shows the implicit form unsafe, the explicit watermark record of
-  round 5 comes back, and D16 is rewritten with two `fsync` per batch.
+  round 5 comes back, and D16 is rewritten with two `fsync` per batch. The
+  second half was taken by [#417](https://github.com/kitsunium/sdk/issues/417):
+  the batch fields stay, and the end record is synced after the rest of its
+  batch.
 
 Both are writes that were never acknowledged, because acknowledgement follows
 the sync. A node that truncated one of them **keeps voting and acknowledging**,
@@ -2582,7 +2600,8 @@ recorded in `BENCH.md`:
 
 - p99 quorum commit from an FRA or RBX leader ≤ 2 × the nearest RTT + 2 ×
   the measured fsync p99, at 1 000 proposals/s;
-- sustained ≥ 10 000 entries/s of 256 B committed with one `fsync` per batch;
+- sustained ≥ 10 000 entries/s of 256 B committed with two `fdatasync` per
+  batch, the end record after the rest ([#417](https://github.com/kitsunium/sdk/issues/417));
 - failover (leader killed, then first commit under the new leader): **p99 ≤
   3.5 s, provisional**. The final number is derived from the simulator's
   distribution with the chosen timeouts, not chosen first. The first draft's
@@ -3582,8 +3601,8 @@ consumer may not start before all of them are in place.
 
 - **The SDK gains a domain that can make ADR 0052's missing guarantee**:
   agreement across machines, with a fence a resource can check.
-- **Every commit costs one network round trip and one `fsync`** on two of
-  three nodes. There is no asynchronous mode; a caller that wants one does not
+- **Every commit costs one network round trip and one batch's two
+  `fdatasync`** on two of three nodes ([#417](https://github.com/kitsunium/sdk/issues/417)). There is no asynchronous mode; a caller that wants one does not
   want this domain.
 - **A minority is read-only and says so.** A node cut off from the majority
   fails `Propose` with `NOT_LEADER` or `OUTCOME_UNKNOWN`, fails `Barrier` with

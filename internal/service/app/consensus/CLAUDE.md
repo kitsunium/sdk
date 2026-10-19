@@ -72,6 +72,11 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   `TestAnInstallBelowTheCommitLeavesTheEngineStateAlone`).
 - Hold `mu` across a batch's write and fdatasync: writers serialise on
   `wmu`, readers must not wait for the disk (review L6).
+- Write a batch's end record before the rest of the batch is durable: a
+  power cut during one fdatasync may persist the end record's page without
+  an earlier one's, and recovery quarantines a valid end after a hole.
+  `writeBatch` syncs the body, then writes and syncs the end record (#417,
+  `TestTheEndRecordIsWrittenOnceTheRestOfItsBatchIsDurable`).
 - Bound a read of the store by the event loop's commit: the loop commits a
   suffix it truncated and appended in memory before the storage actor
   rewrote it, and an install moves the commit before the store. A reader

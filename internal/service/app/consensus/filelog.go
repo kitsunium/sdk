@@ -237,8 +237,9 @@ type fileLog struct {
 	// segment is published. Only the dm-crypt lane sets it, to cut power in
 	// that window; it is nil otherwise.
 	afterSeal func()
-	// duringSync runs while a batch's write and fdatasync run, the lock
-	// released. Only a test sets it.
+	// duringSync runs between each write of a batch and its fdatasync, the
+	// lock released: twice for a batch of several records. Only a test sets
+	// it.
 	duringSync func()
 	// wmu serialises the writers. A sync holds it, not mu, across its
 	// write and fdatasync, so readers do not wait for the disk (review of
@@ -1083,8 +1084,9 @@ func (l *fileLog) Append(entries []coreconsensus.EntryValue, hs *coreconsensus.H
 }
 
 // Sync implements LogStore: the pending batch is written, its last record
-// flagged end-of-batch, and made durable by one fdatasync. A failure is
-// final: the log refuses every later call (D4, fsyncgate).
+// flagged end-of-batch, and made durable by two fdatasyncs, the end record
+// written only once the rest is durable (writeBatch). A failure is final:
+// the log refuses every later call (D4, fsyncgate).
 func (l *fileLog) Sync() error {
 	l.wmu.Lock()
 	defer l.wmu.Unlock()
@@ -1109,21 +1111,11 @@ func (l *fileLog) Sync() error {
 		l.restamp(l.batch)
 		cur = l.segs[len(l.segs)-1]
 	}
-	// The write and its fdatasync run without mu: the writers are held by
-	// wmu, readers find the pending entries in memory and the durable ones
-	// below l.off, which the write does not touch.
+	// The writes and their fdatasync run without mu: the writers are held
+	// by wmu, readers find the pending entries in memory and the durable
+	// ones below l.off, which the writes do not touch.
 	l.mu.Unlock()
-	var ferr error
-	if _, err := cur.f.WriteAt(l.pending, l.off); err != nil {
-		ferr = storageFailed("write", err)
-	} else {
-		if l.duringSync != nil {
-			l.duringSync()
-		}
-		if err := datasync(cur.f); err != nil {
-			ferr = storageFailed("fdatasync", err)
-		}
-	}
+	ferr := l.writeBatch(cur)
 	l.mu.Lock()
 	if ferr != nil {
 		l.failed = ferr
@@ -1131,6 +1123,39 @@ func (l *fileLog) Sync() error {
 	}
 	l.settleBatch(cur.n)
 	return l.dropSegmentsLocked()
+}
+
+// writeBatch makes the pending batch durable at l.off in segment cur in two
+// steps: every record before the last, synced, then the last one, which
+// carries the end-of-batch flag, synced (D16, #417). A power cut during one
+// fdatasync may persist any subset of its dirty pages, the end record's
+// without an earlier one's; with one sync per batch that left a valid end
+// record after a hole in a batch never acknowledged, which recovery must
+// quarantine. Written last and on its own, a valid end record proves that
+// the rest of its batch was durable before it, so a hole before it is
+// damage to synced data, and nothing else.
+func (l *fileLog) writeBatch(cur *segment) error {
+	body := l.pending[:l.pendingLast]
+	if len(body) > 0 {
+		if err := l.writeAndSync(cur, body, l.off); err != nil {
+			return err
+		}
+	}
+	return l.writeAndSync(cur, l.pending[l.pendingLast:], l.off+int64(len(body)))
+}
+
+// writeAndSync writes b at off in segment cur and fdatasyncs it.
+func (l *fileLog) writeAndSync(cur *segment, b []byte, off int64) error {
+	if _, err := cur.f.WriteAt(b, off); err != nil {
+		return storageFailed("write", err)
+	}
+	if l.duringSync != nil {
+		l.duringSync()
+	}
+	if err := datasync(cur.f); err != nil {
+		return storageFailed("fdatasync", err)
+	}
+	return nil
 }
 
 // settleBatch records the pending batch, now synced in segment seg, as
