@@ -23,6 +23,7 @@ go_library(
         "fsfree_windows.go",
         "health.go",
         "initlog.go",
+        "install.go",
         "join.go",
         "memlog.go",
         "memsnap.go",

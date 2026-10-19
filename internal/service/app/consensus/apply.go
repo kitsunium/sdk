@@ -208,24 +208,6 @@ func (n *Node) safeApply(b coreconsensus.BatchingStateMachine, batching bool, es
 	return nil
 }
 
-// removeOld removes the snapshots retain no longer keeps. One refused while
-// a transfer reads it is kept until the next cut or install, which tries
-// again: worth a line, never a stop. A failed unlink or directory sync is
-// the disk, and stops the node as a cut's does (D4, #422).
-func (n *Node) removeOld(old []coreconsensus.SnapshotMetaValue) {
-	for _, m := range old {
-		err := n.cfg.Snapshots.Remove(m.ID)
-		if err == nil {
-			continue
-		}
-		if errs.HasCode(err, coreconsensus.CodeStorageFailed) {
-			n.cutFailed(err)
-			return
-		}
-		n.obs.info("consensus: an old snapshot is kept for now", lstr("id", m.ID), lstr("error", err.Error()))
-	}
-}
-
 // answerCovered answers every proposal waiting at or below index, which a
 // restored snapshot now covers: applied1 never runs for those indexes, and
 // sweepWaiters answers only above the commit, so they would wait forever
