@@ -142,7 +142,7 @@ func (s *MemorySnapshots) Remove(id string) error {
 	defer s.mu.Unlock()
 	if x, ok := s.done[id]; ok {
 		if x.pins > 0 {
-			return storageFailed("remove", errPinned)
+			return pinnedSnapshot()
 		}
 		delete(s.done, id)
 	}

@@ -117,6 +117,13 @@ func storageFailed(op string, cause error) error {
 	return origin(coreconsensus.StorageFailed, f...)
 }
 
+// pinnedSnapshot is a Remove refused while a handle reads the snapshot: a
+// transfer in flight, benign, retried at the next cut. It is never a
+// STORAGE_FAILED, which stops the node (#422).
+func pinnedSnapshot() error {
+	return origin(coreconsensus.AdminPreconditionFailed, errs.String("why", errPinned.Error()))
+}
+
 // notLeader is the NOT_LEADER a follower answers, the leader it knows in
 // the field LeaderHint reads; a zero hint means none is known.
 func notLeader(hint coreconsensus.NodeID) error {

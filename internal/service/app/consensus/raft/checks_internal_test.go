@@ -1024,3 +1024,25 @@ func TestTheFoundingContractRules(t *testing.T) {
 		t.Fatalf("an install at generation 1 left the node on %+v", h.timing)
 	}
 }
+
+// A message queued over the log's entries is serialised after Ready, whose
+// eviction blanks those entries in place: an aliased slice left with an
+// empty payload its BodySum refused, a lost round trip and a false chain
+// refusal. slice hands out a copy (#422).
+func TestASliceOutlivesAnEviction(t *testing.T) {
+	var l memLog
+	for _, e := range chainEntries(0, 1, 1, 1, 1, 1) {
+		l.ents = append(l.ents, e)
+		l.window += int64(len(e.Data))
+	}
+	got := l.slice(1, 5, 1<<20)
+	l.evict(1, 4)
+	if l.evicted == 0 {
+		t.Fatal("setup: nothing was evicted")
+	}
+	for _, e := range got {
+		if len(e.Data) == 0 || wire.BodySum(e.Data) != e.BodySum {
+			t.Fatalf("entry %d left the log with a payload its BodySum refuses (len %d)", e.Position.Index, len(e.Data))
+		}
+	}
+}

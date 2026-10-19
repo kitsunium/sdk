@@ -940,11 +940,13 @@ func readChunk(r io.Reader, limit int) ([]byte, error) {
 	if _, err := io.ReadFull(r, h[:]); err != nil {
 		return nil, err
 	}
-	n := int(binary.LittleEndian.Uint32(h[:]))
-	if n > limit {
-		return nil, origin(coreconsensus.FrameInvalid, errs.Int("length", n))
+	// Compared before the conversion: on a 32-bit platform a length of
+	// 2^31 or more would turn negative, pass the bound and panic make (#422).
+	ln := binary.LittleEndian.Uint32(h[:])
+	if limit < 0 || uint64(ln) > uint64(limit) {
+		return nil, origin(coreconsensus.FrameInvalid, errs.Int64("length", int64(ln)))
 	}
-	b := make([]byte, n)
+	b := make([]byte, int(ln))
 	_, err := io.ReadFull(r, b)
 	return b, err
 }

@@ -1,6 +1,7 @@
 package consensus
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -8,6 +9,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -598,4 +600,17 @@ func TestTCPFrameOnALinkThatDiedQuietlyIsDelivered(t *testing.T) {
 
 	a.tr.Send(b.id, frame)
 	received("frame after the reset")
+}
+
+// A chunk length is compared before its conversion to int: on 32 bits a
+// length of 2^31 or more turned negative, passed the bound and panicked
+// make in the serving goroutine. The test-386 lane runs this (#422).
+func TestReadChunkRefusesALengthAboveTheLimit(t *testing.T) {
+	for _, ln := range []uint32{0xFFFFFFFF, 1 << 31, 513} {
+		var h [4]byte
+		binary.LittleEndian.PutUint32(h[:], ln)
+		if _, err := readChunk(bytes.NewReader(h[:]), 512); !errors.Is(err, coreconsensus.FrameInvalid) {
+			t.Fatalf("length %#x: %v, want FRAME_INVALID", ln, err)
+		}
+	}
 }

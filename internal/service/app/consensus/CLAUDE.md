@@ -101,6 +101,13 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   carries the contract `Bootstrap` proposed, and it rules once committed
   (`commitFounding`); a snapshot's contract is adopted at an equal generation
   (#421, `TestTheFoundingContractRules`).
+- Answer a pinned snapshot's `Remove` with STORAGE_FAILED, or a failed
+  unlink or directory sync with anything else: `retain` stops the node on
+  the second (D4) and only logs the first, a transfer in flight (#422,
+  `TestRemovingAPinnedSnapshotIsNotAStorageFailure`).
+- Convert a length read off the wire or the disk to `int` before bounding
+  it: on 32 bits it turns negative and passes the bound (#422,
+  `TestReadChunkRefusesALengthAboveTheLimit`, run by `test-386`).
 - Take a JOIN answer from an unpinned peer (`JoinConfig.Pins`, review M4),
   or admit a key two members share (review M5).
 - Cut `Recover`'s log back to the commit the survivor persisted: that commit

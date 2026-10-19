@@ -1006,8 +1006,13 @@ func (l *fileLog) readEntry(s slot) (coreconsensus.EntryValue, error) {
 	if _, err := seg.f.ReadAt(h[:], s.off); err != nil {
 		return coreconsensus.EntryValue{}, storageFailed("read", err)
 	}
-	n := int(binary.LittleEndian.Uint32(h[:]))
-	b := make([]byte, recHeader+n)
+	// Bounded by the segment before the conversion: a damaged length must
+	// not turn negative on 32 bits nor allocate past the file (#422).
+	ln := binary.LittleEndian.Uint32(h[:])
+	if int64(ln) > seg.size-s.off-int64(recHeader) {
+		return coreconsensus.EntryValue{}, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
+	}
+	b := make([]byte, recHeader+int(ln))
 	if _, err := seg.f.ReadAt(b, s.off); err != nil && !errors.Is(err, io.EOF) {
 		return coreconsensus.EntryValue{}, storageFailed("read", err)
 	}

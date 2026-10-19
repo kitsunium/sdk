@@ -647,3 +647,54 @@ func TestTheEndRecordIsWrittenOnceTheRestOfItsBatchIsDurable(t *testing.T) {
 	}
 	checkEntries(t, d.Log(), 1, 6, 1)
 }
+
+// A snapshot pinned by a transfer is a benign refusal, retried at the next
+// cut: it is not STORAGE_FAILED, which stops the node (#422).
+func TestRemovingAPinnedSnapshotIsNotAStorageFailure(t *testing.T) {
+	_, d := base(t)
+	defer d.Close()
+	body := []byte("snapshot body")
+	meta := coreconsensus.SnapshotMetaValue{ID: "s1", Position: coreconsensus.PositionValue{Term: 1, Index: 3}, EncodedSize: int64(len(body))}
+	mem := NewMemorySnapshots()
+	for _, s := range []coreconsensus.SnapshotStore{d.Snapshots(), mem} {
+		sink, _, err := s.Create(meta.ID, meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sink.Write(body); err != nil {
+			t.Fatal(err)
+		}
+		if err := sink.Commit(meta); err != nil {
+			t.Fatal(err)
+		}
+		h, err := s.Open(meta.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = s.Remove(meta.ID)
+		if err == nil || errors.Is(err, coreconsensus.StorageFailed) || !errors.Is(err, coreconsensus.AdminPreconditionFailed) {
+			t.Fatalf("%T: removing a pinned snapshot: %v, want ADMIN_PRECONDITION_FAILED", s, err)
+		}
+		h.Close()
+		if err := s.Remove(meta.ID); err != nil {
+			t.Fatalf("%T: removing it once unpinned: %v", s, err)
+		}
+	}
+}
+
+// WipeAndRejoin starts a new member: a silence condition an earlier
+// TruncateAndStaySilent left must go with the stamp, or the new member
+// starts silent at the old log's index (#422).
+func TestWipeAndRejoinRemovesTheSilenceCondition(t *testing.T) {
+	dir, d := base(t)
+	defer d.Close()
+	if err := writeFileSync(filepath.Join(dir, fileSilent), silenceRecord(9, 4)); err != nil {
+		t.Fatal(err)
+	}
+	if err := ClearQuarantine(d, WipeAndRejoin, "op:test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, fileSilent)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the silence condition survived the wipe: %v", err)
+	}
+}

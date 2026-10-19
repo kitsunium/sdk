@@ -285,8 +285,14 @@ func (n *Node) retain() []coreconsensus.SnapshotMetaValue {
 	}
 	for _, m := range metas[min(2, len(metas)):] {
 		// Refused while a transfer reads it: kept until the next cut or
-		// install, which tries again. Worth a line, never a stop.
+		// install, which tries again. Worth a line, never a stop. A failed
+		// unlink or directory sync is the disk, and stops the node as a
+		// cut's does (D4, #422).
 		if err := n.cfg.Snapshots.Remove(m.ID); err != nil {
+			if errs.HasCode(err, coreconsensus.CodeStorageFailed) {
+				n.cutFailed(err)
+				return metas
+			}
 			n.obs.info("consensus: an old snapshot is kept for now", lstr("id", m.ID), lstr("error", err.Error()))
 		}
 	}

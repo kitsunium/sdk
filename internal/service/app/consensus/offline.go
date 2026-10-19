@@ -242,8 +242,8 @@ func (d DataDir) removeStores() error {
 	return nil
 }
 
-// removeStampAndMarkers deletes the stamp, the quarantine marker and every
-// stop marker. A directory that could not be listed keeps its stamp and its
+// removeStampAndMarkers deletes the stamp, the quarantine marker, the
+// silence condition and every stop marker. A directory that could not be listed keeps its stamp and its
 // markers: the wipe fails here rather than reopen a directory it did not
 // clear.
 func (d DataDir) removeStampAndMarkers() error {
@@ -253,7 +253,9 @@ func (d DataDir) removeStampAndMarkers() error {
 	}
 	for _, e := range ents {
 		n := e.Name()
-		if n == fileStamp || n == markerQuarantine || strings.HasPrefix(n, markerStopPrefix) {
+		// SILENT goes too: the new member must not start silent at the old
+		// log's index (#422).
+		if n == fileStamp || n == markerQuarantine || n == fileSilent || strings.HasPrefix(n, markerStopPrefix) {
 			if err := os.Remove(filepath.Join(d.d.dir, n)); err != nil {
 				return storageFailed("wipe", err)
 			}

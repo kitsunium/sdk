@@ -273,12 +273,15 @@ func (s *fileSnapshots) Remove(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.pins[id] > 0 {
-		return storageFailed("remove", errPinned)
+		return pinnedSnapshot()
 	}
 	for _, ext := range []string{".meta", ".snap"} {
 		if err := os.Remove(filepath.Join(s.dir, id+ext)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return storageFailed("remove", err)
 		}
 	}
-	return syncDir(s.dir)
+	if err := syncDir(s.dir); err != nil {
+		return storageFailed("remove", err)
+	}
+	return nil
 }
