@@ -32,3 +32,8 @@ under coverage before touching `shard_count`.
   `Ready.Unsupported` (review M3).
 - Admit a forwarded command without the bounds of a local one
   (`admitForward`, review M2).
+- Answer a past index from the engine state as it stands: `EngineAt` reads
+  the records `noteEngine` keeps per committed engine entry, folded into the
+  base by `Compact` and reset by `InstallSnapshot`. A change to the timing,
+  the cluster version or the alarm made anywhere but `applyAdmin` bypasses
+  them (#402, `TestEngineAtIsTheStateTheCommittedEntriesThroughTheIndexLeft`).

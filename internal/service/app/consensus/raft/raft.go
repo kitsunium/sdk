@@ -287,6 +287,8 @@ type Raft struct {
 	clusterVer  uint32
 	clusterGen  uint64
 	noSpace     core.AlarmID
+	engBase     EngineValue
+	engines     []engineAt
 	refusedLead core.NodeID
 	refusedAt   uint64
 	refusedFrom core.NodeID
@@ -321,6 +323,7 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	node.clusterVer, node.clusterGen, node.noSpace = sm.ClusterVersion, sm.ClusterGeneration, sm.NoSpace
 	node.voteWindow = node.timing.ElectionTimeoutMin
 	node.contracts = map[uint64]core.TimingContractSpec{node.timing.Generation: node.timing}
+	node.engBase = node.engine()
 	for _, e := range st.Entries {
 		if e.Position.Index <= node.log.snapIndex {
 			continue
@@ -433,6 +436,7 @@ func (r *Raft) Compact(index uint64) {
 	r.rd.Compact = max(r.rd.Compact, index)
 	r.base = m.Clone()
 	r.base.Index = index
+	r.compactEngines(index)
 	n := 0
 	for n < len(r.confs) && r.confs[n].index <= index {
 		n++
@@ -463,6 +467,21 @@ func (r *Raft) ConfAt(i uint64) core.MembershipValue { return r.confAt(i).Clone(
 
 // ChainAt returns the chain value at i.
 func (r *Raft) ChainAt(i uint64) uint32 { return r.log.chain(i) }
+
+// EngineAt returns the engine's own replicated state as the committed
+// entries through index i left it: the state a snapshot cut at i carries,
+// never one an engine entry committed past i set (#402). An index at or
+// below the log's base answers the state at the base.
+func (r *Raft) EngineAt(i uint64) EngineValue {
+	v := r.engBase
+	for _, e := range r.engines {
+		if e.index > i {
+			break
+		}
+		v = e.v
+	}
+	return v
+}
 
 // TermAt returns the term at i.
 func (r *Raft) TermAt(i uint64) (uint64, bool) { return r.log.term(i) }
@@ -807,7 +826,61 @@ func (r *Raft) applyCommitEffect(i uint64, e *core.EntryValue) bool {
 	if err != nil {
 		return false
 	}
-	return r.applyAdmin(i, e.Kind, &admin)
+	stop := r.applyAdmin(i, e.Kind, &admin)
+	r.noteEngine(i)
+	return stop
+}
+
+// EngineValue is the engine's own replicated state: the timing contract, the
+// cluster version and its generation, and the no-space alarm.
+type EngineValue struct {
+	Timing   core.TimingContractSpec
+	Cluster  uint32
+	ClusterG uint64
+	NoSpace  core.AlarmID
+}
+
+// engineAt is the engine state the committed entry at index left.
+type engineAt struct {
+	index uint64
+	v     EngineValue
+}
+
+// engine is the engine state as it stands.
+func (r *Raft) engine() EngineValue {
+	return EngineValue{Timing: r.timing, Cluster: r.clusterVer, ClusterG: r.clusterGen, NoSpace: r.noSpace}
+}
+
+// noteEngine records the engine state the committed entry at i left, when
+// it changed it: EngineAt answers a past index from these records. Only an
+// engine entry changes it, so there are as many records as such entries
+// above the base.
+func (r *Raft) noteEngine(i uint64) {
+	v := r.engine()
+	last := r.engBase
+	if n := len(r.engines); n > 0 {
+		last = r.engines[n-1].v
+	}
+	if v != last {
+		r.engines = append(r.engines, engineAt{index: i, v: v})
+	}
+}
+
+// compactEngines folds the records through index into the base: the log
+// forgets those entries, and no snapshot is cut below its base.
+func (r *Raft) compactEngines(index uint64) {
+	n := 0
+	for n < len(r.engines) && r.engines[n].index <= index {
+		r.engBase = r.engines[n].v
+		n++
+	}
+	r.engines = append(r.engines[:0], r.engines[n:]...)
+}
+
+// resetEngines makes the state as it stands the base, with no record: an
+// install replaced the state with the snapshot's.
+func (r *Raft) resetEngines() {
+	r.engBase, r.engines = r.engine(), nil
 }
 
 // actsAtCommit reports whether an entry of kind changes the engine's own
