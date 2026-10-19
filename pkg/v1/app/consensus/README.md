@@ -1373,7 +1373,7 @@ ReceiptMessage returns the bytes a witness signs to attest a fenced voter.
 func Recover(d DataDir, newCluster ClusterID, members []MemberValue, opt *RecoverOptions) error
 ```
 
-Recover starts a new history from this node's committed log, every old voter left out attested fenced by every witness.
+Recover starts a new history from this node's committed log and the contiguous entries past it whose body and chain checksums verify and whose term does not decrease, every old voter left out attested fenced by every witness.
 
 <a name="Redraw"></a>
 ## func [Redraw](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/consensus/facade_gen.go>)
