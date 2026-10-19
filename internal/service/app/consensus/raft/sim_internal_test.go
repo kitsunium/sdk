@@ -311,6 +311,9 @@ func (s *sim) process(n *simNode) {
 		}
 		for _, m := range rd.Forwarded {
 			s.forwarded[[2]uint64{uint64(n.id), m.Context}] = m
+			if s.kv != nil {
+				s.kv.forwardAnswered(n, m)
+			}
 		}
 		for _, to := range rd.SendSnapshot {
 			s.sendSnapshot(n, to)

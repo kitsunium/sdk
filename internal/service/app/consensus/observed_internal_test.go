@@ -11,6 +11,7 @@ import (
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
 // leaderOf returns the node that leads among nodes.
@@ -244,6 +245,204 @@ func TestImportObservedRefusesATamperedTail(t *testing.T) {
 		}
 		if err := fresh.dd.Close(); err != nil && !strings.Contains(err.Error(), "closed") {
 			t.Fatal(err)
+		}
+	}
+}
+
+// heldLog is a MemoryLog whose storage actor can be held inside one write:
+// once armed, the next TruncateSuffix or Append (as hold says) signals
+// entered and waits for release. Readers are never held.
+type heldLog struct {
+	*MemoryLog
+	hold    string
+	armed   chan struct{}
+	entered chan struct{}
+	release chan struct{}
+}
+
+func newHeldLog(hold string) *heldLog {
+	return &heldLog{MemoryLog: NewMemoryLog(), hold: hold, armed: make(chan struct{}, 1), entered: make(chan struct{}), release: make(chan struct{})}
+}
+
+// wait holds the caller when the log is armed for what.
+func (l *heldLog) wait(what string) {
+	if what != l.hold {
+		return
+	}
+	select {
+	case <-l.armed:
+		close(l.entered)
+		<-l.release
+	default:
+	}
+}
+
+func (l *heldLog) TruncateSuffix(from uint64) error {
+	l.wait("truncate")
+	return l.MemoryLog.TruncateSuffix(from)
+}
+
+func (l *heldLog) Append(entries []coreconsensus.EntryValue, hs *coreconsensus.HardState) error {
+	if len(entries) > 0 {
+		l.wait("append")
+	}
+	return l.MemoryLog.Append(entries, hs)
+}
+
+// suffixFrom builds the entries [prev+1, prev+n] of term, chained from
+// prevChain as a leader of that term would, their commands tagged with tag.
+func suffixFrom(prev uint64, prevChain uint32, term uint64, n int, tag string) []coreconsensus.EntryValue {
+	es := make([]coreconsensus.EntryValue, n)
+	chain := prevChain
+	for k := range es {
+		e := &es[k]
+		e.Position = coreconsensus.PositionValue{Term: term, Index: prev + uint64(k) + 1}
+		e.Kind, e.Version = coreconsensus.EntryCommand, 1
+		e.Data = fmt.Appendf(nil, "%s%d=x", tag, k)
+		e.BodySum = wire.BodySum(e.Data)
+		e.ChainSum = wire.ChainSum(chain, e)
+		chain = e.ChainSum
+	}
+	return es
+}
+
+// waitFor polls cond until it holds, or fails the test naming what.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// ReadCommitted reads what the STORE holds as committed, never the loop's
+// commit alone (#400). A follower holding an uncommitted suffix of term 2
+// is sent a conflicting suffix of term 3 with a commit that covers it: the
+// loop truncates, appends and commits in memory at once, while the storage
+// actor, held, has not rewritten the store. Whether the actor is held
+// before the truncation (the store still holds the old suffix) or between
+// it and the append (the store holds neither), ReadCommitted returns no
+// entry of the old suffix and no error, and once the actor is released it
+// returns the new suffix.
+func TestReadCommittedNeverReadsASuffixTheStoreHasNotRewritten(t *testing.T) {
+	for _, hold := range []string{"truncate", "append"} {
+		t.Run(hold, func(t *testing.T) { readCommittedWithTheActorHeld(t, hold) })
+	}
+}
+
+func readCommittedWithTheActorHeld(t *testing.T, hold string) {
+	cid := coreconsensus.ClusterID{4, 0, 0}
+	net := NewMemoryNetwork()
+	log := newHeldLog(hold)
+	var members []coreconsensus.MemberValue
+	for i := range 3 {
+		var l coreconsensus.LogStore = log
+		if i > 0 {
+			// The two leaders are never started: only their identities are.
+			l = NewMemoryLog()
+		}
+		id, inc, err := InitLog(l, cid, fmt.Sprintf("slot-%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		members = append(members, coreconsensus.MemberValue{ID: id, Incarnation: inc, Slot: fmt.Sprintf("slot-%d", i), SPKI: MemorySPKI(id), Voter: true})
+	}
+	f, a, b := members[0].ID, members[1].ID, members[2].ID
+	cfg := Config{
+		Cluster: cid, Machine: newKV(), Durability: DurabilityVolatile, Log: log, Snapshots: NewMemorySnapshots(),
+		Transport: NewMemoryTransport(net, f), MaxSnapshotBytes: 1 << 30, SnapshotEveryBytes: 1 << 20,
+		MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 1, JoinAuthorizer: allowJoin{},
+		// The follower never campaigns during the test: it only obeys.
+		InitialTiming: coreconsensus.TimingContractSpec{
+			Generation: 1, HeartbeatInterval: time.Second,
+			ElectionTimeoutMin: time.Hour, ElectionTimeoutMax: 2 * time.Hour, MaxClockDrift: 0.05,
+		},
+	}
+	if err := Bootstrap(context.Background(), new(cfg), members); err != nil {
+		t.Fatal(err)
+	}
+	n, err := NewNode(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		select {
+		case <-log.release:
+		default:
+			close(log.release)
+		}
+		if err := n.HardClose(); err != nil {
+			t.Errorf("hard close: %v", err)
+		}
+	})
+	_, last := log.Bounds()
+	base := must(log.Entries(last, last+1, 1<<20, nil))(t)[0]
+	ctx := context.Background()
+	send := func(from coreconsensus.NodeID, term, commit uint64, es []coreconsensus.EntryValue) {
+		m := &coreconsensus.MessageValue{
+			Version: 1, Group: 1, Kind: coreconsensus.MsgApp, From: from, To: f, Term: term,
+			Index: base.Position.Index, LogTerm: base.Position.Term, Commit: commit, Entries: es,
+		}
+		n.deliver(coreconsensus.AuthenticatedPeerValue{ID: from}, appendFrame(m))
+	}
+
+	// Term 2: a suffix the store holds, never committed.
+	oldTerm := base.Position.Term + 1
+	send(a, oldTerm, base.Position.Index, suffixFrom(last, base.ChainSum, oldTerm, 3, "old"))
+	waitFor(t, "the old suffix in the store", func() bool {
+		_, l := log.Bounds()
+		term, err := log.Term(last + 3)
+		return l == last+3 && err == nil && term == oldTerm
+	})
+
+	// Term 3: a conflicting suffix, committed by the same append.
+	log.armed <- struct{}{}
+	newTerm := oldTerm + 1
+	send(b, newTerm, last+3, suffixFrom(last, base.ChainSum, newTerm, 3, "new"))
+	<-log.entered
+	waitFor(t, "the loop's commit", func() bool { return n.Status().Commit == last+3 })
+	es, err := n.ReadCommitted(ctx, last+1, last+3, 1<<20)
+	if err != nil {
+		t.Fatalf("held before the %s: an error the store does not justify: %v", hold, err)
+	}
+	for _, e := range es {
+		if e.Position.Term != newTerm {
+			t.Fatalf("held before the %s: read %d at term %d, an entry never committed", hold, e.Position.Index, e.Position.Term)
+		}
+	}
+
+	close(log.release)
+	waitFor(t, "the new suffix read as committed", func() bool {
+		es, err := n.ReadCommitted(ctx, last+1, last+3, 1<<20)
+		if err != nil {
+			t.Fatalf("after the release: %v", err)
+		}
+		return len(es) == 3
+	})
+	es, _ = n.ReadCommitted(ctx, last+1, last+3, 1<<20)
+	for k, e := range es {
+		if e.Position.Term != newTerm || string(e.Data) != fmt.Sprintf("new%d=x", k) {
+			t.Fatalf("after the release: read %d at term %d: %q", e.Position.Index, e.Position.Term, e.Data)
+		}
+	}
+}
+
+// An entry this node applied is read as committed at once, before the
+// storage actor wrote the commit that covers it: Propose answers once its
+// entry is applied, and the store's own commit can still be behind it. A
+// bound on the store's commit alone would hide the entry a caller just
+// waited for (#400).
+func TestReadCommittedReturnsAnAppliedEntryAtOnce(t *testing.T) {
+	c := newCluster(t, 3, 0)
+	l := c.leader(5 * time.Second)
+	for i := range 50 {
+		tok := propose(t, l.node, fmt.Sprintf("now%d=1", i))
+		es, err := l.node.ReadCommitted(context.Background(), tok.Index, tok.Index, 1<<20)
+		if err != nil || len(es) != 1 || es[0].Position != tok.Position() {
+			t.Fatalf("proposal %d at %v: read %v, %v", i, tok, es, err)
 		}
 	}
 }

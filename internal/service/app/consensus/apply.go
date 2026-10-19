@@ -208,6 +208,7 @@ func (n *Node) applied1(e *coreconsensus.EntryValue, val any) {
 	n.am.Lock()
 	n.applied = e.Position.Index
 	n.appliedTerm = e.Position.Term
+	n.logApplied.Store(e.Position.Index)
 	w := n.waiters[e.Position.Index]
 	delete(n.waiters, e.Position.Index)
 	if n.keepResults > 0 {

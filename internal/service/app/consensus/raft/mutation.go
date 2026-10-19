@@ -58,6 +58,9 @@ const (
 	mutInstallBelowBase
 	// mutChainSkip appends an entry whose chain value does not match.
 	mutChainSkip
+	// mutForwardNoDedupe proposes a forward each time it is delivered, the
+	// duplicate a transport resent included (#401).
+	mutForwardNoDedupe
 )
 
 // mutated reports whether a test switched mutation m on; it is false in every

@@ -96,6 +96,12 @@ type Node struct {
 	// applyLag is the payload bytes handed to the apply goroutine and not
 	// yet applied: the gap between commit and applied (D6, R1-14).
 	applyLag atomic.Int64
+	// logApplied is the last entry applied from the log, never an index a
+	// restored snapshot set: an entry applied from the log was synced at its
+	// term before it was handed to the apply goroutine, so the store holds it
+	// as committed, while an install sets applied before the storage actor
+	// moved the store onto the snapshot. ReadCommitted reads up to it.
+	logApplied atomic.Uint64
 
 	// loop-owned
 	forwards  map[uint64]*proposal
