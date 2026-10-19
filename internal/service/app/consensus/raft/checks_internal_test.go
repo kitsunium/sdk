@@ -696,31 +696,36 @@ func TestForwardAnswersAreBounded(t *testing.T) {
 		t.Fatalf("kept %d answers in a ring of %d, bound %d", len(tab.byKey), len(tab.order), maxFwdAnswers)
 	}
 	for ctx := uint64(1); ctx <= uint64(maxFwdAnswers+extra); ctx++ {
-		_, kept := tab.lookup(f.term, fwdKey{from: 2, ctx: ctx})
+		_, kept := tab.lookup(fwdKey{from: 2, ctx: ctx})
 		if kept != (ctx > extra) {
 			t.Fatalf("answer %d kept %v", ctx, kept)
 		}
 	}
 }
 
-// A new term empties the table: what the leader of term 2 answered is not
-// replayed at term 3, where the node follows and refuses as NOT_LEADER. (A
-// copy still carrying term 2 never reaches the table at term 3: an older
-// term's forward is dropped unanswered.)
-func TestANewTermEmptiesTheForwardAnswers(t *testing.T) {
+// The table outlives a term: the leader of term 2 that leads again at
+// term 3 answers a duplicate of a term-2 forward with the term-2 answer and
+// proposes nothing (#401).
+func TestADuplicateAfterANewTermIsNotProposedAgain(t *testing.T) {
 	r := leaderOf(2, 0, nil, 0, false)
 	r.Step(r.now, forwardCmd(2, 9, 10))
-	if as := forwardAnswers(r, 9); len(as) != 1 || as[0].Reject {
-		t.Fatalf("term 2: %+v", as)
+	first := forwardAnswers(r, 9)
+	if len(first) != 1 || first[0].Reject || first[0].LogTerm != 2 {
+		t.Fatalf("term 2: %+v", first)
 	}
-	r.Step(r.now, msg(core.MsgHeartbeat, 3, 1, 3))
+	r.term, r.vote = 3, 1
+	r.becomeLeader()
+	rd := r.Ready()
+	r.StorageDone(rd.Seq, r.log.lastIndex(), 3)
+	r.Ready()
+	last := r.log.lastIndex()
 	r.Step(r.now, forwardCmd(3, 9, 10))
 	as := forwardAnswers(r, 9)
-	if len(as) != 1 || !as[0].Reject || as[0].Code != core.CodeNotLeader || as[0].RejectHint != 3 {
-		t.Fatalf("term 3: %+v", as)
+	if len(as) != 1 || as[0].Reject || as[0].Index != first[0].Index || as[0].LogTerm != 2 {
+		t.Fatalf("term 3: %+v, want the term-2 answer %+v", as, first[0])
 	}
-	if tab := &r.fwdAnswers; tab.term != 3 || len(tab.byKey) != 1 || len(tab.order) != 1 {
-		t.Fatalf("the table after the new term: term %d, %d answers", tab.term, len(tab.byKey))
+	if r.log.lastIndex() != last {
+		t.Fatal("a duplicate was proposed again after a new term")
 	}
 }
 

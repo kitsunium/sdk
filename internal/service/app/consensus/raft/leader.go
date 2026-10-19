@@ -14,7 +14,7 @@ import (
 // allocation on the event loop.
 const (
 	// maxFwdAnswers bounds the answers a node keeps of the forwards it
-	// received in its term. A duplicate is a frame a transport resent with
+	// received. A duplicate is a frame a transport resent with
 	// its batch on a fresh connection, right behind its original (#377,
 	// #401): the newest answers are the ones kept, the oldest go first.
 	maxFwdAnswers int = 4096
@@ -720,32 +720,26 @@ type fwdAnswer struct {
 	logTerm uint64
 }
 
-// fwdTable keeps the answers given in one term, bounded by
-// maxFwdAnswers, the oldest evicted first; a new term empties it.
+// fwdTable keeps the answers given to forwards, bounded by maxFwdAnswers,
+// the oldest evicted first. It outlives a term: a duplicate that arrives
+// after this node changed term, or led again, is still the submission it
+// answered, and replaying an old answer is harmless, the follower having
+// taken the first one (#401).
 type fwdTable struct {
-	term  uint64
 	byKey map[fwdKey]fwdAnswer
 	// order is a ring of the kept keys, oldest at next once it is full.
 	order []fwdKey
 	next  int
 }
 
-// lookup returns the answer kept for k in term.
-func (a *fwdTable) lookup(term uint64, k fwdKey) (fwdAnswer, bool) {
-	if a.term != term {
-		return fwdAnswer{}, false
-	}
+// lookup returns the answer kept for k.
+func (a *fwdTable) lookup(k fwdKey) (fwdAnswer, bool) {
 	v, ok := a.byKey[k]
 	return v, ok
 }
 
-// remember keeps v for k in term, emptying the table when term is a new
-// one and evicting the oldest answer when limit are kept.
-func (a *fwdTable) remember(term uint64, k fwdKey, v fwdAnswer, limit int) {
-	if a.term != term {
-		clear(a.byKey)
-		a.order, a.next, a.term = a.order[:0], 0, term
-	}
+// remember keeps v for k, evicting the oldest answer when limit are kept.
+func (a *fwdTable) remember(k fwdKey, v fwdAnswer, limit int) {
 	if a.byKey == nil {
 		a.byKey = map[fwdKey]fwdAnswer{}
 	}
@@ -763,14 +757,14 @@ func (a *fwdTable) remember(term uint64, k fwdKey, v fwdAnswer, limit int) {
 // resends a batch on a fresh connection can deliver a forward twice (#377);
 // proposed twice, its command would be applied twice, the follower having
 // taken the first answer and dropped the second (#401). A forward already
-// answered in this term is answered again with the same answer, position or
-// refusal, and nothing is proposed.
+// answered, in this term or an earlier one, is answered again with the same
+// answer, position or refusal, and nothing is proposed.
 func (r *Raft) handleForward(m core.MessageValue) {
 	key := fwdKey{from: m.From, ctx: m.Context}
-	a, ok := r.fwdAnswers.lookup(r.term, key)
+	a, ok := r.fwdAnswers.lookup(key)
 	if !ok || r.mutated(mutForwardNoDedupe) {
 		a = r.answerForward(m)
-		r.fwdAnswers.remember(r.term, key, a, maxFwdAnswers)
+		r.fwdAnswers.remember(key, a, maxFwdAnswers)
 	}
 	resp := core.MsgForwardResp
 	if m.Kind == core.MsgForwardAdmin {

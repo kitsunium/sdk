@@ -34,9 +34,9 @@ under coverage before touching `shard_count`.
   (`admitForward`, review M2).
 - Propose a forward each time it is delivered: the TCP transport resends a
   batch whose write failed on a reused connection (#377), so a frame can
-  arrive twice. `handleForward` keeps the answers of the term by
-  `(From, Context)` — the submission id never repeats, R7-23 — in a ring of
-  `maxFwdAnswers`, and answers a duplicate with the recorded answer,
-  position or refusal (#401, `mutForwardNoDedupe`,
+  arrive twice. `handleForward` keeps its answers by `(From, Context)` —
+  the submission id never repeats, R7-23 — in a ring of `maxFwdAnswers`
+  that outlives a term, and answers a duplicate with the recorded answer,
+  position or refusal, never proposing it again (#401, `mutForwardNoDedupe`,
   `TestForwardedWritesUnderDuplicationAreAppliedOnce`). Every other kind
   is idempotent under duplication, which that scenario exercises.
