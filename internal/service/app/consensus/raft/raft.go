@@ -238,6 +238,10 @@ type Raft struct {
 	fwd      []fwdEntry
 	fwdBytes int64
 	fwdTerm  uint64
+	// fwdAnswers are the answers given to the latest forwards, whatever
+	// their term, so a forward delivered twice is answered twice and
+	// proposed once (#401).
+	fwdAnswers fwdTable
 
 	id   core.NodeID
 	term uint64
