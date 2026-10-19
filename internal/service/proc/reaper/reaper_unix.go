@@ -33,6 +33,13 @@ type unixReaper struct {
 	// zero — no ticker at all — wherever every child's exit posts SIGCHLD. A
 	// white-box test sets it to drive the illumos/Solaris path on any Unix.
 	sweepEvery time.Duration
+	// notify subscribes the loop's channel to SIGCHLD: signal.Notify from New.
+	// A white-box test of the timer sweep sets a
+	// subscription that delivers nothing, as on illumos and Solaris, where a
+	// child's exit posts no SIGCHLD: a signal is process-wide, and one from
+	// any child's exit, even one reaped by an earlier test, would otherwise
+	// pass for a tick. Set before Start and never after.
+	notify func(c chan<- os.Signal, sig ...os.Signal)
 	// mu guards running/sigCh/done/closeDone/lastErr across Start/Stop and the
 	// concurrent LastError read so repeated Start/Stop cycles neither
 	// double-install a handler nor leak a goroutine. The collection itself is
@@ -74,7 +81,7 @@ func New(opts ...Option) coreproc.Reaper {
 	cfg := resolve(opts)
 	//: hand back an idle reaper; channels are created lazily in Start. The
 	//: timer sweep runs on the wall clock, at this platform's period.
-	return &unixReaper{onReap: cfg.onReap, clk: clock.System, sweepEvery: timerSweepEvery}
+	return &unixReaper{onReap: cfg.onReap, clk: clock.System, sweepEvery: timerSweepEvery, notify: signal.Notify}
 }
 
 // Start begins the background SIGCHLD loop. It is idempotent: a second Start
@@ -107,8 +114,9 @@ func (r *unixReaper) Start() {
 // one final drain so no zombie outlives Stop, detaches the signal handler, and
 // closes stopped to acknowledge.
 func (r *unixReaper) loop(sigCh chan os.Signal, done, stopped chan struct{}) {
-	//: subscribe to SIGCHLD here so Notify and its defer signal.Stop are paired.
-	signal.Notify(sigCh, syscall.SIGCHLD)
+	//: subscribe to SIGCHLD here so Notify and its defer signal.Stop are paired;
+	//: notify is signal.Notify from New, or a white-box test's.
+	r.notify(sigCh, syscall.SIGCHLD)
 	//: detach the SIGCHLD handler when the loop returns so it never leaks.
 	defer signal.Stop(sigCh)
 	//: announce exit exactly once so Stop can block until we have returned. The

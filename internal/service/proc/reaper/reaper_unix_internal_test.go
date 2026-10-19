@@ -477,9 +477,12 @@ func Test_unixReaper_Start(t *testing.T) {
 // clock passes the period and not a nanosecond before, and Stop releases the
 // ticker with the loop.
 //
-// It holds reapMu, like every test here: no other test spawns a child or
-// raises a SIGCHLD meanwhile, so every sweep this test observes is the
-// initial drain or a tick.
+// It holds reapMu, like every test here, and its loop hears no SIGCHLD: a
+// signal is process-wide, and holding the lock did not keep one out — the
+// exit of a child an earlier test reaped can be delivered late, and on
+// OpenBSD it ran a sweep the test took for an early tick. With no SIGCHLD,
+// every sweep this test observes is the initial drain or a tick, and the
+// test raises one inside the window to prove it.
 func Test_unixReaper_timerSweep(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -502,12 +505,22 @@ func Test_unixReaper_timerSweep(t *testing.T) {
 		}
 		manual := clock.NewManualClock(time.Unix(1_700_000_000, 0))
 		r.clk, r.sweepEvery = manual, c.every
+		//: no SIGCHLD reaches the loop: only the timer sweeps.
+		r.notify = func(chan<- os.Signal, ...os.Signal) {}
 		r.Start()
 		//: the initial drain, which runs before the ticker is armed.
 		<-sweeps
 		//: the loop armed its sweep ticker on the manual clock.
 		manual.BlockUntil(1)
 		manual.Advance(c.every - time.Nanosecond)
+		//: a SIGCHLD is process-wide: any child's exit posts one, even a
+		//: child an earlier test spawned and reaped, its signal delivered
+		//: late (OpenBSD did, and the sweep it ran passed for an early
+		//: tick). The loop here hears none, as on illumos and Solaris; one
+		//: raised now proves it, and that every sweep below is a tick.
+		if err := syscall.Kill(os.Getpid(), syscall.SIGCHLD); err != nil {
+			t.Fatalf("raising SIGCHLD: %v", err)
+		}
 		select {
 		case <-sweeps:
 			t.Fatal("a sweep ran before the clock passed the period")
