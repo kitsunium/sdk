@@ -283,8 +283,9 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 }
 
 // Recover starts a NEW history from this node's log: every entry up to its
-// persisted commit, then every entry past it whose body and chain verify, cut
-// at the first broken link, so no write the old cluster acknowledged is lost;
+// persisted commit, then the contiguous entries past it whose body and chain
+// checksums verify and whose term does not decrease, cut at the first that
+// fails, so no write the old cluster acknowledged is lost;
 // a new cluster id that records its predecessor and the last index it kept;
 // and a forced configuration. The audit file records how many entries past
 // the persisted commit were adopted. Every old voter left out must be
