@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T03:41:17Z -->
+<!-- updated: 2026-10-19T12:00:00Z -->
 # internal/service/proc/reaper/
 
 ## Purpose
@@ -35,7 +35,7 @@ anywhere in the process, and every `Process.Wait` collects its own child.
 | File | Build tag | Role |
 |---|---|---|
 | `reaper.go` | (all) | `Option`/`config` surface; `WithOnReap`; `resolve` |
-| `reaper_unix.go` | `unix` | `unixReaper` (its timer sweep's `clk` and `sweepEvery` set by `New` to `clock.System` and `timerSweepEvery`), `New`, `Start`/`Stop`/`loop`, `ReapOnce`, `drain`/`drainResult` (over `childwait.ReapAny`)/`classifyWaitErr`, `LastError`, `IsPID1` |
+| `reaper_unix.go` | `unix` | `unixReaper` (its timer sweep's `clk` and `sweepEvery` set by `New` to `clock.System` and `timerSweepEvery`, its SIGCHLD subscription `notify` to `signal.Notify`), `New`, `Start`/`Stop`/`loop`, `ReapOnce`, `drain`/`drainResult` (over `childwait.ReapAny`)/`classifyWaitErr`, `LastError`, `IsPID1` |
 | `subreaper_linux.go` | `linux` | `SetChildSubreaper` via `prctl(PR_SET_CHILD_SUBREAPER, 1)` |
 | `subreaper_bsd.go` | `freebsd \|\| dragonfly` | `SetChildSubreaper` via `procctl(P_PID, 0, PROC_REAP_ACQUIRE, NULL)`, a raw `syscall.Syscall6` |
 | `subreaper_freebsd.go` / `subreaper_dragonfly.go` | `freebsd` / `dragonfly` | the `procctl(2)` ABI constants each kernel numbers differently (`sysProcctl`, `procReapAcquire`) |
@@ -72,7 +72,10 @@ disjoint, so exactly one definition of each exported symbol compiles per GOOS.
   `Stop`. Orphans re-parented here still signal (ADR 0144). The ticker is
   built on the reaper's clock (`clock.System`); `Test_unixReaper_timerSweep`
   hands a reaper that period and a `ManualClock`, so the path the two kernels
-  take is exercised on every Unix, to the nanosecond.
+  take is exercised on every Unix, to the nanosecond. The SIGCHLD
+  subscription is the reaper's `notify` (`signal.Notify` from `New`); that
+  test gives one that delivers nothing, as those kernels post none, and
+  raises a SIGCHLD inside the window to prove every sweep it sees is a tick.
 - **Stop** — closes `done` (guarded by a per-cycle `sync.Once`), the loop runs a
   final drain, detaches the handler, and closes `stopped`; Stop blocks on
   `stopped` so no goroutine and no zombie outlives it. Safe without a prior
@@ -115,6 +118,11 @@ uncached — hoist it, do not loop on it.
   through `childwait.ReapAny`.
 - Add codes here — all 23 proc codes are central in `internal/core/proc`.
 - Call `prctl` outside `subreaper_linux.go`; it does not exist elsewhere.
+- Count on `reapMu` to keep SIGCHLD out of a test. It serialises the tests
+  that spawn and sweep, not the kernel: the signal of a child an earlier test
+  reaped can arrive late, and on OpenBSD it ran a sweep that
+  `Test_unixReaper_timerSweep` took for a tick before the period. A test that
+  must see ticks alone sets `notify` to a subscription that delivers nothing.
 
 ## Verification
 
