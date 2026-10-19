@@ -65,6 +65,11 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   segment published (`publishNext`, review H2).
 - Restore a snapshot the machine has applied past, or install one whose
   freshness was not checked again after the transfer (review H3).
+- Move raft onto an install it committed past while the machine restored
+  it, or onto any install on a leader: `InstallSnapshot` ignores both, or
+  the engine state of the entries committed past the snapshot is rolled
+  back and carried by the next cut (#416,
+  `TestAnInstallBelowTheCommitLeavesTheEngineStateAlone`).
 - Hold `mu` across a batch's write and fdatasync: writers serialise on
   `wmu`, readers must not wait for the disk (review L6).
 - Bound a read of the store by the event loop's commit: the loop commits a

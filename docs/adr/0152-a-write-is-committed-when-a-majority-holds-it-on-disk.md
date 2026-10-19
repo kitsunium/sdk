@@ -1423,6 +1423,17 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
     published: a new leader may have moved the receiver past it meanwhile.
     The apply goroutine never restores a snapshot the machine has already
     applied past (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), H3);
+  - **the step function moves onto an install only while it is still
+    ahead of it ([#416](https://github.com/kitsunium/sdk/issues/416)).** The
+    restore can take seconds, and a new leader may make the receiver commit
+    past the snapshot meanwhile, or elect it. Its log and its engine state
+    then already hold everything the snapshot holds, and the effects of the
+    engine entries committed past it: a leader, or a node with a table whose
+    commit reached the snapshot's index, ignores the install, which would
+    roll the cluster version, the timing contract and the no-space alarm
+    back and let its next cut carry the regression. A node with no table
+    still installs, and the effects of the entries it holds committed past
+    the snapshot are applied again over the snapshot's state;
   - `Restore` is serialised with `Apply`;
   - **the install is recorded durably, step by step.** An installation record
     names the snapshot and the step reached: spooled and synced, published,

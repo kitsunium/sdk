@@ -1074,10 +1074,24 @@ func (r *Raft) CheckOffer(from core.NodeID, o core.InstallOfferValue, needTable 
 // InstallSnapshot moves the log onto a snapshot the driver has published and
 // restored. The suffix after it is kept only when the boundary entry matches
 // (D7).
+//
+// The offer was checked fresh before its body streamed and the machine
+// restored it, which takes seconds on a large state. Meanwhile this node may
+// have been elected, or committed past the snapshot through a new leader's
+// appends: its log and its engine state then hold everything the snapshot
+// holds, and the effects of the engine entries committed past it besides.
+// Moving onto the snapshot would roll that engine state back, and a later
+// cut would carry the regression to other nodes: the call does nothing then
+// (#416). A node with no table still installs, and the effects of the
+// entries it holds committed past the snapshot are applied again over the
+// snapshot's state.
 func (r *Raft) InstallSnapshot(meta core.SnapshotMetaValue) {
 	idx, t := meta.Position.Index, meta.Position.Term
 	if idx < r.log.snapIndex && !r.mutated(mutInstallBelowBase) {
 		return // CheckOffer refuses it: never move the base back
+	}
+	if r.role == core.RoleLeader || (idx <= r.log.committed && !r.cfg.NoTable) {
+		return // committed past it meanwhile: nothing to move onto
 	}
 	if r.log.matchTerm(idx, t) && idx <= r.log.lastIndex() {
 		r.log.compactTo(idx, t, meta.ChainTip)
@@ -1099,6 +1113,7 @@ func (r *Raft) InstallSnapshot(meta core.SnapshotMetaValue) {
 	}
 	r.clusterVer, r.clusterGen, r.noSpace = meta.ClusterVersion, meta.ClusterGeneration, meta.NoSpace
 	r.resetEngines()
+	r.applyCommitEffects(idx+1, r.log.committed)
 	r.cfg.NoTable = false
 	r.confChanged()
 	// The install proves the prefix up to idx only: a kept suffix may be
