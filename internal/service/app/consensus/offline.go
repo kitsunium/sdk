@@ -282,10 +282,13 @@ func ReceiptMessage(old, next coreconsensus.ClusterID, voter coreconsensus.NodeI
 	return receiptMessage(old, next, voter)
 }
 
-// Recover starts a NEW history from this node's committed log: a new
-// cluster id that records its predecessor and the last index it kept, and a
-// forced configuration. Every old voter left out must be attested fenced by
-// every witness; without witness keys it fails closed.
+// Recover starts a NEW history from this node's log: every entry up to its
+// persisted commit, then every entry past it whose body and chain verify, cut
+// at the first broken link, so no write the old cluster acknowledged is lost;
+// a new cluster id that records its predecessor and the last index it kept;
+// and a forced configuration. The audit file records how many entries past
+// the persisted commit were adopted. Every old voter left out must be
+// attested fenced by every witness; without witness keys it fails closed.
 func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsensus.MemberValue, opt *RecoverOptions) error {
 	if err := d.offline(); err != nil {
 		return err
@@ -305,24 +308,34 @@ func Recover(d DataDir, newCluster coreconsensus.ClusterID, members []coreconsen
 	if err != nil {
 		return err
 	}
+	// The new history keeps every entry this survivor holds whose chain
+	// verifies, not only those up to its persisted commit (issue #399).
+	kept, err := d.adoptedEnd(hard.Commit)
+	if err != nil {
+		return err
+	}
 	// The old configuration decides which voters must be attested fenced:
-	// one that could not be read fails Recover closed, never open.
-	old, err := lastMembership(flog, d.d.snaps, hard.Commit)
+	// one that could not be read fails Recover closed, never open. It is
+	// the configuration of the last entry kept: an adopted change counts.
+	old, err := lastMembership(flog, d.d.snaps, kept)
 	if err != nil {
 		return err
 	}
 	if err := checkFenced(old.Voters(), members, opt, stamp.Log.Cluster, newCluster); err != nil {
 		return err
 	}
-	if err := d.audit(opt.Operator, "recover "+newCluster.String()); err != nil {
+	// The audit line is Recover's report: the index kept, the persisted
+	// commit, and how many entries past that commit the new history adopts.
+	what := fmt.Sprintf("recover %s kept %d commit %d adopted %d", newCluster, kept, hard.Commit, kept-hard.Commit)
+	if err := d.audit(opt.Operator, what); err != nil {
 		return err
 	}
-	if err := d.appendForced(&hard, members, &old, opt.Operator); err != nil {
+	if err := d.appendForced(new(coreconsensus.HardState{Term: hard.Term, Commit: kept}), members, &old, opt.Operator); err != nil {
 		return err
 	}
 	stamp.Log = coreconsensus.LogIdentityValue{
 		Cluster: newCluster, Epoch: 1, Predecessor: stamp.Log.Cluster,
-		PredecessorEpoch: stamp.Log.Epoch, KeptIndex: hard.Commit,
+		PredecessorEpoch: stamp.Log.Epoch, KeptIndex: kept,
 	}
 	return flog.WriteStamp(stamp)
 }
@@ -407,9 +420,63 @@ func signedByEvery(keys []ed25519.PublicKey, receipts [][]byte, msg []byte) bool
 	return true
 }
 
-// appendForced cuts the log back to its commit and appends, synced, the
-// forced configuration entry of the new history, chained to the entry it
-// follows and one term past any the log knew.
+// adoptedEnd is the last index Recover keeps: the persisted commit, then
+// every entry past it whose body and chain verify from the chain at that
+// commit, up to the first broken link.
+//
+// The persisted commit lags the cluster's: a follower records a commit one
+// round after its leader acknowledged it, and a batch caps the commit it
+// carries. An entry past it may therefore be a write the old cluster
+// committed and acknowledged; the old cluster is fenced, so the new history
+// may adopt it, and cutting it would lose an acknowledged write. The price
+// is that an entry whose client was told ENTRY_SUPERSEDED, or never
+// answered, can be applied too: a duplicate an owner refuses by
+// precondition, never a loss (ADR 0152 D17).
+//
+// An entry whose record no longer parses (LOG_CORRUPT) is a broken link and
+// ends the suffix; any other read failure fails Recover closed.
+func (d DataDir) adoptedEnd(commit uint64) (uint64, error) {
+	flog := d.d.log
+	first, last := flog.Bounds()
+	if last <= commit || commit+1 < first {
+		return commit, nil
+	}
+	chain, term, err := d.chainAt(commit, first)
+	if err != nil {
+		return 0, err
+	}
+	var buf []coreconsensus.EntryValue
+	end := commit
+	for end < last {
+		es, err := flog.Entries(end+1, end+2, 1, buf[:0])
+		if errors.Is(err, coreconsensus.LogCorrupt) {
+			return end, nil
+		}
+		if err != nil {
+			return 0, err
+		}
+		e := &es[0]
+		if !extends(e, end, term, chain) {
+			return end, nil
+		}
+		chain, term, end = e.ChainSum, e.Position.Term, e.Position.Index
+		buf = es
+	}
+	return end, nil
+}
+
+// extends reports whether e is the verified link after the entry at end,
+// of term term and chain sum chain: the next index, a term that does not go
+// back, and a body and chain sum that match what e records.
+func extends(e *coreconsensus.EntryValue, end, term uint64, chain uint32) bool {
+	return e.Position.Index == end+1 && e.Position.Term >= term &&
+		wire.BodySum(e.Data) == e.BodySum && wire.ChainSum(chain, e) == e.ChainSum
+}
+
+// appendForced cuts the log back to hard.Commit, the last index Recover
+// adopts, and appends, synced, the forced configuration entry of the new
+// history, chained to the entry it follows and one term past any the log
+// knew.
 func (d DataDir) appendForced(hard *coreconsensus.HardState, members []coreconsensus.MemberValue, old *coreconsensus.MembershipValue, operator coreconsensus.Operator) error {
 	flog := d.d.log
 	commit := hard.Commit

@@ -2835,7 +2835,7 @@
       "name": "Recover",
       "spelled": "func(d DataDir, newCluster ClusterID, members []MemberValue, opt *RecoverOptions) error",
       "canonical": "func(d github.com/kitsunium/sdk/pkg/v1/app/consensus.DataDir, newCluster github.com/kitsunium/sdk/pkg/v1/app/consensus.ClusterID, members []github.com/kitsunium/sdk/pkg/v1/app/consensus.MemberValue, opt *github.com/kitsunium/sdk/pkg/v1/app/consensus.RecoverOptions) error",
-      "doc": "Recover starts a new history from this node's committed log, every old\nvoter left out attested fenced by every witness.\n",
+      "doc": "Recover starts a new history from this node's committed log and every\nentry past it whose chain verifies, every old voter left out attested\nfenced by every witness.\n",
       "file": "consensus/facade_gen.go",
       "layer": "public",
       "family": "app"
