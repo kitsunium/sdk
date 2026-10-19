@@ -2,7 +2,10 @@ package consensus
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -310,5 +313,169 @@ func TestACutCarriesTheEngineStateAtItsIndex(t *testing.T) {
 	}
 	if meta.Timing.Generation != old.Generation+1 || meta.Timing.HeartbeatInterval != next.HeartbeatInterval {
 		t.Fatalf("a cut at %d, past the contract, carries timing %+v", after.Index, meta.Timing)
+	}
+}
+
+// countingTransport is a node's end of a memory network that counts the
+// frames the node sends: votes, acknowledgements, appends, heartbeats.
+type countingTransport struct {
+	*MemoryTransport
+	sent atomic.Int64
+}
+
+// Send implements Transport, counting the frame before it leaves.
+func (t *countingTransport) Send(to coreconsensus.NodeID, frame []byte) {
+	t.sent.Add(1)
+	t.MemoryTransport.Send(to, frame)
+}
+
+// countedCluster is a cluster of three whose every node sends through a
+// countingTransport, and snapshots into a store whose Commit fails as a
+// failed fsync does when failing names it.
+func countedCluster(t *testing.T, every uint64, pauses bool, failing func(tn *testNode) bool) (*cluster, map[coreconsensus.NodeID]*countingTransport) {
+	t.Helper()
+	var mu sync.Mutex
+	counted := map[coreconsensus.NodeID]*countingTransport{}
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{4, 5, 9}, every: every, size: 3}
+	c.configure = func(tn *testNode, cfg *Config) {
+		mu.Lock()
+		ct := counted[tn.id]
+		if ct == nil {
+			ct = &countingTransport{MemoryTransport: NewMemoryTransport(c.net, tn.id)}
+			counted[tn.id] = ct
+		}
+		mu.Unlock()
+		cfg.Transport = ct
+		cfg.SnapshotPausesApply = pauses
+		if failing != nil && failing(tn) {
+			cfg.Snapshots = syncFailingSnapshots{tn.snaps}
+		}
+	}
+	return newClusterWith(t, c), counted
+}
+
+// stoppedForGood waits for tn's node to stop on STORAGE_FAILED, then proves
+// the stop final: every goroutine of the node ends, and while the rest of the
+// cluster commits past it for several election timeouts, the node sends no
+// frame — no vote, no acknowledgement, no append — and its log does not move.
+// The node is taken out of the cluster's live set, and closed at cleanup.
+func stoppedForGood(t *testing.T, c *cluster, tn *testNode, ct *countingTransport) {
+	t.Helper()
+	n := tn.node
+	waitFor(t, "the node stops on the failed sync", func() bool {
+		_, ok := n.StopReason()
+		return ok
+	})
+	r, _ := n.StopReason()
+	if !errs.HasCode(r.Err, coreconsensus.CodeStorageFailed) || r.ExitCode() != 74 {
+		t.Fatalf("stopped on %v (exit %d), want STORAGE_FAILED (exit 74)", r.Err, r.ExitCode())
+	}
+	tn.node = nil
+	t.Cleanup(func() {
+		if err := n.HardClose(); err != nil {
+			t.Error(err)
+		}
+	})
+	// The stop alone ends every goroutine: nothing is left to send or write.
+	ended := make(chan struct{})
+	go func() { n.wg.Wait(); close(ended) }()
+	select {
+	case <-ended:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the stopped node's goroutines did not end")
+	}
+	sent := ct.sent.Load()
+	_, last := tn.log.Bounds()
+	hs, err := tn.log.HardState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tok coreconsensus.TokenValue
+	for i := range 20 {
+		tok = proposeOnLeader(t, c, fmt.Sprintf("after%d=%d", i, i))
+	}
+	c.waitApplied(tok.Index, 10*time.Second)
+	// Past several election timeouts: a node still running would have
+	// campaigned by now, or acknowledged the appends above.
+	time.Sleep(3 * testTimingFast().ElectionTimeoutMax)
+	if got := ct.sent.Load(); got != sent {
+		t.Fatalf("the stopped node sent %d frames after its stop", got-sent)
+	}
+	if _, now := tn.log.Bounds(); now != last {
+		t.Fatalf("the stopped node's log moved from %d to %d", last, now)
+	}
+	if now, err := tn.log.HardState(); err != nil || now != hs {
+		t.Fatalf("the stopped node's hard state moved from %+v to %+v (%v)", hs, now, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, _, err := n.Propose(ctx, []byte("late=1")); !errors.Is(err, coreconsensus.NodeStopped) {
+		t.Fatalf("propose after the stop: %v", err)
+	}
+}
+
+// TestARequestedCutWhoseSyncFailsStopsTheNode pins D4 on the cut a peer asks
+// for (#404): a leader with no snapshot to send cuts one through requestCut,
+// and that cut's failed fsync stops the leader as a triggered cut's does,
+// whether it is written aside or on the apply goroutine. On the apply
+// goroutine it used to be dropped, and the leader went on leading over a
+// disk that had just failed an fsync.
+func TestARequestedCutWhoseSyncFailsStopsTheNode(t *testing.T) {
+	type tc struct {
+		name   string
+		pauses bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		// No cut is ever triggered: the only one is the one requested.
+		cl, counted := countedCluster(t, 1<<20, c.pauses, func(*testNode) bool { return true })
+		l := cl.leader(5 * time.Second)
+		tok := propose(t, l.node, "a=1")
+		waitFor(t, "the leader applies its entry", func() bool { return l.node.Status().Applied >= tok.Index })
+		l.node.requestCut()
+		stoppedForGood(t, cl, l, counted[l.id])
+	}
+	for _, c := range []tc{{name: "aside"}, {name: "on the apply goroutine", pauses: true}} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}
+
+// TestAnInstallWhoseSyncFailsStopsTheNode pins D4 on the receiving side of a
+// snapshot (#404): a follower caught up by an install whose spool could not
+// be made durable stops with STORAGE_FAILED, instead of answering the leader
+// and voting, acknowledging and appending on to the next offer.
+func TestAnInstallWhoseSyncFailsStopsTheNode(t *testing.T) {
+	var lagID coreconsensus.NodeID
+	var mu sync.Mutex
+	c, counted := countedCluster(t, 20, false, func(tn *testNode) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return lagID != 0 && tn.id == lagID
+	})
+	l := c.leader(5 * time.Second)
+	lag := c.otherThan(l)
+	// Isolated before it stops, or the memory network delivers at the
+	// restart what was sent meanwhile, and appends catch it up (#374).
+	c.net.Isolate(lag.id, true)
+	c.kill(lag)
+	for i := range 200 {
+		proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
+	}
+	compactedPast(t, c, 10)
+	mu.Lock()
+	lagID = lag.id
+	mu.Unlock()
+	lag.sm = newKV()
+	cfg := c.config(lag)
+	// Its own cuts never trigger: the stop can only come from the install.
+	cfg.SnapshotEvery = 1 << 20
+	n, err := NewNode(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lag.node = n
+	c.net.Isolate(lag.id, false)
+	stoppedForGood(t, c, lag, counted[lag.id])
+	if metas := must(lag.snaps.List())(t); len(metas) != 0 {
+		t.Fatalf("the failed install published %d snapshots", len(metas))
 	}
 }

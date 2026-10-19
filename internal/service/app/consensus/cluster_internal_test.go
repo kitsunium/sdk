@@ -127,6 +127,8 @@ type cluster struct {
 	// node k's election timeouts with seed+k.
 	timing coreconsensus.TimingContractSpec
 	seed   uint64
+	// configure, when set, adjusts the configuration node tn starts with.
+	configure func(tn *testNode, cfg *Config)
 }
 
 func testTimingFast() coreconsensus.TimingContractSpec {
@@ -144,13 +146,17 @@ func (c *cluster) config(tn *testNode) Config {
 	if c.seed != 0 {
 		seed = c.seed + uint64(slices.Index(c.nodes, tn))
 	}
-	return Config{
+	cfg := Config{
 		Cluster: c.cid, Machine: tn.sm, Durability: DurabilityVolatile, Log: tn.log, Snapshots: tn.snaps,
 		Transport: NewMemoryTransport(c.net, tn.id), InitialTiming: timing, MaxSnapshotBytes: 1 << 30,
 		SnapshotEveryBytes: 1 << 20, MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 1,
 		SnapshotEvery: c.every, SnapshotTrailing: 4, JoinAuthorizer: allowJoin{}, RecentEntriesBytes: c.recent,
 		Seed: seed,
 	}
+	if c.configure != nil {
+		c.configure(tn, &cfg)
+	}
+	return cfg
 }
 
 type allowJoin struct{}
