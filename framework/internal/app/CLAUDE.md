@@ -675,6 +675,14 @@ the instant it moves to. A wake the digest loop must hold for its backoff
 comes during a run held at its gate, so that the loop arms one timer
 (`loop_internal_test.go`: what a declared loop's wait arms); its entry is
 read once it counts the run `waitWakes` saw start (`digestRan`).
+A test that counts the loops' goroutines (`nocommand_test.go`'s `daemonOf`)
+reads them once the daemon has settled (`daemonSettled`): every loop that
+owns a goroutine shows one under its name, none running, runnable or on a
+lock. `Start` returns once a loop's goroutine is started, not once it has run
+and taken its label, so a count read right after it depended on the
+scheduler — two of four on a Windows runner. Every loop's goroutine is
+labelled with its loop's name: the mail outbox's was labelled with none and
+a secret's rotation with the secret's id.
 `mailer_test.go` brings an in-test SMTP relay and a refused port.
 `module_test.go` declares the `reviews` module — two services, one named
 like it, two stores, a setting, a generated secret, a port with a fallback
