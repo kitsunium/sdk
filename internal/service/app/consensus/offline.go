@@ -938,29 +938,65 @@ func (l *fileLog) resetTo(index, term uint64) error {
 // R4-03). Its cost is stated in the ADR: with one of the two other nodes
 // down, no leader can exist and the node stays silent until the third
 // returns.
+//
+// The term is read before anything is changed and persisted before the
+// truncation, taken at least as high as a condition a crashed run already
+// persisted: a rerun after a crash past the truncation reads a log whose
+// dropped records no longer name their term, and a lower term would let the
+// node vote again in the term of a vote the truncation dropped (#418).
 func (d DataDir) truncateAndStaySilent() error {
 	segN, off, err := d.quarantinePoint()
 	if err != nil {
 		return err
 	}
 	logDir := filepath.Join(d.d.dir, "log")
-	maxTerm, err := truncateAtDamage(logDir, segN, off)
+	maxTerm, err := logMaxTerm(logDir)
 	if err != nil {
+		return err
+	}
+	prev, err := persistedSilenceTerm(d.d.dir)
+	if err != nil {
+		return err
+	}
+	maxTerm = max(maxTerm, prev)
+	// The condition is durable BEFORE the truncation and the marker go: a
+	// crash in between leaves a silent node, never a voting one. Its index
+	// is filled in once the truncated log is read (0 means "the end of the
+	// log").
+	if err := writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, 0)); err != nil {
+		return storageFailed("silence condition", err)
+	}
+	if err := truncateAtDamage(logDir, segN, off); err != nil {
 		return err
 	}
 	if err := syncDir(logDir); err != nil {
 		return storageFailed("truncate", err)
 	}
-	// The condition is durable BEFORE the marker goes: a crash in between
-	// leaves a silent node, never a voting one. Its index is filled in
-	// once the truncated log is read (0 means "the end of the log").
-	if err := writeFileSync(filepath.Join(d.d.dir, fileSilent), silenceRecord(maxTerm, 0)); err != nil {
-		return storageFailed("silence condition", err)
+	if d.d.afterTruncate != nil {
+		if err := d.d.afterTruncate(); err != nil {
+			return err
+		}
 	}
 	if err := os.Remove(filepath.Join(d.d.dir, markerQuarantine)); err != nil {
 		return storageFailed("clear marker", err)
 	}
 	return d.reopenSilenced(maxTerm)
+}
+
+// persistedSilenceTerm is the term of the silence condition already in dir,
+// 0 when there is none. One that cannot be read refuses the exit: it is
+// never overwritten with a term that may be lower.
+func persistedSilenceTerm(dir string) (uint64, error) {
+	b, err := os.ReadFile(filepath.Join(dir, fileSilent))
+	switch {
+	case os.IsNotExist(err):
+		return 0, nil
+	case err != nil:
+		return 0, storageFailed("silence condition", err)
+	case len(b) != 16:
+		return 0, storageFailed("silence condition", errSilenceLength)
+	}
+	return binary.LittleEndian.Uint64(b), nil
 }
 
 // quarantinePoint reads where the quarantine marker places the damage. A
@@ -979,32 +1015,59 @@ func (d DataDir) quarantinePoint() (uint64, int64, error) {
 	return segN, off, nil
 }
 
-// truncateAtDamage deletes every segment after segment segN, and segN too
-// when the damage is at its start, zeroes segN from off otherwise, and
-// returns the highest term of every readable record, read before anything
-// is changed: a vote the truncation drops is still never repeated.
-func truncateAtDamage(logDir string, segN uint64, off int64) (uint64, error) {
+// logSegments lists the published segments of logDir by number; a name
+// that is not exactly a segment's is ignored.
+func logSegments(logDir string) (map[uint64]string, error) {
 	ents, err := os.ReadDir(logDir)
 	if err != nil {
-		return 0, storageFailed("readdir", err)
+		return nil, storageFailed("readdir", err)
 	}
-	var maxTerm uint64
+	segs := map[uint64]string{}
 	for _, e := range ents {
 		var n uint64
 		if _, err := fmt.Sscanf(e.Name(), "seg-%016x", &n); err != nil || e.Name() != segName(n) {
 			continue
 		}
-		path := filepath.Join(logDir, e.Name())
+		segs[n] = filepath.Join(logDir, e.Name())
+	}
+	return segs, nil
+}
+
+// logMaxTerm is the highest term of every readable record of the log,
+// before and after any damage. It changes nothing.
+func logMaxTerm(logDir string) (uint64, error) {
+	segs, err := logSegments(logDir)
+	if err != nil {
+		return 0, err
+	}
+	var maxTerm uint64
+	for _, path := range segs {
 		b, err := os.ReadFile(path)
 		if err != nil {
 			return 0, storageFailed("read segment", err)
 		}
 		maxTerm = max(maxTerm, maxRecordTerm(b))
-		if err := truncateSegment(path, n, segN, off, int64(len(b))); err != nil {
-			return 0, err
-		}
 	}
 	return maxTerm, nil
+}
+
+// truncateAtDamage deletes every segment after segment segN, and segN too
+// when the damage is at its start, and zeroes segN from off otherwise.
+func truncateAtDamage(logDir string, segN uint64, off int64) error {
+	segs, err := logSegments(logDir)
+	if err != nil {
+		return err
+	}
+	for n, path := range segs {
+		st, err := os.Stat(path)
+		if err != nil {
+			return storageFailed("read segment", err)
+		}
+		if err := truncateSegment(path, n, segN, off, st.Size()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // maxRecordTerm is the highest term any readable record of segment b names,

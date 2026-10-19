@@ -85,6 +85,10 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   commit alone (#400, `TestReadCommittedNeverReadsASuffixTheStoreHasNotRewritten`),
   and never at the store's commit alone, which trails an entry Propose
   already answered (`TestReadCommittedReturnsAnAppliedEntryAtOnce`).
+- Truncate for `TruncateAndStaySilent` before the silence condition is
+  durable, or persist a term below one a crashed run already wrote: a rerun
+  reads a log whose dropped records no longer name their term (#418,
+  `TestARerunOfTruncateAndStaySilentKeepsTheDroppedTerm`).
 - Take a JOIN answer from an unpinned peer (`JoinConfig.Pins`, review M4),
   or admit a key two members share (review M5).
 - Cut `Recover`'s log back to the commit the survivor persisted: that commit

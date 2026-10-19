@@ -55,6 +55,10 @@ type dataDir struct {
 	snaps  *fileSnapshots
 	closed bool
 	inUse  bool
+	// afterTruncate runs once TruncateAndStaySilent's truncation is
+	// durable, before the quarantine marker goes; an error ends the exit
+	// there, as a crash would. Only a test sets it.
+	afterTruncate func() error
 }
 
 // DataDir is the shipped layout: a lock, a stamp, the segmented log, the

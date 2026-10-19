@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -783,4 +784,43 @@ func TestARecoverInterruptedAfterItsStampIsCompleted(t *testing.T) {
 		t.Fatalf("completing moved the log from %d to %d", last, now)
 	}
 	startRecovered(t, c, keep, next, map[string]string{"k29": "v29"})
+}
+
+// A TruncateAndStaySilent interrupted after its truncation leaves the
+// quarantine marker, and the operator runs the exit again. The rerun reads a
+// log whose dropped records no longer name their term: it used to persist a
+// lower silence term, and the node could then vote a second time in the
+// term of a vote the truncation dropped. The term is persisted before the
+// truncation, and a rerun never lowers it (#418).
+func TestARerunOfTruncateAndStaySilentKeepsTheDroppedTerm(t *testing.T) {
+	dir, d := base(t)
+	b := d.d.log.batch
+	at := func(index uint64, end bool) []byte {
+		return appendRecord(nil, &record{
+			kind: recEntry, batch: b, index: index, term: 9, end: end,
+			ekind: uint8(coreconsensus.EntryCommand), data: []byte("x"),
+		})
+	}
+	r1, r2 := at(4, false), at(5, true)
+	tail(t, d, r1, 0)
+	tail(t, d, r2, int64(len(r1)))
+	tail(t, d, []byte{0xff}, int64(recHeader+recFixed)) // damage r1, r2 stays valid
+	nd := reopenExpect(t, dir, d, true)
+	defer nd.Close()
+	crash := errors.New("crash after the truncation")
+	nd.d.afterTruncate = func() error { return crash }
+	if err := ClearQuarantine(nd, TruncateAndStaySilent, "op:silent"); !errors.Is(err, crash) {
+		t.Fatalf("first run: %v", err)
+	}
+	nd.d.afterTruncate = nil
+	if err := ClearQuarantine(nd, TruncateAndStaySilent, "op:silent"); err != nil {
+		t.Fatalf("rerun: %v", err)
+	}
+	s, err := os.ReadFile(filepath.Join(dir, fileSilent))
+	if err != nil || len(s) != 16 {
+		t.Fatalf("silence condition: %v (%d bytes)", err, len(s))
+	}
+	if term := binary.LittleEndian.Uint64(s); term != 9 {
+		t.Fatalf("silence term %d after a rerun, want 9, the term of the records the truncation dropped", term)
+	}
 }

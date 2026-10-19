@@ -818,7 +818,13 @@ directory and cleared it, through `Inspect` and the product's own procedure
    its log past the truncation point AND has committed an entry in its
    current term. **Its cost, stated (R5-13):** with one of the two other
    nodes down, no leader can exist, and the node stays silent until the
-   third returns.
+   third returns. **The condition is persisted before the truncation
+   ([#418](https://github.com/kitsunium/sdk/issues/418)):** its term, the
+   highest any readable record names, is read before anything changes and
+   written durably first, never below a condition a crashed run already
+   persisted. A rerun after a crash past the truncation reads a log whose
+   dropped records no longer name their term; a lower term would let the
+   node vote twice in the term of a vote the truncation dropped.
 There is no third exit that keeps the damaged node voting.
 
 **Product commands (R5-12).** The first consumer exposes both exits as
