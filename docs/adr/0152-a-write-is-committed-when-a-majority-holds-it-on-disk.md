@@ -1749,6 +1749,14 @@ committed before the call, and returns the applied index:
       `MaxClockDrift` form the timing contract. The committed contract entry
       is its ONLY authority. A node's own configuration is merely the
       initial proposal, used at `Bootstrap`.
+    - **The founding entry is generation 1's contract entry
+      ([#421](https://github.com/kitsunium/sdk/issues/421)).** Entry 1 carries
+      the contract `Bootstrap` proposed. Appended, it widens the vote window
+      and names generation 1's contract for the lease; committed, it is the
+      contract in force unless a later generation already is. A snapshot's
+      contract is adopted at an equal generation too: a node's own
+      configuration used to rule generation 1 on every node, and two nodes
+      started with different values timed one generation differently.
     - **A different applied contract version is never grounds for refusal
       (R3-06).** It is normal during a contract change, and it feeds the
       lease minimum below. The handshake refuses only a contract it cannot

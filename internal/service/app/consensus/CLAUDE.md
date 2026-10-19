@@ -97,6 +97,10 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   racing a stop can land in `propc` after the loop drained it for the last
   time. `awaitProposal` also waits for `loopDone` (#420,
   `TestAProposeThatRacesAStopIsAnswered`).
+- Run generation 1 on a node's own `InitialTiming`: the founding entry
+  carries the contract `Bootstrap` proposed, and it rules once committed
+  (`commitFounding`); a snapshot's contract is adopted at an equal generation
+  (#421, `TestTheFoundingContractRules`).
 - Take a JOIN answer from an unpinned peer (`JoinConfig.Pins`, review M4),
   or admit a key two members share (review M5).
 - Cut `Recover`'s log back to the commit the survivor persisted: that commit

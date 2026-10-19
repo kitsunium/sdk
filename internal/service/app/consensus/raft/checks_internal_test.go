@@ -992,3 +992,35 @@ func TestANoTableInstallReplaysTheEffectsCommittedPastIt(t *testing.T) {
 		t.Fatalf("the alarm committed at 4, past the snapshot at 3, was forgotten: noSpace %d", st.NoSpace)
 	}
 }
+
+// Bootstrap writes the founding contract into entry 1, and the committed
+// contract rules: the step function used to ignore it, and every node ran
+// generation 1 on its own InitialTiming. Two nodes started with different
+// values agreed that generation 1 was in force while timing it differently,
+// and a lease could outlast a follower's vote refusal. The founding
+// contract widens the vote window when appended and rules once committed;
+// a snapshot's contract is adopted at an equal generation too (#421).
+func TestTheFoundingContractRules(t *testing.T) {
+	founding := testTiming()
+	founding.ElectionTimeoutMin, founding.ElectionTimeoutMax = 10*time.Second, 20*time.Second
+	e1 := engineEntry(0, 1, core.EntryMembership, &wire.AdminValue{Change: wire.ChangeFounding, Membership: testConf(1, 2, 3), Contract: founding})
+	f := newTest(2, testState{term: 1, commit: 0, ents: []core.EntryValue{e1}}, 0, false)
+	if f.voteWindow != 10*time.Second || f.contractWindow(1) != 10*time.Second {
+		t.Fatalf("appended founding contract: vote window %v, lease window %v, want 10s", f.voteWindow, f.contractWindow(1))
+	}
+	if f.timing.ElectionTimeoutMin != time.Second {
+		t.Fatalf("setup: the contract ruled before its entry committed: %v", f.timing.ElectionTimeoutMin)
+	}
+	g := newTest(2, testState{term: 1, commit: 1, ents: []core.EntryValue{e1}}, 0, false)
+	if g.timing.ElectionTimeoutMin != 10*time.Second || g.timing.Generation != 1 {
+		t.Fatalf("committed founding contract: the node runs on %+v, want ElectionTimeoutMin 10s at generation 1", g.timing)
+	}
+	if got := g.EngineAt(1); got.Timing.ElectionTimeoutMin != 10*time.Second {
+		t.Fatalf("EngineAt(1) = %+v, a cut at 1 would not carry the founding contract", got.Timing)
+	}
+	h := newTest(3, testState{term: 1}, 0, false)
+	h.InstallSnapshot(core.SnapshotMetaValue{Position: core.PositionValue{Term: 1, Index: 1}, ChainTip: e1.ChainSum, Membership: testConf(1, 2, 3), Timing: g.timing})
+	if h.timing.ElectionTimeoutMin != 10*time.Second || h.contractWindow(1) != 10*time.Second {
+		t.Fatalf("an install at generation 1 left the node on %+v", h.timing)
+	}
+}

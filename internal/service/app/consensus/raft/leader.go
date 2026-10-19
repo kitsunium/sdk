@@ -1105,8 +1105,9 @@ func (r *Raft) InstallSnapshot(meta core.SnapshotMetaValue) {
 	r.log.stable = max(r.log.stable, idx)
 	r.base = meta.Membership.Clone()
 	r.base.Index = idx
-	if meta.Timing.Generation > r.timing.Generation {
+	if adoptsTiming(meta.Timing, r.timing) {
 		r.timing = meta.Timing
+		r.contracts[r.timing.Generation] = r.timing
 	}
 	if meta.Timing.ElectionTimeoutMin > r.voteWindow {
 		r.voteWindow = meta.Timing.ElectionTimeoutMin
