@@ -180,6 +180,10 @@ func (n *Node) forceCut() {
 		ss.mu.Lock()
 		ss.inFlight = false
 		ss.mu.Unlock()
+		// Written on the apply goroutine (SnapshotPausesApply), a failed
+		// sync returns here, and D4 stops the node as for any other cut
+		// (#404).
+		n.cutFailed(err)
 	}
 }
 

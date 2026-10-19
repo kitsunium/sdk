@@ -2,6 +2,7 @@ package consensus
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -310,5 +311,84 @@ func TestACutCarriesTheEngineStateAtItsIndex(t *testing.T) {
 	}
 	if meta.Timing.Generation != old.Generation+1 || meta.Timing.HeartbeatInterval != next.HeartbeatInterval {
 		t.Fatalf("a cut at %d, past the contract, carries timing %+v", after.Index, meta.Timing)
+	}
+}
+
+// TestARequestedCutWhoseSyncFailsStopsTheNode pins that a cut requested by
+// a peer that needs a snapshot (forceCut) obeys D4 like a triggered one:
+// written on the apply goroutine, its failed sync stopped nothing, and the
+// node carried on over a disk that had just failed an fsync.
+func TestARequestedCutWhoseSyncFailsStopsTheNode(t *testing.T) {
+	cid := coreconsensus.ClusterID{4, 5, 8}
+	log, net := NewMemoryLog(), NewMemoryNetwork()
+	id, inc, err := InitLog(log, cid, "slot-0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	members := []coreconsensus.MemberValue{{ID: id, Incarnation: inc, Slot: "slot-0", SPKI: MemorySPKI(id), Voter: true}}
+	cfg := Config{
+		Cluster: cid, Machine: newKV(), Durability: DurabilityVolatile, Log: log,
+		Snapshots: syncFailingSnapshots{NewMemorySnapshots()}, Transport: NewMemoryTransport(net, id),
+		InitialTiming: testTimingFast(), MaxSnapshotBytes: 1 << 30, SnapshotEveryBytes: 1 << 20,
+		MaxLogBytes: 1 << 30, LogReserveBytes: 1 << 20, MinVoters: 1, SnapshotEvery: 1 << 20,
+		SnapshotTrailing: 1, JoinAuthorizer: allowJoin{}, SnapshotPausesApply: true,
+	}
+	if err := Bootstrap(context.Background(), &cfg, members); err != nil {
+		t.Fatal(err)
+	}
+	n, err := NewNode(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := n.HardClose(); err != nil {
+			t.Error(err)
+		}
+	})
+	tok := propose(t, n, "a=1")
+	waitFor(t, "the entry is applied", func() bool { return n.Status().Applied >= tok.Index })
+	n.requestCut()
+	waitFor(t, "the node stops on the failed sync of a requested cut", func() bool {
+		_, ok := n.StopReason()
+		return ok
+	})
+	if r, _ := n.StopReason(); !errs.HasCode(r.Err, coreconsensus.CodeStorageFailed) {
+		t.Fatalf("stopped on %v, want STORAGE_FAILED", r.Err)
+	}
+}
+
+// TestAnInstallWhoseSyncFailsStopsTheNode pins D4 on the receiving side: an
+// installed snapshot whose spool could not be made durable is a failed
+// fsync of this node's disk, and the node stops instead of answering the
+// leader and waiting for the next offer.
+func TestAnInstallWhoseSyncFailsStopsTheNode(t *testing.T) {
+	c := newCluster(t, 3, 20)
+	l := c.leader(5 * time.Second)
+	lag := c.otherThan(l)
+	// Isolated before it stops, or the memory network delivers at the
+	// restart what was sent meanwhile, and appends catch it up (#374).
+	c.net.Isolate(lag.id, true)
+	c.kill(lag)
+	for i := range 200 {
+		proposeOnLeader(t, c, fmt.Sprintf("k%d=%d", i, i))
+	}
+	compactedPast(t, c, 10)
+	lag.sm = newKV()
+	cfg := c.config(lag)
+	cfg.Snapshots = syncFailingSnapshots{lag.snaps}
+	// Its own cuts never trigger: the stop must come from the install.
+	cfg.SnapshotEvery = 1 << 20
+	n, err := NewNode(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lag.node = n
+	c.net.Isolate(lag.id, false)
+	waitFor(t, "the node stops on the failed sync of an install", func() bool {
+		_, ok := n.StopReason()
+		return ok
+	})
+	if r, _ := n.StopReason(); !errs.HasCode(r.Err, coreconsensus.CodeStorageFailed) {
+		t.Fatalf("stopped on %v, want STORAGE_FAILED", r.Err)
 	}
 }
