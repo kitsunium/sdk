@@ -46048,7 +46048,7 @@
       "recv": "Node",
       "spelled": "func(ctx context.Context, from uint64, to uint64, maxBytes int) ([]coreconsensus.EntryValue, error)",
       "canonical": "func(ctx context.Context, from uint64, to uint64, maxBytes int) ([]github.com/kitsunium/sdk/internal/core/app/consensus.EntryValue, error)",
-      "doc": "ReadCommitted returns the committed entries [from, to], to clamped to\nthis node's commit index, at most maxBytes of them but always one when\nany is due. from below the first entry the log keeps is COMPACTED: the\nreader starts again from a snapshot. It reads the log store concurrently\nwith the writer, as every reader does, and never waits on the loop.\n",
+      "doc": "ReadCommitted returns the committed entries [from, to], to clamped to\nwhat this node's log store holds as committed (its own commit, or the\nlast entry applied from it), never to the commit the event loop knows\nof alone, at most maxBytes of them but always one when any is due.\nfrom below the first entry the log keeps is COMPACTED: the reader\nstarts again from a snapshot. It reads the log store concurrently\nwith the writer, as every reader does, and never waits on the loop.\n",
       "file": "service/app/consensus/observed.go",
       "layer": "service",
       "family": "app"

@@ -3022,7 +3022,7 @@ RaiseClusterVersion raises the protocol version every member must speak.
 func (*Node) ReadCommitted(ctx context.Context, from uint64, to uint64, maxBytes int) ([]coreconsensus.EntryValue, error)
 ```
 
-ReadCommitted returns the committed entries \[from, to], to clamped to this node's commit index, at most maxBytes of them but always one when any is due. from below the first entry the log keeps is COMPACTED: the reader starts again from a snapshot. It reads the log store concurrently with the writer, as every reader does, and never waits on the loop.
+ReadCommitted returns the committed entries \[from, to], to clamped to what this node's log store holds as committed (its own commit, or the last entry applied from it), never to the commit the event loop knows of alone, at most maxBytes of them but always one when any is due. from below the first entry the log keeps is COMPACTED: the reader starts again from a snapshot. It reads the log store concurrently with the writer, as every reader does, and never waits on the loop.
 
 <a name="Node.Remove"></a>
 ### func \(Node\) [Remove](<https://github.com/kitsunium/sdk/blob/main/internal/service/app/consensus/ops.go>)

@@ -46,6 +46,14 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   freshness was not checked again after the transfer (review H3).
 - Hold `mu` across a batch's write and fdatasync: writers serialise on
   `wmu`, readers must not wait for the disk (review L6).
+- Bound a read of the store by the event loop's commit: the loop commits a
+  suffix it truncated and appended in memory before the storage actor
+  rewrote it, and an install moves the commit before the store. A reader
+  stops at what the store holds as committed — its own `HardState().Commit`,
+  or `logApplied`, the last entry applied from the log — never at the loop's
+  commit alone (#400, `TestReadCommittedNeverReadsASuffixTheStoreHasNotRewritten`),
+  and never at the store's commit alone, which trails an entry Propose
+  already answered (`TestReadCommittedReturnsAnAppliedEntryAtOnce`).
 - Take a JOIN answer from an unpinned peer (`JoinConfig.Pins`, review M4),
   or admit a key two members share (review M5).
 - Report a refused transfer as done on the node's own view that the target
