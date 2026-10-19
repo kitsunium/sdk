@@ -515,7 +515,9 @@ func (s *Secret) stop(ctx context.Context, a *App) error {
 func (s *Secret) rotate(ctx context.Context, a *App, r *secretRun) {
 	done := r.done
 	defer close(done)
-	ctx = a.asLoop(ctx, s.id)
+	// Labelled with its loop's name, as every loop's goroutine is: the
+	// goroutine view groups by it, and the secret's id named no loop.
+	ctx = a.asLoop(ctx, r.loop.Name)
 	failures := 0
 	// next is this loop's own, written again after every rotation: the loop
 	// state is handed a copy (idle), which the Studio may read meanwhile.

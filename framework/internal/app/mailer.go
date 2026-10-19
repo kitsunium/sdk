@@ -517,7 +517,10 @@ func (m *Mailer) start(ctx context.Context, a *App) error {
 	m.mu.Unlock()
 	go func() {
 		defer close(done)
-		if err := spool.Run(ctx); err != nil && ctx.Err() == nil {
+		// The outbox's goroutines are its loop's, as every loop's are: its
+		// pprof label (dev) names them in the goroutine view and the
+		// profiles, which counted them in no loop.
+		if err := spool.Run(a.asLoop(ctx, loop.Name)); err != nil && ctx.Err() == nil {
 			a.problem(m.id, say("mailer.outbox-stopped", "mailer", m.id, "detail", errs.PublicOf(err)))
 			loop.died(a, err)
 		}

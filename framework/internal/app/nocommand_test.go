@@ -22,20 +22,45 @@ type daemon struct {
 	goroutines int
 }
 
-// daemonOf reads what app keeps going.
+// daemonOf reads what app keeps going, once it has settled.
+//
+// Start returns once every loop's goroutine is started, not once it has
+// run: a goroutine takes its loop's label (asLoop) when it first runs, and
+// one that has not run yet is in no loop's group; a consumer's second
+// goroutine, its pump, does not even exist until the first has run. Read
+// right after Start, the count depended on the scheduler — two of four on a
+// Windows runner. So the goroutines are read once the daemon has settled:
+// every loop that owns a goroutine (all but a job, which runs on the
+// scheduler's, and the HTTP listener) shows one, and none of the loops'
+// goroutines is running, runnable or waiting on a lock — each is parked
+// where it waits for its next wake, after starting what it starts.
 func daemonOf(t *testing.T, a *app.App) daemon {
 	t.Helper()
 	var d daemon
 	g := a.Graph()
+	owners := map[string]bool{}
 	for _, c := range g.Runtime.Components {
 		d.components = append(d.components, c.Name)
 	}
 	for _, l := range g.Runtime.Loops {
 		d.loops = append(d.loops, l.Name)
+		if l.Kind != model.LoopJob && l.Kind != model.LoopHTTP {
+			owners[l.Name] = true
+		}
 	}
-	var gs model.Goroutines
-	call(t, a, "GET /_app/api/goroutines", noBody).json(t, &gs)
-	for _, grp := range gs.Groups {
+	var last model.Goroutines
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		call(t, a, "GET /_app/api/goroutines", noBody).json(t, &last)
+		if daemonSettled(&last, owners) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the daemon did not settle: loops owning a goroutine %v, goroutines %+v", owners, last.Groups)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	for _, grp := range last.Groups {
 		if grp.Loop != "" && grp.Loop != "http" {
 			d.goroutines += grp.Count
 		}
@@ -43,6 +68,29 @@ func daemonOf(t *testing.T, a *app.App) daemon {
 	slices.Sort(d.components)
 	slices.Sort(d.loops)
 	return d
+}
+
+// daemonSettled reports whether every loop of owners shows a goroutine in gs and
+// every loop's goroutine is parked, none running, runnable or on a lock.
+func daemonSettled(gs *model.Goroutines, owners map[string]bool) bool {
+	seen := map[string]bool{}
+	for _, grp := range gs.Groups {
+		if grp.Loop == "" || grp.Loop == "http" {
+			continue
+		}
+		state := strings.ToLower(grp.State)
+		if state == "running" || state == "runnable" || state == "syscall" ||
+			strings.Contains(state, "mutex") || strings.Contains(state, "semacquire") {
+			return false
+		}
+		seen[grp.Loop] = true
+	}
+	for name := range owners {
+		if !seen[name] {
+			return false
+		}
+	}
+	return true
 }
 
 // stopNow stops app, which a test started, before the next start.
