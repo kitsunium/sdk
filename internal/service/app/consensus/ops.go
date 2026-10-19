@@ -174,6 +174,11 @@ func (n *Node) appended(p *proposal, pos coreconsensus.PositionValue, local bool
 	if pos.Index <= n.applied {
 		r, ok := n.results[pos.Index]
 		n.am.Unlock()
+		if local {
+			// Answered here, never registered: no applied1 releases them
+			// (#419).
+			n.pendingBytes.Add(-int64(len(p.entry.Data)))
+		}
 		switch {
 		case ok && r.term == pos.Term:
 			p.done <- propResult{tok: n.token(pos), val: r.val}

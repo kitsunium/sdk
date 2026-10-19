@@ -46,6 +46,7 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 		}
 		n.am.Lock()
 		n.applied, n.appliedTerm = m.Position.Index, m.Position.Term
+		n.answerCovered(m.Position.Index)
 		n.acond.Broadcast()
 		n.am.Unlock()
 	}
@@ -53,6 +54,25 @@ func (n *Node) restoreFrom(m coreconsensus.SnapshotMetaValue, durIdx uint64) (er
 	n.snapState.last = max(n.snapState.last, m.Position.Index)
 	n.snapState.mu.Unlock()
 	return nil
+}
+
+// answerCovered answers every proposal waiting at or below index, which a
+// restored snapshot now covers: applied1 never runs for those indexes, and
+// sweepWaiters answers only above the commit, so they would wait forever
+// and their bytes stay counted against MaxPendingBytes (#419). The snapshot
+// holds their entry or another one at that index, which only a read
+// through Barrier tells apart: OUTCOME_UNKNOWN. The caller holds am.
+func (n *Node) answerCovered(index uint64) {
+	for idx, p := range n.waiters {
+		if idx > index {
+			continue
+		}
+		delete(n.waiters, idx)
+		if p.local {
+			n.pendingBytes.Add(-int64(len(p.entry.Data)))
+		}
+		p.done <- propResult{err: outcomeUnknown("a snapshot was installed over its position")}
+	}
 }
 
 // maybeSnapshot cuts a snapshot after SnapshotEvery applied entries, on the

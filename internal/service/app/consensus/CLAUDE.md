@@ -89,6 +89,10 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   durable, or persist a term below one a crashed run already wrote: a rerun
   reads a log whose dropped records no longer name their term (#418,
   `TestARerunOfTruncateAndStaySilentKeepsTheDroppedTerm`).
+- Restore a snapshot without answering the proposals it covers: applied1
+  never runs at their indexes and `sweepWaiters` answers only above the
+  commit. `answerCovered` answers them OUTCOME_UNKNOWN and releases their
+  pending bytes (#419, `TestARestoredSnapshotAnswersTheProposalsItCovers`).
 - Take a JOIN answer from an unpinned peer (`JoinConfig.Pins`, review M4),
   or admit a key two members share (review M5).
 - Cut `Recover`'s log back to the commit the survivor persisted: that commit
