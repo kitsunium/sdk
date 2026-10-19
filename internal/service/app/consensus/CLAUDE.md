@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-18T22:00:00Z -->
+<!-- updated: 2026-10-19T12:00:00Z -->
 # internal/service/app/consensus/
 
 ## Purpose
@@ -65,6 +65,14 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   in the new history, a duplicate and never a loss (#399,
   `TestRecoverAdoptsTheVerifiedSuffixPastThePersistedCommit`,
   `TestRecoverCutsTheSuffixAtTheFirstBrokenLink`).
+- Write `Recover`'s forced entry before `STOP-RECOVER` is durable, or remove
+  the marker before the new stamp is: between the two writes the directory
+  holds the new members' configuration under the old cluster's stamp, and
+  it started in the old cluster (#405). A rerun to the same cluster resumes
+  from the index the marker kept, never from `adoptedEnd` over a log ending
+  in the interrupted forced entry, which would read the new members as the
+  old voters and ask for no fence (`TestAnInterruptedRecoverRefusesAStartAndResumes`,
+  `TestARecoverInterruptedAfterItsStampIsCompleted`).
 - Report a refused transfer as done on the node's own view that the target
   leads: a deposed leader that has not heard its successor still names
   itself. `confirmLeader` makes the view a fact with a barrier first.
