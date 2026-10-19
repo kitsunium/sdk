@@ -20,9 +20,11 @@ import (
 // member: these read, or write an offline directory, and nothing else.
 
 // ReadCommitted returns the committed entries [from, to], to clamped to
-// this node's commit index, at most maxBytes of them but always one when
-// any is due. from below the first entry the log keeps is COMPACTED: the
-// reader starts again from a snapshot. It reads the log store concurrently
+// what this node's log store holds as committed (its own commit, or the
+// last entry applied from it), never to the commit the event loop knows
+// of alone, at most maxBytes of them but always one when any is due.
+// from below the first entry the log keeps is COMPACTED: the reader
+// starts again from a snapshot. It reads the log store concurrently
 // with the writer, as every reader does, and never waits on the loop.
 func (n *Node) ReadCommitted(ctx context.Context, from, to uint64, maxBytes int) ([]coreconsensus.EntryValue, error) {
 	if err := ctx.Err(); err != nil {
@@ -34,7 +36,20 @@ func (n *Node) ReadCommitted(ctx context.Context, from, to uint64, maxBytes int)
 	if from == 0 {
 		from = 1
 	}
-	to = min(to, n.Status().Commit)
+	// Not the loop's commit: it runs ahead of the store. A follower commits
+	// entries it truncated and appended in memory before the storage actor
+	// rewrote the suffix, and an install moves the commit before the store
+	// is moved onto the snapshot; the store would hand back the old suffix
+	// as committed (#400). The bound is what the store itself holds as
+	// committed: its own commit, written with the entries it covers, or the
+	// last entry applied from the log, synced at its term before it was
+	// applied. Both are at or below the loop's commit, and a committed entry
+	// is never truncated.
+	hs, err := n.cfg.Log.HardState()
+	if err != nil {
+		return nil, err
+	}
+	to = min(to, max(hs.Commit, n.logApplied.Load()))
 	if from > to {
 		return nil, nil
 	}
