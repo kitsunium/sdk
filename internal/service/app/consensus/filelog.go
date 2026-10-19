@@ -268,8 +268,8 @@ func openFileLog(dd *dataDir, segBytes int64) (*fileLog, error) {
 		segBytes = DefaultSegmentBytes
 	}
 	l := &fileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1, runDir: runtimeMarkerDir()}
-	if err := os.MkdirAll(l.logDir(), 0o700); err != nil {
-		return nil, storageFailed("mkdir", err)
+	if err := mkdirDurable(l.logDir()); err != nil {
+		return nil, err
 	}
 	st, err := readStamp(dd.dir)
 	if err != nil {
@@ -875,6 +875,26 @@ func writeFileSync(path string, data []byte) error {
 		return err
 	}
 	return syncDir(filepath.Dir(path))
+}
+
+// mkdirDurable creates dir, private to the owner, and when it did not exist
+// syncs its parent: the new entry is otherwise published only by whatever
+// syncs that directory next, which ext4 and XFS do through their journal and
+// other filesystems may not (#422). A directory already there is left as it
+// is, so a parent this process may not open is never asked for.
+func mkdirDurable(dir string) error {
+	_, err := os.Stat(dir)
+	existed := err == nil
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return storageFailed("mkdir", err)
+	}
+	if existed {
+		return nil
+	}
+	if err := syncDir(filepath.Dir(dir)); err != nil {
+		return storageFailed("mkdir", err)
+	}
+	return nil
 }
 
 // writeSynced writes data to a fresh file at path and syncs it. The file is

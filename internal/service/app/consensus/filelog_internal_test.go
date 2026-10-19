@@ -1,8 +1,10 @@
 package consensus
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -467,10 +469,11 @@ func TestReadersDoNotWaitForASync(t *testing.T) {
 }
 
 // copyTree copies every regular file under src to dst, as a restart reads
-// them: through the page cache, synced or not.
-func copyTree(t *testing.T, src, dst string) {
-	t.Helper()
-	err := filepath.WalkDir(src, func(p string, e os.DirEntry, err error) error {
+// them: through the page cache, synced or not. The lock file is left out:
+// Windows refuses to read a file another handle locks, and the copy takes
+// its own lock.
+func copyTree(src, dst string) error {
+	return filepath.WalkDir(src, func(p string, e os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -481,15 +484,15 @@ func copyTree(t *testing.T, src, dst string) {
 		if e.IsDir() {
 			return os.MkdirAll(filepath.Join(dst, rel), 0o700)
 		}
+		if rel == fileLock {
+			return nil
+		}
 		b, err := os.ReadFile(p)
 		if err != nil {
 			return err
 		}
 		return os.WriteFile(filepath.Join(dst, rel), b, 0o600)
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 // A process killed between a batch's write and its fdatasync leaves the
@@ -505,8 +508,12 @@ func TestRecoverySyncsWhatItTrustsBeforeServing(t *testing.T) {
 		t.Fatal(err)
 	}
 	killed := t.TempDir()
-	l.duringSync = func() { copyTree(t, d.Dir(), killed) }
+	var copied error
+	l.duringSync = func() { copied = copyTree(d.Dir(), killed) }
 	mustSync(t, l)
+	if copied != nil {
+		t.Fatal(copied)
+	}
 	nd := openDir(t, killed, 1<<16)
 	defer nd.Close()
 	if f, la := nd.Log().Bounds(); f != 1 || la != 6 {
@@ -696,5 +703,21 @@ func TestWipeAndRejoinRemovesTheSilenceCondition(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, fileSilent)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the silence condition survived the wipe: %v", err)
+	}
+}
+
+// A spool resumes at its last chunk boundary. A region of zeros, a spool a
+// crash left unsynced, read as a run of empty chunks whose CRC of nothing is
+// 0: the resume continued past it, and only the final digest refused the
+// install. The writer never emits an empty chunk, so one ends the prefix
+// (#422).
+func TestASpoolResumesBeforeARegionOfZeros(t *testing.T) {
+	payload := []byte("abc")
+	var h [chunkHeaderLen]byte
+	binary.LittleEndian.PutUint32(h[0:], uint32(len(payload)))
+	binary.LittleEndian.PutUint32(h[8:], crc32.Checksum(payload, castagnoli))
+	prefix := append(append(h[:], payload...), make([]byte, 4*chunkHeaderLen)...)
+	if got, want := alignedOffset(prefix), int64(chunkHeaderLen+len(payload)); got != want {
+		t.Fatalf("resume offset %d over a chunk then zeros, want %d", got, want)
 	}
 }

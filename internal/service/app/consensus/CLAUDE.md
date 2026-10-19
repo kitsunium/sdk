@@ -108,6 +108,17 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 - Convert a length read off the wire or the disk to `int` before bounding
   it: on 32 bits it turns negative and passes the bound (#422,
   `TestReadChunkRefusesALengthAboveTheLimit`, run by `test-386`).
+- Keep `Recover`'s index at a persisted commit below the log's base: the
+  forced entry cannot be appended there, and every rerun failed the same
+  way. `adoptedPastTheBase` adopts from the base, and refuses with a reason
+  when nothing records the chain there (#422,
+  `TestRecoverAdoptsPastABaseAboveThePersistedCommit`).
+- Resume a spool across an empty chunk: the writer never emits one, and a
+  region of zeros reads as a run of them (#422,
+  `TestASpoolResumesBeforeARegionOfZeros`).
+- Create a directory of the data directory without `mkdirDurable`, or put
+  the data directory on NFS: Linux emulates its `flock` with POSIX locks,
+  which one process does not exclude from itself (#422, ADR 0152).
 - Take a JOIN answer from an unpinned peer (`JoinConfig.Pins`, review M4),
   or admit a key two members share (review M5).
 - Cut `Recover`'s log back to the commit the survivor persisted: that commit

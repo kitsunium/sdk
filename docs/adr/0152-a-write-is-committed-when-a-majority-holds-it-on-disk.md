@@ -736,7 +736,7 @@ R7's rules contradicted each other.
        after reporting that chunk's sync, then persists the end record, is
        outside the crash-only model. That case is quarantined, so it loses
        availability, never data.
-     - **A second residual, stated (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), L7):** damage to
+     - **A second residual, stated (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), L7, found again by the strict review, [#422](https://github.com/kitsunium/sdk/issues/422)):** damage to
        the END record of the highest batch AFTER its sync returned (bit
        rot, a misdirected write) cannot be told from a batch that never
        completed. That batch is truncated, and with it what it acknowledged,
@@ -762,7 +762,10 @@ R7's rules contradicted each other.
   cut within the write-back delay loses them. A write-back that failed after
   the process died is reported to the fresh descriptor (errseq, Linux 4.13):
   the open fails with `STORAGE_FAILED`, never a log trusted from pages the
-  disk refused.
+  disk refused. A directory the node creates (the data directory, `log/`,
+  `snap/`) has its parent synced, and the audit file's directory is synced
+  after each line ([#422](https://github.com/kitsunium/sdk/issues/422)):
+  only ext4 and XFS publish a new entry through their journal anyway.
 - **Zeroing only after classification, only for a torn tail (R8-03).** When
   step 4 truncates a torn tail, recovery zeroes the rest of that segment and
   syncs it, as etcd's `ZeroToEnd` does (`wal.go:505`, `wal.go:562-570`),
@@ -1889,6 +1892,13 @@ unweakened. The `lock.Locker` adapter itself is deferred.
   `internal/service/data/vfs` already does. A second process
   opening the same directory fails at once with `DATA_DIR_LOCKED`, before
   either can touch the tail.
+  **The data directory is on a local filesystem, stated
+  ([#422](https://github.com/kitsunium/sdk/issues/422)).** On NFS, Linux
+  emulates `flock` with POSIX locks, which belong to the process: two
+  `DataDir` of one process on the same directory would no longer exclude
+  each other, and the durability rules above assume a local disk. No check
+  can tell every network filesystem apart, so this is a deployment rule,
+  not a refusal.
 - **Who closes what (R3-18).** A `Node` never closes what it was handed: the
   `DataDir`, its stores and the transport belong to the caller. `DataDir.Close`
   is idempotent, and refuses while a `Node` built on it is open. `Recover` and

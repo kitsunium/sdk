@@ -80,8 +80,8 @@ func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
 	if !flock.Native {
 		return DataDir{}, coreproc.UnsupportedPlatform
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return DataDir{}, storageFailed("mkdir", err)
+	if err := mkdirDurable(dir); err != nil {
+		return DataDir{}, err
 	}
 	d := &dataDir{dir: dir, opts: opts}
 	lf, err := os.OpenFile(filepath.Join(dir, fileLock), os.O_RDWR|os.O_CREATE, 0o600)

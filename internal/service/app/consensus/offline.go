@@ -81,6 +81,11 @@ func (d DataDir) audit(op coreconsensus.Operator, what string) (err error) {
 	if err := f.Sync(); err != nil {
 		return storageFailed("audit", err)
 	}
+	// The first line creates the file: its entry is durable only once the
+	// directory is synced (#422).
+	if err := syncDir(d.d.dir); err != nil {
+		return storageFailed("audit", err)
+	}
 	return nil
 }
 
@@ -598,15 +603,55 @@ func signedByEvery(keys []ed25519.PublicKey, receipts [][]byte, msg []byte) bool
 func (d DataDir) adoptedEnd(commit uint64) (uint64, error) {
 	flog := d.d.log
 	first, last := flog.Bounds()
-	if last <= commit || commit+1 < first {
+	if commit+1 < first {
+		return d.adoptedPastTheBase(first, last)
+	}
+	if last <= commit {
 		return commit, nil
 	}
 	chain, term, err := d.chainAt(commit, first)
 	if err != nil {
 		return 0, err
 	}
+	return d.verifiedEnd(commit, last, term, chain)
+}
+
+// adoptedPastTheBase is adoptedEnd over a log compacted past its persisted
+// commit: a snapshot covers only applied, hence committed, entries, so the
+// base first-1 is committed. The kept index used to stay at the persisted
+// commit, below the log: the forced entry could not be appended there, and
+// every rerun failed the same way (#422). The suffix is verified from the
+// base when a snapshot ends there, else from the log's first entry, whose
+// body is verified and whose link to the compacted entry before it no
+// store can check. With neither, nothing the forced entry could chain to is
+// known: Recover refuses, and says why.
+func (d DataDir) adoptedPastTheBase(first, last uint64) (uint64, error) {
+	metas, err := d.d.snaps.List()
+	if err != nil {
+		return 0, err
+	}
+	if len(metas) > 0 && metas[0].Position.Index == first-1 {
+		return d.verifiedEnd(first-1, last, metas[0].Position.Term, metas[0].ChainTip)
+	}
+	if last < first {
+		return 0, recoverRefused("the log is compacted past its persisted commit, and nothing records the chain at its base")
+	}
+	es, err := d.d.log.Entries(first, first+1, 1, nil)
+	if err != nil {
+		return 0, err
+	}
+	e := &es[0]
+	if wire.BodySum(e.Data) != e.BodySum {
+		return 0, recoverRefused("the log is compacted past its persisted commit, and its first entry does not verify")
+	}
+	return d.verifiedEnd(first, last, e.Position.Term, e.ChainSum)
+}
+
+// verifiedEnd walks the log from end, the entry of term term and chain sum
+// chain, and returns the last index whose link verifies.
+func (d DataDir) verifiedEnd(end, last, term uint64, chain uint32) (uint64, error) {
+	flog := d.d.log
 	var buf []coreconsensus.EntryValue
-	end := commit
 	for end < last {
 		es, err := flog.Entries(end+1, end+2, 1, buf[:0])
 		if errors.Is(err, coreconsensus.LogCorrupt) {

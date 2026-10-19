@@ -824,3 +824,44 @@ func TestARerunOfTruncateAndStaySilentKeepsTheDroppedTerm(t *testing.T) {
 		t.Fatalf("silence term %d after a rerun, want 9, the term of the records the truncation dropped", term)
 	}
 }
+
+// A log compacted past its persisted commit: Recover kept the persisted
+// commit, below the log, could not append its forced entry there, and every
+// rerun failed the same way. The base is committed (a snapshot covers only
+// applied entries), so the verified suffix is adopted from the log's first
+// entry, and a log with nothing to chain from refuses with its reason (#422).
+func TestRecoverAdoptsPastABaseAboveThePersistedCommit(t *testing.T) {
+	dir := t.TempDir()
+	d := openDir(t, dir, 1<<16)
+	defer d.Close()
+	var all []coreconsensus.EntryValue
+	var prev uint32
+	for i := uint64(1); i <= 10; i++ {
+		data := fmt.Appendf(nil, "e%d", i)
+		e := coreconsensus.EntryValue{Position: coreconsensus.PositionValue{Term: 1, Index: i}, Kind: coreconsensus.EntryCommand, BodySum: wire.BodySum(data), Data: data}
+		e.ChainSum = wire.ChainSum(prev, &e)
+		prev = e.ChainSum
+		all = append(all, e)
+	}
+	if err := d.Log().Append(all, &coreconsensus.HardState{Term: 1, Commit: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Log().CompactPrefix(6); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, d.Log())
+	if f, _ := d.Log().Bounds(); f != 7 {
+		t.Fatalf("setup: first %d, want 7", f)
+	}
+	kept, err := d.adoptedEnd(3)
+	if err != nil || kept != 10 {
+		t.Fatalf("adoptedEnd over a base above the commit = %d %v, want 10", kept, err)
+	}
+	if err := d.d.log.compactPrefixAt(20, 1); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, d.Log())
+	if _, err := d.adoptedEnd(3); !errors.Is(err, coreconsensus.RecoverRefused) {
+		t.Fatalf("nothing to chain from: %v, want RECOVER_REFUSED", err)
+	}
+}

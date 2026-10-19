@@ -197,11 +197,19 @@ func verifySnapshot(r io.Reader, meta coreconsensus.SnapshotMetaValue, codec cor
 	return nil
 }
 
-// alignedOffset is the largest chunk boundary of an encoded prefix.
+// alignedOffset is the largest chunk boundary of an encoded prefix. The
+// writer never emits an empty chunk, so a length of 0 ends the prefix: a
+// region of zeros (a spool never synced, an allocation a crash left
+// unwritten) reads as a run of empty chunks whose CRC of nothing is 0, and
+// a resume used to continue past it, to fail only on the final digest
+// (#422).
 func alignedOffset(prefix []byte) int64 {
 	var off int64
 	for int64(len(prefix))-off >= chunkHeaderLen {
 		n := int64(binary.LittleEndian.Uint32(prefix[off:]))
+		if n == 0 {
+			break
+		}
 		end := off + chunkHeaderLen + n
 		if end > int64(len(prefix)) {
 			break
