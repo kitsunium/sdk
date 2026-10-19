@@ -222,9 +222,12 @@ type fileLog struct {
 	prep *prepared
 	// tailsTruncated counts the torn tails recovery truncated.
 	tailsTruncated int64
-	failed         error
-	refuse         error
-	dd             *dataDir
+	// syncedAtOpen counts the segments recovery made durable before
+	// trusting them; a test reads it.
+	syncedAtOpen int
+	failed       error
+	refuse       error
+	dd           *dataDir
 	// runDir is the boot-scoped directory of the second STORAGE_FAILED
 	// marker (R9-05). It is read once at open from runtimeMarkerDir and is
 	// a field, not a constant, so a test can point it at a directory an
@@ -322,6 +325,9 @@ func (l *fileLog) recover() error {
 	}
 	l.applyCompaction()
 	if err := l.openSegments(segs); err != nil {
+		return err
+	}
+	if err := l.syncAtOpen(); err != nil {
 		return err
 	}
 	tail := l.segs[len(l.segs)-1]
@@ -579,6 +585,32 @@ func (l *fileLog) openSegments(segs []*scanned) error {
 			return storageFailed("open segment", err)
 		}
 		l.segs = append(l.segs, &segment{n: s.n, f: f, size: int64(len(s.data))})
+	}
+	return nil
+}
+
+// syncAtOpen makes durable everything recovery is about to trust, before
+// anything is acknowledged from it. A process killed between a batch's write
+// and its fdatasync leaves that batch in the page cache, complete with its
+// end record: a restart in the same boot reads it as written, and would
+// acknowledge entries no device holds, which a power cut within the
+// write-back delay then loses. The same holds for a rename or an unlink
+// whose directory sync never ran. PostgreSQL syncs its data directory before
+// crash recovery for this reason (SyncDataDirectory). A write-back that
+// failed after the process died is reported to this fresh descriptor too
+// (errseq, Linux 4.13), so a failure here is STORAGE_FAILED, never a log
+// trusted from pages the disk refused.
+func (l *fileLog) syncAtOpen() error {
+	for _, s := range l.segs {
+		if err := datasync(s.f); err != nil {
+			return storageFailed("sync at open", err)
+		}
+		l.syncedAtOpen++
+	}
+	for _, dir := range []string{l.logDir(), l.dir} {
+		if err := syncDir(dir); err != nil {
+			return storageFailed("sync at open", err)
+		}
 	}
 	return nil
 }

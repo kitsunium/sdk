@@ -738,6 +738,18 @@ R7's rules contradicted each other.
   The reason for point 3: in the highest batch, an acknowledged record can
   exist once that batch's sync returned. A rule that truncated any damage
   there would delete acknowledged data (codex, R8-02).
+- **What recovery trusts is synced first ([#414](https://github.com/kitsunium/sdk/issues/414)).**
+  A process killed between a batch's write and its `fdatasync` leaves the
+  batch in the page cache, end record included, and a restart in the same
+  boot reads it as complete. Before the node serves anything, recovery
+  `fdatasync`s every published segment and syncs the log directory, the
+  data directory and the snapshot directory, as PostgreSQL does before
+  crash recovery (`SyncDataDirectory`). Without it, a Ready that writes
+  nothing new acknowledges entries and votes no device holds, and a power
+  cut within the write-back delay loses them. A write-back that failed after
+  the process died is reported to the fresh descriptor (errseq, Linux 4.13):
+  the open fails with `STORAGE_FAILED`, never a log trusted from pages the
+  disk refused.
 - **Zeroing only after classification, only for a torn tail (R8-03).** When
   step 4 truncates a torn tail, recovery zeroes the rest of that segment and
   syncs it, as etcd's `ZeroToEnd` does (`wal.go:505`, `wal.go:562-570`),

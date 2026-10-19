@@ -50,6 +50,13 @@ func newFileSnapshots(dir string) (*fileSnapshots, error) {
 			}
 		}
 	}
+	// A process killed after a publication's rename and before its
+	// directory sync leaves a snapshot the listing reads and the disk may
+	// not hold: the directory is made durable before anything is restored
+	// or offered from it, as the log's segments are (syncAtOpen).
+	if err := syncDir(dir); err != nil {
+		return nil, storageFailed("sync snapshots at open", err)
+	}
 	return &fileSnapshots{dir: dir, pins: map[string]int{}}, nil
 }
 

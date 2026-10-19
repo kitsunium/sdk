@@ -48,6 +48,12 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   `TestARequestedCutWhoseSyncFailsStopsTheNode`,
   `TestAnInstallWhoseSyncFailsStopsTheNode`).
 - Truncate a hole before every segment is classified (R8-02, R9-03).
+- Serve a log recovery read without syncing it first: a process killed
+  between a batch's write and its fdatasync leaves the batch in the page
+  cache, and a same-boot restart would acknowledge it from there.
+  `syncAtOpen` fdatasyncs every segment and syncs the log, data and
+  snapshot directories before anything is trusted (#414,
+  `TestRecoverySyncsWhatItTrustsBeforeServing`).
 - Seal a segment again in recovery: a durable seal only needs the next
   segment published (`publishNext`, review H2).
 - Restore a snapshot the machine has applied past, or install one whose

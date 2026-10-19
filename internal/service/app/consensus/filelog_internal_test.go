@@ -458,3 +458,55 @@ func TestReadersDoNotWaitForASync(t *testing.T) {
 	}
 	checkEntries(t, d.Log(), 1, 6, 1)
 }
+
+// copyTree copies every regular file under src to dst, as a restart reads
+// them: through the page cache, synced or not.
+func copyTree(t *testing.T, src, dst string) {
+	t.Helper()
+	err := filepath.WalkDir(src, func(p string, e os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		if e.IsDir() {
+			return os.MkdirAll(filepath.Join(dst, rel), 0o700)
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dst, rel), b, 0o600)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A process killed between a batch's write and its fdatasync leaves the
+// batch in the page cache, end record included: a restart in the same boot
+// reads it as complete. Recovery makes what it trusts durable before the
+// node acknowledges anything from it, or a power cut within the write-back
+// delay loses entries already acknowledged (#414).
+func TestRecoverySyncsWhatItTrustsBeforeServing(t *testing.T) {
+	_, d := base(t)
+	defer d.Close()
+	l := d.d.log
+	if err := l.Append(ents(4, 6, 1), nil); err != nil {
+		t.Fatal(err)
+	}
+	killed := t.TempDir()
+	l.duringSync = func() { copyTree(t, d.Dir(), killed) }
+	mustSync(t, l)
+	nd := openDir(t, killed, 1<<16)
+	defer nd.Close()
+	if f, la := nd.Log().Bounds(); f != 1 || la != 6 {
+		t.Fatalf("setup: the unsynced batch was not read back: bounds %d %d", f, la)
+	}
+	got := nd.d.log
+	if got.syncedAtOpen != len(got.segs) || got.syncedAtOpen == 0 {
+		t.Fatalf("recovery trusted %d segment(s) and synced %d before serving them", len(got.segs), got.syncedAtOpen)
+	}
+}
