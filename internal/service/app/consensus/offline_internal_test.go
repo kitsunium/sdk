@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	coreconsensus "github.com/kitsunium/sdk/internal/core/app/consensus"
+	"github.com/kitsunium/sdk/internal/service/app/consensus/wire"
 )
 
 // threeOnDisk founds three nodes on data directories, writes n keys, and
@@ -69,11 +71,11 @@ func threeOnDisk(t *testing.T, n int) (*cluster, []*diskNode) {
 // Both halves are what the callers go on to rely on. Applied is what the
 // state machine holds; the recorded commit is what an offline operation
 // reads after the crash — Recover keeps a node's log up to its HardState
-// commit and cuts the rest — and a follower can apply an entry before the
-// batch carrying its commit reaches the log. The index is the last
-// proposal's token, never the largest Status().Commit at the time of the
-// call: Status is a node's view after its last turn, and the proposer can be
-// answered before the turn that commits publishes it. A deadline that ran
+// commit, then only the suffix whose chain verifies — and a follower can
+// apply an entry before the batch carrying its commit reaches the log. The
+// index is the last proposal's token, never the largest Status().Commit at
+// the time of the call: Status is a node's view after its last turn, and the
+// proposer can be answered before the turn that commits publishes it. A deadline that ran
 // out used to return in silence, so a lagging node was crashed and the
 // failure surfaced later as a key the recovered history did not hold.
 func (c *cluster) waitAppliedDisk(nodes []*diskNode, index uint64) {
@@ -158,6 +160,145 @@ func TestRecoverStartsANewHistoryFromOneNode(t *testing.T) {
 	old.sm = newKV()
 	if _, err := NewNode(diskConfig(c, old)); !errors.Is(err, coreconsensus.DataDirMismatch) {
 		t.Fatalf("old pair restarted under the new cluster: %v", err)
+	}
+}
+
+// appendPastCommit appends to a stopped node's log one command entry per kv,
+// past its persisted commit, which it leaves as it is: what a follower holds
+// when it synced and acknowledged entries its leader then committed, before
+// it learned that commit. The entry at broken, when not negative, carries a
+// body sum its data does not have; the entries after it chain on from the
+// sum it records, so only that one link is broken. It returns the last
+// index appended and the persisted commit.
+func appendPastCommit(t *testing.T, dd DataDir, kvs []string, broken int) (last, commit uint64) {
+	t.Helper()
+	l := dd.Log()
+	hs := must(l.HardState())(t)
+	_, last = l.Bounds()
+	prev := must(l.Entries(last, last+1, 1, nil))(t)[0]
+	var es []coreconsensus.EntryValue
+	for i, s := range kvs {
+		e := coreconsensus.EntryValue{
+			Position: coreconsensus.PositionValue{Term: prev.Position.Term, Index: prev.Position.Index + 1},
+			Kind:     coreconsensus.EntryCommand, Data: []byte(s), BodySum: wire.BodySum([]byte(s)),
+		}
+		if i == broken {
+			e.BodySum++
+		}
+		e.ChainSum = wire.ChainSum(prev.ChainSum, &e)
+		es = append(es, e)
+		prev = e
+	}
+	if err := l.Append(es, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if got := must(l.HardState())(t); got.Commit != hs.Commit {
+		t.Fatalf("setup: the persisted commit moved from %d to %d", hs.Commit, got.Commit)
+	}
+	return prev.Position.Index, hs.Commit
+}
+
+// recoverAlone runs Recover on keep, every other node attested fenced, and
+// restarts keep alone under the new cluster.
+func recoverAlone(t *testing.T, c *cluster, nodes []*diskNode, keep *diskNode, next coreconsensus.ClusterID) {
+	t.Helper()
+	st := must(keep.dd.Log().Stamp())(t)
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	self := coreconsensus.MemberValue{ID: keep.id, Incarnation: st.Incarnation, Slot: st.Slot, SPKI: MemorySPKI(keep.id), Voter: true}
+	opt := RecoverOptions{Confirm: next.String(), Operator: "op:recover", WitnessKeys: []ed25519.PublicKey{pub}}
+	for _, dn := range nodes {
+		if dn != keep {
+			opt.Fenced = append(opt.Fenced, coreconsensus.FencedAttestationValue{
+				Voter: dn.id, Method: "powered-off",
+				Receipts: [][]byte{ed25519.Sign(priv, ReceiptMessage(c.cid, next, dn.id))},
+			})
+		}
+	}
+	if err := Recover(keep.dd, next, []coreconsensus.MemberValue{self}, &opt); err != nil {
+		t.Fatal(err)
+	}
+	c.cid = next
+	keep.sm = newKV()
+	cfg := diskConfig(c, keep)
+	cfg.MinVoters = 1
+	n, err := NewNode(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep.node = n
+	propose(t, n, "after=recover")
+}
+
+// recoverReport is the last line Recover wrote to keep's audit file.
+func recoverReport(t *testing.T, keep *diskNode) string {
+	t.Helper()
+	b := must(os.ReadFile(filepath.Join(keep.dir, fileAudit)))(t)
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	return lines[len(lines)-1]
+}
+
+// A survivor that synced and acknowledged entries its leader committed,
+// before it learned that commit, holds them past its persisted commit.
+// Recover adopts every one of them whose chain verifies: cutting them back
+// to the persisted commit loses writes the old cluster acknowledged
+// (issue #399). The report says how many it adopted.
+func TestRecoverAdoptsTheVerifiedSuffixPastThePersistedCommit(t *testing.T) {
+	c, nodes := threeOnDisk(t, 30)
+	for _, dn := range nodes {
+		dn.crash(t, c)
+	}
+	keep := nodes[0]
+	keep.dd = openDir(t, keep.dir, 16<<10)
+	last, commit := appendPastCommit(t, keep.dd, []string{"acked0=a", "acked1=b", "acked2=c"}, -1)
+	next := coreconsensus.ClusterID{9}
+	recoverAlone(t, c, nodes, keep, next)
+	defer keep.crash(t, c)
+	for k, want := range map[string]string{"k29": "v29", "acked0": "a", "acked1": "b", "acked2": "c", "after": "recover"} {
+		if v, _ := keep.sm.get(k); v != want {
+			t.Fatalf("after Recover, %s = %q, want %q", k, v, want)
+		}
+	}
+	want := fmt.Sprintf("op:recover recover %s kept %d commit %d adopted %d", next, last, commit, last-commit)
+	if got := recoverReport(t, keep); got != want {
+		t.Fatalf("Recover reported %q, want %q", got, want)
+	}
+	if st := must(keep.dd.Log().Stamp())(t); st.Log.KeptIndex != last {
+		t.Fatalf("KeptIndex %d, want the last adopted index %d", st.Log.KeptIndex, last)
+	}
+}
+
+// A suffix whose chain breaks is cut at the first bad link: the entries
+// before it are adopted, it and every entry after it are not, even when
+// those chain on from it.
+func TestRecoverCutsTheSuffixAtTheFirstBrokenLink(t *testing.T) {
+	c, nodes := threeOnDisk(t, 30)
+	for _, dn := range nodes {
+		dn.crash(t, c)
+	}
+	keep := nodes[0]
+	keep.dd = openDir(t, keep.dir, 16<<10)
+	last, commit := appendPastCommit(t, keep.dd, []string{"good=a", "bad=b", "after-bad=c"}, 1)
+	kept := last - 2
+	next := coreconsensus.ClusterID{10}
+	recoverAlone(t, c, nodes, keep, next)
+	defer keep.crash(t, c)
+	if v, _ := keep.sm.get("good"); v != "a" {
+		t.Fatalf("the entry before the broken link was cut: good = %q", v)
+	}
+	for _, k := range []string{"bad", "after-bad"} {
+		if v, ok := keep.sm.get(k); ok {
+			t.Fatalf("an entry at or past the broken link was adopted: %s = %q", k, v)
+		}
+	}
+	want := fmt.Sprintf("op:recover recover %s kept %d commit %d adopted %d", next, kept, commit, kept-commit)
+	if got := recoverReport(t, keep); got != want {
+		t.Fatalf("Recover reported %q, want %q", got, want)
 	}
 }
 

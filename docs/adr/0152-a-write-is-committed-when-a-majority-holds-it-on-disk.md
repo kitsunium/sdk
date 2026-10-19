@@ -2616,12 +2616,29 @@ node, under the directory lock.
   - It writes a forced configuration and a NEW `ClusterID`, and bumps the log
     epoch (R2-09), so no node of the old cluster can talk to the recovered one
     by mistake.
-  - **It keeps the log up to the commit index the node persisted (review of
-    [PR #301](https://github.com/kitsunium/sdk/pull/301), L8).** The commit index is written lazily, so entries this node
-    saw committed but had not yet recorded as committed are dropped. That is
-    the price of a disaster recovery: the runbook picks the survivor with the
-    highest persisted commit (`Inspect`) and says that the last writes before
-    the loss may be gone.
+  - **It keeps every entry the node holds whose chain verifies, not only
+    those up to the commit index it persisted ([issue
+    #399](https://github.com/kitsunium/sdk/issues/399), amending the review of
+    [PR #301](https://github.com/kitsunium/sdk/pull/301), L8).** The commit
+    index is written lazily: a follower records a commit one round after its
+    leader acknowledged it, and a batch caps the commit it carries. An entry
+    past the persisted commit may therefore be a write the old cluster
+    committed and acknowledged, and cutting it there lost that write. The old
+    cluster is fenced, so the new history adopts the persisted log and then
+    every entry past its commit whose `BodySum` and `ChainSum` verify from the
+    chain at that commit, with a term that never decreases; it cuts only at
+    the first broken link (a mismatch, or a record that no longer parses),
+    and the configuration whose old voters must be fenced is the one of the
+    last entry kept. The audit record is the report: `kept`, the persisted
+    `commit` and how many entries past it were `adopted`, and the stamp's
+    `KeptIndex` is the last entry kept. **The owner's objective is zero loss
+    of an acknowledged write, and the trade-off is stated:** an entry past the
+    commit may also be one the old cluster never committed — its client was
+    told `ENTRY_SUPERSEDED`, or never answered — and it is applied in the new
+    history. That is a duplicate, never a loss, and an owner rejects it by
+    precondition (forgejo-raft through `ExpectRev`). The runbook picks the
+    survivor whose log reaches furthest (`Inspect`'s `Last`); a write no
+    survivor received is one no choice of survivor can keep.
   - **The probe cannot detect a partition, and the text says so (R4-04).** A
     seed cut off from this node still runs, and can still serve. So
     `Recover` requires an operator attestation,
