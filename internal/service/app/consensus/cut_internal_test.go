@@ -421,16 +421,21 @@ func stoppedForGood(t *testing.T, c *cluster, tn *testNode, ct *countingTranspor
 // goroutine it used to be dropped, and the leader went on leading over a
 // disk that had just failed an fsync.
 func TestARequestedCutWhoseSyncFailsStopsTheNode(t *testing.T) {
-	for _, pauses := range []bool{false, true} {
-		t.Run(map[bool]string{false: "aside", true: "on the apply goroutine"}[pauses], func(t *testing.T) {
-			// No cut is ever triggered: the only one is the one requested.
-			c, counted := countedCluster(t, 1<<20, pauses, func(*testNode) bool { return true })
-			l := c.leader(5 * time.Second)
-			tok := propose(t, l.node, "a=1")
-			waitFor(t, "the leader applies its entry", func() bool { return l.node.Status().Applied >= tok.Index })
-			l.node.requestCut()
-			stoppedForGood(t, c, l, counted[l.id])
-		})
+	type tc struct {
+		name   string
+		pauses bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		// No cut is ever triggered: the only one is the one requested.
+		cl, counted := countedCluster(t, 1<<20, c.pauses, func(*testNode) bool { return true })
+		l := cl.leader(5 * time.Second)
+		tok := propose(t, l.node, "a=1")
+		waitFor(t, "the leader applies its entry", func() bool { return l.node.Status().Applied >= tok.Index })
+		l.node.requestCut()
+		stoppedForGood(t, cl, l, counted[l.id])
+	}
+	for _, c := range []tc{{name: "aside"}, {name: "on the apply goroutine", pauses: true}} {
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
 
