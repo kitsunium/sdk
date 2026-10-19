@@ -21,6 +21,12 @@ var (
 	_ coreconsensus.Transport     = (*TCPTransport)(nil)
 	_ coreconsensus.Transport     = (*MemoryTransport)(nil)
 
+	_ interface {
+		compactPrefixAt(through, term uint64) error
+	} = (*fileLog)(nil)
+	_ interface {
+		compactPrefixAt(through, term uint64) error
+	} = (*MemoryLog)(nil)
 	_ dirHolder                         = (*fileLog)(nil)
 	_ interface{ checkMarkers() error } = (*fileLog)(nil)
 	_ interface {

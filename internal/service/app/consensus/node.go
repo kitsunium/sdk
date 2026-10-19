@@ -195,17 +195,15 @@ type storeReq struct {
 	compactTerm uint64
 }
 
-// termCompactor is a LogStore that takes the term of the compaction point
-// from its caller, which an install past the end of the log needs. Both
-// shipped stores are; another store compacts by CompactPrefix alone.
-type termCompactor interface {
-	compactPrefixAt(through, term uint64) error
-}
-
 // compactLog compacts log through index through, whose term is term (0 when
-// unknown), by the store's compactPrefixAt when it has one.
+// unknown), by the store's compactPrefixAt when it has one: a store that
+// takes the term of the compaction point from its caller, which an install
+// past the end of the log needs. Both shipped stores do; another store
+// compacts by CompactPrefix alone.
 func compactLog(log coreconsensus.LogStore, through, term uint64) error {
-	if c, ok := log.(termCompactor); ok {
+	if c, ok := log.(interface {
+		compactPrefixAt(through, term uint64) error
+	}); ok {
 		return c.compactPrefixAt(through, term)
 	}
 	return log.CompactPrefix(through)
@@ -586,17 +584,27 @@ func noTableBase(log coreconsensus.LogStore, metas []coreconsensus.SnapshotMetaV
 	if err != nil {
 		return coreconsensus.SnapshotMetaValue{}, err
 	}
-	switch {
-	case matched && term != 0 && term != b.Position.Term:
-		return coreconsensus.SnapshotMetaValue{}, errImpossible
-	case matched:
-		term = b.Position.Term
+	if b.Position.Term, err = baseTerm(term, b.Position.Term, matched, first); err != nil {
+		return coreconsensus.SnapshotMetaValue{}, err
+	}
+	return b, nil
+}
+
+// baseTerm is the term of a no-table base at first-1: the log's, logTerm,
+// or the term metaTerm of the snapshot metadata at that index when matched
+// and the log says 0. Two that disagree, or none above index 0, are refused.
+func baseTerm(logTerm, metaTerm uint64, matched bool, first uint64) (uint64, error) {
+	term := logTerm
+	if matched {
+		if logTerm != 0 && logTerm != metaTerm {
+			return 0, errImpossible
+		}
+		term = metaTerm
 	}
 	if term == 0 && first > 1 {
-		return coreconsensus.SnapshotMetaValue{}, errUnknownBaseTerm
+		return 0, errUnknownBaseTerm
 	}
-	b.Position.Term = term
-	return b, nil
+	return term, nil
 }
 
 // ---- transport callbacks ----
