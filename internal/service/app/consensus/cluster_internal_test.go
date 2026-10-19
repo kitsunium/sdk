@@ -470,6 +470,15 @@ func TestClusterSnapshotInstallsOnALaggingNode(t *testing.T) {
 	if metas := must(lag.snaps.List())(t); len(metas) == 0 {
 		t.Fatal("the lagging node caught up without a snapshot")
 	}
+	// The install compacted the lagging node's log past its end, where the
+	// store holds no entry to read the term from: the engine passes it, and
+	// the base never answers 0, which a node restarted with no table would
+	// vote on (#415).
+	if first, _ := lag.log.Bounds(); first > 1 {
+		if term, err := lag.log.Term(first - 1); err != nil || term == 0 {
+			t.Fatalf("the lagging node's base at %d has term %d (%v), want the snapshot's", first-1, term, err)
+		}
+	}
 }
 
 func TestClusterMembershipThroughLearners(t *testing.T) {

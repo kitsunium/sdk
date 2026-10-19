@@ -60,7 +60,8 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   compaction past its end without one, and `noTableBase` never takes a term
   of 0 above index 0 (#415,
   `TestACompactionPastTheEndRecordsTheTermItIsGiven`,
-  `TestANoTableBaseNeverTakesATermOfZero`).
+  `TestANoTableBaseNeverTakesATermOfZero`, and through the driver
+  `TestClusterSnapshotInstallsOnALaggingNode`).
 - Seal a segment again in recovery: a durable seal only needs the next
   segment published (`publishNext`, review H2).
 - Restore a snapshot the machine has applied past, or install one whose
@@ -68,7 +69,8 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 - Move raft onto an install it committed past while the machine restored
   it, or onto any install on a leader: `InstallSnapshot` ignores both, or
   the engine state of the entries committed past the snapshot is rolled
-  back and carried by the next cut (#416,
+  back and carried by the next cut — a node with a table evicted the
+  payloads it applied, so they cannot be replayed (#416,
   `TestAnInstallBelowTheCommitLeavesTheEngineStateAlone`).
 - Hold `mu` across a batch's write and fdatasync: writers serialise on
   `wmu`, readers must not wait for the disk (review L6).
@@ -104,7 +106,8 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
 - Answer a pinned snapshot's `Remove` with STORAGE_FAILED, or a failed
   unlink or directory sync with anything else: `retain` stops the node on
   the second (D4) and only logs the first, a transfer in flight (#422,
-  `TestRemovingAPinnedSnapshotIsNotAStorageFailure`).
+  `TestRemovingAPinnedSnapshotIsNotAStorageFailure`,
+  `TestARetentionWhoseRemoveFailsStopsTheNode`).
 - Convert a length read off the wire or the disk to `int` before bounding
   it: on 32 bits it turns negative and passes the bound (#422,
   `TestReadChunkRefusesALengthAboveTheLimit`, run by `test-386`).

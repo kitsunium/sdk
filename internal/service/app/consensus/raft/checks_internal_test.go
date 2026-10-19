@@ -951,6 +951,13 @@ func TestAnInstallBelowTheCommitLeavesTheEngineStateAlone(t *testing.T) {
 		Position: core.PositionValue{Term: 1, Index: 3}, ChainTip: f.log.chain(3), Membership: testConf(1, 2, 3),
 		Timing: eng.Timing, ClusterVersion: eng.Cluster, ClusterGeneration: eng.ClusterG, NoSpace: eng.NoSpace,
 	}
+	// A node with a table evicts the payloads it applied, so the effects of
+	// the entries committed past the snapshot cannot be replayed from them:
+	// only leaving the install alone keeps them.
+	f.log.evict(1, f.log.committed)
+	if f.log.evicted != 5 {
+		t.Fatalf("setup: evicted through %d, want 5", f.log.evicted)
+	}
 	f.InstallSnapshot(meta)
 	if st := f.Status(); st.NoSpace != 4 || st.Cluster != ProtocolMax || f.log.committed != 5 || f.log.lastIndex() != 5 {
 		t.Fatalf("an install at 3 over a commit of 5 left noSpace %d cluster %d commit %d last %d",
