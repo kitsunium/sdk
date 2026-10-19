@@ -2339,10 +2339,14 @@ packages:
         out:
           - type: "[]byte"
       - doc: |-
-          Recover starts a NEW history from this node's committed log: a new
-          cluster id that records its predecessor and the last index it kept, and a
-          forced configuration. Every old voter left out must be attested fenced by
-          every witness; without witness keys it fails closed.
+          Recover starts a NEW history from this node's log: every entry up to its
+          persisted commit, then the contiguous entries past it whose body and chain
+          checksums verify and whose term does not decrease, cut at the first that
+          fails, so no write the old cluster acknowledged is lost;
+          a new cluster id that records its predecessor and the last index it kept;
+          and a forced configuration. The audit file records how many entries past
+          the persisted commit were adopted. Every old voter left out must be
+          attested fenced by every witness; without witness keys it fails closed.
         in:
           - name: d
             type: DataDir
@@ -4698,8 +4702,10 @@ packages:
             - type: error
       - func:
           doc: |-
-            Recover starts a new history from this node's committed log, every old
-            voter left out attested fenced by every witness.
+            Recover starts a new history from this node's committed log and the
+            contiguous entries past it whose body and chain checksums verify and whose
+            term does not decrease, every old voter left out attested fenced by every
+            witness.
           forward: svcconsensus.Recover
           in:
             - name: d
