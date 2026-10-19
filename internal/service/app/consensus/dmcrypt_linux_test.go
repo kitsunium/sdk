@@ -49,7 +49,8 @@ func pct(ds []time.Duration, p float64) time.Duration {
 
 // TestDMCryptBench measures one Sync per batch over dm-crypt: 64 × 256 B
 // (D15's row) and 1 × 256 B, p50, p90, p99 and max, and the entries per
-// second one fsync per batch gives (D16: ≥ 10 000 entries/s of 256 B).
+// second one Sync per batch gives, two fdatasyncs since #417 (D16: ≥ 10 000
+// entries/s of 256 B).
 func TestDMCryptBench(t *testing.T) {
 	dir := dmDir(t)
 	d, err := NewDataDir(dir + "/bench")

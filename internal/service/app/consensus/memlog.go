@@ -126,18 +126,28 @@ func (l *MemoryLog) TruncateSuffix(from uint64) error {
 
 // CompactPrefix implements LogStore; compacting past the end leaves an
 // empty log at (through+1, through).
-func (l *MemoryLog) CompactPrefix(through uint64) error {
+func (l *MemoryLog) CompactPrefix(through uint64) error { return l.compactPrefixAt(through, 0) }
+
+// compactPrefixAt is CompactPrefix with the term of the compaction point as
+// the caller knows it, 0 when it does not: past the end of the log it is the
+// term the empty log answers for its base, which a node restarted on this
+// log with no table votes on (#415). A known term that disagrees with an
+// entry the log holds is refused, as the file log refuses it.
+func (l *MemoryLog) compactPrefixAt(through, term uint64) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if through < l.first {
 		return nil
 	}
 	last := l.first + uint64(len(l.ents)) - 1
+	if through <= last && term != 0 && term != l.ents[through-l.first].Position.Term {
+		return storageFailed("compact", errImpossible)
+	}
 	if through >= last {
 		if through == last && len(l.ents) > 0 {
 			l.prevTerm = l.ents[len(l.ents)-1].Position.Term
 		} else {
-			l.prevTerm = 0
+			l.prevTerm = term
 		}
 		l.ents = nil
 		l.first = through + 1

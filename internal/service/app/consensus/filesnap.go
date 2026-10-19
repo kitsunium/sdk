@@ -30,8 +30,8 @@ type fileSnapshots struct {
 // nor resumable. A directory that cannot be created, listed or cleaned is a
 // STORAGE_FAILED, so a store never opens over a state it could not read.
 func newFileSnapshots(dir string) (*fileSnapshots, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, storageFailed("mkdir", err)
+	if err := mkdirDurable(dir); err != nil {
+		return nil, err
 	}
 	// A crash between a snapshot's rename and its .meta leaves a .snap
 	// that is not a snapshot, nor resumable: it goes (review of PR #301, L4).
@@ -49,6 +49,13 @@ func newFileSnapshots(dir string) (*fileSnapshots, error) {
 				return nil, storageFailed("remove orphan snapshot", err)
 			}
 		}
+	}
+	// A process killed after a publication's rename and before its
+	// directory sync leaves a snapshot the listing reads and the disk may
+	// not hold: the directory is made durable before anything is restored
+	// or offered from it, as the log's segments are (syncAtOpen).
+	if err := syncDir(dir); err != nil {
+		return nil, storageFailed("sync snapshots at open", err)
 	}
 	return &fileSnapshots{dir: dir, pins: map[string]int{}}, nil
 }
@@ -266,12 +273,15 @@ func (s *fileSnapshots) Remove(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.pins[id] > 0 {
-		return storageFailed("remove", errPinned)
+		return pinnedSnapshot()
 	}
 	for _, ext := range []string{".meta", ".snap"} {
 		if err := os.Remove(filepath.Join(s.dir, id+ext)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return storageFailed("remove", err)
 		}
 	}
-	return syncDir(s.dir)
+	if err := syncDir(s.dir); err != nil {
+		return storageFailed("remove", err)
+	}
+	return nil
 }

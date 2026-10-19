@@ -33,6 +33,46 @@ func (syncFailingSink) Commit(coreconsensus.SnapshotMetaValue) error {
 	return storageFailed("sync snapshot", errImpossible)
 }
 
+// removeFailingSnapshots is a snapshot store whose every Remove fails as a
+// failed unlink or directory sync does.
+type removeFailingSnapshots struct{ *MemorySnapshots }
+
+func (removeFailingSnapshots) Remove(string) error {
+	return storageFailed("remove", errImpossible)
+}
+
+// TestARetentionWhoseRemoveFailsStopsTheNode pins D4 on retention (#422): a
+// cut that leaves three snapshots removes the oldest, and a failed unlink or
+// directory sync there is this node's disk failing, which stops the node as
+// a failed cut does. retain used to log it and go on.
+func TestARetentionWhoseRemoveFailsStopsTheNode(t *testing.T) {
+	c := &cluster{t: t, net: NewMemoryNetwork(), cid: coreconsensus.ClusterID{4, 5, 10}, every: 5, size: 1}
+	c.configure = func(tn *testNode, cfg *Config) { cfg.Snapshots = removeFailingSnapshots{tn.snaps} }
+	newClusterWith(t, c)
+	n := c.leader(5 * time.Second).node
+	// Proposed until the node stops, not a fixed count: triggers that land
+	// while a cut is in flight coalesce into one cut, so a slow runner can
+	// apply a fixed number of entries over two cuts and never reach the
+	// third snapshot, whose retention removes the first.
+	deadline := time.Now().Add(20 * time.Second)
+	for i := 0; ; i++ {
+		if _, stopped := n.StopReason(); stopped {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the node did not stop after %d entries: a failed removal of an old snapshot left it running", i)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		// Only the cuts these entries trigger matter: an entry the stop
+		// refuses is no failure of the test.
+		_, _, _ = n.Propose(ctx, fmt.Appendf(nil, "k%d=%d", i, i))
+		cancel()
+	}
+	if r, _ := n.StopReason(); !errs.HasCode(r.Err, coreconsensus.CodeStorageFailed) || r.ExitCode() != 74 {
+		t.Fatalf("stopped on %v (exit %d), want STORAGE_FAILED (exit 74)", r.Err, r.ExitCode())
+	}
+}
+
 // gatedSnapshots is a snapshot store whose Create waits for gate: a cut stays
 // in flight until the test lets it be written.
 type gatedSnapshots struct {

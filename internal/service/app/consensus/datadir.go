@@ -55,6 +55,10 @@ type dataDir struct {
 	snaps  *fileSnapshots
 	closed bool
 	inUse  bool
+	// afterTruncate runs once TruncateAndStaySilent's truncation is
+	// durable, before the quarantine marker goes; an error ends the exit
+	// there, as a crash would. Only a test sets it.
+	afterTruncate func() error
 }
 
 // DataDir is the shipped layout: a lock, a stamp, the segmented log, the
@@ -76,8 +80,8 @@ func NewDataDirWith(dir string, opts DataDirOptions) (DataDir, error) {
 	if !flock.Native {
 		return DataDir{}, coreproc.UnsupportedPlatform
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return DataDir{}, storageFailed("mkdir", err)
+	if err := mkdirDurable(dir); err != nil {
+		return DataDir{}, err
 	}
 	d := &dataDir{dir: dir, opts: opts}
 	lf, err := os.OpenFile(filepath.Join(dir, fileLock), os.O_RDWR|os.O_CREATE, 0o600)

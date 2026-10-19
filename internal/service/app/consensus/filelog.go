@@ -222,9 +222,12 @@ type fileLog struct {
 	prep *prepared
 	// tailsTruncated counts the torn tails recovery truncated.
 	tailsTruncated int64
-	failed         error
-	refuse         error
-	dd             *dataDir
+	// syncedAtOpen counts the segments recovery made durable before
+	// trusting them; a test reads it.
+	syncedAtOpen int
+	failed       error
+	refuse       error
+	dd           *dataDir
 	// runDir is the boot-scoped directory of the second STORAGE_FAILED
 	// marker (R9-05). It is read once at open from runtimeMarkerDir and is
 	// a field, not a constant, so a test can point it at a directory an
@@ -234,8 +237,9 @@ type fileLog struct {
 	// segment is published. Only the dm-crypt lane sets it, to cut power in
 	// that window; it is nil otherwise.
 	afterSeal func()
-	// duringSync runs while a batch's write and fdatasync run, the lock
-	// released. Only a test sets it.
+	// duringSync runs between each write of a batch and its fdatasync, the
+	// lock released: twice for a batch of several records. Only a test sets
+	// it.
 	duringSync func()
 	// wmu serialises the writers. A sync holds it, not mu, across its
 	// write and fdatasync, so readers do not wait for the disk (review of
@@ -264,8 +268,8 @@ func openFileLog(dd *dataDir, segBytes int64) (*fileLog, error) {
 		segBytes = DefaultSegmentBytes
 	}
 	l := &fileLog{dir: dd.dir, segBytes: segBytes, dd: dd, first: 1, pendingLast: -1, runDir: runtimeMarkerDir()}
-	if err := os.MkdirAll(l.logDir(), 0o700); err != nil {
-		return nil, storageFailed("mkdir", err)
+	if err := mkdirDurable(l.logDir()); err != nil {
+		return nil, err
 	}
 	st, err := readStamp(dd.dir)
 	if err != nil {
@@ -322,6 +326,9 @@ func (l *fileLog) recover() error {
 	}
 	l.applyCompaction()
 	if err := l.openSegments(segs); err != nil {
+		return err
+	}
+	if err := l.syncAtOpen(); err != nil {
 		return err
 	}
 	tail := l.segs[len(l.segs)-1]
@@ -579,6 +586,32 @@ func (l *fileLog) openSegments(segs []*scanned) error {
 			return storageFailed("open segment", err)
 		}
 		l.segs = append(l.segs, &segment{n: s.n, f: f, size: int64(len(s.data))})
+	}
+	return nil
+}
+
+// syncAtOpen makes durable everything recovery is about to trust, before
+// anything is acknowledged from it. A process killed between a batch's write
+// and its fdatasync leaves that batch in the page cache, complete with its
+// end record: a restart in the same boot reads it as written, and would
+// acknowledge entries no device holds, which a power cut within the
+// write-back delay then loses. The same holds for a rename or an unlink
+// whose directory sync never ran. PostgreSQL syncs its data directory before
+// crash recovery for this reason (SyncDataDirectory). A write-back that
+// failed after the process died is reported to this fresh descriptor too
+// (errseq, Linux 4.13), so a failure here is STORAGE_FAILED, never a log
+// trusted from pages the disk refused.
+func (l *fileLog) syncAtOpen() error {
+	for _, s := range l.segs {
+		if err := datasync(s.f); err != nil {
+			return storageFailed("sync at open", err)
+		}
+		l.syncedAtOpen++
+	}
+	for _, dir := range []string{l.logDir(), l.dir} {
+		if err := syncDir(dir); err != nil {
+			return storageFailed("sync at open", err)
+		}
 	}
 	return nil
 }
@@ -844,6 +877,26 @@ func writeFileSync(path string, data []byte) error {
 	return syncDir(filepath.Dir(path))
 }
 
+// mkdirDurable creates dir, private to the owner, and when it did not exist
+// syncs its parent: the new entry is otherwise published only by whatever
+// syncs that directory next, which ext4 and XFS do through their journal and
+// other filesystems may not (#422). A directory already there is left as it
+// is, so a parent this process may not open is never asked for.
+func mkdirDurable(dir string) error {
+	_, err := os.Stat(dir)
+	existed := err == nil
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return storageFailed("mkdir", err)
+	}
+	if existed {
+		return nil
+	}
+	if err := syncDir(filepath.Dir(dir)); err != nil {
+		return storageFailed("mkdir", err)
+	}
+	return nil
+}
+
 // writeSynced writes data to a fresh file at path and syncs it. The file is
 // closed before it returns, so before writeFileSync renames it, and a Close
 // failure is reported like the sync's: it is part of the write.
@@ -973,8 +1026,13 @@ func (l *fileLog) readEntry(s slot) (coreconsensus.EntryValue, error) {
 	if _, err := seg.f.ReadAt(h[:], s.off); err != nil {
 		return coreconsensus.EntryValue{}, storageFailed("read", err)
 	}
-	n := int(binary.LittleEndian.Uint32(h[:]))
-	b := make([]byte, recHeader+n)
+	// Bounded by the segment before the conversion: a damaged length must
+	// not turn negative on 32 bits nor allocate past the file (#422).
+	ln := binary.LittleEndian.Uint32(h[:])
+	if int64(ln) > seg.size-s.off-int64(recHeader) {
+		return coreconsensus.EntryValue{}, origin(coreconsensus.LogCorrupt, errs.String("segment", segName(s.seg)), errs.Int64("offset", s.off))
+	}
+	b := make([]byte, recHeader+int(ln))
 	if _, err := seg.f.ReadAt(b, s.off); err != nil && !errors.Is(err, io.EOF) {
 		return coreconsensus.EntryValue{}, storageFailed("read", err)
 	}
@@ -1051,8 +1109,9 @@ func (l *fileLog) Append(entries []coreconsensus.EntryValue, hs *coreconsensus.H
 }
 
 // Sync implements LogStore: the pending batch is written, its last record
-// flagged end-of-batch, and made durable by one fdatasync. A failure is
-// final: the log refuses every later call (D4, fsyncgate).
+// flagged end-of-batch, and made durable by two fdatasyncs, the end record
+// written only once the rest is durable (writeBatch). A failure is final:
+// the log refuses every later call (D4, fsyncgate).
 func (l *fileLog) Sync() error {
 	l.wmu.Lock()
 	defer l.wmu.Unlock()
@@ -1077,21 +1136,11 @@ func (l *fileLog) Sync() error {
 		l.restamp(l.batch)
 		cur = l.segs[len(l.segs)-1]
 	}
-	// The write and its fdatasync run without mu: the writers are held by
-	// wmu, readers find the pending entries in memory and the durable ones
-	// below l.off, which the write does not touch.
+	// The writes and their fdatasync run without mu: the writers are held
+	// by wmu, readers find the pending entries in memory and the durable
+	// ones below l.off, which the writes do not touch.
 	l.mu.Unlock()
-	var ferr error
-	if _, err := cur.f.WriteAt(l.pending, l.off); err != nil {
-		ferr = storageFailed("write", err)
-	} else {
-		if l.duringSync != nil {
-			l.duringSync()
-		}
-		if err := datasync(cur.f); err != nil {
-			ferr = storageFailed("fdatasync", err)
-		}
-	}
+	ferr := l.writeBatch(cur)
 	l.mu.Lock()
 	if ferr != nil {
 		l.failed = ferr
@@ -1099,6 +1148,39 @@ func (l *fileLog) Sync() error {
 	}
 	l.settleBatch(cur.n)
 	return l.dropSegmentsLocked()
+}
+
+// writeBatch makes the pending batch durable at l.off in segment cur in two
+// steps: every record before the last, synced, then the last one, which
+// carries the end-of-batch flag, synced (D16, #417). A power cut during one
+// fdatasync may persist any subset of its dirty pages, the end record's
+// without an earlier one's; with one sync per batch that left a valid end
+// record after a hole in a batch never acknowledged, which recovery must
+// quarantine. Written last and on its own, a valid end record proves that
+// the rest of its batch was durable before it, so a hole before it is
+// damage to synced data, and nothing else.
+func (l *fileLog) writeBatch(cur *segment) error {
+	body := l.pending[:l.pendingLast]
+	if len(body) > 0 {
+		if err := l.writeAndSync(cur, body, l.off); err != nil {
+			return err
+		}
+	}
+	return l.writeAndSync(cur, l.pending[l.pendingLast:], l.off+int64(len(body)))
+}
+
+// writeAndSync writes b at off in segment cur and fdatasyncs it.
+func (l *fileLog) writeAndSync(cur *segment, b []byte, off int64) error {
+	if _, err := cur.f.WriteAt(b, off); err != nil {
+		return storageFailed("write", err)
+	}
+	if l.duringSync != nil {
+		l.duringSync()
+	}
+	if err := datasync(cur.f); err != nil {
+		return storageFailed("fdatasync", err)
+	}
+	return nil
 }
 
 // settleBatch records the pending batch, now synced in segment seg, as
@@ -1172,8 +1254,17 @@ func (l *fileLog) TruncateSuffix(from uint64) error {
 
 // CompactPrefix implements LogStore: a compact record, then whole segments
 // whose entries the next checkpoint already supersedes are deleted, as a
-// prefix, with a directory fsync after the unlinks (D4 step 6).
-func (l *fileLog) CompactPrefix(through uint64) error {
+// prefix, with a directory fsync after the unlinks (D4 step 6). Past the end
+// of the log there is no entry to read the compaction point's term from, and
+// a guessed one is a log-matching check answered falsely: that compaction is
+// refused, and the engine makes it with compactPrefixAt (#415).
+func (l *fileLog) CompactPrefix(through uint64) error { return l.compactPrefixAt(through, 0) }
+
+// compactPrefixAt is CompactPrefix with the term of the compaction point as
+// the caller knows it, 0 when it does not. The log's own term wins where it
+// holds the entry, and must agree with a known one; past its end the
+// caller's term is recorded, and an unknown one refuses the compaction.
+func (l *fileLog) compactPrefixAt(through, term uint64) error {
 	l.wmu.Lock()
 	defer l.wmu.Unlock()
 	l.mu.Lock()
@@ -1185,7 +1276,10 @@ func (l *fileLog) CompactPrefix(through uint64) error {
 		return nil
 	}
 	last := l.first + uint64(len(l.slots)) - 1
-	t := l.termLocked(through)
+	t, err := compactionTerm(through, last, l.termLocked(through), term)
+	if err != nil {
+		return err
+	}
 	l.add(&record{kind: recCompact, batch: l.batch, index: through, term: t})
 	if through >= last {
 		l.slots = nil
@@ -1195,6 +1289,23 @@ func (l *fileLog) CompactPrefix(through uint64) error {
 	l.first, l.prevTerm = through+1, t
 	l.compact, l.compactTerm = through, t
 	return nil
+}
+
+// compactionTerm is the term a compaction through index through records,
+// over a log whose last index is last and which answers held for that
+// index: the log's own where it holds the entry, the caller's past its end.
+// A caller's term that disagrees with the log's, or none past the end, is
+// refused: the term recorded there is what a node with no table votes on.
+func compactionTerm(through, last, held, given uint64) (uint64, error) {
+	switch {
+	case through <= last && given != 0 && given != held:
+		return 0, storageFailed("compact", errImpossible)
+	case through <= last:
+		return held, nil
+	case given == 0:
+		return 0, storageFailed("compact", errUnknownCompactTerm)
+	}
+	return given, nil
 }
 
 // dropSegmentsLocked deletes the prefix of sealed segments whose every

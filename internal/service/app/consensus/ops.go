@@ -61,16 +61,33 @@ func (n *Node) submit(ctx context.Context, e coreconsensus.EntryValue, admin boo
 	case <-n.stopc:
 		return finish(propResult{err: n.stoppedErr()})
 	}
-	return finish(awaitProposal(ctx, p))
+	return finish(n.awaitProposal(ctx, p))
 }
 
 // awaitProposal waits for the loop's answer to a proposal it already holds.
 // A ctx that ends first is ctx.Err() only while the proposal is provably
 // unsent; once it may have been appended the answer is OUTCOME_UNKNOWN.
-func awaitProposal(ctx context.Context, p *proposal) propResult {
+//
+// The loop may also end without ever seeing it: a submit that passed the
+// stopped check finds both propc and stopc ready, and Go picks one at
+// random, after failAllOnStop drained propc for the last time. Once the
+// loop is gone an answer it posted wins; otherwise the proposal never left
+// and is NODE_STOPPED, or OUTCOME_UNKNOWN if it may have been appended
+// (#420).
+func (n *Node) awaitProposal(ctx context.Context, p *proposal) propResult {
 	select {
 	case r := <-p.done:
 		return r
+	case <-n.loopDone:
+		select {
+		case r := <-p.done:
+			return r
+		default:
+		}
+		if p.stage.Load() == stageUnsent {
+			return propResult{err: n.stoppedErr()}
+		}
+		return propResult{err: outcomeUnknown("node stopped")}
 	case <-ctx.Done():
 		if p.stage.Load() == stageUnsent {
 			// Ended before the append: ctx.Err(), as everywhere in the SDK.
@@ -174,6 +191,11 @@ func (n *Node) appended(p *proposal, pos coreconsensus.PositionValue, local bool
 	if pos.Index <= n.applied {
 		r, ok := n.results[pos.Index]
 		n.am.Unlock()
+		if local {
+			// Answered here, never registered: no applied1 releases them
+			// (#419).
+			n.pendingBytes.Add(-int64(len(p.entry.Data)))
+		}
 		switch {
 		case ok && r.term == pos.Term:
 			p.done <- propResult{tok: n.token(pos), val: r.val}

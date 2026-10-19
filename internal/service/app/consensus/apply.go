@@ -208,6 +208,25 @@ func (n *Node) safeApply(b coreconsensus.BatchingStateMachine, batching bool, es
 	return nil
 }
 
+// answerCovered answers every proposal waiting at or below index, which a
+// restored snapshot now covers: applied1 never runs for those indexes, and
+// sweepWaiters answers only above the commit, so they would wait forever
+// and their bytes stay counted against MaxPendingBytes (#419). The snapshot
+// holds their entry or another one at that index, which only a read
+// through Barrier tells apart: OUTCOME_UNKNOWN. The caller holds am.
+func (n *Node) answerCovered(index uint64) {
+	for idx, p := range n.waiters {
+		if idx > index {
+			continue
+		}
+		delete(n.waiters, idx)
+		if p.local {
+			n.pendingBytes.Add(-int64(len(p.entry.Data)))
+		}
+		p.done <- propResult{err: outcomeUnknown("a snapshot was installed over its position")}
+	}
+}
+
 // applied1 records one applied entry and answers the Propose that created
 // it on this node.
 func (n *Node) applied1(e *coreconsensus.EntryValue, val any) {

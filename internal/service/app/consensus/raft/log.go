@@ -1,6 +1,8 @@
 package raft
 
 import (
+	"slices"
+
 	core "github.com/kitsunium/sdk/internal/core/app/consensus"
 )
 
@@ -65,7 +67,9 @@ func (l *memLog) matchTerm(i, t uint64) bool {
 	return ok && x == t
 }
 
-// slice returns the entries in [lo, hi), at least one, at most maxBytes.
+// slice returns the entries in [lo, hi), at least one, at most maxBytes,
+// as a copy: a message queued over them is serialised after Ready, whose
+// eviction blanks the log's own entries in place (#422).
 func (l *memLog) slice(lo, hi uint64, maxBytes int) []core.EntryValue {
 	if lo > hi || lo <= l.snapIndex {
 		return nil
@@ -82,7 +86,7 @@ func (l *memLog) slice(lo, hi uint64, maxBytes int) []core.EntryValue {
 		}
 		n++
 	}
-	return src[:n:n]
+	return slices.Clone(src[:n])
 }
 
 // resident sums the payload bytes held for (from, to].

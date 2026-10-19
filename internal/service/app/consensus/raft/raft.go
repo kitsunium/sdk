@@ -321,7 +321,7 @@ func NewRaft(cfg *Config, st *StartState) *Raft {
 	node.log = memLog{snapIndex: sm.Position.Index, snapTerm: sm.Position.Term, snapChain: sm.ChainTip}
 	node.base = sm.Membership.Clone()
 	node.base.Index = sm.Position.Index
-	if sm.Timing.Generation > node.timing.Generation {
+	if adoptsTiming(sm.Timing, node.timing) {
 		node.timing = sm.Timing
 	}
 	node.clusterVer, node.clusterGen, node.noSpace = sm.ClusterVersion, sm.ClusterGeneration, sm.NoSpace
@@ -720,6 +720,15 @@ func (r *Raft) noteAppended(e *core.EntryValue) {
 		m.Index = e.Position.Index
 		r.confs = append(r.confs, confAt{index: e.Position.Index, m: m})
 		r.confChanged()
+		if c, ok := foundingContract(&a); ok {
+			// The founding contract is generation 1's: a lease counts
+			// acknowledgements of it, and it widens the vote window from
+			// its append, as every contract does (R3-07, #421).
+			r.contracts[1] = c
+			if c.ElectionTimeoutMin > r.voteWindow {
+				r.voteWindow = c.ElectionTimeoutMin
+			}
+		}
 	case core.EntryTimingContract:
 		if a, err := wire.ParseAdmin(e.Data); err == nil {
 			c := a.Contract
@@ -888,16 +897,54 @@ func (r *Raft) resetEngines() {
 }
 
 // actsAtCommit reports whether an entry of kind changes the engine's own
-// replicated state when it commits.
+// replicated state when it commits. A membership does only when it is the
+// founding one, which carries the generation 1 contract (#421).
 func actsAtCommit(kind core.EntryKind) bool {
 	switch kind {
-	case core.EntryTimingContract, core.EntryClusterVersion, core.EntryNoSpaceRaise, core.EntryNoSpaceClear:
+	case core.EntryTimingContract, core.EntryClusterVersion, core.EntryNoSpaceRaise, core.EntryNoSpaceClear, core.EntryMembership:
 		return true
 	default:
-		// Commands, no-ops, memberships and transfers carry no state of
-		// the engine's own at commit.
+		// Commands, no-ops and transfers carry no state of the engine's
+		// own at commit.
 		return false
 	}
+}
+
+// foundingContract is the generation 1 contract a founding membership
+// entry carries; ok is false for any other membership, and for a founding
+// entry with no contract.
+func foundingContract(admin *wire.AdminValue) (core.TimingContractSpec, bool) {
+	c := admin.Contract
+	if admin.Change != wire.ChangeFounding || c.HeartbeatInterval <= 0 || c.ElectionTimeoutMin <= 0 {
+		return core.TimingContractSpec{}, false
+	}
+	c.Generation = 1
+	return c, true
+}
+
+// commitFounding makes the founding contract the one in force when its
+// entry commits, unless a later generation already is: Bootstrap proposed
+// it, and every node runs on it rather than on its own InitialTiming, or
+// two nodes started with different values would agree that generation 1
+// is in force while timing it differently (#421).
+func (r *Raft) commitFounding(admin *wire.AdminValue) {
+	c, ok := foundingContract(admin)
+	if !ok || r.timing.Generation > 1 {
+		return
+	}
+	r.timing = c
+	r.contracts[1] = c
+	if c.ElectionTimeoutMin > r.voteWindow {
+		r.voteWindow = c.ElectionTimeoutMin
+	}
+}
+
+// adoptsTiming reports whether a snapshot's contract c replaces the one in
+// force, cur: at a higher generation, and at the same one too, which is the
+// same contract by determinism unless cur is still a node's own
+// InitialTiming (#421). A snapshot with no contract replaces nothing.
+func adoptsTiming(c, cur core.TimingContractSpec) bool {
+	return c.Generation > 0 && c.HeartbeatInterval > 0 && c.Generation >= cur.Generation
 }
 
 // applyAdmin applies the committed engine entry at index i, of kind, whose
@@ -917,6 +964,8 @@ func (r *Raft) applyAdmin(i uint64, kind core.EntryKind, admin *wire.AdminValue)
 		if admin.Pre.Alarm == r.noSpace {
 			r.noSpace = 0
 		}
+	case core.EntryMembership:
+		r.commitFounding(admin)
 	default:
 		// actsAtCommit admits no other kind.
 	}

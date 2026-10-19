@@ -911,3 +911,145 @@ func TestEngineAtIsTheStateTheCommittedEntriesThroughTheIndexLeft(t *testing.T) 
 		t.Fatalf("after compacting through 4, %d records kept, want 2", len(f.engines))
 	}
 }
+
+// A node with no table votes on its base: a base term that is the term of
+// its compaction point refuses a candidate whose log ends in an older term,
+// however long that log is (#415: the store used to record 0 there).
+func TestANoTableNodeVotesOnItsBaseTerm(t *testing.T) {
+	cfg := &Config{
+		ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
+		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, MaxChainRefusals: 3, NoTable: true,
+	}
+	base := core.SnapshotMetaValue{Position: core.PositionValue{Term: 5, Index: 100}, Membership: testConf(1, 2, 3)}
+	f := NewRaft(cfg, &StartState{HardState: core.HardState{Term: 6, Commit: 100}, Snapshot: base, Now: t0})
+	f.Step(t0.Add(5*time.Second), voteFrom(core.MsgVote, 3, 7, 3, 400))
+	if granted(f.Ready(), core.MsgVoteResp) {
+		t.Fatal("a node with no table granted its vote to a candidate whose last term is below its base's")
+	}
+}
+
+// An install is checked fresh before its body streams and the machine
+// restores it; meanwhile a new leader may make the follower commit past it.
+// Moving onto the snapshot then rolled the engine's replicated state back:
+// the alarm raised by an entry committed past the snapshot was forgotten,
+// and the node's next cut carried the regression to the others. The step
+// function ignores such an install, and a leader ignores every install
+// (#416).
+func TestAnInstallBelowTheCommitLeavesTheEngineStateAlone(t *testing.T) {
+	f := newTest(2, testState{term: 1, commit: 3, ents: chainEntries(0, 1, 1, 1, 1)}, 0, false)
+	e4 := engineEntry(f.log.chain(3), 4, core.EntryNoSpaceRaise, &wire.AdminValue{})
+	e5 := engineEntry(e4.ChainSum, 5, core.EntryClusterVersion, &wire.AdminValue{ClusterVersion: ProtocolMax})
+	m := msg(core.MsgApp, 1, 2, 1)
+	m.Index, m.LogTerm, m.Commit, m.Entries = 3, 1, 5, []core.EntryValue{e4, e5}
+	f.Step(t0, m)
+	f.Ready()
+	if st := f.Status(); f.log.committed != 5 || st.NoSpace != 4 || st.Cluster != ProtocolMax {
+		t.Fatalf("setup: commit %d, engine %+v", f.log.committed, st)
+	}
+	eng := f.EngineAt(3)
+	meta := core.SnapshotMetaValue{
+		Position: core.PositionValue{Term: 1, Index: 3}, ChainTip: f.log.chain(3), Membership: testConf(1, 2, 3),
+		Timing: eng.Timing, ClusterVersion: eng.Cluster, ClusterGeneration: eng.ClusterG, NoSpace: eng.NoSpace,
+	}
+	// A node with a table evicts the payloads it applied, so the effects of
+	// the entries committed past the snapshot cannot be replayed from them:
+	// only leaving the install alone keeps them.
+	f.log.evict(1, f.log.committed)
+	if f.log.evicted != 5 {
+		t.Fatalf("setup: evicted through %d, want 5", f.log.evicted)
+	}
+	f.InstallSnapshot(meta)
+	if st := f.Status(); st.NoSpace != 4 || st.Cluster != ProtocolMax || f.log.committed != 5 || f.log.lastIndex() != 5 {
+		t.Fatalf("an install at 3 over a commit of 5 left noSpace %d cluster %d commit %d last %d",
+			st.NoSpace, st.Cluster, f.log.committed, f.log.lastIndex())
+	}
+	if got := f.EngineAt(5); got.NoSpace != 4 || got.Cluster != ProtocolMax {
+		t.Fatalf("EngineAt(5) after the install = %+v", got)
+	}
+	l := leaderOf(2, 0, chainEntries(0, 1, 1, 1), 0, false)
+	last := l.log.lastIndex()
+	l.InstallSnapshot(core.SnapshotMetaValue{Position: core.PositionValue{Term: 1, Index: 40}, Membership: testConf(1, 2, 3)})
+	if l.log.lastIndex() != last || l.log.snapIndex != 0 || l.log.committed > last {
+		t.Fatalf("a leader moved onto an install: last %d base %d commit %d", l.log.lastIndex(), l.log.snapIndex, l.log.committed)
+	}
+}
+
+// A node with no table installs even below its commit, and the engine
+// effects of the entries it holds committed past the snapshot are applied
+// again over the snapshot's state rather than forgotten (#416).
+func TestANoTableInstallReplaysTheEffectsCommittedPastIt(t *testing.T) {
+	cfg := &Config{
+		ID: 2, Group: 1, Seed: 1, Timing: testTiming(), MaxInflight: 8, MaxInflightBytes: 1 << 20,
+		MaxBatchBytes: 1 << 16, MinVoters: 1, PromoteLag: 16, CanVote: true, MaxChainRefusals: 3, NoTable: true,
+	}
+	all := chainEntries(0, 1, 1, 1, 1)
+	e4 := engineEntry(all[2].ChainSum, 4, core.EntryNoSpaceRaise, &wire.AdminValue{})
+	ents := append(append(all, e4), chainEntries(e4.ChainSum, 5, 1)...)
+	base := core.SnapshotMetaValue{Position: core.PositionValue{Term: 1, Index: 2}, ChainTip: all[1].ChainSum, Membership: testConf(1, 2, 3)}
+	f := NewRaft(cfg, &StartState{HardState: core.HardState{Term: 1, Commit: 5}, Snapshot: base, Entries: ents[2:], Now: t0})
+	if f.Status().NoSpace != 4 {
+		t.Fatalf("setup: the alarm committed at 4 is not raised: %+v", f.Status())
+	}
+	f.lead, f.term = 1, 1
+	f.InstallSnapshot(core.SnapshotMetaValue{Position: core.PositionValue{Term: 1, Index: 3}, ChainTip: all[2].ChainSum, Membership: testConf(1, 2, 3), Timing: testTiming()})
+	if f.NoTable() || f.log.snapIndex != 3 {
+		t.Fatalf("the install was not taken: noTable %v base %d", f.NoTable(), f.log.snapIndex)
+	}
+	if st := f.Status(); st.NoSpace != 4 {
+		t.Fatalf("the alarm committed at 4, past the snapshot at 3, was forgotten: noSpace %d", st.NoSpace)
+	}
+}
+
+// Bootstrap writes the founding contract into entry 1, and the committed
+// contract rules: the step function used to ignore it, and every node ran
+// generation 1 on its own InitialTiming. Two nodes started with different
+// values agreed that generation 1 was in force while timing it differently,
+// and a lease could outlast a follower's vote refusal. The founding
+// contract widens the vote window when appended and rules once committed;
+// a snapshot's contract is adopted at an equal generation too (#421).
+func TestTheFoundingContractRules(t *testing.T) {
+	founding := testTiming()
+	founding.ElectionTimeoutMin, founding.ElectionTimeoutMax = 10*time.Second, 20*time.Second
+	e1 := engineEntry(0, 1, core.EntryMembership, &wire.AdminValue{Change: wire.ChangeFounding, Membership: testConf(1, 2, 3), Contract: founding})
+	f := newTest(2, testState{term: 1, commit: 0, ents: []core.EntryValue{e1}}, 0, false)
+	if f.voteWindow != 10*time.Second || f.contractWindow(1) != 10*time.Second {
+		t.Fatalf("appended founding contract: vote window %v, lease window %v, want 10s", f.voteWindow, f.contractWindow(1))
+	}
+	if f.timing.ElectionTimeoutMin != time.Second {
+		t.Fatalf("setup: the contract ruled before its entry committed: %v", f.timing.ElectionTimeoutMin)
+	}
+	g := newTest(2, testState{term: 1, commit: 1, ents: []core.EntryValue{e1}}, 0, false)
+	if g.timing.ElectionTimeoutMin != 10*time.Second || g.timing.Generation != 1 {
+		t.Fatalf("committed founding contract: the node runs on %+v, want ElectionTimeoutMin 10s at generation 1", g.timing)
+	}
+	if got := g.EngineAt(1); got.Timing.ElectionTimeoutMin != 10*time.Second {
+		t.Fatalf("EngineAt(1) = %+v, a cut at 1 would not carry the founding contract", got.Timing)
+	}
+	h := newTest(3, testState{term: 1}, 0, false)
+	h.InstallSnapshot(core.SnapshotMetaValue{Position: core.PositionValue{Term: 1, Index: 1}, ChainTip: e1.ChainSum, Membership: testConf(1, 2, 3), Timing: g.timing})
+	if h.timing.ElectionTimeoutMin != 10*time.Second || h.contractWindow(1) != 10*time.Second {
+		t.Fatalf("an install at generation 1 left the node on %+v", h.timing)
+	}
+}
+
+// A message queued over the log's entries is serialised after Ready, whose
+// eviction blanks those entries in place: an aliased slice left with an
+// empty payload its BodySum refused, a lost round trip and a false chain
+// refusal. slice hands out a copy (#422).
+func TestASliceOutlivesAnEviction(t *testing.T) {
+	var l memLog
+	for _, e := range chainEntries(0, 1, 1, 1, 1, 1) {
+		l.ents = append(l.ents, e)
+		l.window += int64(len(e.Data))
+	}
+	got := l.slice(1, 5, 1<<20)
+	l.evict(1, 4)
+	if l.evicted == 0 {
+		t.Fatal("setup: nothing was evicted")
+	}
+	for _, e := range got {
+		if len(e.Data) == 0 || wire.BodySum(e.Data) != e.BodySum {
+			t.Fatalf("entry %d left the log with a payload its BodySum refuses (len %d)", e.Position.Index, len(e.Data))
+		}
+	}
+}

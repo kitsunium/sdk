@@ -470,6 +470,15 @@ func TestClusterSnapshotInstallsOnALaggingNode(t *testing.T) {
 	if metas := must(lag.snaps.List())(t); len(metas) == 0 {
 		t.Fatal("the lagging node caught up without a snapshot")
 	}
+	// The install compacted the lagging node's log past its end, where the
+	// store holds no entry to read the term from: the engine passes it, and
+	// the base never answers 0, which a node restarted with no table would
+	// vote on (#415).
+	if first, _ := lag.log.Bounds(); first > 1 {
+		if term, err := lag.log.Term(first - 1); err != nil || term == 0 {
+			t.Fatalf("the lagging node's base at %d has term %d (%v), want the snapshot's", first-1, term, err)
+		}
+	}
 }
 
 func TestClusterMembershipThroughLearners(t *testing.T) {
@@ -1400,6 +1409,119 @@ func TestTickFollowsTheCommittedContract(t *testing.T) {
 				t.Fatalf("node %d ticks every %v, want %v", tn.id, time.Duration(tn.node.tickEvery.Load()), want)
 			}
 			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
+// A deposed leader keeps the proposals it appended and never committed. When
+// a snapshot installed over them moves applied past their index, applied1
+// never runs for them and sweepWaiters answers only above the commit: their
+// callers waited forever and their bytes stayed counted until every
+// proposal was refused OVERLOADED. The restore answers them OUTCOME_UNKNOWN
+// and releases their bytes (#419).
+func TestARestoredSnapshotAnswersTheProposalsItCovers(t *testing.T) {
+	c := newCluster(t, 3, 20)
+	l := c.leader(5 * time.Second)
+	f := c.otherThan(l)
+	c.net.Isolate(f.id, true)
+	for i := range 60 {
+		propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
+	}
+	metas, err := l.snaps.List()
+	if err != nil || len(metas) == 0 {
+		t.Fatalf("no leader snapshot: %v", err)
+	}
+	meta := metas[0]
+	h, err := l.snaps.Open(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := make([]byte, meta.EncodedSize)
+	if _, err := h.ReadAt(body, 0); err != nil && !errors.Is(err, io.EOF) {
+		t.Fatal(err)
+	}
+	h.Close()
+	f.node.am.Lock()
+	applied := f.node.applied
+	f.node.am.Unlock()
+	if applied+3 > meta.Position.Index {
+		t.Fatalf("setup: the follower applied %d, the snapshot is at %d", applied, meta.Position.Index)
+	}
+	// Proposals a deposed leader appended below the snapshot, and one above.
+	var ps []*proposal
+	f.node.am.Lock()
+	for _, idx := range []uint64{applied + 1, applied + 2, meta.Position.Index, meta.Position.Index + 1} {
+		p := &proposal{entry: coreconsensus.EntryValue{Data: []byte("orphan")}, done: make(chan propResult, 1), local: true}
+		p.pos = coreconsensus.PositionValue{Term: 1, Index: idx}
+		p.stage.Store(stageAppended)
+		f.node.waiters[idx] = p
+		f.node.pendingBytes.Add(int64(len(p.entry.Data)))
+		ps = append(ps, p)
+	}
+	f.node.am.Unlock()
+	sink, _, err := f.snaps.Create(meta.ID, meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sink.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Commit(meta); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	f.node.aq.push(applyItem{restore: &restoreReq{meta: meta, done: done}})
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range ps[:3] {
+		select {
+		case r := <-p.done:
+			if !errors.Is(r.err, coreconsensus.OutcomeUnknown) {
+				t.Fatalf("waiter at %d answered %v, want OUTCOME_UNKNOWN", p.pos.Index, r.err)
+			}
+		default:
+			t.Fatalf("waiter at %d, covered by the snapshot at %d, was never answered", p.pos.Index, meta.Position.Index)
+		}
+	}
+	f.node.am.Lock()
+	_, kept := f.node.waiters[meta.Position.Index+1]
+	left := len(f.node.waiters)
+	f.node.am.Unlock()
+	if !kept || left != 1 {
+		t.Fatalf("%d waiter(s) left, want only the one above the snapshot", left)
+	}
+	if got := f.node.pendingBytes.Load(); got != int64(len("orphan")) {
+		t.Fatalf("pending bytes %d, want only the waiter above the snapshot's", got)
+	}
+	f.node.am.Lock()
+	delete(f.node.waiters, meta.Position.Index+1)
+	f.node.am.Unlock()
+	f.node.pendingBytes.Add(-int64(len("orphan")))
+}
+
+// A Propose that passed the stopped check just before a stop finds propc
+// and stopc both ready, and Go picks one at random. When it picked propc
+// after failAllOnStop drained it for the last time, nothing answered the
+// proposal: the caller waited its whole deadline, forever without one. It
+// is answered NODE_STOPPED once the loop is gone (#420).
+func TestAProposeThatRacesAStopIsAnswered(t *testing.T) {
+	c := newCluster(t, 1, 0)
+	l := c.leader(5 * time.Second)
+	n := l.node
+	c.kill(l)
+	<-n.loopDone
+	// The race, made certain: the stopped check passes, then the select
+	// finds propc's buffer free and stopc closed.
+	n.stopped.Store(false)
+	defer n.stopped.Store(true)
+	for i := range 64 {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		start := time.Now()
+		_, _, err := n.Propose(ctx, []byte("a=1"))
+		cancel()
+		if !errors.Is(err, coreconsensus.NodeStopped) || time.Since(start) > time.Second {
+			t.Fatalf("Propose %d on a stopped node: %v after %v, want NODE_STOPPED at once", i, err, time.Since(start))
 		}
 	}
 }

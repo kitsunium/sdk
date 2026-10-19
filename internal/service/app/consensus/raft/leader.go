@@ -1076,8 +1076,8 @@ func (r *Raft) CheckOffer(from core.NodeID, o core.InstallOfferValue, needTable 
 // (D7).
 func (r *Raft) InstallSnapshot(meta core.SnapshotMetaValue) {
 	idx, t := meta.Position.Index, meta.Position.Term
-	if idx < r.log.snapIndex && !r.mutated(mutInstallBelowBase) {
-		return // CheckOffer refuses it: never move the base back
+	if r.ignoresInstall(idx) {
+		return
 	}
 	if r.log.matchTerm(idx, t) && idx <= r.log.lastIndex() {
 		r.log.compactTo(idx, t, meta.ChainTip)
@@ -1091,14 +1091,7 @@ func (r *Raft) InstallSnapshot(meta core.SnapshotMetaValue) {
 	r.log.stable = max(r.log.stable, idx)
 	r.base = meta.Membership.Clone()
 	r.base.Index = idx
-	if meta.Timing.Generation > r.timing.Generation {
-		r.timing = meta.Timing
-	}
-	if meta.Timing.ElectionTimeoutMin > r.voteWindow {
-		r.voteWindow = meta.Timing.ElectionTimeoutMin
-	}
-	r.clusterVer, r.clusterGen, r.noSpace = meta.ClusterVersion, meta.ClusterGeneration, meta.NoSpace
-	r.resetEngines()
+	r.installEngine(&meta)
 	r.cfg.NoTable = false
 	r.confChanged()
 	// The install proves the prefix up to idx only: a kept suffix may be
@@ -1110,6 +1103,40 @@ func (r *Raft) InstallSnapshot(meta core.SnapshotMetaValue) {
 	if r.lead != 0 {
 		r.send(core.MessageValue{Kind: core.MsgAppResp, To: r.lead, Index: ack})
 	}
+}
+
+// ignoresInstall reports whether an install at idx must leave the log as it
+// is. One below the base never moves it back: CheckOffer refuses it.
+//
+// The offer was checked fresh before its body streamed and the machine
+// restored it, which takes seconds on a large state. Meanwhile this node
+// may have been elected, or committed past the snapshot through a new
+// leader's appends: its log and its engine state then hold everything the
+// snapshot holds, and the effects of the engine entries committed past it
+// besides. Moving onto the snapshot would roll that engine state back, and
+// a later cut would carry the regression to the other nodes (#416). A node
+// with no table still installs (installEngine replays those effects).
+func (r *Raft) ignoresInstall(idx uint64) bool {
+	if idx < r.log.snapIndex && !r.mutated(mutInstallBelowBase) {
+		return true
+	}
+	return r.role == core.RoleLeader || (idx <= r.log.committed && !r.cfg.NoTable)
+}
+
+// installEngine replaces the engine's own replicated state with the
+// snapshot's, then applies again the effects of the entries this node holds
+// committed past it, which only a node with no table can (#416).
+func (r *Raft) installEngine(meta *core.SnapshotMetaValue) {
+	if adoptsTiming(meta.Timing, r.timing) {
+		r.timing = meta.Timing
+		r.contracts[r.timing.Generation] = r.timing
+	}
+	if meta.Timing.ElectionTimeoutMin > r.voteWindow {
+		r.voteWindow = meta.Timing.ElectionTimeoutMin
+	}
+	r.clusterVer, r.clusterGen, r.noSpace = meta.ClusterVersion, meta.ClusterGeneration, meta.NoSpace
+	r.resetEngines()
+	r.applyCommitEffects(meta.Position.Index+1, r.log.committed)
 }
 
 // restartLogAt discards the whole log, whose boundary entry does not match

@@ -1,11 +1,14 @@
 package consensus
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -127,7 +130,12 @@ func TestFileLogPersistsAcrossReopen(t *testing.T) {
 	if len(after) >= len(segs) {
 		t.Fatalf("no segment dropped: %d then %d", len(segs), len(after))
 	}
-	if err := l.CompactPrefix(90); err != nil {
+	// Past the end there is no entry to read the term from: refused
+	// without one, recorded with the one the engine gives (#415).
+	if err := l.CompactPrefix(90); !errors.Is(err, coreconsensus.StorageFailed) {
+		t.Fatalf("a compaction past the end with no term: %v", err)
+	}
+	if err := d.d.log.compactPrefixAt(90, 4); err != nil {
 		t.Fatal(err)
 	}
 	mustSync(t, l)
@@ -431,8 +439,9 @@ func TestReadersDoNotWaitForASync(t *testing.T) {
 		t.Fatal(err)
 	}
 	in, out := make(chan struct{}), make(chan struct{})
+	var first sync.Once
 	l.duringSync = func() {
-		close(in)
+		first.Do(func() { close(in) })
 		<-out
 	}
 	done := make(chan error, 1)
@@ -457,4 +466,258 @@ func TestReadersDoNotWaitForASync(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkEntries(t, d.Log(), 1, 6, 1)
+}
+
+// copyTree copies every regular file under src to dst, as a restart reads
+// them: through the page cache, synced or not. The lock file is left out:
+// Windows refuses to read a file another handle locks, and the copy takes
+// its own lock.
+func copyTree(src, dst string) error {
+	return filepath.WalkDir(src, func(p string, e os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		if e.IsDir() {
+			return os.MkdirAll(filepath.Join(dst, rel), 0o700)
+		}
+		if rel == fileLock {
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dst, rel), b, 0o600)
+	})
+}
+
+// A process killed between a batch's write and its fdatasync leaves the
+// batch in the page cache, end record included: a restart in the same boot
+// reads it as complete. Recovery makes what it trusts durable before the
+// node acknowledges anything from it, or a power cut within the write-back
+// delay loses entries already acknowledged (#414).
+func TestRecoverySyncsWhatItTrustsBeforeServing(t *testing.T) {
+	_, d := base(t)
+	defer d.Close()
+	l := d.d.log
+	if err := l.Append(ents(4, 6, 1), nil); err != nil {
+		t.Fatal(err)
+	}
+	killed := t.TempDir()
+	var copied error
+	l.duringSync = func() { copied = copyTree(d.Dir(), killed) }
+	mustSync(t, l)
+	if copied != nil {
+		t.Fatal(copied)
+	}
+	nd := openDir(t, killed, 1<<16)
+	defer nd.Close()
+	if f, la := nd.Log().Bounds(); f != 1 || la != 6 {
+		t.Fatalf("setup: the unsynced batch was not read back: bounds %d %d", f, la)
+	}
+	got := nd.d.log
+	if got.syncedAtOpen != len(got.segs) || got.syncedAtOpen == 0 {
+		t.Fatalf("recovery trusted %d segment(s) and synced %d before serving them", len(got.segs), got.syncedAtOpen)
+	}
+}
+
+// An install past the end of the log truncates it and compacts it to the
+// snapshot's index. The store holds no entry there to read the term from:
+// it used to record 0, and a node that restarted with no table then based
+// its vote on a last term of 0 and granted it to a stale candidate. The
+// term comes from the engine, and a compaction past the end without one is
+// refused (#415).
+func TestACompactionPastTheEndRecordsTheTermItIsGiven(t *testing.T) {
+	dir, d := base(t)
+	l := d.d.log
+	if err := l.compactPrefixAt(2, 7); !errors.Is(err, coreconsensus.StorageFailed) {
+		t.Fatalf("a term that disagrees with the log's: %v", err)
+	}
+	if err := l.TruncateSuffix(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.CompactPrefix(100); !errors.Is(err, coreconsensus.StorageFailed) {
+		t.Fatalf("a compaction past the end with no term: %v", err)
+	}
+	if err := l.compactPrefixAt(100, 5); err != nil {
+		t.Fatal(err)
+	}
+	mustSync(t, l)
+	nd := reopenExpect(t, dir, d, false)
+	defer nd.Close()
+	if f, la := nd.Log().Bounds(); f != 101 || la != 100 {
+		t.Fatalf("bounds %d %d, want 101 100", f, la)
+	}
+	if tm, err := nd.Log().Term(100); err != nil || tm != 5 {
+		t.Fatalf("Term(100) = %d %v, want 5", tm, err)
+	}
+	base, err := noTableBase(nd.Log(), nil, 101)
+	if err != nil || base.Position != (coreconsensus.PositionValue{Term: 5, Index: 100}) {
+		t.Fatalf("no-table base %+v %v, want (100, term 5)", base.Position, err)
+	}
+}
+
+// A log compacted past its end before #415 answers a term of 0 at its base.
+// A node with no table takes the term of the snapshot metadata at that
+// index, which stays readable when the bytes do not, and refuses to start
+// when there is none: a base term of 0 grants a vote to any candidate.
+func TestANoTableBaseNeverTakesATermOfZero(t *testing.T) {
+	log := NewMemoryLog()
+	if err := log.Append(ents(1, 3, 1), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.TruncateSuffix(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.CompactPrefix(100); err != nil {
+		t.Fatal(err)
+	}
+	if tm, _ := log.Term(100); tm != 0 {
+		t.Fatalf("setup: the base term is %d, want the 0 a compaction with no term leaves", tm)
+	}
+	at := func(index, term uint64) coreconsensus.SnapshotMetaValue {
+		return coreconsensus.SnapshotMetaValue{ID: fmt.Sprintf("s%d", index), Position: coreconsensus.PositionValue{Term: term, Index: index}}
+	}
+	got, err := noTableBase(log, []coreconsensus.SnapshotMetaValue{at(100, 5), at(60, 4)}, 101)
+	if err != nil || got.Position != (coreconsensus.PositionValue{Term: 5, Index: 100}) {
+		t.Fatalf("base %+v %v, want the metadata's term 5", got.Position, err)
+	}
+	if got, err := noTableBase(log, []coreconsensus.SnapshotMetaValue{at(60, 4)}, 101); err == nil {
+		t.Fatalf("a base of term 0 at index 100 was accepted: %+v", got.Position)
+	}
+	if got, err := noTableBase(log, nil, 101); err == nil {
+		t.Fatalf("a base of term 0 at index 100 was accepted: %+v", got.Position)
+	}
+	if _, err := noTableBase(NewMemoryLog(), nil, 1); err != nil {
+		t.Fatalf("an empty log's base (0, 0): %v", err)
+	}
+	// The engine gives the term: the base answers it.
+	given := NewMemoryLog()
+	if err := given.compactPrefixAt(100, 5); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := noTableBase(given, nil, 101); err != nil || got.Position.Term != 5 {
+		t.Fatalf("base %+v %v, want term 5", got.Position, err)
+	}
+}
+
+// A power cut during a batch's fdatasync may persist any subset of its
+// pages, the end record's without an earlier one's. With one sync per batch
+// a batch never acknowledged then read as damage inside a completed batch,
+// and was quarantined. The end record is written only once the rest of its
+// batch is durable, so a valid end record after a hole is damage to synced
+// data and nothing else (#417).
+func TestTheEndRecordIsWrittenOnceTheRestOfItsBatchIsDurable(t *testing.T) {
+	_, d := base(t)
+	defer d.Close()
+	l := d.d.log
+	if err := l.Append(ents(4, 6, 1), nil); err != nil {
+		t.Fatal(err)
+	}
+	batch, off := l.batch, l.off
+	seg := filepath.Join(l.logDir(), segName(l.segs[len(l.segs)-1].n))
+	type seen struct{ recs, ends int }
+	var syncs []seen
+	l.duringSync = func() {
+		b, err := os.ReadFile(seg)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		var s seen
+		for o := int(off); o+recHeader+recFixed <= len(b); {
+			r, ok := parseRecord(b[o:])
+			if !ok || r.batch != batch {
+				break
+			}
+			s.recs++
+			if r.end {
+				s.ends++
+			}
+			o += r.length
+		}
+		syncs = append(syncs, s)
+	}
+	mustSync(t, l)
+	if len(syncs) != 2 {
+		t.Fatalf("%d fdatasync(s) for a batch of three records (%+v), want the body's then the end record's", len(syncs), syncs)
+	}
+	if syncs[0].ends != 0 || syncs[0].recs != 2 {
+		t.Fatalf("before the body was durable the disk held %+v, want its two records and no end record", syncs[0])
+	}
+	if syncs[1].ends != 1 || syncs[1].recs != 3 {
+		t.Fatalf("the end record's write left %+v, want three records, the last ending the batch", syncs[1])
+	}
+	checkEntries(t, d.Log(), 1, 6, 1)
+}
+
+// A snapshot pinned by a transfer is a benign refusal, retried at the next
+// cut: it is not STORAGE_FAILED, which stops the node (#422).
+func TestRemovingAPinnedSnapshotIsNotAStorageFailure(t *testing.T) {
+	_, d := base(t)
+	defer d.Close()
+	body := []byte("snapshot body")
+	meta := coreconsensus.SnapshotMetaValue{ID: "s1", Position: coreconsensus.PositionValue{Term: 1, Index: 3}, EncodedSize: int64(len(body))}
+	mem := NewMemorySnapshots()
+	for _, s := range []coreconsensus.SnapshotStore{d.Snapshots(), mem} {
+		sink, _, err := s.Create(meta.ID, meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sink.Write(body); err != nil {
+			t.Fatal(err)
+		}
+		if err := sink.Commit(meta); err != nil {
+			t.Fatal(err)
+		}
+		h, err := s.Open(meta.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = s.Remove(meta.ID)
+		if err == nil || errors.Is(err, coreconsensus.StorageFailed) || !errors.Is(err, coreconsensus.AdminPreconditionFailed) {
+			t.Fatalf("%T: removing a pinned snapshot: %v, want ADMIN_PRECONDITION_FAILED", s, err)
+		}
+		h.Close()
+		if err := s.Remove(meta.ID); err != nil {
+			t.Fatalf("%T: removing it once unpinned: %v", s, err)
+		}
+	}
+}
+
+// WipeAndRejoin starts a new member: a silence condition an earlier
+// TruncateAndStaySilent left must go with the stamp, or the new member
+// starts silent at the old log's index (#422).
+func TestWipeAndRejoinRemovesTheSilenceCondition(t *testing.T) {
+	dir, d := base(t)
+	defer d.Close()
+	if err := writeFileSync(filepath.Join(dir, fileSilent), silenceRecord(9, 4)); err != nil {
+		t.Fatal(err)
+	}
+	if err := ClearQuarantine(d, WipeAndRejoin, "op:test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, fileSilent)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the silence condition survived the wipe: %v", err)
+	}
+}
+
+// A spool resumes at its last chunk boundary. A region of zeros, a spool a
+// crash left unsynced, read as a run of empty chunks whose CRC of nothing is
+// 0: the resume continued past it, and only the final digest refused the
+// install. The writer never emits an empty chunk, so one ends the prefix
+// (#422).
+func TestASpoolResumesBeforeARegionOfZeros(t *testing.T) {
+	payload := []byte("abc")
+	var h [chunkHeaderLen]byte
+	binary.LittleEndian.PutUint32(h[0:], uint32(len(payload)))
+	binary.LittleEndian.PutUint32(h[8:], crc32.Checksum(payload, castagnoli))
+	prefix := append(append(h[:], payload...), make([]byte, 4*chunkHeaderLen)...)
+	if got, want := alignedOffset(prefix), int64(chunkHeaderLen+len(payload)); got != want {
+		t.Fatalf("resume offset %d over a chunk then zeros, want %d", got, want)
+	}
 }

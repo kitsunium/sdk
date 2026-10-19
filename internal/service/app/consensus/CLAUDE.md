@@ -48,12 +48,37 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   `TestARequestedCutWhoseSyncFailsStopsTheNode`,
   `TestAnInstallWhoseSyncFailsStopsTheNode`).
 - Truncate a hole before every segment is classified (R8-02, R9-03).
+- Serve a log recovery read without syncing it first: a process killed
+  between a batch's write and its fdatasync leaves the batch in the page
+  cache, and a same-boot restart would acknowledge it from there.
+  `syncAtOpen` fdatasyncs every segment and syncs the log, data and
+  snapshot directories before anything is trusted (#414,
+  `TestRecoverySyncsWhatItTrustsBeforeServing`).
+- Compact the store past its end without the term: it holds no entry to read
+  it from, and a node restarted with no table votes on that term. The engine
+  passes it (`storeReq.compactTerm`, `compactLog`), the file log refuses a
+  compaction past its end without one, and `noTableBase` never takes a term
+  of 0 above index 0 (#415,
+  `TestACompactionPastTheEndRecordsTheTermItIsGiven`,
+  `TestANoTableBaseNeverTakesATermOfZero`, and through the driver
+  `TestClusterSnapshotInstallsOnALaggingNode`).
 - Seal a segment again in recovery: a durable seal only needs the next
   segment published (`publishNext`, review H2).
 - Restore a snapshot the machine has applied past, or install one whose
   freshness was not checked again after the transfer (review H3).
+- Move raft onto an install it committed past while the machine restored
+  it, or onto any install on a leader: `InstallSnapshot` ignores both, or
+  the engine state of the entries committed past the snapshot is rolled
+  back and carried by the next cut — a node with a table evicted the
+  payloads it applied, so they cannot be replayed (#416,
+  `TestAnInstallBelowTheCommitLeavesTheEngineStateAlone`).
 - Hold `mu` across a batch's write and fdatasync: writers serialise on
   `wmu`, readers must not wait for the disk (review L6).
+- Write a batch's end record before the rest of the batch is durable: a
+  power cut during one fdatasync may persist the end record's page without
+  an earlier one's, and recovery quarantines a valid end after a hole.
+  `writeBatch` syncs the body, then writes and syncs the end record (#417,
+  `TestTheEndRecordIsWrittenOnceTheRestOfItsBatchIsDurable`).
 - Bound a read of the store by the event loop's commit: the loop commits a
   suffix it truncated and appended in memory before the storage actor
   rewrote it, and an install moves the commit before the store. A reader
@@ -62,6 +87,41 @@ wrap, it is not published (`TestResourceMetrics` asserts both).
   commit alone (#400, `TestReadCommittedNeverReadsASuffixTheStoreHasNotRewritten`),
   and never at the store's commit alone, which trails an entry Propose
   already answered (`TestReadCommittedReturnsAnAppliedEntryAtOnce`).
+- Truncate for `TruncateAndStaySilent` before the silence condition is
+  durable, or persist a term below one a crashed run already wrote: a rerun
+  reads a log whose dropped records no longer name their term (#418,
+  `TestARerunOfTruncateAndStaySilentKeepsTheDroppedTerm`).
+- Restore a snapshot without answering the proposals it covers: applied1
+  never runs at their indexes and `sweepWaiters` answers only above the
+  commit. `answerCovered` answers them OUTCOME_UNKNOWN and releases their
+  pending bytes (#419, `TestARestoredSnapshotAnswersTheProposalsItCovers`).
+- Wait for a proposal's answer on `p.done` and the context alone: a submit
+  racing a stop can land in `propc` after the loop drained it for the last
+  time. `awaitProposal` also waits for `loopDone` (#420,
+  `TestAProposeThatRacesAStopIsAnswered`).
+- Run generation 1 on a node's own `InitialTiming`: the founding entry
+  carries the contract `Bootstrap` proposed, and it rules once committed
+  (`commitFounding`); a snapshot's contract is adopted at an equal generation
+  (#421, `TestTheFoundingContractRules`).
+- Answer a pinned snapshot's `Remove` with STORAGE_FAILED, or a failed
+  unlink or directory sync with anything else: `retain` stops the node on
+  the second (D4) and only logs the first, a transfer in flight (#422,
+  `TestRemovingAPinnedSnapshotIsNotAStorageFailure`,
+  `TestARetentionWhoseRemoveFailsStopsTheNode`).
+- Convert a length read off the wire or the disk to `int` before bounding
+  it: on 32 bits it turns negative and passes the bound (#422,
+  `TestReadChunkRefusesALengthAboveTheLimit`, run by `test-386`).
+- Keep `Recover`'s index at a persisted commit below the log's base: the
+  forced entry cannot be appended there, and every rerun failed the same
+  way. `adoptedPastTheBase` adopts from the base, and refuses with a reason
+  when nothing records the chain there (#422,
+  `TestRecoverAdoptsPastABaseAboveThePersistedCommit`).
+- Resume a spool across an empty chunk: the writer never emits one, and a
+  region of zeros reads as a run of them (#422,
+  `TestASpoolResumesBeforeARegionOfZeros`).
+- Create a directory of the data directory without `mkdirDurable`, or put
+  the data directory on NFS: Linux emulates its `flock` with POSIX locks,
+  which one process does not exclude from itself (#422, ADR 0152).
 - Take a JOIN answer from an unpinned peer (`JoinConfig.Pins`, review M4),
   or admit a key two members share (review M5).
 - Cut `Recover`'s log back to the commit the survivor persisted: that commit

@@ -719,11 +719,24 @@ R7's rules contradicted each other.
        write through dm-crypt leaves.
      - When its end-of-batch record IS valid, the batch may have been
        acknowledged. A bad CRC inside it is quarantined, never truncated.
-     - **The residual, stated:** a device that persists the end record but
-       not an earlier chunk of the same batch, while reporting the sync, is
+     - **The end record is written last, on its own
+       ([#417](https://github.com/kitsunium/sdk/issues/417)).** A batch is
+       made durable in two steps: every record before the last, then its
+       `fdatasync`; then the last record, which carries the end-of-batch
+       flag, then its `fdatasync`. With one `fdatasync` per batch a power
+       cut DURING it could persist any subset of the batch's dirty pages
+       (neither the page cache, the block layer nor the disk orders the
+       pages of one file, ALICE, OSDI 2014): the end record's page without
+       an earlier one's, a batch never acknowledged, quarantined, and two
+       nodes cut together waiting for an operator. Telling such a tear by
+       zeroed sectors does not work through dm-crypt, which leaves random
+       bytes. Written last, a valid end record proves that the rest of its
+       batch was durable before it.
+     - **The residual, stated:** a device that loses a chunk of a batch
+       after reporting that chunk's sync, then persists the end record, is
        outside the crash-only model. That case is quarantined, so it loses
        availability, never data.
-     - **A second residual, stated (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), L7):** damage to
+     - **A second residual, stated (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), L7, found again by the strict review, [#422](https://github.com/kitsunium/sdk/issues/422)):** damage to
        the END record of the highest batch AFTER its sync returned (bit
        rot, a misdirected write) cannot be told from a batch that never
        completed. That batch is truncated, and with it what it acknowledged,
@@ -738,6 +751,21 @@ R7's rules contradicted each other.
   The reason for point 3: in the highest batch, an acknowledged record can
   exist once that batch's sync returned. A rule that truncated any damage
   there would delete acknowledged data (codex, R8-02).
+- **What recovery trusts is synced first ([#414](https://github.com/kitsunium/sdk/issues/414)).**
+  A process killed between a batch's write and its `fdatasync` leaves the
+  batch in the page cache, end record included, and a restart in the same
+  boot reads it as complete. Before the node serves anything, recovery
+  `fdatasync`s every published segment and syncs the log directory, the
+  data directory and the snapshot directory, as PostgreSQL does before
+  crash recovery (`SyncDataDirectory`). Without it, a Ready that writes
+  nothing new acknowledges entries and votes no device holds, and a power
+  cut within the write-back delay loses them. A write-back that failed after
+  the process died is reported to the fresh descriptor (errseq, Linux 4.13):
+  the open fails with `STORAGE_FAILED`, never a log trusted from pages the
+  disk refused. A directory the node creates (the data directory, `log/`,
+  `snap/`) has its parent synced, and the audit file's directory is synced
+  after each line ([#422](https://github.com/kitsunium/sdk/issues/422)):
+  only ext4 and XFS publish a new entry through their journal anyway.
 - **Zeroing only after classification, only for a torn tail (R8-03).** When
   step 4 truncates a torn tail, recovery zeroes the rest of that segment and
   syncs it, as etcd's `ZeroToEnd` does (`wal.go:505`, `wal.go:562-570`),
@@ -754,8 +782,10 @@ R7's rules contradicted each other.
   because a second seal is invisible to the next recovery and leaves a hole
   in the batch sequence (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), H2; the dm-crypt lane cuts in
   that window and reopens twice).
-- **Nothing else changes.** D5b's sync-done still means "data durable", and
-  D16 keeps one `fsync` per side.
+- **Nothing else changes.** D5b's sync-done still means "data durable".
+  D16 counts two `fdatasync` per batch on each side since
+  [#417](https://github.com/kitsunium/sdk/issues/417), the fallback stated
+  below: the end record waits for the rest of its batch.
 - *Tests:* crashes between a batch's write, its sync, the next batch's write
   and the acknowledgement, in every order the kernel allows. A shorter
   overwrite, then a crash. A crash that persists a RANDOM SUBSET of the
@@ -764,7 +794,10 @@ R7's rules contradicted each other.
   (R8-02).
 - **Fallback, stated in advance:** if the batch fields are not adopted, or
   review shows the implicit form unsafe, the explicit watermark record of
-  round 5 comes back, and D16 is rewritten with two `fsync` per batch.
+  round 5 comes back, and D16 is rewritten with two `fsync` per batch. The
+  second half was taken by [#417](https://github.com/kitsunium/sdk/issues/417):
+  the batch fields stay, and the end record is synced after the rest of its
+  batch.
 
 Both are writes that were never acknowledged, because acknowledgement follows
 the sync. A node that truncated one of them **keeps voting and acknowledging**,
@@ -788,7 +821,13 @@ directory and cleared it, through `Inspect` and the product's own procedure
    its log past the truncation point AND has committed an entry in its
    current term. **Its cost, stated (R5-13):** with one of the two other
    nodes down, no leader can exist, and the node stays silent until the
-   third returns.
+   third returns. **The condition is persisted before the truncation
+   ([#418](https://github.com/kitsunium/sdk/issues/418)):** its term, the
+   highest any readable record names, is read before anything changes and
+   written durably first, never below a condition a crashed run already
+   persisted. A rerun after a crash past the truncation reads a log whose
+   dropped records no longer name their term; a lower term would let the
+   node vote twice in the term of a vote the truncation dropped.
 There is no third exit that keeps the damaged node voting.
 
 **Product commands (R5-12).** The first consumer exposes both exits as
@@ -1339,6 +1378,15 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
     at or below its own commit index is accepted. Its may-campaign gate is
     closed while it holds no table, so it can vote but never lead. A test
     corrupts every snapshot and cold-restarts (R6-02).
+    **Its base term is never guessed ([#415](https://github.com/kitsunium/sdk/issues/415)).**
+    It votes on the term of its log's compaction point, so that term must be
+    the snapshot's. An install past the end of the log compacts the store
+    to an index it holds no entry for: the engine passes the term it holds
+    there, and the store refuses a compaction past its end without one (it
+    used to record 0, and the node granted its vote to any candidate whose
+    last term was 1 or more). At a start with no table the base takes the
+    term of the snapshot metadata at that index when the log answers 0, and
+    the node refuses to start when neither knows it.
   - **integrity checks beyond the checksum never gate start-up.** ADR 0173
     may add anchors on top of these snapshots without changing that rule.
 - **Cut:** `StateMachine.Snapshot` on the apply goroutine; `WriteTo` streams
@@ -1402,6 +1450,17 @@ is refused with `OVERLOADED`. Nothing is appended in either case.
     published: a new leader may have moved the receiver past it meanwhile.
     The apply goroutine never restores a snapshot the machine has already
     applied past (review of [PR #301](https://github.com/kitsunium/sdk/pull/301), H3);
+  - **the step function moves onto an install only while it is still
+    ahead of it ([#416](https://github.com/kitsunium/sdk/issues/416)).** The
+    restore can take seconds, and a new leader may make the receiver commit
+    past the snapshot meanwhile, or elect it. Its log and its engine state
+    then already hold everything the snapshot holds, and the effects of the
+    engine entries committed past it: a leader, or a node with a table whose
+    commit reached the snapshot's index, ignores the install, which would
+    roll the cluster version, the timing contract and the no-space alarm
+    back and let its next cut carry the regression. A node with no table
+    still installs, and the effects of the entries it holds committed past
+    the snapshot are applied again over the snapshot's state;
   - `Restore` is serialised with `Apply`;
   - **the install is recorded durably, step by step.** An installation record
     names the snapshot and the step reached: spooled and synced, published,
@@ -1693,6 +1752,14 @@ committed before the call, and returns the applied index:
       `MaxClockDrift` form the timing contract. The committed contract entry
       is its ONLY authority. A node's own configuration is merely the
       initial proposal, used at `Bootstrap`.
+    - **The founding entry is generation 1's contract entry
+      ([#421](https://github.com/kitsunium/sdk/issues/421)).** Entry 1 carries
+      the contract `Bootstrap` proposed. Appended, it widens the vote window
+      and names generation 1's contract for the lease; committed, it is the
+      contract in force unless a later generation already is. A snapshot's
+      contract is adopted at an equal generation too: a node's own
+      configuration used to rule generation 1 on every node, and two nodes
+      started with different values timed one generation differently.
     - **A different applied contract version is never grounds for refusal
       (R3-06).** It is normal during a contract change, and it feeds the
       lease minimum below. The handshake refuses only a contract it cannot
@@ -1825,6 +1892,13 @@ unweakened. The `lock.Locker` adapter itself is deferred.
   `internal/service/data/vfs` already does. A second process
   opening the same directory fails at once with `DATA_DIR_LOCKED`, before
   either can touch the tail.
+  **The data directory is on a local filesystem, stated
+  ([#422](https://github.com/kitsunium/sdk/issues/422)).** On NFS, Linux
+  emulates `flock` with POSIX locks, which belong to the process: two
+  `DataDir` of one process on the same directory would no longer exclude
+  each other, and the durability rules above assume a local disk. No check
+  can tell every network filesystem apart, so this is a deployment rule,
+  not a refusal.
 - **Who closes what (R3-18).** A `Node` never closes what it was handed: the
   `DataDir`, its stores and the transport belong to the caller. `DataDir.Close`
   is idempotent, and refuses while a `Node` built on it is open. `Recover` and
@@ -2550,7 +2624,8 @@ recorded in `BENCH.md`:
 
 - p99 quorum commit from an FRA or RBX leader ≤ 2 × the nearest RTT + 2 ×
   the measured fsync p99, at 1 000 proposals/s;
-- sustained ≥ 10 000 entries/s of 256 B committed with one `fsync` per batch;
+- sustained ≥ 10 000 entries/s of 256 B committed with two `fdatasync` per
+  batch, the end record after the rest ([#417](https://github.com/kitsunium/sdk/issues/417));
 - failover (leader killed, then first commit under the new leader): **p99 ≤
   3.5 s, provisional**. The final number is derived from the simulator's
   distribution with the chosen timeouts, not chosen first. The first draft's
@@ -3550,8 +3625,8 @@ consumer may not start before all of them are in place.
 
 - **The SDK gains a domain that can make ADR 0052's missing guarantee**:
   agreement across machines, with a fence a resource can check.
-- **Every commit costs one network round trip and one `fsync`** on two of
-  three nodes. There is no asynchronous mode; a caller that wants one does not
+- **Every commit costs one network round trip and one batch's two
+  `fdatasync`** on two of three nodes ([#417](https://github.com/kitsunium/sdk/issues/417)). There is no asynchronous mode; a caller that wants one does not
   want this domain.
 - **A minority is read-only and says so.** A node cut off from the majority
   fails `Propose` with `NOT_LEADER` or `OUTCOME_UNKNOWN`, fails `Barrier` with

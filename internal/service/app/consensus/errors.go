@@ -17,6 +17,13 @@ const (
 	// errImpossible is the cause of an answer a store must never give.
 	errImpossible cause = "impossible answer"
 
+	// errUnknownCompactTerm is the cause of a compaction past the log's end
+	// whose term the caller did not give (#415).
+	errUnknownCompactTerm cause = "compaction past the end of the log with no term"
+	// errUnknownBaseTerm is the cause of a start with no table whose base
+	// term neither the log nor a snapshot's metadata knows (#415).
+	errUnknownBaseTerm cause = "no term known for the log's base"
+
 	// errPinned is the cause of a Remove refused while a handle is open.
 	errPinned cause = "snapshot pinned by an open handle"
 	// errSilenceLength is the cause of a silence condition of a length this
@@ -108,6 +115,13 @@ func storageFailed(op string, cause error) error {
 		f = append(f, errs.String("cause", cause.Error()))
 	}
 	return origin(coreconsensus.StorageFailed, f...)
+}
+
+// pinnedSnapshot is a Remove refused while a handle reads the snapshot: a
+// transfer in flight, benign, retried at the next cut. It is never a
+// STORAGE_FAILED, which stops the node (#422).
+func pinnedSnapshot() error {
+	return origin(coreconsensus.AdminPreconditionFailed, errs.String("why", errPinned.Error()))
 }
 
 // notLeader is the NOT_LEADER a follower answers, the leader it knows in
