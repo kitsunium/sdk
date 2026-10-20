@@ -50,6 +50,7 @@ go_test(
         "backups_internal_test.go",
         "decode_internal_test.go",
         "gen_api_test.go",
+        "link_internal_test.go",
         "prune_internal_test.go",
         "rotate_internal_test.go",
         "rotate_interval_bench_test.go",

@@ -13,7 +13,7 @@ exports it as a type alias for legacy call sites). This package ships two:
 | File      | Role |
 |---|---|
 | `encoder.go`  | `Encoder = corelogger.Encoder` type alias; `ReservesKey` + `ReservedPrefix` — the top-level keys the SDK reserves (ADR 0070) and the `attr.` namespace they are renamed under |
-| `text.go`     | `NewText` → `textEncoder` — renders `RecordEvent` → bytes, sanitises framing bytes through the exported `AppendSanitized` (the one scrub the legacy `service/observe/logger.TextHandler` calls too), renders the top-level trace context; `appendQuotedString`/`quoteSafe` are its escaping fast path |
+| `text.go`     | `NewText` → `textEncoder` — renders `RecordEvent` → bytes, sanitises framing bytes and terminal controls through the exported `AppendSanitized` (the one scrub the legacy `service/observe/logger.TextHandler` calls too), renders the top-level trace context; `appendQuotedString`/`quoteSafe` are its escaping fast path |
 | `json.go`     | `NewJSON` → `jsonEncoder` — renders `RecordEvent` → one JSON object per line, flat attrs, top-level trace context |
 | `timestamp.go`| `timestampLayout` + `appendTimestamp` — the one RFC3339-milli layout and the renderer BOTH encoders use in place of `time.Time.AppendFormat` |
 
@@ -25,9 +25,14 @@ exports it as a type alias for legacy call sites). This package ships two:
 
 - Timestamp: RFC3339 with millisecond precision (`timestampLayout`).
 - Level: `level.Level.String()` (uppercase).
-- Message: sanitised — `\n`, `\r`, NUL collapsed to a single space so
-  line-framed downstream sinks (syslog RFC5424, plain file tail) cannot be
-  spoofed by attacker-influenced content.
+- Message: sanitised — every C0 control (`\n`, `\r`, NUL, ESC, TAB…), DEL,
+  every C1 control (U+0080–U+009F, NEL and CSI among them), U+2028 and U+2029
+  each become a single space, so neither line-framed downstream sinks (syslog
+  RFC5424, plain file tail) nor the terminal a console sink writes to can be
+  driven by attacker-influenced content: `ESC [2K ESC [G` erased the line and
+  returned to column 0, the effect of the CR the scrub already removed
+  (CWE-117, CWE-150, #464). Everything else — printable UTF-8 in any script,
+  and bytes that are not valid UTF-8 — is copied unchanged.
 - Attrs: `key=value` with strings and durations quoted exactly as
   `strconv.AppendQuote` quotes them; times unquoted, in the header's
   `timestampLayout`; ints / uints / bool / float64 unquoted; every other
@@ -90,6 +95,19 @@ exports it as a type alias for legacy call sites). This package ships two:
   forms they replaced: `Test_appendJSONEscapedRunsMatchBytewise` and
   `Test_AppendSanitizedRunsMatchBytewise` sweep all 256 byte values alone, at
   the start, middle and end of a run, and doubled.
+- **`AppendSanitized` inlines, and its slow path is a call.** Since #464 it
+  scrubs C0, DEL, C1, U+2028 and U+2029, yet it stays within the inlining
+  budget (cost 80 of 80 on go1.27.2): it tests printable ASCII in ONE unsigned
+  comparison per byte (`text[i]-sanitizeFloor < printableSpan`) and appends
+  the whole text when that is all it holds; the first other byte hands the
+  text to `appendScrubbed` (runs, `scrubWidth` for the multi-byte runes).
+  Losing the inlining cost +4 % to +18 % on the text benchmarks; keeping it,
+  measured interleaved A/B (n=10) against the CR/LF/NUL scrub it replaced:
+  −1 % to −14 % on every `Text_*` benchmark (geomean −6 %), 0 B and 0 allocs
+  unchanged. `Test_AppendSanitizedRunsMatchBytewise` now holds it to a
+  rune-decoding form of the contract over every byte, every `C2 xx` and
+  `E2 80 xx` sequence and the truncated ones, and
+  `Test_AppendSanitizedEveryRune` over every code point.
 - **One timestamp layout, two encoders.** `timestampLayout` is declared once,
   in `timestamp.go`, and serves both encoders' headers and every `KindTime`
   attribute; `appendTimestamp` renders that layout and no other.

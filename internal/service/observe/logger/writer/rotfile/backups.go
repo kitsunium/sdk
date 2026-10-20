@@ -4,7 +4,10 @@ import (
 	"compress/gzip"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // backupName returns the rotated sibling path for slot n (Path.n), or its
@@ -87,35 +90,83 @@ func (s *rotatingSink) promoteActive() error {
 // then removes the uncompressed original. It runs while the sink is between
 // descriptors (the active file is closed) so producers stall only for the
 // duration of the compaction — documented as the producer-stall window.
-func (s *rotatingSink) gzipActive() (err error) {
-	//: create the .gz sibling with 0600 so gzip never leaks default perms.
-	dst, derr := os.OpenFile(s.cfg.Path+".1.gz", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, defaultFilePerm)
-	//: a create failure aborts the rotation.
-	if derr != nil {
-		//: surface the create failure under the rotate sentinel.
-		return wrapRotate(derr, "service/observe/logger/writer/rotfile.gzipActive: creating .gz sibling")
-	}
-	//: close dst on every path; a late close failure replaces a nil err so a
-	//: truncated archive is never reported as success.
-	defer func() {
-		//: capture the close error only when the body itself succeeded.
-		if cerr := dst.Close(); cerr != nil && err == nil {
-			//: a close failure means the .gz may be truncated — surface it.
-			err = wrapRotate(cerr, "service/observe/logger/writer/rotfile.gzipActive: closing .gz sibling")
-		}
-	}()
-	//: stream the closed active file through gzip into dst.
-	if cerr := compressInto(dst, s.cfg.Path); cerr != nil {
+//
+// The archive is written to a fresh sibling os.CreateTemp makes — a random
+// name opened O_CREATE|O_EXCL, 0600, which no link can stand in for — and
+// renamed onto Path.1.gz. A rename replaces whatever entry is there and never
+// follows it, so a link planted at Path.1.gz after shiftExisting moved the
+// previous one away is replaced, not written through (CWE-59, #463); and a
+// failed compression leaves no truncated Path.1.gz behind.
+func (s *rotatingSink) gzipActive() error {
+	final := s.cfg.Path + ".1.gz"
+	//: the archive, complete and closed, under a name no link can stand in for.
+	tmpName, werr := writeArchive(filepath.Dir(s.cfg.Path), filepath.Base(final)+".tmp-*", s.cfg.Path)
+	//: nothing was published; writeArchive removed what it wrote.
+	if werr != nil {
 		//: the helper already wrapped its diagnostic.
-		return cerr
+		return werr
 	}
-	//: drop the uncompressed original now that the .gz is durable.
+	//: publish: the entry at Path.1.gz is replaced, never followed.
+	if rerr := os.Rename(tmpName, final); rerr != nil {
+		//: surface under the rotate sentinel, and drop the unpublished archive.
+		return removeLeftover(tmpName, wrapRotate(rerr, "service/observe/logger/writer/rotfile.gzipActive: publishing .gz sibling"))
+	}
+	//: drop the uncompressed original now that the .gz is in place.
 	if rerr := os.Remove(s.cfg.Path); rerr != nil && !os.IsNotExist(rerr) {
 		//: a removal failure leaves a stray plaintext copy — surface it.
 		return wrapRotate(rerr, "service/observe/logger/writer/rotfile.gzipActive: removing uncompressed original")
 	}
-	//: compaction body complete; the deferred close finalises the archive.
+	//: the archive is published and the original gone.
 	return nil
+}
+
+// writeArchive compresses the file at srcPath into a fresh file os.CreateTemp
+// makes in dir under pattern — O_CREATE|O_EXCL, 0600 — closes it, and returns
+// its name. On failure it removes that file and returns no name, so a failed
+// rotation leaves no partial archive behind.
+func writeArchive(dir, pattern, srcPath string) (name string, err error) {
+	tmp, terr := os.CreateTemp(dir, pattern)
+	//: a create failure aborts the rotation.
+	if terr != nil {
+		//: surface the create failure under the rotate sentinel.
+		return "", wrapRotate(terr, "service/observe/logger/writer/rotfile.gzipActive: creating .gz sibling")
+	}
+	//: closed on every path, before the caller renames it — Windows refuses to
+	//: rename an open file; a late close failure replaces a nil err, so a
+	//: truncated archive is never published; a failure removes the file.
+	defer func() {
+		//: the close error matters only when the body itself succeeded.
+		if cerr := tmp.Close(); cerr != nil && err == nil {
+			//: a close failure means the archive may be truncated.
+			err = wrapRotate(cerr, "service/observe/logger/writer/rotfile.gzipActive: closing .gz sibling")
+		}
+		//: a failed archive is never handed to the caller.
+		if err != nil {
+			name, err = "", removeLeftover(tmp.Name(), err)
+		}
+	}()
+	//: stream the closed active file through gzip into the sibling.
+	if cerr := compressInto(tmp, srcPath); cerr != nil {
+		//: the helper already wrapped its diagnostic.
+		return "", cerr
+	}
+	//: the archive, closed by the deferred call.
+	return tmp.Name(), nil
+}
+
+// removeLeftover removes the unpublished archive at name after cause failed
+// the rotation, and returns cause — with the file named in a "leftover" field
+// when it could not be removed, so the stray sibling is reported rather than
+// silently left. Origin wins: the code stays the cause's.
+func removeLeftover(name string, cause error) error {
+	rerr := os.Remove(name)
+	//: removed, or already gone.
+	if rerr == nil || os.IsNotExist(rerr) {
+		//: the rotation's own error.
+		return cause
+	}
+	//: the cause, naming the file left behind and why.
+	return errs.Wrap(cause, errs.WrapParams{}, errs.String("leftover", name), errs.String("leftover_error", rerr.Error()))
 }
 
 // compressInto streams the file at srcPath through gzip into dst. Factored out

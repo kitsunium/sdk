@@ -1,6 +1,11 @@
 package rotfile
 
-import "os"
+import (
+	"os"
+
+	corerotfile "github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
 
 // maybeRotate rotates the active file when appending incoming bytes would push
 // it past cfg.MaxBytes. It is a no-op when rotation is disabled (MaxBytes <= 0),
@@ -23,6 +28,12 @@ func (s *rotatingSink) maybeRotate(incoming int64) error {
 // freshly rotated Path.1, then reopens Path through the hardened path so the
 // symlink + O_NOFOLLOW + 0600 checks re-run. The caller holds s.mu.
 func (s *rotatingSink) rotate() error {
+	//: a sink whose last reopen failed holds no descriptor: open one first, so
+	//: the cut below has a file to close and rename.
+	if oerr := s.ensureOpen(); oerr != nil {
+		//: still refused — RotFileOpenFailed, nothing rotated.
+		return oerr
+	}
 	//: close the active descriptor before renaming it.
 	if cerr := s.f.Close(); cerr != nil {
 		//: surface the close failure under the rotate sentinel.
@@ -42,10 +53,10 @@ func (s *rotatingSink) rotate() error {
 	f, oerr := openHardened(s.cfg.Path)
 	//: a reopen failure leaves the sink unusable — surface it.
 	if oerr != nil {
-		//: V45: re-seed size to 0 so the next maybeRotate does not immediately
-		//: re-enter rotate() on the still-closed descriptor; the next Write retries
-		//: the open via reopenAfterFailure and the sink self-heals once the transient
-		//: condition clears. origin wins — RotFileOpenFailed already set code/reason.
+		//: V45, #463: drop the closed descriptor so the next Write reopens Path
+		//: (ensureOpen) and the sink self-heals once the transient condition — a
+		//: planted link removed, EMFILE or ENOSPC gone — clears. origin wins —
+		//: RotFileOpenFailed already set code/reason.
 		s.reopenAfterFailure()
 		//: surface the reopen failure; the sink will retry the open next Write.
 		return oerr
@@ -61,31 +72,57 @@ func (s *rotatingSink) rotate() error {
 
 // reopenAfterFailure best-effort reopens Path through openHardened after a
 // rotation step failed with the active descriptor already closed, so the sink
-// self-heals on the next Write instead of latching into a permanently-closed
-// state (V45). It re-seeds s.size from the reopened file; on a still-failing
-// reopen it resets s.size to 0 so the next maybeRotate does not immediately
-// re-enter rotate() on the dead descriptor — the next Write retries the open.
-// The caller holds s.mu and returns the original (more informative) error.
+// self-heals instead of latching into a permanently-closed state (V45). On a
+// still-failing reopen it drops the closed descriptor — s.f is nil — so the
+// next Write, Flush or Rotate opens Path again through ensureOpen rather than
+// writing to a dead descriptor forever (#463). The caller holds s.mu and
+// returns the original (more informative) error.
 func (s *rotatingSink) reopenAfterFailure() {
-	//: try the same hardened open the happy path uses; failure is non-fatal here.
-	f, oerr := openHardened(s.cfg.Path)
-	//: a still-failing reopen leaves no usable descriptor — reset size so the
-	//: next Write retries the open rather than thrashing rotate() on a dead fd.
-	if oerr != nil {
-		//: keep s.f as-is (already closed) but neutralise the size trigger.
-		s.size = 0
-		//: nothing more to recover here; the next Write retries the open.
+	s.f = nil
+	s.size = 0
+	//: try the same hardened open the happy path uses; failure is non-fatal
+	//: here — the caller returns the rotation's own error.
+	if oerr := s.ensureOpen(); oerr != nil {
+		//: no descriptor: the next Write, Flush or Rotate retries the open.
 		return
 	}
-	//: adopt the recovered descriptor in place of the closed one.
+}
+
+// ensureOpen opens Path through openHardened when the sink holds no
+// descriptor — its last reopen failed — and re-seeds s.size from the file. It
+// is a no-op on a sink that holds one. The caller holds s.mu.
+func (s *rotatingSink) ensureOpen() error {
+	//: the common case: a live descriptor.
+	if s.f != nil {
+		//: nothing to reopen.
+		return nil
+	}
+	//: a closed sink stays closed, as one that held its descriptor does.
+	if s.closed {
+		//: the write a closed descriptor refuses, under the same sentinel.
+		return errs.Wrap(os.ErrClosed, errs.WrapParams{
+			Code:    corerotfile.CodeRotFileWriteFailed,
+			Reason:  "ROT_FILE_WRITE_FAILED",
+			Public:  "Rotating file write failed",
+			Private: "service/observe/logger/writer/rotfile.ensureOpen: the sink is closed",
+		})
+	}
+	f, oerr := openHardened(s.cfg.Path)
+	//: still refused: the sink keeps no descriptor and the caller reports why.
+	if oerr != nil {
+		//: RotFileOpenFailed, with the kind field when a link is the reason.
+		return oerr
+	}
+	//: adopt the recovered descriptor.
 	s.f = f
-	//: re-seed size from the reopened file so the next threshold check is honest.
 	s.size = 0
 	//: an existing file (e.g. a Path.1 rename that never happened) still counts.
 	if fi, serr := f.Stat(); serr == nil {
 		//: existing content counts toward the next rotation threshold.
 		s.size = fi.Size()
 	}
+	//: open again.
+	return nil
 }
 
 // shiftBackups renames the rotated siblings down by one (dropping the oldest

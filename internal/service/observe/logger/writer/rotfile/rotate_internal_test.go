@@ -260,8 +260,8 @@ func Test_rotatingSink_rotate_selfHealsAfterShiftFailure(t *testing.T) {
 // Test_rotatingSink_reopenAfterFailure covers the V45 recovery helper directly:
 // a healthy Path reopens into a live descriptor with size re-seeded from the
 // file, while a reopen that still fails (a symlink planted at Path, refused by
-// the hardening) resets size to 0 and leaves the prior descriptor untouched so
-// the next Write retries the open.
+// the hardening) resets size to 0 and drops the closed descriptor so the next
+// Write retries the open (#463).
 func Test_rotatingSink_reopenAfterFailure(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -301,12 +301,13 @@ func Test_rotatingSink_reopenAfterFailure(t *testing.T) {
 		s.mu.Lock()
 		s.size = 999
 		s.reopenAfterFailure()
-		gotFD := s.f != closed
+		gotFD := s.f != nil && s.f != closed
+		dropped := s.f == nil
 		gotSize := s.size
 		s.mu.Unlock()
-		//: a healthy reopen swaps in a fresh descriptor; a failing one keeps the
-		//: closed one so the caller still owns a (dead) fd to retry against.
-		if gotFD != c.wantFD {
+		//: a healthy reopen swaps in a fresh descriptor; a failing one drops the
+		//: closed one, so the next Write opens Path again (#463).
+		if gotFD != c.wantFD || dropped == c.wantFD {
 			t.Errorf("%s: descriptor swapped=%v want %v", c.name, gotFD, c.wantFD)
 		}
 		//: a healthy reopen re-seeds size from the file; a failing one zeroes it

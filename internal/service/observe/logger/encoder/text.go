@@ -43,6 +43,40 @@ const (
 	quoteSafeCeiling byte = 0x7e
 )
 
+// The bytes AppendSanitized's fast path tests, the UTF-8 encodings of the
+// runes it scrubs, and how many bytes each scrubbed shape spans.
+const (
+	// sanitizeFloor is the first byte that is not a C0 control (space).
+	sanitizeFloor byte = 0x20
+	// sanitizeDEL is DEL, the one ASCII control above the C0 range.
+	sanitizeDEL byte = 0x7f
+	// printableSpan is how many bytes printable ASCII spans from
+	// sanitizeFloor: 0x20-0x7E, so b-sanitizeFloor < printableSpan tests it in
+	// one unsigned comparison.
+	printableSpan byte = sanitizeDEL - sanitizeFloor
+	// utf8C1Lead leads the two-byte encodings of U+0080-U+00BF, the C1
+	// controls U+0080-U+009F among them.
+	utf8C1Lead byte = 0xc2
+	// utf8C1Last is the last continuation byte of a C1 control (U+009F).
+	utf8C1Last byte = 0x9f
+	// utf8SeparatorLead leads the three-byte encoding of U+2000-U+2FFF.
+	utf8SeparatorLead byte = 0xe2
+	// utf8SeparatorMid is the second byte of U+2000-U+203F.
+	utf8SeparatorMid byte = 0x80
+	// utf8LineSeparatorLast is U+2028's last byte; U+2029's is the next.
+	utf8LineSeparatorLast byte = 0xa8
+	// utf8ParagraphSeparatorLast is U+2029's last byte.
+	utf8ParagraphSeparatorLast byte = 0xa9
+	// continuationFloor is the first UTF-8 continuation byte.
+	continuationFloor byte = 0x80
+	// asciiControlWidth is the bytes a C0 control or DEL spans.
+	asciiControlWidth int = 1
+	// c1ControlWidth is the bytes a C1 control spans in UTF-8.
+	c1ControlWidth int = 2
+	// separatorWidth is the bytes U+2028 or U+2029 spans in UTF-8.
+	separatorWidth int = 3
+)
+
 // textEncoder renders records as a single plain-text line. Unexported so the
 // public surface is the Encoder interface returned by NewText.
 type textEncoder struct {
@@ -146,12 +180,16 @@ func appendTraceContext(dst []byte, r corelogger.RecordEvent) []byte {
 	return tc.AppendSpanIDHex(dst)
 }
 
-// AppendSanitized copies text onto dst replacing '\n', '\r', and NUL
-// with a single space so the content can never inject a new frame in a
-// line-framed downstream sink. Other control characters are preserved to
-// keep the rendering faithful; only framing-sensitive bytes are stripped.
-// It scrubs every attacker-influenceable textual field — the Message, group
-// names, and attribute keys — not just the Message (V110).
+// AppendSanitized copies text onto dst replacing every C0 control byte
+// (0x00-0x1F, '\n', '\r' and NUL among them), DEL (0x7F), every C1 control
+// (U+0080-U+009F, NEL among them) and the two Unicode separators U+2028 and
+// U+2029 with a single space each, so the content can neither inject a new
+// frame in a line-framed downstream sink nor drive the terminal a console sink
+// writes to — ESC [2K ESC [G erases a line and returns to its start, the
+// effect of the CR the scrub removes (CWE-117, CWE-150). Every other byte,
+// printable UTF-8 and invalid UTF-8 alike, is copied unchanged. It scrubs
+// every attacker-influenceable textual field — the Message, group names, and
+// attribute keys — not just the Message (V110).
 //
 // It is exported for one caller outside this package: the legacy
 // service/observe/logger.TextHandler, which renders the same line shape without going
@@ -159,26 +197,99 @@ func appendTraceContext(dst []byte, r corelogger.RecordEvent) []byte {
 // the scrub existed, but only here — so a line break in any of them forged a
 // log line. One function shared by both renderers cannot drift from itself.
 func AppendSanitized(dst []byte, text string) []byte {
-	//: the bytes that pass through are copied in RUNS — one append for the
-	//: whole text when it holds no framing byte, which is every ordinary
-	//: message — not one append per byte. start is the first byte of the run
-	//: not yet copied.
+	//: small enough to inline, as the CR/LF/NUL scrub was (#444): printable
+	//: ASCII, 0x20-0x7E, in ONE unsigned comparison per byte, and the whole
+	//: text appended at once when that is all it holds — every ordinary key,
+	//: group name and message.
+	for i := range len(text) {
+		//: anything else — a control, DEL, a byte of a multi-byte rune — is
+		//: looked at by the scrub proper, from there.
+		if text[i]-sanitizeFloor >= printableSpan {
+			//: the whole text, rescanned there: one argument fewer keeps this
+			//: function within the inlining budget.
+			return appendScrubbed(dst, text)
+		}
+	}
+	//: nothing to scrub.
+	return append(dst, text...)
+}
+
+// appendScrubbed is AppendSanitized for a text holding at least one byte that
+// is not printable ASCII: it copies the bytes that pass through in RUNS — one
+// append per stretch, not one per byte — and one space per scrubbed byte or
+// rune.
+func appendScrubbed(dst []byte, text string) []byte {
+	//: start is the first byte of the run not yet copied.
 	start := 0
-	//: walk text byte-by-byte (UTF-8 multi-byte runes never contain bytes in
-	//: 0x00..0x1F, so a byte-level scan is safe).
+	//: walk text byte-by-byte; the bytes of a rune already scrubbed lie
+	//: before start and are skipped.
 	for i := range len(text) {
 		b := text[i]
-		//: every other byte passes through verbatim: it extends the run.
-		if b != '\n' && b != '\r' && b != 0 {
+		//: printable ASCII extends the run, and a scrubbed rune's tail is gone.
+		if b-sanitizeFloor < printableSpan || i < start {
 			continue
 		}
-		//: framing-sensitive bytes collapse to a single space per occurrence.
+		width := 0
+		//: a byte of a multi-byte rune that is neither C1's lead nor the
+		//: separators' is copied without a call.
+		if b < continuationFloor || b == utf8C1Lead || b == utf8SeparatorLead {
+			width = scrubWidth(text, i)
+		}
+		//: nothing to scrub here: the byte extends the run.
+		if width == 0 {
+			continue
+		}
+		//: one space per scrubbed byte or rune.
 		dst = append(dst, text[start:i]...)
 		dst = append(dst, ' ')
-		start = i + 1
+		start = i + width
 	}
 	//: hand back the sanitized buffer with the last run appended.
 	return append(dst, text[start:]...)
+}
+
+// scrubWidth reports how many bytes of text, from i, AppendSanitized replaces
+// with one space: 1 for a C0 control or DEL, 2 for a C1 control, 3 for U+2028
+// or U+2029, and 0 for anything else, which is copied.
+func scrubWidth(text string, i int) int {
+	b := text[i]
+	//: a C0 control or DEL: one byte.
+	if b < sanitizeFloor || b == sanitizeDEL {
+		//: replaced alone.
+		return asciiControlWidth
+	}
+	//: U+0080-U+009F.
+	if isC1Control(text, i) {
+		//: the two bytes of the rune.
+		return c1ControlWidth
+	}
+	//: U+2028 and U+2029.
+	if isUnicodeSeparator(text, i) {
+		//: the three bytes of the rune.
+		return separatorWidth
+	}
+	//: copied unchanged.
+	return 0
+}
+
+// isC1Control reports whether text holds a C1 control at i: 0xC2 then
+// 0x80-0x9F.
+func isC1Control(text string, i int) bool {
+	//: the lead, and a continuation byte at most utf8C1Last.
+	return text[i] == utf8C1Lead && i+1 < len(text) &&
+		text[i+1] >= continuationFloor && text[i+1] <= utf8C1Last
+}
+
+// isUnicodeSeparator reports whether text holds U+2028 or U+2029 at i:
+// 0xE2 0x80 then 0xA8 or 0xA9.
+func isUnicodeSeparator(text string, i int) bool {
+	//: too short for the three bytes.
+	if text[i] != utf8SeparatorLead || i+2 >= len(text) || text[i+1] != utf8SeparatorMid {
+		//: not a separator.
+		return false
+	}
+	//: the line or the paragraph separator.
+	return text[i+2] == utf8LineSeparatorLast || text[i+2] == utf8ParagraphSeparatorLast
 }
 
 // appendAttrWithGroups prepends the active group prefix stack to the

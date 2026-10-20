@@ -28,6 +28,8 @@ files:
       - (*rotatingSink).shiftExisting
       - (*rotatingSink).promoteActive
       - (*rotatingSink).gzipActive
+      - writeArchive
+      - removeLeftover
       - compressInto
     name: backups.go
   - decls:
@@ -53,6 +55,7 @@ files:
       - (*rotatingSink).maybeRotate
       - (*rotatingSink).rotate
       - (*rotatingSink).reopenAfterFailure
+      - (*rotatingSink).ensureOpen
       - (*rotatingSink).shiftBackups
     name: rotate.go
   - decls:
@@ -70,6 +73,8 @@ files:
       - (*rotatingSink).Write
       - (*rotatingSink).Flush
       - (*rotatingSink).Close
+      - (*rotatingSink).syncOpen
+      - (*rotatingSink).closeOpen
     name: rotating_sink.go
   - decls:
       - Config
@@ -84,6 +89,22 @@ files:
       - wrapRotate
     name: wrap.go
 functions:
+  - doc: |-
+      writeArchive compresses the file at srcPath into a fresh file os.CreateTemp
+      makes in dir under pattern — O_CREATE|O_EXCL, 0600 — closes it, and returns
+      its name. On failure it removes that file and returns no name, so a failed
+      rotation leaves no partial archive behind.
+    name: writeArchive
+    params: dir, pattern, srcPath string
+    results: name string, err error
+  - doc: |-
+      removeLeftover removes the unpublished archive at name after cause failed
+      the rotation, and returns cause — with the file named in a "leftover" field
+      when it could not be removed, so the stray sibling is reported rather than
+      silently left. Origin wins: the code stays the cause's.
+    name: removeLeftover
+    params: name string, cause error
+    results: error
   - doc: |-
       compressInto streams the file at srcPath through gzip into dst. Factored out
       so gzipActive stays under KTN-FUNC-MAXLOC.
@@ -183,6 +204,7 @@ imports:
   corerotfile: github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile
   corewriter: github.com/kitsunium/sdk/internal/core/observe/logger/writer
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  filepath: path/filepath
   gzip: compress/gzip
   io: io
   level: github.com/kitsunium/sdk/internal/core/observe/logger/level
@@ -239,6 +261,11 @@ types:
           guarded by mu.
         name: tickErr
         type: error
+      - doc: |-
+          closed is set by Close, so a sink that held no descriptor — its last
+          reopen failed — never reopens one after it was closed; guarded by mu.
+        name: closed
+        type: bool
     kind: struct
     methods:
       - doc: |-
@@ -274,9 +301,16 @@ types:
           then removes the uncompressed original. It runs while the sink is between
           descriptors (the active file is closed) so producers stall only for the
           duration of the compaction — documented as the producer-stall window.
+
+          The archive is written to a fresh sibling os.CreateTemp makes — a random
+          name opened O_CREATE|O_EXCL, 0600, which no link can stand in for — and
+          renamed onto Path.1.gz. A rename replaces whatever entry is there and never
+          follows it, so a link planted at Path.1.gz after shiftExisting moved the
+          previous one away is replaced, not written through (CWE-59, #463); and a
+          failed compression leaves no truncated Path.1.gz behind.
         name: gzipActive
         recv: s *rotatingSink
-        results: err error
+        results: error
       - doc: |-
           pruneByAge removes rotated siblings whose modification time is older than the
           MaxAgeDays cutoff, evaluated against the injected clock. It is a no-op when
@@ -314,13 +348,20 @@ types:
       - doc: |-
           reopenAfterFailure best-effort reopens Path through openHardened after a
           rotation step failed with the active descriptor already closed, so the sink
-          self-heals on the next Write instead of latching into a permanently-closed
-          state (V45). It re-seeds s.size from the reopened file; on a still-failing
-          reopen it resets s.size to 0 so the next maybeRotate does not immediately
-          re-enter rotate() on the dead descriptor — the next Write retries the open.
-          The caller holds s.mu and returns the original (more informative) error.
+          self-heals instead of latching into a permanently-closed state (V45). On a
+          still-failing reopen it drops the closed descriptor — s.f is nil — so the
+          next Write, Flush or Rotate opens Path again through ensureOpen rather than
+          writing to a dead descriptor forever (#463). The caller holds s.mu and
+          returns the original (more informative) error.
         name: reopenAfterFailure
         recv: s *rotatingSink
+      - doc: |-
+          ensureOpen opens Path through openHardened when the sink holds no
+          descriptor — its last reopen failed — and re-seeds s.size from the file. It
+          is a no-op on a sink that holds one. The caller holds s.mu.
+        name: ensureOpen
+        recv: s *rotatingSink
+        results: error
       - doc: |-
           shiftBackups renames the rotated siblings down by one (dropping the oldest
           when MaxBackups is reached) and moves the active Path into the .1 slot,
@@ -365,6 +406,18 @@ types:
           Close closes the active file. Subsequent Writes fail with the kernel's "file
           already closed" error, which we wrap as WriteFailed.
         name: Close
+        recv: s *rotatingSink
+        results: error
+      - doc: |-
+          syncOpen syncs the active descriptor; a sink whose last reopen failed holds
+          none, and there is nothing it wrote to sync. The caller holds s.mu.
+        name: syncOpen
+        recv: s *rotatingSink
+        results: error
+      - doc: |-
+          closeOpen closes the active descriptor; a sink whose last reopen failed
+          holds none, and closing it releases nothing. The caller holds s.mu.
+        name: closeOpen
         recv: s *rotatingSink
         results: error
     name: rotatingSink
