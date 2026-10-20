@@ -77,6 +77,13 @@ const (
 	// spawnerLost is the spawner's status when a helper it handed the socket
 	// explicitly did not receive it.
 	spawnerLost int = 6
+	// spawnerNoProbe is the spawner's status when it could not run a probe at
+	// all — told apart from a verdict, so a broken harness never reads as one.
+	spawnerNoProbe int = 7
+	// selfEnv carries the test binary's path to the spawner. os.Executable
+	// resolves argv[0] on OpenBSD, and the spawner's argv[0] is a role name,
+	// not a path.
+	selfEnv string = "SDK_SDLISTEN_TEST_SELF"
 )
 
 // runProbe reports whether fd 3 is a listening socket bound to $addrEnv: the
@@ -110,14 +117,24 @@ func runSpawningChild() int {
 		return 2
 	}
 	//: an unrelated helper must not inherit the listening socket.
-	if probeStatus(nil) != probeEmpty {
+	switch probeStatus(nil) {
+	case probeEmpty:
+	case probeHolds:
 		//: the socket leaked into a child that was never handed it.
 		return spawnerLeaked
+	default:
+		//: no verdict at all.
+		return spawnerNoProbe
 	}
 	//: an explicit hand-on still reaches the helper, at fd 3.
-	if probeStatus(files) != probeHolds {
+	switch probeStatus(files) {
+	case probeHolds:
+	case probeEmpty:
 		//: ExtraFiles no longer carries the socket.
 		return spawnerLost
+	default:
+		//: no verdict at all.
+		return spawnerNoProbe
 	}
 	//: close-on-exec, and explicit passing still works.
 	return 0
@@ -126,13 +143,7 @@ func runSpawningChild() int {
 // probeStatus runs the probe helper with extra as its ExtraFiles and returns
 // its exit status, or -1 when it could not be run.
 func probeStatus(extra []*os.File) int {
-	self, err := os.Executable()
-	//: a binary that cannot find itself cannot spawn its probe.
-	if err != nil {
-		//: report an unrunnable probe.
-		return -1
-	}
-	cmd := exec.Command(self, "sdlisten-probe")
+	cmd := exec.Command(os.Getenv(selfEnv), "sdlisten-probe")
 	cmd.Env = append(os.Environ(), helperEnv+"="+helperProbe)
 	cmd.ExtraFiles = extra
 	//: the probe's verdict is its exit status.
@@ -165,7 +176,7 @@ func TestFiles_closeOnExec(t *testing.T) {
 	spec := coreproc.Spec{
 		Path: self,
 		Args: []string{"sdlisten-spawner"},
-		Env:  []string{helperEnv + "=" + helperSpawner, addrEnv + "=" + ln.Addr().String()},
+		Env:  []string{helperEnv + "=" + helperSpawner, addrEnv + "=" + ln.Addr().String(), selfEnv + "=" + self},
 	}
 	if perr := listen.Prepare(&spec, map[string]net.Listener{"web": ln}); perr != nil {
 		t.Fatalf("Prepare: %v", perr)
@@ -187,6 +198,8 @@ func TestFiles_closeOnExec(t *testing.T) {
 		t.Fatal("a helper the activated service never handed the socket inherited it")
 	case spawnerLost:
 		t.Fatal("a helper handed the socket through ExtraFiles did not receive it")
+	case spawnerNoProbe:
+		t.Fatal("the activated child could not run its probe")
 	default:
 		t.Fatalf("the activated child exited %d", exit.Code)
 	}
