@@ -120,6 +120,16 @@ Two rejections are load-bearing and easy to omit:
   drop the two high bits, and the decoder would stop being the encoder's inverse
   without ever erroring.
 
+**The base62 codec works on 32-bit words.** `base62Encode` divides the 160-bit
+value, held as five big-endian `uint32`, by `62^5` (`base62Pow5`, the largest
+power of 62 below 2^32) and peels five digits off each remainder: six rounds of
+five word divisions instead of 27 rounds of twenty byte divisions — `KSUID.New`
+2.31 µs → 362 ns (−84 %). `base62Decode` multiplies the same five words by 62 per
+character, so its per-character rejections (alphabet at an offset, overflow) are
+unchanged — `ParseKSUID` 485 → 178 ns (−63 %). The byte-at-a-time division stays
+as the reference of `Test_base62Encode_matchesBytewiseDivision` (extremes, every
+single-byte value at every position, 2 000 mixed values, both directions).
+
 `ParseTypeID` splits the suffix off by **width**, counting back from the end —
 not on the first or last `_`. A prefix may legitimately contain underscores
 (`user_account_01h2…`) while the suffix alphabet never does.

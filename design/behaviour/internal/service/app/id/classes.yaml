@@ -160,6 +160,28 @@ constants:
         name: base62Radix
         type: int
         value: "62"
+      - doc: ksuidWordBytes is the width of one word of base62Encode's division.
+        name: ksuidWordBytes
+        type: int
+        value: "4"
+      - doc: "ksuidWords is the raw value's width in 32-bit words: 20 / 4 = 5."
+        name: ksuidWords
+        type: int
+        value: ksuidRawLen / ksuidWordBytes
+      - doc: bitsPerWord is the width of one division word, in bits.
+        name: bitsPerWord
+        type: int
+        value: ksuidWordBytes * bitsPerByte
+      - doc: base62DigitsPerRound is how many base-62 digits one division yields.
+        name: base62DigitsPerRound
+        type: int
+        value: "5"
+      - doc: |-
+          base62Pow5 is 62^5 = 916 132 832, the largest power of 62 below 2^32:
+          the divisor of one round, whose remainder is five digits.
+        name: base62Pow5
+        type: uint64
+        value: 62 * 62 * 62 * 62 * 62
     name: ksuidEpoch
   - grouped: true
     items:

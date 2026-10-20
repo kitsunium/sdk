@@ -35,6 +35,17 @@ const (
 	base62ReverseLen int = 256
 	// base62Radix is the length of base62Alphabet, named for the arithmetic.
 	base62Radix int = 62
+	// ksuidWordBytes is the width of one word of base62Encode's division.
+	ksuidWordBytes int = 4
+	// ksuidWords is the raw value's width in 32-bit words: 20 / 4 = 5.
+	ksuidWords int = ksuidRawLen / ksuidWordBytes
+	// bitsPerWord is the width of one division word, in bits.
+	bitsPerWord int = ksuidWordBytes * bitsPerByte
+	// base62DigitsPerRound is how many base-62 digits one division yields.
+	base62DigitsPerRound int = 5
+	// base62Pow5 is 62^5 = 916 132 832, the largest power of 62 below 2^32:
+	// the divisor of one round, whose remainder is five digits.
+	base62Pow5 uint64 = 62 * 62 * 62 * 62 * 62
 )
 
 // KSUID is the registered KSUID generator: a 32-bit second-resolution timestamp
@@ -105,28 +116,41 @@ func ParseKSUID(s string) (issued time.Time, payload [ksuidPayloadBytes]byte, er
 // "10", so every KSUID is rendered to the same width and the string order then
 // matches the numeric order.
 func base62Encode(b []byte) string {
-	//: long division consumes its input, so work on a scratch copy.
-	var work [ksuidRawLen]byte
+	//: long division consumes its input, so work on a scratch copy — as five
+	//: big-endian 32-bit words rather than twenty bytes, so one division step
+	//: moves four bytes instead of one.
+	var work [ksuidWords]uint32
 	//: seed the scratch with the value to divide.
-	copy(work[:], b)
+	for j := range work {
+		//: word j holds bytes 4j..4j+3, most significant first.
+		work[j] = binary.BigEndian.Uint32(b[j*ksuidWordBytes:])
+	}
 	//: the rendered characters, filled back-to-front.
 	var out [ksuidChars]byte
-	//: each round divides the whole 160-bit value by 62; the remainder is the
-	//: least-significant digit not yet emitted.
-	for i := ksuidChars - 1; i >= 0; i-- {
-		//: carry of the schoolbook division, always < base62Radix.
-		rem := 0
-		//: divide the big-endian digits from the most-significant byte down.
+	//: each round divides the whole 160-bit value by 62^5 — the largest power
+	//: of 62 below 2^32 — and the remainder holds the next five digits: six
+	//: rounds of five word divisions, where dividing by 62 itself took 27
+	//: rounds of twenty byte divisions.
+	for i := ksuidChars; i > 0; {
+		//: carry of the schoolbook division, always < base62Pow5.
+		var rem uint64
+		//: divide the big-endian words from the most-significant one down.
 		for j := range work {
-			//: the running dividend for this byte position.
-			cur := rem<<bitsPerByte | int(work[j])
-			//: the quotient byte stays in place for the next round.
-			work[j] = byte(cur / base62Radix)
-			//: the remainder feeds the next, less-significant byte.
-			rem = cur % base62Radix
+			//: the running dividend for this word position.
+			cur := rem<<bitsPerWord | uint64(work[j])
+			//: the quotient word stays in place for the next round.
+			work[j] = uint32(cur / base62Pow5)
+			//: the remainder feeds the next, less-significant word.
+			rem = cur % base62Pow5
 		}
-		//: the final remainder is this round's base62 digit.
-		out[i] = base62Alphabet[rem]
+		//: the remainder's base-62 digits, least significant first. The last
+		//: round has room for two: 62^27 > 2^160, so the quotient left after
+		//: five rounds is below 62^2 and the digits dropped here are zero.
+		for k := 0; k < base62DigitsPerRound && i > 0; k++ {
+			i--
+			out[i] = base62Alphabet[rem%uint64(base62Radix)]
+			rem /= uint64(base62Radix)
+		}
 	}
 	//: the assembled 27-char rendering.
 	return string(out[:])
@@ -147,7 +171,10 @@ func base62Decode(s string) (raw [ksuidRawLen]byte, err error) {
 		return raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
 			errs.String("rule", "length"), errs.Int("length", len(s)))
 	}
-	//: accumulate raw = raw*62 + digit, most-significant digit first.
+	//: accumulate value = value*62 + digit, most-significant digit first, in
+	//: five 32-bit words (big-endian order) so one multiply-add step moves four
+	//: bytes instead of one.
+	var words [ksuidWords]uint32
 	for i := range ksuidChars {
 		//: resolve the symbol to its value; -1 means it is not a symbol. The
 		//: table is a direct index rather than a scan of the alphabet: a
@@ -162,25 +189,30 @@ func base62Decode(s string) (raw [ksuidRawLen]byte, err error) {
 			return raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
 				errs.String("rule", "alphabet"), errs.Int("offset", i))
 		}
-		//: the incoming digit is the carry into the least-significant byte.
-		carry := digit
-		//: schoolbook multiply-add, from the least-significant byte upward.
-		for j := ksuidRawLen - 1; j >= 0; j-- {
+		//: the incoming digit is the carry into the least-significant word.
+		carry := uint64(digit)
+		//: schoolbook multiply-add, from the least-significant word upward.
+		for j := ksuidWords - 1; j >= 0; j-- {
 			//: widen before multiplying so the carry is not lost.
-			cur := int(raw[j])*base62Radix + carry
-			//: keep the low byte in place.
-			raw[j] = byte(cur)
-			//: propagate the rest to the next, more-significant byte.
-			carry = cur >> bitsPerByte
+			cur := uint64(words[j])*uint64(base62Radix) + carry
+			//: keep the low word in place.
+			words[j] = uint32(cur)
+			//: propagate the rest to the next, more-significant word.
+			carry = cur >> bitsPerWord
 		}
-		//: a carry out of the top byte means the value exceeds 160 bits.
+		//: a carry out of the top word means the value exceeds 160 bits.
 		if carry != 0 {
 			//: refuse rather than truncate — truncation would alias two inputs.
 			return raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
 				errs.String("rule", "overflow"))
 		}
 	}
-	//: the fully reconstructed 160-bit value.
+	//: the fully reconstructed 160-bit value, laid back out as bytes.
+	for j, word := range words {
+		//: word j is bytes 4j..4j+3, most significant first.
+		binary.BigEndian.PutUint32(raw[j*ksuidWordBytes:], word)
+	}
+	//: the decoded identifier.
 	return raw, nil
 }
 

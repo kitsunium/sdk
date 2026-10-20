@@ -11,6 +11,63 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// Test_base62Encode_matchesBytewiseDivision holds the word-at-a-time encoder
+// to the byte-at-a-time schoolbook division it replaced, on the two extremes,
+// on every single-byte value at every position, and on a sweep of mixed values
+// — so a dropped carry or a lost leading digit cannot pass.
+func Test_base62Encode_matchesBytewiseDivision(t *testing.T) {
+	t.Parallel()
+	var inputs [][ksuidRawLen]byte
+	var zero, ones [ksuidRawLen]byte
+	for i := range ones {
+		ones[i] = 0xFF
+	}
+	inputs = append(inputs, zero, ones)
+	for pos := range ksuidRawLen {
+		for _, v := range []byte{1, 61, 62, 0x7F, 0x80, 0xFF} {
+			var in [ksuidRawLen]byte
+			in[pos] = v
+			inputs = append(inputs, in)
+		}
+	}
+	state := uint32(2463534242)
+	for range 2000 {
+		var in [ksuidRawLen]byte
+		for i := range in {
+			state ^= state << 13
+			state ^= state >> 17
+			state ^= state << 5
+			in[i] = byte(state)
+		}
+		inputs = append(inputs, in)
+	}
+	for _, in := range inputs {
+		want := bytewiseBase62(in)
+		if got := base62Encode(in[:]); got != want {
+			t.Fatalf("base62Encode(%x) = %q, want %q", in, got, want)
+		}
+		if back, err := base62Decode(want); err != nil || back != in {
+			t.Fatalf("base62Decode(%q) = %x, %v; want %x", want, back, err, in)
+		}
+	}
+}
+
+// bytewiseBase62 is the reference: 27 rounds, each dividing the 20-byte value
+// by 62 one byte at a time.
+func bytewiseBase62(in [ksuidRawLen]byte) string {
+	var out [ksuidChars]byte
+	for i := ksuidChars - 1; i >= 0; i-- {
+		rem := 0
+		for j := range in {
+			cur := rem<<8 | int(in[j])
+			in[j] = byte(cur / 62)
+			rem = cur % 62
+		}
+		out[i] = base62Alphabet[rem]
+	}
+	return string(out[:])
+}
+
 // Test_ksuidGen_Scheme pins the registry key. It is what a caller passes to
 // id.New, so a drift here unregisters the generator from every consumer that
 // asks for it by name.
