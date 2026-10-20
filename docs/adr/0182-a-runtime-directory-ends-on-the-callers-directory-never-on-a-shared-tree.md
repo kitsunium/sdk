@@ -39,7 +39,21 @@ container without a session manager, a CI runner.
 4. A sibling, not a parameter: `RuntimeDir`'s signature is published
    (ADR 0039).
 
-## Alternatives
+## Consequences
+
+- ktn-linter's per-user daemon places its socket with `RuntimeDirOr` and
+  removes its local `/tmp` fallback and the guard that came with it. A
+  second consumer exists, the criterion #785 set for a mechanism to come back
+  to the SDK.
+- `<tmp>/<app>-<uid>` stays reachable through `RuntimeDir` for the callers
+  that never name a directory.
+
+## Breaking changes
+
+None. `RuntimeDir` keeps its signature and its behaviour; `RuntimeDirOr` is
+new.
+
+## Alternatives considered
 
 - **Drop the `/tmp` step from `RuntimeDir`.** Rejected: it changes where
   every existing caller's sockets live on a host without
@@ -51,11 +65,16 @@ container without a session manager, a CI runner.
   logind and exists only for a session logind opened. Where it exists without
   `$XDG_RUNTIME_DIR`, a caller may name it as its fallback.
 
-## Consequences
+## Deferred
 
-- ktn-linter's per-user daemon places its socket with `RuntimeDirOr` and
-  removes its local `/tmp` fallback and the guard that came with it. A
-  second consumer exists, the criterion #785 set for a mechanism to come back
-  to the SDK.
-- `<tmp>/<app>-<uid>` stays reachable through `RuntimeDir` for the callers
-  that never name a directory.
+None in the SDK. ktn-linter adopts `RuntimeDirOr` once a release of
+`pkg/v1/proc` carries it (kodflow/ktn-linter#785).
+
+## References
+
+- [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md):
+  the directory gate every step is held to.
+- [ADR 0039](0039-extending-a-published-port-without-breaking-it.md): a
+  sibling, never a widened signature.
+- kodflow/ktn-linter#785 and #757: the second consumer and its per-user
+  daemon.
