@@ -24489,8 +24489,8 @@
       "kind": "type",
       "package": "github.com/kitsunium/sdk/internal/core/net",
       "name": "ClientConfig",
-      "spelled": "struct{BaseURL string \"json:\\\"base_url\\\"\"; DialTimeout DurationValue \"json:\\\"dial_timeout\\\"\"; HandshakeTimeout DurationValue \"json:\\\"handshake_timeout\\\"\"; ResponseTimeout DurationValue \"json:\\\"response_timeout\\\"\"; TotalTimeout DurationValue \"json:\\\"total_timeout\\\"\"; MaxResponseSize int64 \"json:\\\"max_response_size\\\"\"; MaxRedirects int \"json:\\\"max_redirects\\\"\"; DefaultHeaders map[string]string \"json:\\\"default_headers\\\"\"}",
-      "canonical": "struct{BaseURL string \"json:\\\"base_url\\\"\"; DialTimeout github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"dial_timeout\\\"\"; HandshakeTimeout github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"handshake_timeout\\\"\"; ResponseTimeout github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"response_timeout\\\"\"; TotalTimeout github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"total_timeout\\\"\"; MaxResponseSize int64 \"json:\\\"max_response_size\\\"\"; MaxRedirects int \"json:\\\"max_redirects\\\"\"; DefaultHeaders map[string]string \"json:\\\"default_headers\\\"\"}",
+      "spelled": "struct{BaseURL string \"json:\\\"base_url\\\"\"; DialTimeout DurationValue \"json:\\\"dial_timeout\\\"\"; HandshakeTimeout DurationValue \"json:\\\"handshake_timeout\\\"\"; ResponseTimeout DurationValue \"json:\\\"response_timeout\\\"\"; TotalTimeout DurationValue \"json:\\\"total_timeout\\\"\"; MaxResponseSize int64 \"json:\\\"max_response_size\\\"\"; MaxRedirects int \"json:\\\"max_redirects\\\"\"; RedirectOrigins []string \"json:\\\"redirect_origins\\\"\"; DefaultHeaders map[string]string \"json:\\\"default_headers\\\"\"}",
+      "canonical": "struct{BaseURL string \"json:\\\"base_url\\\"\"; DialTimeout github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"dial_timeout\\\"\"; HandshakeTimeout github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"handshake_timeout\\\"\"; ResponseTimeout github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"response_timeout\\\"\"; TotalTimeout github.com/kitsunium/sdk/internal/core/net.DurationValue \"json:\\\"total_timeout\\\"\"; MaxResponseSize int64 \"json:\\\"max_response_size\\\"\"; MaxRedirects int \"json:\\\"max_redirects\\\"\"; RedirectOrigins []string \"json:\\\"redirect_origins\\\"\"; DefaultHeaders map[string]string \"json:\\\"default_headers\\\"\"}",
       "fields": [
         {
           "name": "BaseURL",
@@ -24532,13 +24532,19 @@
           "name": "MaxRedirects",
           "type": "int",
           "tag": "json:\"max_redirects\"",
-          "doc": "MaxRedirects caps the redirect chain. Every hop is re-authorised by the\npolicy, so a redirect cannot walk out of the allowed surface.\n"
+          "doc": "MaxRedirects caps the redirect chain. Every hop is re-authorised by the\npolicy, and a hop to another origin is refused unless RedirectOrigins\nnames it, so a redirect cannot walk out of the allowed surface.\n"
+        },
+        {
+          "name": "RedirectOrigins",
+          "type": "[]string",
+          "tag": "json:\"redirect_origins\"",
+          "doc": "RedirectOrigins names the origins, each written scheme://host[:port], a\nredirect may lead to besides the origin of the request that started the\nchain. Empty — the default — refuses with RequestDenied every redirect\nthat changes the scheme, the host or the port, https to http included:\nthe built-in policies judge the method and the path, so a hop that keeps\nthe path and swaps the origin would otherwise pass them. A listed origin\nis followed, and receives none of the DefaultHeaders. An entry that is\nnot a bare http or https origin fails New with InvalidAddress.\n"
         },
         {
           "name": "DefaultHeaders",
           "type": "map[string]string",
           "tag": "json:\"default_headers\"",
-          "doc": "DefaultHeaders are added to every request that does not already set them.\n"
+          "doc": "DefaultHeaders are added to every request that does not already set them\nand is sent to the origin of BaseURL — or, with no BaseURL, to whatever\norigin the request names. They are never sent to another origin: a\nrequest built for one does not receive them, and a redirect that leaves\nthe origin of the request that started the chain is sent without them.\n"
         }
       ],
       "doc": "ClientConfig describes an outbound client. Durations use DurationValue so a\nconfiguration file can say \"5s\" rather than a nanosecond count.\n\nIt sits in core beside LimitsValue and TimeoutsValue, which carry the same\nkind of knobs for the inbound half. Keeping both faces' configuration in one\nlayer is what lets a consumer decode a whole network stanza against the\ncontract package alone, without importing an implementation to name the type\nof a field it is setting.\n",

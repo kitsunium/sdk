@@ -4,6 +4,7 @@ package client_test
 import (
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -778,5 +779,213 @@ func TestClient_Get_RefusesAForeignOrigin(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// TestClient_Get_KeepsARedirectOnItsOrigin pins issue #448: a redirect is
+// followed on the origin the chain started on, refused off it unless the
+// caller opened that origin, and the configured defaults never leave it.
+//
+// The built-in policies judge the method and the path, so a 302 that keeps the
+// path and swaps the host passed every one of them, and net/http copies the
+// first request's headers onto each hop — an API key configured as a default
+// reached whatever peer the upstream named. Two upstreams stand in for the two
+// ends; the foreign one records what it received.
+func TestClient_Get_KeepsARedirectOnItsOrigin(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		// name describes the case.
+		name string
+		// openForeign lists the foreign upstream in RedirectOrigins.
+		openForeign bool
+		// start is the path the caller asks for.
+		start string
+		// wantCode is the refusal, or zero when the chain completes.
+		wantCode errs.Code
+		// wantForeign reports whether the foreign upstream must be reached.
+		wantForeign bool
+		// wantBackKey is the key the configured upstream must receive on the hop
+		// that comes back to it, or "" when no hop comes back.
+		wantBackKey string
+	}
+	tests := []tc{
+		//: the two upstreams share 127.0.0.1, so the hop changes only the port —
+		//: the narrowest change of origin there is.
+		{name: "a hop to another origin, nothing opened", start: "/v1/subscribers", wantCode: corenet.CodeRequestDenied},
+		{name: "a hop to an opened host", start: "/v1/subscribers", openForeign: true, wantForeign: true},
+		//: the chain leaves the origin and comes back: the hop that returns is
+		//: on the origin the key was configured for, so it carries it again.
+		{name: "a chain that leaves and comes back", start: "/v1/profiles", openForeign: true, wantForeign: true, wantBackKey: "s3cr3t"},
+		{name: "a hop on the same origin", start: "/v1/supi/same", wantBackKey: "s3cr3t"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		foreignKey := make(chan string, 1)
+		backKey := make(chan string, 1)
+		var configured *httptest.Server
+		foreign, reached := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+			foreignKey <- r.Header.Get("X-Api-Key")
+			//: the chain that comes back is sent home by the foreign peer.
+			if r.URL.Path == "/v1/profiles" {
+				http.Redirect(w, r, configured.URL+"/v1/profiles/back", http.StatusFound)
+				return
+			}
+			writeOrFail(t, w, "foreign")
+		})
+		configured, _ = newServer(t, func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/v1/supi/same":
+				http.Redirect(w, r, "/v1/profiles/back", http.StatusFound)
+			case "/v1/profiles/back":
+				backKey <- r.Header.Get("X-Api-Key")
+				writeOrFail(t, w, "home")
+			default:
+				http.Redirect(w, r, foreign.URL+r.URL.Path, http.StatusFound)
+			}
+		})
+		cfg := corenet.ClientConfig{DefaultHeaders: map[string]string{"x-api-key": "s3cr3t"}}
+		if c.openForeign {
+			cfg.RedirectOrigins = []string{foreign.URL}
+		}
+		client := newClient(t, configured, cfg)
+
+		_, err := client.Get(t.Context(), c.start, nil)
+
+		if c.wantCode != 0 {
+			if !errs.HasCode(err, c.wantCode) {
+				t.Fatalf("Get = %v, want code %v", err, c.wantCode)
+			}
+		} else if err != nil {
+			t.Fatalf("Get = %v, want nil", err)
+		}
+		if *reached != c.wantForeign {
+			t.Fatalf("the foreign upstream reached = %v, want %v", *reached, c.wantForeign)
+		}
+		//: an opened origin is followed, and receives none of the defaults.
+		if c.wantForeign {
+			if got := <-foreignKey; got != "" {
+				t.Errorf("the foreign upstream received X-Api-Key = %q, want none", got)
+			}
+		}
+		if c.wantBackKey != "" {
+			if got := <-backKey; got != c.wantBackKey {
+				t.Errorf("the hop home received X-Api-Key = %q, want %q", got, c.wantBackKey)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestClient_Do_KeepsTheDefaultsOnTheBase pins the other half of #448: a
+// request Do is handed for an origin other than the base's is sent without the
+// configured defaults. They were configured for the base, and an API key is not
+// a header to show any other peer.
+func TestClient_Do_KeepsTheDefaultsOnTheBase(t *testing.T) {
+	t.Parallel()
+	seen := make(chan string, 1)
+	foreign, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.Header.Get("X-Api-Key")
+		w.WriteHeader(http.StatusOK)
+	})
+	configured, _ := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	client := newClient(t, configured, corenet.ClientConfig{
+		DefaultHeaders: map[string]string{"X-Api-Key": "s3cr3t"},
+	})
+	req, rerr := http.NewRequestWithContext(t.Context(), http.MethodGet, foreign.URL+"/v1/subscribers", nil)
+	if rerr != nil {
+		t.Fatalf("build request: %v", rerr)
+	}
+
+	if _, err := client.Do(req); err != nil {
+		t.Fatalf("Do = %v, want nil", err)
+	}
+
+	if got := <-seen; got != "" {
+		t.Errorf("another origin received X-Api-Key = %q, want none", got)
+	}
+}
+
+// TestNew_RedirectOrigins pins that an opening is read exactly or refused. An
+// entry carrying a path would read as narrower than the origin it opens, and
+// an entry the parser cannot read must not open anything; both fail New with
+// INVALID_ADDRESS rather than on the first redirect.
+func TestNew_RedirectOrigins(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		// name describes the case.
+		name string
+		// origins is the configured list.
+		origins []string
+		// wantErr reports whether New must refuse.
+		wantErr bool
+	}
+	tests := []tc{
+		{name: "none"},
+		{name: "an https origin", origins: []string{"https://cdn.example"}},
+		{name: "an origin with a port and a trailing slash", origins: []string{"https://cdn.example:8443/"}},
+		{name: "a scheme and a host in capitals", origins: []string{"HTTP://CDN.EXAMPLE"}},
+		{name: "an IPv6 origin", origins: []string{"http://[::1]:8080"}},
+		{name: "a path", origins: []string{"https://cdn.example/assets"}, wantErr: true},
+		{name: "a query", origins: []string{"https://cdn.example?a=b"}, wantErr: true},
+		{name: "an empty query", origins: []string{"https://cdn.example?"}, wantErr: true},
+		{name: "a fragment", origins: []string{"https://cdn.example#x"}, wantErr: true},
+		{name: "credentials", origins: []string{"https://u:p@cdn.example"}, wantErr: true},
+		{name: "another scheme", origins: []string{"ftp://cdn.example"}, wantErr: true},
+		{name: "no scheme", origins: []string{"cdn.example"}, wantErr: true},
+		{name: "no host", origins: []string{"https://"}, wantErr: true},
+		{name: "an empty entry", origins: []string{""}, wantErr: true},
+		{name: "an unparseable entry", origins: []string{"https://cdn.example:port"}, wantErr: true},
+		//: one bad entry fails the whole list, not just itself.
+		{name: "one good, one bad", origins: []string{"https://cdn.example", "https://x/y"}, wantErr: true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got, err := svcclient.New(corenet.ClientConfig{BaseURL: "https://api.example", RedirectOrigins: c.origins},
+			corenet.IdentityValue{}, buildReadOnly(t), nil)
+
+		if c.wantErr {
+			if !errs.HasCode(err, corenet.CodeInvalidAddress) {
+				t.Fatalf("New = %v, want INVALID_ADDRESS", err)
+			}
+			if got != nil {
+				t.Error("New returned a client beside the error")
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("New = %v, want nil", err)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestClient_Get_AdmitsTheLargestCeiling pins issue #453: MaxResponseSize set
+// to math.MaxInt64 — "no ceiling I care about" — made the probe byte's sum
+// wrap negative and the body's Read panic on the caller's goroutine.
+func TestClient_Get_AdmitsTheLargestCeiling(t *testing.T) {
+	t.Parallel()
+	srv, _ := newServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeOrFail(t, w, "hello")
+	})
+	client := newClient(t, srv, corenet.ClientConfig{MaxResponseSize: math.MaxInt64})
+
+	resp, err := client.Get(t.Context(), "/v1/subscribers", nil)
+	if err != nil {
+		t.Fatalf("Get = %v, want nil", err)
+	}
+	if string(resp.Body) != "hello" {
+		t.Errorf("Body = %q, want %q", resp.Body, "hello")
 	}
 }

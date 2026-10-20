@@ -38,6 +38,13 @@ constructors. No logic lives here.
 - **A non-2xx returns both the response and an error.** The body is what makes
   the failure diagnosable; the error is what protects the caller who never
   considered the status. A 204 is a normal outcome.
+- **A redirect stays on its origin (#448, a behaviour change).** A hop whose
+  scheme, host or port differs from the chain's first request is refused with
+  `RequestDenied` unless `Config.RedirectOrigins` names that origin, and
+  `DefaultHeaders` are sent only to the base's origin — never to an origin the
+  caller opened, never to a request `Do` is handed for another origin. Before,
+  a 302 to another host (or from https to http) was followed and carried the
+  defaults, an API key included, past every path-and-method policy.
 - **`errors.Is` works on the sentinels** because `http.Client` wraps every
   failure in `*url.Error`; `unwrapClientError` unwraps it so the domain code
   stays reachable.

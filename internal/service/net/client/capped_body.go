@@ -3,6 +3,7 @@ package client
 import (
 	"errors"
 	"io"
+	"math"
 	"sync"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -67,7 +68,14 @@ func (c *cappedBody) Read(p []byte) (n int, err error) {
 	//: difference between a body that ended on the boundary and one that
 	//: crossed it. Reading no further is what still stops a single oversized
 	//: Read from crossing the ceiling undetected.
-	remaining := c.limit - c.read + 1
+	remaining := c.limit - c.read
+	//: the probe byte saturates: at a ceiling of math.MaxInt64 the sum wrapped
+	//: negative and p[:remaining] panicked on the caller's goroutine. A budget
+	//: that large already exceeds any buffer, so dropping the probe changes
+	//: nothing a read could observe.
+	if remaining < math.MaxInt64 {
+		remaining++
+	}
 	//: shrink the caller's buffer so the transport cannot overshoot the probe.
 	if int64(len(p)) > remaining {
 		p = p[:remaining]

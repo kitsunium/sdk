@@ -576,10 +576,27 @@ types:
         type: int64
       - doc: |-
           MaxRedirects caps the redirect chain. Every hop is re-authorised by the
-          policy, so a redirect cannot walk out of the allowed surface.
+          policy, and a hop to another origin is refused unless RedirectOrigins
+          names it, so a redirect cannot walk out of the allowed surface.
         name: MaxRedirects
         type: int
-      - doc: DefaultHeaders are added to every request that does not already set them.
+      - doc: |-
+          RedirectOrigins names the origins, each written scheme://host[:port], a
+          redirect may lead to besides the origin of the request that started the
+          chain. Empty — the default — refuses with RequestDenied every redirect
+          that changes the scheme, the host or the port, https to http included:
+          the built-in policies judge the method and the path, so a hop that keeps
+          the path and swaps the origin would otherwise pass them. A listed origin
+          is followed, and receives none of the DefaultHeaders. An entry that is
+          not a bare http or https origin fails New with InvalidAddress.
+        name: RedirectOrigins
+        type: "[]string"
+      - doc: |-
+          DefaultHeaders are added to every request that does not already set them
+          and is sent to the origin of BaseURL — or, with no BaseURL, to whatever
+          origin the request names. They are never sent to another origin: a
+          request built for one does not receive them, and a redirect that leaves
+          the origin of the request that started the chain is sent without them.
         name: DefaultHeaders
         type: map[string]string
     kind: struct

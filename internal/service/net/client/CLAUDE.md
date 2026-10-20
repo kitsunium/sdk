@@ -18,7 +18,7 @@ Public façade: `pkg/v1/net/client`.
 | `path_policy.go` | `pathPolicy` — anchored allow patterns |
 | `deny_policy.go` | `denyPolicy` — anchored deny patterns, final |
 | `conjunction.go` | `conjunction` — every member must allow |
-| `client.go` | `Client`, `New`, `Get`, `Do`, `HTTP` — per-phase timeouts, redirect cap, `readBody`'s bounded use of the peer's `Content-Length`, `canonicalHeaders` |
+| `client.go` | `Client`, `New`, `Get`, `Do`, `HTTP` — per-phase timeouts, redirect cap and origin check (`redirectLimiter`, `parseOrigins`, `sameOrigin`, `stripDefaults`), `readBody`'s bounded use of the peer's `Content-Length`, `canonicalHeaders` |
 | `guard.go` | the policy-enforcing `http.RoundTripper` |
 | `capped_body.go` | the response ceiling; fails rather than truncating |
 | `policies.go` | `AllowMethods` / `AllowPaths` / `DenyPaths` / `Policies` |
@@ -73,6 +73,31 @@ Public façade: `pkg/v1/net/client`.
   documented as a path relative to that base, and anything else is a different
   request than the call site reads as. With no base the caller supplies absolute
   URLs by design, so the check does not apply there.
+- **A redirect stays on its origin, and the defaults never leave it (#448).**
+  Every hop re-enters the guard, but the built-in policies judge the method and
+  the path, so a 302 that kept the path and swapped the origin — another host,
+  `169.254.169.254`, https turned into http — passed all of them, and net/http
+  copies the first request's headers onto each hop, stripping only
+  `Authorization`, `WWW-Authenticate` and `Cookie`: an API key configured in
+  `DefaultHeaders` reached whatever peer the upstream named. `redirectLimiter`
+  now refuses (`RequestDenied`, `why` "the redirect leaves the origin") any hop
+  whose scheme, host or port differs from the chain's first request, unless
+  `ClientConfig.RedirectOrigins` names that origin — an opt-in, empty by default
+  (ADR 0031), each entry a bare `scheme://host[:port]` checked in `New`
+  (`parseOrigins`, `InvalidAddress` otherwise; a path is refused rather than
+  ignored, since it would read as narrower than the origin it opens). An
+  admitted hop is stripped of every header still carrying a default's value
+  (`stripDefaults`), and `applyHeaders` adds the defaults only to a request for
+  the base's origin. Each hop's headers are a fresh copy of the first request's,
+  so a chain that comes home carries them again on the hop that returns.
+  `sameOrigin` compares substrings — scheme and host without case, an omitted
+  port read as the scheme's default — and allocates nothing, which is what lets
+  `applyHeaders` run it per request.
+- **The probe byte saturates (#453).** `cappedBody.Read` reads one byte past
+  the ceiling to tell "ended on the boundary" from "crossed it"; at
+  `MaxResponseSize = math.MaxInt64` the sum `limit - read + 1` wrapped negative
+  and `p[:remaining]` panicked on the caller's goroutine. The increment is
+  skipped at `math.MaxInt64`, a budget no buffer reaches.
 - **A refusal never echoes the path in its public message.** The path is the
   shape of the private API surface; a denial must not leak it into a log line or
   a response. The reason goes in a structured field instead.
@@ -151,6 +176,9 @@ this layer.
 - Put the refused path in a `Public` message.
 - Let a caller-supplied path carry its own scheme or authority into `resolve`.
   It replaces the base's origin, and no path-and-method policy can see it.
+- Follow a redirect to another scheme, host or port unless `RedirectOrigins`
+  names it, or send `DefaultHeaders` to any origin but the base's — not even
+  to an origin the caller opened.
 - Truncate an over-sized response body — fail. A silent truncation surfaces
   three layers away as an incomprehensible decode error.
 - Size a read buffer from `Content-Length` without a bound, or bound it by
