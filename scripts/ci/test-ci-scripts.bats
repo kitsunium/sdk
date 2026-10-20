@@ -797,3 +797,30 @@ SH
   run grep -c '::warning::.*retry' "$wf" "$CI_DIR/run-test-binaries.sh"
   [[ "$output" != *":"[1-9]* ]]
 }
+
+# The summary step runs on every run, including the one where the cut step was
+# skipped and /tmp/cut.err, /tmp/cut.log never existed. Under the runner's
+# default `bash -e` (which `set -uo pipefail` does not undo), an awk on the
+# missing file exits 2 and failed a run whose verdict, "nothing consumer-visible
+# changed", was right (run 39450668933). The block is run as the runner runs
+# it, with its /tmp redirected, in each rendering that reads those files.
+@test "release: the summary step cannot fail when the cut step was skipped" {
+  local wf="$REPO_ROOT/.github/workflows/sdk-release.yml"
+  local script="$BATS_TEST_TMPDIR/summary.sh"
+  awk '
+    /- name: Emit release summary artifact/ { grab = 1; next }
+    grab && /^      - name:/ { exit }
+    grab && /^        run: \|/ { run = 1; next }
+    grab && run { sub(/^          /, ""); print }
+  ' "$wf" | sed "s#/tmp/#$BATS_TEST_TMPDIR/#g" > "$script"
+  [ -s "$script" ]
+  export TARGET_SHA=0123456 GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/step.md"
+  # Nothing computed, then a dry run, then a held bootstrap, then a real cut:
+  # none has a cut.err, and none may fail.
+  for env in "MAJORS= DRY_RUN=" "MAJORS=. DRY_RUN=true" "MAJORS=. HELD=true" "MAJORS=. DRY_RUN=false"; do
+    rm -f "$BATS_TEST_TMPDIR"/cut.err "$BATS_TEST_TMPDIR"/cut.log
+    run env $env CUT_OUTCOME=skipped bash -e "$script"
+    [ "$status" -eq 0 ]
+  done
+  [[ "$(cat "$BATS_TEST_TMPDIR/release-summary.md")" == *"SDK release summary"* ]]
+}
