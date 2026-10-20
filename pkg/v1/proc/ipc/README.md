@@ -195,7 +195,7 @@ func RuntimeDir(app string) string
 RuntimeDir is where an application's private sockets belong on this machine. It creates nothing.
 
 <a name="RuntimeDirOr"></a>
-## func [RuntimeDirOr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/facade_gen.go>)
+## func [RuntimeDirOr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/gen_facade.go>)
 
 ```go
 func RuntimeDirOr(app string, fallback string) string
