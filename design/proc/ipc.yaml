@@ -457,6 +457,22 @@ packages:
         name: RuntimeDir
         out:
           - type: string
+      - doc: |-
+          RuntimeDirOr is RuntimeDir with fallback in place of <tmp>/<app>-<uid>:
+          $RUNTIME_DIRECTORY, then $XDG_RUNTIME_DIR/<app>, then %LOCALAPPDATA%\<app>
+          on Windows, else fallback, returned as given. A caller that keeps state
+          in a directory of its own names a directory there, and its sockets never
+          land in a tree any account can create first (ADR 0181). It creates
+          nothing; Listen does, at 0700, and refuses a fallback that is not
+          absolute or not private.
+        in:
+          - name: app
+            type: string
+          - name: fallback
+            type: string
+        name: RuntimeDirOr
+        out:
+          - type: string
     imports:
       coreipc: github.com/kitsunium/sdk/internal/core/proc/ipc
     path: github.com/kitsunium/sdk/internal/service/proc/ipc
@@ -605,8 +621,9 @@ packages:
 
       [RuntimeDir] names an application's directory: $RUNTIME_DIRECTORY (systemd),
       $XDG_RUNTIME_DIR/<app>, %LOCALAPPDATA%\<app> on Windows, else
-      <tmp>/<app>-<uid>. A path is at most the shortest sun_path any supported
-      kernel has, less its NUL.
+      <tmp>/<app>-<uid>. [RuntimeDirOr] ends the same chain on a directory the
+      caller names instead of <tmp> (ADR 0181). A path is at most the shortest
+      sun_path any supported kernel has, less its NUL.
 
       # Ports, and the doubles they admit
 
@@ -700,6 +717,19 @@ packages:
             - name: app
               type: string
           name: RuntimeDir
+          out:
+            - type: string
+      - func:
+          doc: |-
+            RuntimeDirOr is RuntimeDir with fallback in place of <tmp>/<app>-<uid>
+            (ADR 0181). It creates nothing.
+          forward: svcipc.RuntimeDirOr
+          in:
+            - name: app
+              type: string
+            - name: fallback
+              type: string
+          name: RuntimeDirOr
           out:
             - type: string
     functions:
