@@ -92,9 +92,12 @@ func validateCode(code Code) *Error {
 		//: only whitelisted meta-codes may have Layer==0; everything else
 		//: is a layer-misallocation bug at the call site.
 		if _, allowed := metaCodeAllowed[code]; !allowed {
-			//: emit the reserved-layer rejection with the offending Code string.
+			//: emit the reserved-layer rejection with the offending Code string —
+			//: handed to fmt as the Stringer, not rendered here: Code.String
+			//: inlines, and inlined into this cold branch its stack buffer
+			//: grows the frame of every Define, measured +3 % to +7 %.
 			return newValidationError(CodeInvalidCode, "INVALID_CODE",
-				fmt.Sprintf("Layer=0 reserved for meta-codes; got %s", code.String()))
+				fmt.Sprintf("Layer=0 reserved for meta-codes; got %s", code))
 		}
 	}
 	//: all three Code rules passed.

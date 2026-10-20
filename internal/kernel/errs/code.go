@@ -29,6 +29,17 @@ const padThreshold10 uint8 = 10
 // leading zero ("0XX"). Named to avoid a bare magic literal.
 const padThreshold100 uint8 = 100
 
+// codeMaxLen is the longest rendering of a Code in either form:
+// "255.255.255.255" and "MMM.LLL.PPP.SSS" are both fifteen bytes.
+const codeMaxLen int = 15
+
+// octetMaxDigits is the decimal width of the largest octet, 255 — and so the
+// width Padded fills every octet to.
+const octetMaxDigits int = 3
+
+// codeDotCount is the number of '.' separators between a Code's four octets.
+const codeDotCount int = 3
+
 // Code packs a 4-byte dotted identifier (MM.LL.PP.SS) as uint32.
 // See ADR 0005 for the registry.
 type Code uint32
@@ -77,46 +88,85 @@ func (c Code) Serial() Serial {
 // String returns the CANONICAL dotted form "M.L.P.S" (unpadded).
 // This form is used for storage, logs, fixtures, and lookup keys.
 func (c Code) String() string {
-	//: manual concat avoids the fmt import and keeps the kernel package's
-	//: zero-alloc discipline (strconv.Itoa is the only helper we need).
-	return itoaDecimal(uint8(c.Major())) + "." +
-		itoaDecimal(uint8(c.Layer())) + "." +
-		itoaDecimal(uint8(c.Package())) + "." +
-		itoaDecimal(uint8(c.Serial()))
+	//: rendered into a stack buffer and copied once: the result string is
+	//: the only allocation, where a seven-operand concat paid a runtime
+	//: concatstrings call on top of it.
+	var buf [codeMaxLen]byte
+	//: the one heap copy — the caller's string.
+	return string(appendCode(buf[:0], c))
 }
 
 // Padded returns the zero-padded "MMM.LLL.PPP.SSS" form. DISPLAY ONLY —
 // must never be used as a lookup key; the canonical form is String().
 func (c Code) Padded() string {
+	//: fixed width, so the stack buffer is filled exactly once and copied
+	//: once — five allocations (four padded octets and the concat) become one.
+	var buf [codeMaxLen]byte
+	dst := appendPadded3(buf[:0], uint8(c.Major()))
+	dst = append(dst, '.')
+	dst = appendPadded3(dst, uint8(c.Layer()))
+	dst = append(dst, '.')
+	dst = appendPadded3(dst, uint8(c.Package()))
+	dst = append(dst, '.')
 	//: matches the width any dashboard or aligned-table consumer wants.
-	return itoaPadded3(uint8(c.Major())) + "." +
-		itoaPadded3(uint8(c.Layer())) + "." +
-		itoaPadded3(uint8(c.Package())) + "." +
-		itoaPadded3(uint8(c.Serial()))
+	return string(appendPadded3(dst, uint8(c.Serial())))
+}
+
+// appendCode appends the canonical dotted form of c — the bytes String
+// returns — onto dst, so a renderer that composes a larger string (Error,
+// PrefixMatcher.String) writes the code in place instead of allocating it.
+func appendCode(dst []byte, c Code) []byte {
+	dst = strconv.AppendUint(dst, uint64(c.Major()), decimalBase)
+	dst = append(dst, '.')
+	dst = strconv.AppendUint(dst, uint64(c.Layer()), decimalBase)
+	dst = append(dst, '.')
+	dst = strconv.AppendUint(dst, uint64(c.Package()), decimalBase)
+	dst = append(dst, '.')
+	//: hand back the buffer carrying the four octets.
+	return strconv.AppendUint(dst, uint64(c.Serial()), decimalBase)
+}
+
+// codeLen returns len(c.String()) without rendering it, so a renderer can
+// size its one allocation exactly.
+func codeLen(c Code) int {
+	//: three dots plus the width of each octet.
+	return octetLen(uint8(c.Major())) + octetLen(uint8(c.Layer())) +
+		octetLen(uint8(c.Package())) + octetLen(uint8(c.Serial())) + codeDotCount
+}
+
+// octetLen returns the number of decimal digits of an unpadded octet.
+func octetLen(octet uint8) int {
+	//: one comparison per width; an octet has at most three digits.
+	switch {
+	//: 0-9.
+	case octet < padThreshold10:
+		//: one digit.
+		return 1
+	//: 10-99.
+	case octet < padThreshold100:
+		//: two digits.
+		return 2
+	//: 100-255.
+	default:
+		//: three digits — the padded width, which every octet fits.
+		return octetMaxDigits
+	}
 }
 
 // itoaDecimal returns the decimal representation of a uint8 (0-255) UNPADDED.
-// Internal helper — exported sibling is Code.String().
+// Internal helper for ParseCode's diagnostics; the renderers use appendCode.
 func itoaDecimal(octet uint8) string {
 	//: strconv.Itoa is the single stdlib call; no fmt required.
 	return strconv.Itoa(int(octet))
 }
 
-// itoaPadded3 returns the zero-padded 3-digit decimal form ("000".. "255").
-func itoaPadded3(octet uint8) string {
-	//: single switch keeps each branch at constant work; no fmt verbs.
-	switch {
-	//: single-digit input — prepend two zeros to reach 3-char width.
-	case octet < padThreshold10:
-		//: emit the "00X" form using a leading two-zero prefix.
-		return "00" + strconv.Itoa(int(octet))
-	//: double-digit input — prepend one zero to reach 3-char width.
-	case octet < padThreshold100:
-		//: emit the "0XX" form using a single leading zero.
-		return "0" + strconv.Itoa(int(octet))
-	//: triple-digit input — already the right width, emit as-is.
-	default:
-		//: forward the 3-digit decimal directly with no padding.
-		return strconv.Itoa(int(octet))
-	}
+// appendPadded3 appends the zero-padded 3-digit decimal form ("000".. "255")
+// of octet onto dst.
+func appendPadded3(dst []byte, octet uint8) []byte {
+	//: hundreds, tens, units — each a digit, leading zeros included, which is
+	//: exactly the padding the form asks for.
+	return append(dst,
+		'0'+octet/padThreshold100,
+		'0'+octet/padThreshold10%padThreshold10,
+		'0'+octet%padThreshold10)
 }
