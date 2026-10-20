@@ -224,34 +224,114 @@ sequences:
       - return: time.Unix(secs, 0).UTC(), payload, nil
         to: time.Unix(secs, 0).UTC
   - of: base62Encode
+    participants:
+      - id: caller
+        kind: actor
+      - id: base62Encode
+        kind: self
+      - id: binary.BigEndian.Uint32
+        kind: value
     steps:
       - var:
           name: work
-          type: "[ksuidRawLen]byte"
-      - eval: copy(work[:], b)
+          type: "[ksuidWords]uint32"
+      - loop:
+          do:
+            - set: work[j]
+              to: binary.BigEndian.Uint32
+              value: binary.BigEndian.Uint32(b[j*ksuidWordBytes:])
+          key: j
+          range: work
       - var:
           name: out
           type: "[ksuidChars]byte"
       - loop:
-          cond: i >= 0
+          cond: i > 0
           do:
-            - bind: rem
-              eval: "0"
+            - var:
+                name: rem
+                type: uint64
             - loop:
                 do:
                   - bind: cur
-                    eval: rem<<bitsPerByte | int(work[j])
+                    eval: rem<<bitsPerWord | uint64(work[j])
                   - set: work[j]
-                    value: byte(cur / base62Radix)
+                    value: uint32(cur / base62Pow5)
                   - set: rem
-                    value: cur % base62Radix
+                    value: cur % base62Pow5
                 key: j
                 range: work
-            - set: out[i]
-              value: base62Alphabet[rem]
-          init: i := ksuidChars - 1
-          post: i--
+            - loop:
+                cond: k < base62DigitsPerRound && i > 0
+                do:
+                  - op: "--"
+                    set: i
+                  - set: out[i]
+                    value: base62Alphabet[rem%uint64(base62Radix)]
+                  - op: /=
+                    set: rem
+                    value: uint64(base62Radix)
+                init: k := 0
+                post: k++
+          init: i := ksuidChars
       - return: string(out[:])
+  - of: base62Decode
+    participants:
+      - id: caller
+        kind: actor
+      - id: base62Decode
+        kind: self
+      - id: binary.BigEndian.PutUint32
+        kind: value
+    steps:
+      - opt:
+          do:
+            - return: |-
+                raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
+                			errs.String("rule", "length"), errs.Int("length", len(s)))
+          when: len(s) != ksuidChars
+      - var:
+          name: words
+          type: "[ksuidWords]uint32"
+      - loop:
+          do:
+            - bind: digit
+              eval: int(base62Reverse[s[i]])
+            - opt:
+                do:
+                  - return: |-
+                      raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
+                      				errs.String("rule", "alphabet"), errs.Int("offset", i))
+                when: digit < 0
+            - bind: carry
+              eval: uint64(digit)
+            - loop:
+                cond: j >= 0
+                do:
+                  - bind: cur
+                    eval: uint64(words[j])*uint64(base62Radix) + carry
+                  - set: words[j]
+                    value: uint32(cur)
+                  - set: carry
+                    value: cur >> bitsPerWord
+                init: j := ksuidWords - 1
+                post: j--
+            - opt:
+                do:
+                  - return: |-
+                      raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
+                      				errs.String("rule", "overflow"))
+                when: carry != 0
+          key: i
+          range: ksuidChars
+      - loop:
+          do:
+            - eval: binary.BigEndian.PutUint32(raw[j*ksuidWordBytes:], word)
+              to: binary.BigEndian.PutUint32
+          key: j
+          range: words
+          value: word
+      - return: raw, nil
   - of: buildBase62Reverse
     steps:
       - var:
