@@ -1193,10 +1193,7 @@ func staleSnapshot(t *testing.T) (c *cluster, l, f *testNode, meta coreconsensus
 		propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
 	}
 	c.waitApplied(l.node.Status().Commit, 5*time.Second)
-	metas, err := l.snaps.List()
-	if err != nil || len(metas) == 0 {
-		t.Fatalf("no leader snapshot: %v", err)
-	}
+	metas := leaderSnapshots(t, l)
 	meta = metas[0]
 	h, err := l.snaps.Open(meta.ID)
 	if err != nil {
@@ -1419,6 +1416,24 @@ func TestTickFollowsTheCommittedContract(t *testing.T) {
 // callers waited forever and their bytes stayed counted until every
 // proposal was refused OVERLOADED. The restore answers them OUTCOME_UNKNOWN
 // and releases their bytes (#419).
+// leaderSnapshots waits until the leader has published a snapshot, and
+// returns its snapshots. propose returns once an entry is applied, but a cut
+// is written on a goroutine of its own (maybeSnapshot, cut): reading the list
+// right after the last proposal found it empty about once in 200 runs (#427).
+func leaderSnapshots(t *testing.T, l *testNode) []coreconsensus.SnapshotMetaValue {
+	t.Helper()
+	var metas []coreconsensus.SnapshotMetaValue
+	waitFor(t, "a leader snapshot", func() bool {
+		var err error
+		metas, err = l.snaps.List()
+		if err != nil {
+			t.Fatalf("list the leader's snapshots: %v", err)
+		}
+		return len(metas) > 0
+	})
+	return metas
+}
+
 func TestARestoredSnapshotAnswersTheProposalsItCovers(t *testing.T) {
 	c := newCluster(t, 3, 20)
 	l := c.leader(5 * time.Second)
@@ -1427,11 +1442,7 @@ func TestARestoredSnapshotAnswersTheProposalsItCovers(t *testing.T) {
 	for i := range 60 {
 		propose(t, l.node, fmt.Sprintf("k%d=%d", i, i))
 	}
-	metas, err := l.snaps.List()
-	if err != nil || len(metas) == 0 {
-		t.Fatalf("no leader snapshot: %v", err)
-	}
-	meta := metas[0]
+	meta := leaderSnapshots(t, l)[0]
 	h, err := l.snaps.Open(meta.ID)
 	if err != nil {
 		t.Fatal(err)
