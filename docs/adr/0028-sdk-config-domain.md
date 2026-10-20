@@ -46,6 +46,16 @@ reusing `encoding/json`'s struct-tag mapping, no `mapstructure` dependency. Env
 values are JSON-coerced (`"8080"`→int, `"true"`→bool; bare words stay strings)
 so typed fields populate from the environment.
 
+**Note (2026-10-21, #468).** The round trip inherits `encoding/json`'s
+case-insensitive key matching, and the merge did not: two layers spelling one
+field `port` and `Port` both survived the merge, and `json.Marshal`'s sorted key
+order — not the layer order — decided which one the decode kept, so an earlier
+layer, or a schema default, could beat a later one. "Later wins" now holds
+whatever the case: each source's layer is rewritten to the spelling the target
+type declares (matched as the decoder matches it) before the merge. A map's
+keys are data and keep their case, and two fields whose names differ only by
+case keep their exact spellings apart.
+
 ## Consequences
 
 - 10th core sibling; closes the Phase-B wave (id/cache/resilience/metrics/config).

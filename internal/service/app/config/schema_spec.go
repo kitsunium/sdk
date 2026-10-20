@@ -55,6 +55,10 @@ type SchemaSpec[T any] struct {
 	// configuration file shared by two services, or an unprefixed EnvSource,
 	// which hands over every variable in the process environment. Those are
 	// facts about the SOURCE, and the opt-out is where the author says so.
+	//
+	// A key that differs from one of T's only by case is not unknown: the
+	// decoder fills that field from it, and the load rewrites it to T's
+	// spelling before the check.
 	AllowUnknownKeys bool
 	// Rule is one extra constraint, composed with the `validate` tags of T
 	// into a single report. It is where a CROSS-FIELD rule lives — "a TLS

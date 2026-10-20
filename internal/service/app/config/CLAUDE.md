@@ -17,6 +17,7 @@ ADR 0028 + ADR 0061 + ADR 0097. Emits the core sentinels `0.2.10.*`.
 | `file_source.go` | `FileSource(format, path)` — codec-dispatched file parse; `Describe` names the path; `parseDocument` — the codec lookup + decode both file sources share |
 | `fs_source.go` | `FSSource(fsys, format, path)` — `FileSource` over an `io/fs.FS` (an embedded configuration): the same parse, the same `CONFIG_SOURCE_FAILED` — a file the FS does not hold included, never an empty layer — and the same `Describe` (`"file"`, the path as given); a nil `fsys` is refused at `Load` |
 | `merge.go` | `deepMerge` — recursive layer merge (later wins; an array REPLACES, it is never merged) + `cloneNested` / `cloneArray` — a deep copy sharing no table and no array, a nil array kept nil |
+| `canonical.go` | `keyVocabulary.canonicalLayer` — every source's layer rewritten to the spelling T declares before the merge, matched as encoding/json matches a key (`foldKey`: each rune lowered then raised), so later wins whatever the case (#468); a copy only when something is rewritten, never the source's map; a map's keys and an ambiguous fold (two fields differing only by case) left alone |
 | `load.go` | `Load[T]` / `LoadSchema[T]` — merge + key pass + JSON round-trip decode + constraints + Validate; the merge keeps its layers, and `restoreRawSecrets` undoes the environment's coercion for a `secret.Value` field |
 | `origins.go` | `LoadWithOrigins[T]` / `LoadSchemaWithOrigins[T]` — the same pipeline, plus one `core/app/config.OriginValue` per leaf key, attributed to the last layer that supplied it (ADR 0097) |
 | `schema.go` | `SchemaValue[T]` + `NewSchemaValue` + `Check` + `Source` — the compiled schema |
@@ -62,6 +63,15 @@ ADR 0028 + ADR 0061 + ADR 0097. Emits the core sentinels `0.2.10.*`.
   run, because a key nobody supplied decodes to a zero the operator never wrote.
 - **An unknown key is refused by default** (`SchemaSpec.AllowUnknownKeys` opts
   out). The zero value is the safe one — ADR 0031.
+- **One field, one key, whatever the case** (#468). encoding/json fills a field
+  tagged `port` from `Port` or `PORT`; the merge compared keys exactly, kept
+  both, and the decode's sorted key order — not the layer order — decided which
+  won (a default could beat a file). Every source's layer is therefore
+  canonicalised to T's spelling BEFORE the merge (`canonical.go`), at every level
+  T names a table, so the merge, the key pass, the secret restore and the
+  origins all see one key. Inside one layer the exact spelling wins over a
+  variant, the variants folding in byte order. A case variant is therefore no
+  longer an unknown key to a strict schema: the decoder reads it.
 - **A schema owns no rule vocabulary.** `Rule` is a `core/app/validation.Constraint`
   and the tags are compiled by `service/app/validation.Struct`; there is no `min`,
   `max` or `oneof` in this package and there must not be.
@@ -76,8 +86,9 @@ ADR 0028 + ADR 0061 + ADR 0097. Emits the core sentinels `0.2.10.*`.
   the variable's raw text before the decode — on every entry point. A slice or
   a map of secrets (`secretNested`) keeps its coerced JSON document, which is
   what its decode needs. The secret set is resolved at schema construction, or once per target
-  type for a schemaless load (`secretKeysByType`, a `sync.Map`): walked per load
-  it doubled `Load` (`BENCH.md` §ADR 0097).
+  type for a schemaless load (`typeKeysByType`, a `sync.Map`, which memoises the
+  vocabulary and its fold index with them): walked per load it doubled `Load`
+  (`BENCH.md` §ADR 0097).
 - **An origin never carries a value**, and a `Describer`'s detail must not
   either. A key present in the merged fold is attributed to the LAST layer
   holding it; a key absent from the fold — never supplied, or erased when a

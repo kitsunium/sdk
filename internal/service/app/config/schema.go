@@ -31,6 +31,9 @@ type SchemaValue[T any] struct {
 	// known is the target type's whole vocabulary, with each key marked leaf
 	// or table. The unknown-key pass walks the merged map against it.
 	known map[string]keyKind
+	// vocabulary is known with the index of its folds, which every source's
+	// layer is canonicalised against before the merge (#468).
+	vocabulary keyVocabulary
 	// secrets is every key whose field holds a core/security/secret.Value, and how,
 	// resolved once here so a load pays no walk for it (ADR 0097).
 	secrets map[string]secretHold
@@ -103,6 +106,7 @@ func NewSchemaValue[T any](spec SchemaSpec[T]) (schema *SchemaValue[T], err erro
 		declared:   compiled.declared,
 		required:   compiled.required,
 		known:      compiled.known,
+		vocabulary: keyVocabulary{known: compiled.known, folds: buildFolds(compiled.known)},
 		secrets:    compiled.secrets,
 		strict:     !spec.AllowUnknownKeys,
 		constraint: constraint,
