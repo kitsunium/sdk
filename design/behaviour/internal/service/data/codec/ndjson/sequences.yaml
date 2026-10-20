@@ -101,24 +101,22 @@ sequences:
         kind: self
       - id: stdjson
         kind: stdlib
-      - id: buf.Write
-        kind: value
-      - id: buf.WriteByte
+      - id: enc.Encode
         kind: value
     steps:
+      - bind: enc
+        eval: stdjson.NewEncoder(buf)
+        to: stdjson
       - loop:
           do:
-            - bind: line, merr
-              eval: stdjson.Marshal(getElem(i))
-              to: stdjson
             - opt:
                 do:
                   - return: merr
+                init:
+                  bind: merr
+                  eval: enc.Encode(getElem(i))
+                  to: enc.Encode
                 when: merr != nil
-            - eval: buf.Write(line)
-              to: buf.Write
-            - eval: buf.WriteByte('\n')
-              to: buf.WriteByte
           key: i
           range: "n"
       - return: nil
@@ -339,8 +337,12 @@ sequences:
         kind: internal
       - id: asSlice
         kind: internal
-      - id: stdjson
+      - id: bytes
         kind: stdlib
+      - id: encodeSliceInto
+        kind: internal
+      - id: out.Bytes
+        kind: value
     steps:
       - opt:
           do:
@@ -365,28 +367,25 @@ sequences:
           when: "!ok"
       - bind: origLen
         eval: len(dst)
-      - loop:
+      - bind: out
+        eval: bytes.NewBuffer(dst)
+        to: bytes
+      - opt:
           do:
-            - bind: line, merr
-              eval: stdjson.Marshal(elemForMarshal(slice, i))
-              to: stdjson
-            - opt:
-                do:
-                  - return: |-
-                      dst[:origLen], errs.Wrap(merr, errs.WrapParams{
-                      				Code:    corendjson.CodeNDJSONMarshalFailed,
-                      				Reason:  "MARSHAL_FAILED",
-                      				Public:  "NDJSON encoding failed",
-                      				Private: "service/data/codec/ndjson.Append: encoding/json returned an error",
-                      			})
-                when: merr != nil
-            - set: dst
-              value: append(dst, line...)
-            - set: dst
-              value: append(dst, '\n')
-          key: i
-          range: slice.Len()
-      - return: dst, nil
+            - return: |-
+                dst[:origLen], errs.Wrap(merr, errs.WrapParams{
+                			Code:    corendjson.CodeNDJSONMarshalFailed,
+                			Reason:  "MARSHAL_FAILED",
+                			Public:  "NDJSON encoding failed",
+                			Private: "service/data/codec/ndjson.Append: encoding/json returned an error",
+                		})
+          init:
+            bind: merr
+            eval: encodeSliceInto(out, slice.Len(), func(i int) any { return elemForMarshal(slice, i) })
+            to: encodeSliceInto
+          when: merr != nil
+      - return: out.Bytes(), nil
+        to: out.Bytes
   - of: elemForMarshal
     participants:
       - id: caller

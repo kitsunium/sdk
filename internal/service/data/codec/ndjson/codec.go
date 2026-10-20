@@ -115,19 +115,19 @@ func (*ndjsonCodec) Marshal(v any) (encoded []byte, err error) {
 // reflect.Value at the API boundary. Stops at the first per-record
 // failure, returning the raw stdlib error so the caller can wrap it.
 func encodeSliceInto(buf *bytes.Buffer, n int, getElem func(int) any) error {
-	//: encode record-by-record; one '\n' per element.
+	//: ONE encoder for the whole batch, writing straight into buf. Its Encode
+	//: is Marshal's bytes (compact, HTML-escaped by default, the same
+	//: marshalers) followed by exactly the '\n' NDJSON wants — and it reuses
+	//: its scratch across records, where a stdjson.Marshal per record handed
+	//: back a fresh slice each time only to copy it into buf.
+	enc := stdjson.NewEncoder(buf)
+	//: encode record-by-record; Encode terminates each with '\n'.
 	for i := range n {
-		//: delegate per-record JSON encoding to the stdlib.
-		line, merr := stdjson.Marshal(getElem(i))
 		//: surface the raw stdlib error to the caller for wrapping.
-		if merr != nil {
+		if merr := enc.Encode(getElem(i)); merr != nil {
 			//: caller's responsibility to wrap and release the buffer.
 			return merr
 		}
-		//: append the record and the mandatory newline.
-		buf.Write(line)
-		//: RFC-compliant NDJSON separator.
-		buf.WriteByte('\n')
 	}
 	//: every record written successfully.
 	return nil
@@ -350,27 +350,22 @@ func (*ndjsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: snapshot dst's prior length so a mid-slice failure can roll back and
 	//: honour the Appender contract's "return prior contents on error" rule.
 	origLen := len(dst)
-	//: encode record-by-record; one '\n' per element appended in place.
-	for i := range slice.Len() {
-		//: delegate per-record JSON encoding to the stdlib.
-		line, merr := stdjson.Marshal(elemForMarshal(slice, i))
-		//: surface any per-record failure with dst restored to its prior length.
-		if merr != nil {
-			//: wrap the stdlib error for reason-based matching; slice off any
-			//: partially-written records so callers never see a torn buffer.
-			return dst[:origLen], errs.Wrap(merr, errs.WrapParams{
-				Code:    corendjson.CodeNDJSONMarshalFailed,
-				Reason:  "MARSHAL_FAILED",
-				Public:  "NDJSON encoding failed",
-				Private: "service/data/codec/ndjson.Append: encoding/json returned an error",
-			})
-		}
-		//: append the record and the mandatory newline.
-		dst = append(dst, line...)
-		dst = append(dst, '\n')
+	//: the records are encoded straight onto dst through one encoder — the
+	//: same loop as Marshal, so the two cannot drift apart.
+	out := bytes.NewBuffer(dst)
+	//: one '\n'-terminated line per element, appended in place.
+	if merr := encodeSliceInto(out, slice.Len(), func(i int) any { return elemForMarshal(slice, i) }); merr != nil {
+		//: wrap the stdlib error for reason-based matching; slice off any
+		//: partially-written records so callers never see a torn buffer.
+		return dst[:origLen], errs.Wrap(merr, errs.WrapParams{
+			Code:    corendjson.CodeNDJSONMarshalFailed,
+			Reason:  "MARSHAL_FAILED",
+			Public:  "NDJSON encoding failed",
+			Private: "service/data/codec/ndjson.Append: encoding/json returned an error",
+		})
 	}
 	//: hand back the (possibly re-allocated) buffer.
-	return dst, nil
+	return out.Bytes(), nil
 }
 
 // elemForMarshal hands element i of slice to encoding/json in the form that

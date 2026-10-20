@@ -25,7 +25,7 @@ package always emitted; only the declaration moved.
 
 | Code         | Var               | Trigger |
 |---|---|---|
-| `0.3.11.1`   | `MarshalFailed`   | `encoding/json.Marshal` failed on a single record |
+| `0.3.11.1`   | `MarshalFailed`   | `encoding/json` failed to encode a single record (`Encoder.Encode`) |
 | `0.3.11.2`   | `UnmarshalFailed` | `encoding/json.Unmarshal` failed on a single record OR a line exceeded `scannerMaxCapacity` |
 | `0.3.11.3`   | `ValueInvalid`    | argument is not a slice or an array (Marshal/Append) or target is not a pointer to a slice (Unmarshal) |
 
@@ -38,6 +38,11 @@ package always emitted; only the declaration moved.
 - **Per-record encoding passes the element's ADDRESS**, not a copy (`elemForMarshal`), whenever the element is addressable — i.e. always for a `[]T`, never for a bare `[N]T` array value, and deliberately never for an interface element. Two measured reasons:
   - *Parity.* `reflect.Value.Interface()` strips addressability, so a `MarshalJSON` / `MarshalText` declared on `*T` used to be skipped: ndjson emitted `{"v":1}` where `encoding/json.Marshal` of the whole `[]T` emits `"PTR-JSON"`. Pinned by `TestStdlibSliceParity`, which asserts line *i* equals element *i* of the stdlib's whole-slice encoding.
   - *Allocation.* Since Go 1.27 `encoding/json` is the json/v2 implementation (`GOEXPERIMENT=jsonv2` joined the baseline in `internal/buildcfg/exp.go`), and json/v2's `marshalEncode` shallow-copies every non-pointer argument through `reflect.New` (`encoding/json/v2/arshal.go`). Passing the address skips it. Per record: **3 → 1** allocation for `[]T`, `[]*T` was already at 1, `[]any` stays at 2 (an interface's dynamic value is not addressable, so that copy is irreducible). Pinned by `TestAllocPerRecord`.
+- **One `json.Encoder` per call, not one `json.Marshal` per record** (`encodeSliceInto`, shared by `Marshal` and `Append`). `Encoder.Encode` writes `Marshal`'s bytes — compact, HTML-escaped by default, the same marshalers — followed by the `'\n'` a record needs, straight into the output buffer, and reuses its scratch across records. A `json.Marshal` per record allocated a fresh slice per record only to copy it out. Per record: **1 → 0** allocation for `[]T` and `[]*T`, **2 → 1** for `[]any`; a 1 000-record `Append` leaves 74 B for the collector instead of 78 KiB (`BENCH.md`). Line parity with the stdlib's whole-slice encoding is still `TestStdlibSliceParity`'s, and `TestAllocBudget` / `TestAllocPerRecord` hold the new figures (3 per call, 0 per record).
+
+## Benchmarks
+
+`codec_bench_test.go` — `MarshalBatch` and `AppendBatch` over 10 and 1 000 small records; numbers and machine in `BENCH.md`.
 
 ## Verification
 
