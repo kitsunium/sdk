@@ -46,7 +46,7 @@ reusing `encoding/json`'s struct-tag mapping, no `mapstructure` dependency. Env
 values are JSON-coerced (`"8080"`→int, `"true"`→bool; bare words stay strings)
 so typed fields populate from the environment.
 
-**Note (2026-10-21, #468).** The round trip inherits `encoding/json`'s
+**Note (2026-10-21, [issue 468](https://github.com/kitsunium/sdk/issues/468)).** The round trip inherits `encoding/json`'s
 case-insensitive key matching, and the merge did not: two layers spelling one
 field `port` and `Port` both survived the merge, and `json.Marshal`'s sorted key
 order — not the layer order — decided which one the decode kept, so an earlier
