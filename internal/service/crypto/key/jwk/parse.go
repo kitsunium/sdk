@@ -143,7 +143,7 @@ func attachECPrivate(base KeyValue, member string, size int) (key KeyValue, err 
 		//: out of range, or a keypair that does not agree with itself.
 		return KeyValue{}, serr
 	}
-	base.priv = scalar
+	base.priv = holdPrivate(scalar)
 	//: a coherent private key.
 	return base, nil
 }
@@ -195,7 +195,7 @@ func attachOKPPrivate(base KeyValue, member string) (key KeyValue, err error) {
 		//: d and x describe different keys.
 		return KeyValue{}, corejwk.KeyMismatch
 	}
-	base.priv = seed
+	base.priv = holdPrivate(seed)
 	//: a coherent private key.
 	return base, nil
 }
@@ -221,7 +221,7 @@ func parseOct(base KeyValue, raw keyJSON) (key KeyValue, err error) {
 		//: propagate the encoding refusal untouched.
 		return KeyValue{}, kerr
 	}
-	base.priv = secret
+	base.priv = holdPrivate(secret)
 	//: a symmetric key, private by construction.
 	return base, nil
 }

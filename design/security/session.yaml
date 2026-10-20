@@ -648,8 +648,12 @@ packages:
           ID is an opaque session identifier. It IS a bearer secret — whoever holds it
           is the session — so this type is built to make leaking it hard:
 
-            - String and GoString render "<redacted>", so an accidental %v, %s or %#v
-              in a log line, an error message or a struct dump prints nothing usable.
+            - String, GoString and Format render "<redacted>", so an accidental %v,
+              %s, %#v or %d in a log line, an error message or a struct dump prints
+              nothing usable. The bytes sit behind a pointer, so even a struct holding
+              an ID in an UNEXPORTED field — which fmt prints by reflection, without
+              calling Format — prints an address rather than the identifier, and a
+              zero-size non-comparable field keeps == from comparing that pointer.
               The public/private split of errs is the same idea applied to errors: a
               Public string is read by third parties, so no sentinel in this domain
               ever carries an identifier in one.
@@ -722,6 +726,17 @@ packages:
             out:
               - type: string
             recv: value
+          - doc: |-
+              Format implements fmt.Formatter, so EVERY verb writes "<redacted>" — %d
+              included, which bypasses String and would otherwise print the struct. %q
+              writes it quoted.
+            in:
+              - name: state
+                type: fmt.State
+              - name: verb
+                type: rune
+            name: Format
+            recv: value
         name: ID
         struct:
           unexported: true
@@ -735,6 +750,12 @@ packages:
           no Elevate: the subject is written exactly once, by [Store.Regenerate], and
           that call always mints a new identifier. A caller therefore cannot express
           "keep this identifier and log this user in" — the sentence has no method.
+
+          Every rendering — String, GoString and Format, so every verb — writes the
+          session's shape, never its contents. The state sits behind a pointer, so a
+          struct holding a SessionValue in an UNEXPORTED field, which fmt prints by
+          reflection without calling Format, prints an address rather than the
+          identifier, the subject or the data.
         methods:
           - doc: "ID reports the session's identifier. It is a bearer secret: see [ID]."
             name: ID
@@ -862,6 +883,17 @@ packages:
             name: GoString
             out:
               - type: string
+            recv: value
+          - doc: |-
+              Format implements fmt.Formatter, so EVERY verb writes the same shape-only
+              rendering as String — %d included, which bypasses String and would
+              otherwise print every field. %q writes it quoted.
+            in:
+              - name: state
+                type: fmt.State
+              - name: verb
+                type: rune
+            name: Format
             recv: value
         name: SessionValue
         struct:

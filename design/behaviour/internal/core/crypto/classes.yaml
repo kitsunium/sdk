@@ -1,6 +1,12 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 constants:
+  - doc: redactedKey is the one rendering a Key has, whatever it holds.
+    items:
+      - name: redactedKey
+        type: string
+        value: "\"<redacted>\""
+    name: redactedKey
   - doc: |-
       KeyLen is the required symmetric key length in bytes (256-bit). Both shipped
       AEADs — AES-256-GCM and XChaCha20-Poly1305 — take a 32-byte key, so a single
@@ -75,13 +81,17 @@ files:
       - SumHex
     name: hash_registry.go
   - decls:
+      - redactedKey
       - KeyLen
       - Key
+      - keyBytes
       - NewKey
       - Key.Bytes
       - Key.Zeroize
       - Key.String
       - Key.GoString
+      - Key.Format
+      - writeKeyRendering
     name: key.go
   - decls:
       - macs
@@ -204,6 +214,12 @@ functions:
   - name: NewKey
     params: raw []byte
     results: key Key, err error
+  - doc: |-
+      writeKeyRendering writes a rendering into the state fmt handed to Format.
+      fmt.Formatter has no error return and fmt discards what a write into its own
+      buffer reports, so the error is read here and dropped as a visible decision.
+    name: writeKeyRendering
+    params: state fmt.State, text string
   - name: RegisterMAC
     params: m MAC
     results: MAC
@@ -343,10 +359,16 @@ types:
     underlying: string
   - fields:
       - doc: |-
-          raw holds the symmetric key bytes behind a slice so a value-receiver
-          Zeroize can clear the shared backing array; NewKey is the only producer.
-        name: raw
-        type: "[]byte"
+          _ makes the struct non-comparable at zero cost: with the bytes behind a
+          pointer, == would otherwise compile and compare allocations.
+        name: _
+        type: "[0]func()"
+      - doc: |-
+          held points at the symmetric key bytes; nil for the zero Key. Every copy
+          shares it, so a value-receiver Zeroize clears the material for all of
+          them; NewKey is the only producer.
+        name: held
+        type: "*keyBytes"
     kind: struct
     methods:
       - name: Bytes
@@ -360,7 +382,19 @@ types:
       - name: GoString
         recv: k Key
         results: string
+      - name: Format
+        params: state fmt.State, verb rune
+        recv: k Key
     name: Key
+  - doc: |-
+      keyBytes is the one allocation a Key owns. It is a separate type only so
+      that the field a Key carries is a pointer — see the Key doc comment.
+    fields:
+      - doc: raw is the key material, exactly KeyLen bytes.
+        name: raw
+        type: "[]byte"
+    kind: struct
+    name: keyBytes
   - doc: |-
       schemeRegistry is one capability's registry: the kernel's read-mostly,
       copy-on-write table, and the public registrar's name, which is what its

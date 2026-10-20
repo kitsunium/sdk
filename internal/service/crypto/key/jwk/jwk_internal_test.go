@@ -164,7 +164,7 @@ func TestWireRejectsIncompleteKeys(t *testing.T) {
 	}{
 		{"an EC key with no coordinates cannot be published", KeyValue{kty: TypeEC, crv: CurveP256}, true, corejwk.CodeJWKMissingMember},
 		{"an OKP key with no x cannot be published", KeyValue{kty: TypeOKP, crv: CurveEd25519}, true, corejwk.CodeJWKMissingMember},
-		{"a private EC key with no coordinates cannot be exported", KeyValue{kty: TypeEC, crv: CurveP256, priv: []byte{1}}, false, corejwk.CodeJWKMissingMember},
+		{"a private EC key with no coordinates cannot be exported", KeyValue{kty: TypeEC, crv: CurveP256, priv: holdPrivate([]byte{1})}, false, corejwk.CodeJWKMissingMember},
 	}
 	runCase := func(t *testing.T, c struct {
 		name     string
@@ -234,7 +234,7 @@ func TestThumbprintInputRejects(t *testing.T) {
 // literal rather than through a mutating closure.
 var baseKey = KeyValue{
 	kty: TypeEC, crv: CurveP256, kid: "k", use: "sig", alg: "ES256",
-	keyOps: []string{"sign"}, x: []byte{1}, y: []byte{2}, priv: []byte{3},
+	keyOps: []string{"sign"}, x: []byte{1}, y: []byte{2}, priv: holdPrivate([]byte{3}),
 }
 
 // withMember returns a copy of baseKey with one member replaced.

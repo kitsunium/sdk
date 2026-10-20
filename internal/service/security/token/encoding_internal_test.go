@@ -9,6 +9,42 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// TestTheZeroInstantIsNotAnAbsentClaim is the regression for
+// kitsunium/sdk#439 in both claim formats: a time claim present at exactly
+// 0001-01-01T00:00:00Z decodes to the zero Time, which reads as "absent", so
+// it is refused as malformed instead — an exp there would never expire.
+func TestTheZeroInstantIsNotAnAbsentClaim(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		payload string
+		shape   claimShape
+	}{
+		{"JWT exp", `{"exp":-62135596800}`, joseShape{}},
+		{"JWT iat", `{"iat":-62135596800}`, joseShape{}},
+		{"PASETO exp", `{"exp":"0001-01-01T00:00:00Z"}`, pasetoShape{}},
+		{"PASETO nbf", `{"nbf":"0001-01-01T00:00:00Z"}`, pasetoShape{}},
+	}
+	runCase := func(t *testing.T, name, payload string, shape claimShape) {
+		t.Helper()
+		_, err := decodeClaims([]byte(payload), DefaultMaxClaimDepth, shape)
+		if !errs.HasCode(err, coretoken.CodeMalformed) {
+			t.Fatalf("%s: decodeClaims = %v, want MALFORMED", name, err)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c.name, c.payload, c.shape)
+		})
+	}
+	//: one second later is a real, if ancient, instant.
+	claims, err := decodeClaims([]byte(`{"exp":"0001-01-01T00:00:01Z"}`), DefaultMaxClaimDepth, pasetoShape{})
+	if err != nil || claims.Expiry().IsZero() {
+		t.Fatalf("decodeClaims(one second past the zero instant) = %v, %v", claims.Expiry(), err)
+	}
+}
+
 // TestPreAuthEncodeMatchesTheSpecVectors checks PAE against the three worked
 // examples in the PASETO specification. PAE is the piece nothing else can
 // cross-check: an off-by-one in the length prefix produces signatures that

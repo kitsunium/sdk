@@ -345,6 +345,54 @@ func TestFormattingNeverPrintsMaterial(t *testing.T) {
 	}
 }
 
+// keyHider carries a KeyValue in an UNEXPORTED field, which fmt formats by
+// reflection instead of through the KeyValue's methods.
+type keyHider struct {
+	key jwk.KeyValue
+}
+
+// TestFormattingNeverPrintsMaterialThroughAnyVerb is the regression for
+// kitsunium/sdk#433: %d bypasses String, and a KeyValue in an unexported field
+// is walked by reflection; neither may print the private member, in decimal or
+// in hex.
+func TestFormattingNeverPrintsMaterialThroughAnyVerb(t *testing.T) {
+	t.Parallel()
+	ecKey := parseFixture(t, ecPrivateDoc).WithKid("k1")
+	octKey := parseFixture(t, octDoc)
+	tests := []struct {
+		name    string
+		printed string
+	}{
+		{"%d on a private key", fmt.Sprintf("%d", ecKey)},
+		{"%x on a private key", fmt.Sprintf("%x", ecKey)},
+		{"%d on a symmetric key", fmt.Sprintf("%d", octKey)},
+		{"%d on a set", fmt.Sprintf("%d", jwk.NewSet(ecKey, octKey))},
+		{"an unexported field, %+v", fmt.Sprintf("%+v", keyHider{key: ecKey})},
+		{"an unexported field, %d", fmt.Sprintf("%d", keyHider{key: octKey})},
+	}
+	//: the first octets of the RFC 7515 A.3.1 scalar and of the oct secret, in
+	//: decimal and hex — the shapes a reflective dump would take.
+	leaks := []string{"142 155 16", "[1 1 1 1", "8e9b10", "01010101"}
+	runCase := func(t *testing.T, c struct {
+		name    string
+		printed string
+	},
+	) {
+		t.Helper()
+		for _, leak := range leaks {
+			if strings.Contains(c.printed, leak) {
+				t.Errorf("%s: material leaked through fmt: %s", c.name, c.printed)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 func TestThumbprint(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

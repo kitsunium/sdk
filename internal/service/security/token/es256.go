@@ -2,6 +2,7 @@ package token
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"math/big"
@@ -16,6 +17,15 @@ import (
 // that cannot inherit an exit override — lands on the same number its sibling
 // sentinel would have produced.
 const exitConfigFault int = 78
+
+// p256HalfOrder is n/2 for P-256. An ECDSA signature (r, s) verifies exactly
+// as (r, n−s) does, so the signer writes the low-S form (s at most n/2): a
+// token THIS SDK signs has one spelling. The verifier accepts both forms —
+// RFC 7518 §3.4 does not require low S, and most producers, crypto/ecdsa
+// included, emit a high s about half the time, so refusing it would refuse
+// valid tokens from every external issuer. A token string is therefore not a
+// key for a revocation or replay list; jti, or the claims, are.
+var p256HalfOrder = new(big.Int).Rsh(elliptic.P256().Params().N, 1)
 
 // es256Signing is ECDSA P-256 signing with the RFC 7518 §3.4 R||S encoding.
 type es256Signing struct {
@@ -53,6 +63,11 @@ func (b es256Signing) sign(input []byte) (sig []byte, err error) {
 			Private:  "service/security/token: ecdsa.Sign failed on the P-256 signing key",
 			ExitCode: exitConfigFault,
 		})
+	}
+	//: the low-S form: n−s verifies as s does, so a high s is replaced by its
+	//: twin rather than emitted, and a token signed here has one spelling.
+	if s.Cmp(p256HalfOrder) > 0 {
+		s.Sub(b.key.Params().N, s)
 	}
 	var fixed [p256SigLen]byte
 	//: FillBytes left-pads to the fixed width, which is what §3.4 requires.

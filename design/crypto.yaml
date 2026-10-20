@@ -1390,15 +1390,23 @@ packages:
         name: Algorithm
         underlying: string
       - doc: |-
-          Key is an opaque, redacting 256-bit symmetric key. Its String / GoString
-          output is always "<redacted>" so an accidental %v / %s / %#v never leaks the
-          secret; Bytes hands a fresh copy to the cipher and is the only way out. All
-          copies of a Key share one backing array, so Zeroize on any copy clears the
-          secret everywhere — call it when you are done with the key.
+          Key is an opaque, redacting 256-bit symmetric key. Every rendering — String,
+          GoString and Format, so %v, %s, %#v, %d and every other verb — writes
+          "<redacted>", so an accidental print never leaks the secret; Bytes hands a
+          fresh copy to the cipher and is the only way out. All copies of a Key share
+          one backing array, so Zeroize on any copy clears the secret everywhere —
+          call it when you are done with the key.
+
+          The bytes sit behind a pointer rather than in the struct: fmt cannot call
+          Format on a Key held in an UNEXPORTED field of another struct, so it prints
+          that field's own fields instead, and a pointer prints an address where a
+          slice would print the key as a list of byte values. A zero-size field of a
+          non-comparable type keeps == from compiling, so no pointer comparison can
+          pass for a key comparison.
         methods:
           - doc: |-
               Bytes returns a fresh copy of the raw key material for handoff to a cipher.
-              Callers MUST NOT log the result; the redaction only covers String / GoString.
+              Callers MUST NOT log the result; the redaction only covers the renderings.
               A zero-value Key returns nil.
             name: Bytes
             out:
@@ -1422,6 +1430,17 @@ packages:
             name: GoString
             out:
               - type: string
+            recv: value
+          - doc: |-
+              Format implements fmt.Formatter, so EVERY verb writes "<redacted>" — %d
+              included, which bypasses String and would otherwise print the struct's
+              bytes. %q writes it quoted.
+            in:
+              - name: state
+                type: fmt.State
+              - name: verb
+                type: rune
+            name: Format
             recv: value
         name: Key
         struct:

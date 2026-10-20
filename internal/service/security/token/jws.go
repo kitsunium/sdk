@@ -117,9 +117,9 @@ func finishHeader(members map[string]json.RawMessage, alg string) (header header
 // reaches any primitive.
 func (p policyValue) checkHeader(header headerValue, bound coretoken.Algorithm) error {
 	//: an unsecured token is refused by name, so the log says what happened.
-	if strings.EqualFold(header.alg, algNone) {
+	if uerr := refuseUnsecured(header); uerr != nil {
 		//: unconditional — no configuration accepts it.
-		return coretoken.AlgorithmNone
+		return uerr
 	}
 	//: a header with no alg at all is not a JWS.
 	if header.alg == "" {
@@ -169,4 +169,17 @@ func (p policyValue) decodeAndValidate(payload string, shape claimShape) (claims
 	}
 	//: authenticated and accepted.
 	return decoded, nil
+}
+
+// refuseUnsecured refuses an unsecured token — "alg": "none", in any case — by
+// name. It needs no key, so a verifier that selects among several runs it
+// before selecting, and the verdict never depends on which keys it holds.
+func refuseUnsecured(header headerValue) error {
+	//: unconditional — no configuration accepts it.
+	if strings.EqualFold(header.alg, algNone) {
+		//: AlgorithmNone.
+		return coretoken.AlgorithmNone
+	}
+	//: secured, as far as the header says.
+	return nil
 }

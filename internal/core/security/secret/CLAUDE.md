@@ -89,6 +89,7 @@ engine replaces keys while it ranges.
 | `Value` | `NewValue` / `FromString`; `Reveal` / `RevealString` / `IsZero` / `Len` / `Equal`; `String` / `GoString` / `Format` / `MarshalJSON` / `MarshalText` / `UnmarshalJSON` / `UnmarshalText` |
 | `Redacted` | the placeholder, `"<redacted>"` |
 | `Store` | `Get` / `Versions` / `Put` / `Prune` / `Names` — **FROZEN at five** (ADR 0039), guarded by `TestStoreIsFrozenAtFiveMethods` |
+| `FloorPruner` | `PruneBelow(ctx, name, floor)` — the `Store` sibling (ADR 0039) that prunes by version number, never the newest; what the rotator prunes through, so a concurrent `Put` cannot push a version in use out (#434) |
 | `VersionValue` | `Name`, `Version`, `Value`, `Created` — aliased as `pkg/v1/security/secret.Versioned` |
 | `ValidateName`, `MaxNameLen` (63) | the DNS-label grammar |
 | `SubjectKeyStore` | `Get` / `Insert` / `Replace` / `Delete` / `All` — **FROZEN at five** (ADR 0039, ADR 0142), guarded by `TestSubjectKeyStoreIsFrozenAtFiveMethods`; implemented by the caller, or `service/security/secret.NewMemorySubjectKeyStore` |

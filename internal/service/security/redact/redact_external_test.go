@@ -107,6 +107,114 @@ func TestJSONJudgesADocumentByItsNames(t *testing.T) {
 	}
 }
 
+// TestJSONScrubsTheCredentialsInAMemberName is the regression for
+// kitsunium/sdk#437: a member NAME is a string like a value, and the
+// credentials of a URL in it are replaced the same way.
+func TestJSONScrubsTheCredentialsInAMemberName(t *testing.T) {
+	t.Parallel()
+	redacted, err := redact.NewRedactor(redact.Config{}).JSON(
+		[]byte(`{"https://admin:hunter2@db/x":1,"v":"https://admin:hunter2@db/x"}`), 1024)
+	if err != nil {
+		t.Fatalf("JSON() = %v", err)
+	}
+	want := `{"https://[redacted]@db/x":1,"v":"https://[redacted]@db/x"}`
+	if string(redacted.JSON) != want {
+		t.Errorf("JSON() =\n  %s\nwant\n  %s", redacted.JSON, want)
+	}
+}
+
+// pinHolder declares its one field secret, and is held below through
+// interfaces only.
+type pinHolder struct {
+	Pin string `redact:"secret"`
+}
+
+// keyedPin is a map key that writes its own text, as encoding/json names it.
+type keyedPin int
+
+// MarshalText names the key as encoding/json writes it.
+func (k keyedPin) MarshalText() ([]byte, error) { return []byte("pin-" + string(rune('0'+k))), nil }
+
+// TestValueRedactsWhatAnInterfaceHolds is the regression for
+// kitsunium/sdk#436: a field declared secret is replaced whether its struct is
+// reached through a static type or through an interface — a field of type
+// any, an element of []any, a value of map[string]any — and a value with no
+// secret beneath its interface is kept.
+func TestValueRedactsWhatAnInterfaceHolds(t *testing.T) {
+	t.Parallel()
+	type outer struct {
+		Payload any
+		Direct  pinHolder
+	}
+	type nested struct {
+		Inner *outer `json:"inner"`
+	}
+	tests := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{
+			"a field of type any",
+			outer{Payload: pinHolder{Pin: "1234"}, Direct: pinHolder{Pin: "5678"}},
+			`{"Payload":{"Pin":"[redacted]"},"Direct":{"Pin":"[redacted]"}}`,
+		},
+		{
+			"a pointer in a field of type any",
+			outer{Payload: &pinHolder{Pin: "1234"}},
+			`{"Payload":{"Pin":"[redacted]"},"Direct":{"Pin":"[redacted]"}}`,
+		},
+		{
+			"an element of []any",
+			[]any{"kept", pinHolder{Pin: "9999"}, 3},
+			`["kept",{"Pin":"[redacted]"},3]`,
+		},
+		{
+			"a value of map[string]any",
+			map[string]any{"a": pinHolder{Pin: "1"}, "b": "kept"},
+			`{"a":{"Pin":"[redacted]"},"b":"kept"}`,
+		},
+		{
+			"a value under a TextMarshaler key",
+			map[keyedPin]any{1: pinHolder{Pin: "1"}},
+			`{"pin-1":{"Pin":"[redacted]"}}`,
+		},
+		{
+			"an interface below an interface",
+			outer{Payload: []any{map[string]any{"x": pinHolder{Pin: "7"}}}},
+			`{"Payload":[{"x":{"Pin":"[redacted]"}}],"Direct":{"Pin":"[redacted]"}}`,
+		},
+		{
+			"through a pointer to a struct",
+			nested{Inner: &outer{Payload: pinHolder{Pin: "2"}}},
+			`{"inner":{"Payload":{"Pin":"[redacted]"},"Direct":{"Pin":"[redacted]"}}}`,
+		},
+		{"a nil interface", outer{}, `{"Payload":null,"Direct":{"Pin":"[redacted]"}}`},
+		{
+			"a plain value in a field of type any",
+			outer{Payload: "visible"},
+			`{"Payload":"visible","Direct":{"Pin":"[redacted]"}}`,
+		},
+	}
+	r := redact.NewRedactor(redact.Config{})
+	runCase := func(t *testing.T, name string, value any, want string) {
+		t.Helper()
+		redacted, err := r.Value(value, 4096)
+		if err != nil {
+			t.Fatalf("%s: Value() = %v", name, err)
+		}
+		if string(redacted.JSON) != want {
+			t.Errorf("%s: Value() =\n  %s\nwant\n  %s", name, redacted.JSON, want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c.name, c.value, c.want)
+		})
+	}
+}
+
 // TestTheDefaultTagIsRedact pins the SDK's own spelling of a declared secret,
 // and that a Redactor with no words still recognises the default ones — a
 // redactor that recognised no name would be a formatter.

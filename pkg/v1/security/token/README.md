@@ -158,6 +158,7 @@ Move it between calls, or guard it with a mutex if a verifier reads it from anot
   - [func \(JWK\) Ed25519Private\(\) \(priv \[\]byte, err error\)](<#JWK.Ed25519Private>)
   - [func \(JWK\) Ed25519Public\(\) \(pub \[\]byte, err error\)](<#JWK.Ed25519Public>)
   - [func \(JWK\) Equal\(other KeyValue\) bool](<#JWK.Equal>)
+  - [func \(JWK\) Format\(state fmt.State, verb rune\)](<#JWK.Format>)
   - [func \(JWK\) GoString\(\) string](<#JWK.GoString>)
   - [func \(JWK\) IsPrivate\(\) bool](<#JWK.IsPrivate>)
   - [func \(JWK\) IsZero\(\) bool](<#JWK.IsZero>)
@@ -189,6 +190,7 @@ Move it between calls, or guard it with a mutex if a verifier reads it from anot
   - [func \(JWKSet\) String\(\) string](<#JWKSet.String>)
 - [type Key](<#Key>)
   - [func \(Key\) Bytes\(\) \[\]byte](<#Key.Bytes>)
+  - [func \(Key\) Format\(state fmt.State, verb rune\)](<#Key.Format>)
   - [func \(Key\) GoString\(\) string](<#Key.GoString>)
   - [func \(Key\) String\(\) string](<#Key.String>)
   - [func \(Key\) Zeroize\(\)](<#Key.Zeroize>)
@@ -1566,6 +1568,15 @@ func (JWK) Equal(other KeyValue) bool
 
 Equal reports whether k and other describe the same key, comparing every member including the private one. The comparison is NOT constant-time and must not be used to authenticate anything; it exists so round-trip tests and set de-duplication can ask a precise question.
 
+<a name="JWK.Format"></a>
+### func \(JWK\) [Format](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
+
+```go
+func (JWK) Format(state fmt.State, verb rune)
+```
+
+Format implements fmt.Formatter, so EVERY verb writes the same metadata-only rendering as String — %d included, which bypasses String and would otherwise print the octet slices. %q writes it quoted.
+
 <a name="JWK.GoString"></a>
 ### func \(JWK\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/service/crypto/key/jwk/jwk.go>)
 
@@ -1869,7 +1880,16 @@ type Key struct{}
 func (Key) Bytes() []byte
 ```
 
-Bytes returns a fresh copy of the raw key material for handoff to a cipher. Callers MUST NOT log the result; the redaction only covers String / GoString. A zero-value Key returns nil.
+Bytes returns a fresh copy of the raw key material for handoff to a cipher. Callers MUST NOT log the result; the redaction only covers the renderings. A zero-value Key returns nil.
+
+<a name="Key.Format"></a>
+### func \(Key\) [Format](<https://github.com/kitsunium/sdk/blob/main/internal/core/crypto/key.go>)
+
+```go
+func (Key) Format(state fmt.State, verb rune)
+```
+
+Format implements fmt.Formatter, so EVERY verb writes "\<redacted>" — %d included, which bypasses String and would otherwise print the struct's bytes. %q writes it quoted.
 
 <a name="Key.GoString"></a>
 ### func \(Key\) [GoString](<https://github.com/kitsunium/sdk/blob/main/internal/core/crypto/key.go>)

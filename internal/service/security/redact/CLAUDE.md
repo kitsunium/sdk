@@ -24,7 +24,7 @@ since ADR 0160, with its values unchanged; this package raises it.
 |---|---|
 | `doc.go` | the package comment — kit writes it from the design (ADR 0167) |
 | `redact.go` | `DefaultWords`, `Config`, `Redactor`, `NewRedactor`, `Name`, `bound` |
-| `plan.go` | the per-type plan: which members of a type's JSON form are secret by declaration, cached per `Redactor` |
+| `plan.go` | the per-type plan: which members of a type's JSON form are secret by declaration, cached per `Redactor`; an interface-typed member plans as `dynamicPlan`, and `resolve` replaces it, for one value, with the plan of the type it holds (#436) — that per-value plan is never cached, and a type whose plan reaches no interface (`opensAt`, cached) is never resolved |
 | `fields.go` | `writtenFields` — for a struct, the one field `encoding/json` writes under each member name, selected by `encoding/json`'s own rules (`jsonName`, level-by-level embedding, `dominant`) |
 | `json.go` | `JSON`, `Value` (both returning the core's `DocumentValue`), and the `copier` — a `jsontext` token stream re-emitted by hand so every byte is accounted against the bound |
 | `text.go` | `Text`, the URL-credential pattern (`credentials`, compiled at the first text holding "://" and "@", not at every program start), `clip` |
@@ -93,6 +93,17 @@ since ADR 0160, with its values unchanged; this package raises it.
   unexported named embedding ignored — let a declared secret through in all
   three cases (`TestThePlanFollowsTheFieldEncodingJSONWrites`, each case
   checked against `json.Marshal`'s own output; `TestTheShallowestFieldDecides`).
+- **An interface is planned by what it holds.** A type cannot say what its
+  `any` field, its `[]any` elements or its `map[string]any` values will hold,
+  so a declared secret below one was shown as written (#436). Such a member
+  plans as `dynamicPlan`, and `Value` resolves the plan against the value — the
+  fields encoding/json wrote, every element, every map entry under the name
+  encoding/json gives its key — with the held type's own cached plan
+  (`TestValueRedactsWhatAnInterfaceHolds`).
+- **A member name is a string too.** The credentials of a URL in a member name
+  are replaced as in a value (#437); the name rule and the declaration are
+  still judged on the name as read
+  (`TestJSONScrubsTheCredentialsInAMemberName`).
 - **Every text `Attrs` hands out is cut**, a timestamp or a number as much as a
   string — `TestAttrsBoundEveryKind`; `TestDeepNestingStaysWithinTheBound` pins
   the copier against a document that is all structure.

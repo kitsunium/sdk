@@ -18,6 +18,7 @@ package comment, which kit writes from the design (ADR 0167).
 |---|---|
 | `Value`, `New`, `FromString`, `Redacted` | the secret, and the placeholder every rendering writes |
 | `Store`, `Versioned` | the frozen five-method port and one version |
+| `FloorPruner` | the `Store` sibling that prunes by version number; every store this package builds implements it |
 | `ValidateName`, `MaxNameLen` | the name grammar |
 | `NewMemory` / `MemoryConfig` | in-process store |
 | `NewEnv` / `EnvConfig` | read-only environment store, `NAME_FILE` convention |

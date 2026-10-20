@@ -79,7 +79,7 @@ func attachScalar(base KeyValue, scalar *big.Int) (key KeyValue, err error) {
 		//: out of range, or a keypair that does not agree with itself.
 		return KeyValue{}, serr
 	}
-	base.priv = fixed
+	base.priv = holdPrivate(fixed)
 	//: a coherent private key.
 	return base, nil
 }
@@ -151,7 +151,7 @@ func (k KeyValue) ECDSAPrivate() (der []byte, err error) {
 		return nil, corejwk.NoPrivateMaterial
 	}
 	//: D is validated against x/y at construction, so the pair is coherent.
-	priv := &ecdsa.PrivateKey{PublicKey: *pub, D: new(big.Int).SetBytes(k.priv)}
+	priv := &ecdsa.PrivateKey{PublicKey: *pub, D: new(big.Int).SetBytes(k.secret())}
 	out, merr := x509.MarshalECPrivateKey(priv)
 	//: defensive — a validated keypair always marshals.
 	if merr != nil {
@@ -217,7 +217,7 @@ func FromEd25519Private(priv []byte) (key KeyValue, err error) {
 	//: a coherent Edwards keypair.
 	return KeyValue{
 		kty: TypeOKP, crv: CurveEd25519,
-		x: bytes.Clone(priv[ed25519KeyLen:]), priv: bytes.Clone(seed),
+		x: bytes.Clone(priv[ed25519KeyLen:]), priv: holdPrivate(bytes.Clone(seed)),
 	}, nil
 }
 
@@ -249,7 +249,7 @@ func (k KeyValue) Ed25519Private() (priv []byte, err error) {
 	}
 	//: the seed was checked against x at construction, so this re-derives the
 	//: same public half the JWK declares.
-	return ed25519.NewKeyFromSeed(k.priv), nil
+	return ed25519.NewKeyFromSeed(k.secret()), nil
 }
 
 // FromSecret builds an oct JWK from the SDK's redacting symmetric key — the one
@@ -267,7 +267,7 @@ func FromSecret(secret corecrypto.Key) (key KeyValue, err error) {
 		return KeyValue{}, corecrypto.InvalidKey
 	}
 	//: a symmetric key, private by construction.
-	return KeyValue{kty: TypeOct, priv: raw}, nil
+	return KeyValue{kty: TypeOct, priv: holdPrivate(raw)}, nil
 }
 
 // Secret returns the key as a core/crypto.Key, re-entering the redacting type
@@ -288,5 +288,5 @@ func (k KeyValue) Secret() (secret corecrypto.Key, err error) {
 		return corecrypto.Key{}, corejwk.NoPrivateMaterial
 	}
 	//: NewKey enforces the 32-octet rule and copies defensively.
-	return corecrypto.NewKey(k.priv)
+	return corecrypto.NewKey(k.secret())
 }

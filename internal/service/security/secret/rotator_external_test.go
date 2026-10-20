@@ -237,6 +237,102 @@ func TestRotatorOverAReadOnlyStore(t *testing.T) {
 	}
 }
 
+// countOnlyStore hides the FloorPruner sibling of the store it wraps, so a
+// rotator over it takes the by-count path a third-party store gets.
+type countOnlyStore struct {
+	coresecret.Store
+}
+
+// TestRotatorKeepsTheVersionInUseWhenAnotherProcessRotates is the regression
+// for kitsunium/sdk#434: with no Locker, another replica rotates between this
+// rotator's Put and its prune. Keep 2 and InUse 1 must still leave version 1,
+// over a store that prunes by number and over one that only prunes by count.
+func TestRotatorKeepsTheVersionInUseWhenAnotherProcessRotates(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		wrap func(coresecret.Store) coresecret.Store
+	}
+	tests := []tc{
+		{"a FloorPruner store", func(store coresecret.Store) coresecret.Store { return store }},
+		{"a count-only store", func(store coresecret.Store) coresecret.Store { return countOnlyStore{store} }},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		store := c.wrap(svcsecret.NewMemory(svcsecret.MemoryConfig{}))
+		policy := svcsecret.PolicySpec{Every: time.Hour, Keep: 2, Generate: svcsecret.Random(32)}
+		other, err := svcsecret.NewRotator(svcsecret.RotatorConfig{
+			Store: store, Name: "root", Policy: policy,
+			InUse: func(context.Context) (int, error) { return 1, nil },
+		})
+		if err != nil {
+			t.Fatalf("NewRotator(other): %v", err)
+		}
+		this, err := svcsecret.NewRotator(svcsecret.RotatorConfig{
+			Store: store, Name: "root", Policy: policy,
+			InUse: func(ctx context.Context) (int, error) {
+				//: the other replica rotates between this one's Put and its prune.
+				if _, rotateErr := other.Rotate(ctx); rotateErr != nil {
+					return 0, rotateErr
+				}
+				//: version 1 is still needed.
+				return 1, nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("NewRotator(this): %v", err)
+		}
+		if _, err := this.Ensure(t.Context()); err != nil {
+			t.Fatalf("Ensure: %v", err)
+		}
+		if _, err := this.Rotate(t.Context()); err != nil {
+			t.Fatalf("Rotate: %v", err)
+		}
+		versions, err := store.Versions(t.Context(), "root")
+		if err != nil || !slices.Equal(numbers(versions), []int{3, 2, 1}) {
+			t.Fatalf("versions = (%v, %v), want [3 2 1] — version 1, reported in use, was pruned", numbers(versions), err)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestRotatorKeepsTheVersionsThisRotationCountsWhenAnotherProcessPuts pins
+// the other half of #434: with no InUse, a Put by another process between a
+// rotation's Put and its prune adds to what is kept and never pushes one of
+// this rotation's Keep versions out.
+func TestRotatorKeepsTheVersionsThisRotationCountsWhenAnotherProcessPuts(t *testing.T) {
+	t.Parallel()
+	store := svcsecret.NewMemory(svcsecret.MemoryConfig{})
+	putOnce := sync.OnceValue(func() error {
+		_, putErr := store.Put(t.Context(), "root", coresecret.FromString("manual"))
+		return putErr
+	})
+	rotator, err := svcsecret.NewRotator(svcsecret.RotatorConfig{
+		Store: store, Name: "root",
+		Policy: svcsecret.PolicySpec{Every: time.Hour, Keep: 2, Generate: svcsecret.Random(32)},
+		//: InUse reports nothing, but runs where a concurrent Put would land.
+		InUse: func(context.Context) (int, error) { return 0, putOnce() },
+	})
+	if err != nil {
+		t.Fatalf("NewRotator: %v", err)
+	}
+	if _, err := rotator.Ensure(t.Context()); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if _, err := rotator.Rotate(t.Context()); err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+	versions, err := store.Versions(t.Context(), "root")
+	if err != nil || !slices.Equal(numbers(versions), []int{3, 2, 1}) {
+		t.Fatalf("versions = (%v, %v), want [3 2 1]: the rotation's own two plus the concurrent one", numbers(versions), err)
+	}
+}
+
 // TestRotatorSerialisesThroughALocker pins the cross-process option: with a
 // Locker, concurrent RotateIfDue calls through two rotators — two processes'
 // worth — rotate a due secret exactly once.

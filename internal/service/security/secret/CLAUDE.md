@@ -23,7 +23,7 @@ declarations moved.
 
 | File | Holds |
 |---|---|
-| `versions.go` | the argument checks every store shares (`checkPut`, `checkPrune`), `nextVersion`, `pruned` |
+| `versions.go` | the argument checks every store shares (`checkPut`, `checkPrune`, `checkPruneBelow`), `nextVersion`, `pruned`, `prunedBelow` (the `FloorPruner` form every store here implements) |
 | `memory.go` | `NewMemory` / `MemoryConfig` — a map under an RWMutex |
 | `env.go` | `NewEnv` / `EnvConfig` — read-only, the `NAME_FILE` convention |
 | `file.go`, `file_config.go`, `file_record.go`, `fileguard_*.go` | `NewFile` / `FileConfig` — the directory store |
@@ -43,7 +43,10 @@ declarations moved.
 - **Environment: both `NAME` and `NAME_FILE` set is `ENV_REFUSED`**, never a
   precedence rule — the official container images refuse it too. One trailing
   line ending (`\n` or `\r\n`) is removed from a file; an empty variable is
-  unset; an empty or >64 KiB file is refused; an unreadable file is the
+  unset; an empty or >64 KiB file is refused — judged on the raw bytes read,
+  BEFORE the line ending is trimmed: the read stops at 64 KiB + 3 bytes, and a
+  read that reaches it is refused, so a longer file is never truncated into a
+  secret (#435); an unreadable file is the
   retryable `StoreUnavailable` (a volume may not be mounted yet). A name whose
   variable ends in `_FILE` is refused by this store. `Names` skips an empty
   variable, in either form, since `Get` treats it as unset. No refusal repeats a value
@@ -93,10 +96,16 @@ declarations moved.
   error otherwise, and waits one whole interval rather than spinning when the
   store's clock and its own disagree. The optional `Locker` serialises across
   processes; the mutex serialises within one. The optional `InUse` (ADR 0142)
-  is asked after the `Put` and before the `Prune`: the prune keeps
-  `max(Keep, newest − oldest + 1)`, so a version a data key is still wrapped
-  under is never pruned, and an `InUse` error prunes NOTHING — unknown is never
-  read as "none".
+  is asked after the `Put` and before the prune, and an `InUse` error prunes
+  NOTHING — unknown is never read as "none". The prune is by version NUMBER
+  (#434): it drops every version below `min(created − Keep + 1, oldest in
+  use)`, `created` being the version THIS rotation stored, through the store's
+  `FloorPruner` (memory, file and env stores all have it). A count ("keep the
+  newest N") is decided when the prune runs, so a version another process Put
+  in between pushed one in use out of the window; a floor cannot be moved by a
+  newer version. A third-party store without `FloorPruner` is pruned by a
+  count re-read just before the `Prune`, which narrows that window without
+  closing it — the `Locker`, and no manual `Put` during rotations, close it.
 - **Subject keys (ADR 0142)**: a data key is 32 bytes from `crypto/rand`,
   wrapped under the root's newest version with the keyring's WRAP key — never
   its `Seal` key, so no value a caller seals directly under the same root can
@@ -155,7 +164,7 @@ declarations moved.
   version is kept: an index cannot know which keys still OPEN without opening
   them, which is the one thing `OldestRoot` answers, and the scan runs once per
   rotation of the root — kit's `data-key` every 30 days, from the rotator's
-  `keepFor`. `BenchmarkSubjectKeysOldestRootPopulation` measures it, the keys
+  `floorFor`. `BenchmarkSubjectKeysOldestRootPopulation` measures it, the keys
   over two root versions as during a re-wrap, memory store, median of five on
   a shared 8-core AMD EPYC 7351P (linux/amd64, go1.27.2, load 5 to 8):
 

@@ -78,6 +78,8 @@ func TestEnvStoreReadsTheFileConvention(t *testing.T) {
 		{"one CRLF", "s3cr3t\r\n", "s3cr3t"},
 		{"only one ending is the file's", "s3cr3t\n\n", "s3cr3t\n"},
 		{"inner newlines are the secret's", "line1\nline2\n", "line1\nline2"},
+		{"64 KiB exactly plus its LF", strings.Repeat("a", 64<<10) + "\n", strings.Repeat("a", 64<<10)},
+		{"64 KiB exactly plus its CRLF", strings.Repeat("a", 64<<10) + "\r\n", strings.Repeat("a", 64<<10)},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -124,6 +126,18 @@ func TestEnvStoreRefusals(t *testing.T) {
 		}, coresecret.CodeEnvRefused},
 		{"the file is too large to be a secret", func(t *testing.T) {
 			t.Setenv(envPrefix+"_TOKEN_FILE", writeSecretFile(t, strings.Repeat("x", 64<<10+1)))
+		}, coresecret.CodeEnvRefused},
+		//: #435: a 64 KiB secret, a line ending, then more — the bounded read
+		//: stopped inside the file, and trimming that line ending must not let
+		//: the 64 KiB prefix pass for the whole secret.
+		{"64 KiB, a line ending, then a tail", func(t *testing.T) {
+			t.Setenv(envPrefix+"_TOKEN_FILE", writeSecretFile(t, strings.Repeat("a", 64<<10)+"\nTAIL-THAT-IS-DROPPED"))
+		}, coresecret.CodeEnvRefused},
+		{"64 KiB, a CRLF, then one byte", func(t *testing.T) {
+			t.Setenv(envPrefix+"_TOKEN_FILE", writeSecretFile(t, strings.Repeat("a", 64<<10)+"\r\nx"))
+		}, coresecret.CodeEnvRefused},
+		{"64 KiB and one byte, then its LF", func(t *testing.T) {
+			t.Setenv(envPrefix+"_TOKEN_FILE", writeSecretFile(t, strings.Repeat("a", 64<<10+1)+"\n"))
 		}, coresecret.CodeEnvRefused},
 		{"the file does not exist", func(t *testing.T) {
 			t.Setenv(envPrefix+"_TOKEN_FILE", filepath.Join(t.TempDir(), "absent-path-marker"))

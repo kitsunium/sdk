@@ -1132,6 +1132,13 @@ packages:
           claiming HS256 through — the binding built from that key reports ES256, the
           header comparison refuses, and no key material reaches a MAC.
 
+          The verdicts are the single-key verifier's. A token with "alg": "none" is
+          refused with AlgorithmNone before any key is selected, kid or no kid. A
+          token whose header no candidate accepts — an algorithm none of them is
+          bound to, a "crit" parameter, an unexpected "typ" — is refused with that
+          header's own verdict, never reduced to SignatureInvalid, which means a
+          candidate accepted the header and no signature verified.
+
           # Duplicate kids
 
           jwk.Set.ByKid refuses to choose between keys sharing a kid, because nothing
@@ -1202,7 +1209,8 @@ packages:
             type: error
       - doc: |-
           NewES256Issuer returns a JWT issuer signing with ECDSA P-256 + SHA-256,
-          emitting the fixed-width R||S signature of RFC 7518 §3.4.
+          emitting the fixed-width R||S signature of RFC 7518 §3.4, always in its
+          low-S form, so a token it signs has one spelling.
         in:
           - name: priv
             type: "*ecdsa.PrivateKey"
@@ -1243,6 +1251,12 @@ packages:
 
           pub is validated as a curve point, not merely measured: an off-curve point
           is a documented route to key recovery (RFC 8725 §3.4).
+
+          It accepts a high-S signature as well as a low-S one: RFC 7518 §3.4 does
+          not require low S, and most producers emit a high s about half the time.
+          Since (r, s) and (r, n−s) both verify, a token from another issuer has two
+          valid spellings, so a revocation or replay list is keyed on jti, or on
+          the claims, never on the token string.
         in:
           - name: pub
             type: "*ecdsa.PublicKey"

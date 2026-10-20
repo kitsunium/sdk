@@ -5,6 +5,9 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
+	"io"
+	"strconv"
 )
 
 // IDLen is the required identifier length in bytes. 32 bytes is 256 bits of
@@ -13,6 +16,9 @@ import (
 // value a caller could choose below it is a weaker session and every value
 // above it only lengthens the cookie.
 const IDLen int = 32
+
+// redactedID is the one rendering an ID has, whatever it holds.
+const redactedID string = "<redacted>"
 
 // canonicalEncoding is the one spelling an identifier has: unpadded base64url,
 // decoded STRICTLY. 32 bytes are 256 bits and 43 characters carry 258, so the
@@ -25,8 +31,12 @@ var canonicalEncoding = base64.RawURLEncoding.Strict()
 // ID is an opaque session identifier. It IS a bearer secret — whoever holds it
 // is the session — so this type is built to make leaking it hard:
 //
-//   - String and GoString render "<redacted>", so an accidental %v, %s or %#v
-//     in a log line, an error message or a struct dump prints nothing usable.
+//   - String, GoString and Format render "<redacted>", so an accidental %v,
+//     %s, %#v or %d in a log line, an error message or a struct dump prints
+//     nothing usable. The bytes sit behind a pointer, so even a struct holding
+//     an ID in an UNEXPORTED field — which fmt prints by reflection, without
+//     calling Format — prints an address rather than the identifier, and a
+//     zero-size non-comparable field keeps == from comparing that pointer.
 //     The public/private split of errs is the same idea applied to errors: a
 //     Public string is read by third parties, so no sentinel in this domain
 //     ever carries an identifier in one.
@@ -38,9 +48,12 @@ var canonicalEncoding = base64.RawURLEncoding.Strict()
 //   - [ID.Digest] is the value a store indexes and names files by, so the
 //     secret itself is never a map key, never a filename, and never at rest.
 type ID struct {
-	// raw holds exactly IDLen bytes; the zero value holds nil and is not
+	// _ makes the struct non-comparable at zero cost: with the bytes behind a
+	// pointer, == would otherwise compile and compare allocations.
+	_ [0]func()
+	// held points at exactly IDLen bytes; the zero value holds nil and is not
 	// usable. NewID and ParseID are the only producers, and both copy.
-	raw []byte
+	held *[IDLen]byte
 }
 
 // NewID builds an ID from raw, which MUST be exactly [IDLen] bytes. A wrong
@@ -55,10 +68,10 @@ func NewID(raw []byte) (id ID, err error) {
 	}
 	//: defensive copy so the caller's buffer is not the ID's storage. A fixed
 	//: array rather than a make: the length is a constant of the domain.
-	var buf [IDLen]byte
+	buf := new([IDLen]byte)
 	copy(buf[:], raw)
 	//: a usable identifier.
-	return ID{raw: buf[:]}, nil
+	return ID{held: buf}, nil
 }
 
 // ParseID decodes the canonical form produced by [ID.Reveal] — unpadded
@@ -91,7 +104,7 @@ func (i ID) Reveal() string {
 	//: nil raw renders empty rather than panicking; a zero ID names nothing.
 	//: The encoder always leaves the unused bits clear, which is exactly the
 	//: spelling ParseID's strict decoder accepts.
-	return canonicalEncoding.EncodeToString(i.raw)
+	return canonicalEncoding.EncodeToString(i.bytes())
 }
 
 // Digest returns the lowercase hex SHA-256 of the identifier: 64 characters,
@@ -107,11 +120,11 @@ func (i ID) Reveal() string {
 func (i ID) Digest() string {
 	//: a zero ID has no digest; returning the digest of the empty string would
 	//: give every zero ID one shared, valid-looking lookup key.
-	if len(i.raw) == 0 {
+	if i.held == nil {
 		//: no key at all — a store lookup on "" finds nothing.
 		return ""
 	}
-	sum := sha256.Sum256(i.raw)
+	sum := sha256.Sum256(i.held[:])
 	//: hex rather than base64 so the value is filename-safe on every OS,
 	//: including the case-insensitive ones.
 	return hex.EncodeToString(sum[:])
@@ -122,16 +135,28 @@ func (i ID) Digest() string {
 // session identifier in this SDK goes through here or through crypto/subtle
 // directly; none of them uses == or string equality.
 func (i ID) Equal(other ID) bool {
-	//: ConstantTimeCompare already returns 0 on a length mismatch, so a zero
-	//: ID never equals a real one and no early return leaks the length.
-	return subtle.ConstantTimeCompare(i.raw, other.raw) == 1
+	//: the comparison is out of line, so Equal stays as cheap to inline as it
+	//: was when the bytes sat in the struct.
+	return equalIDs(i, other)
+}
+
+// equalIDs is ID.Equal's body. ConstantTimeCompare already returns 0 on a
+// length mismatch, so a zero ID never equals a real one and no early return
+// leaks the length. It is kept out of line: inlined, the two nil-guarded reads
+// would push ID.Equal past the inline budget, and every caller already pays
+// ConstantTimeCompare's call.
+//
+//go:noinline
+func equalIDs(a, b ID) bool {
+	//: a nil held reads as zero bytes, so two zero IDs are equal.
+	return subtle.ConstantTimeCompare(a.bytes(), b.bytes()) == 1
 }
 
 // IsZero reports whether the ID names nothing — the zero value, which no
 // constructor produces. A store refuses it with [InvalidID].
 func (i ID) IsZero() bool {
 	//: only the zero value has no bytes; both constructors enforce IDLen.
-	return len(i.raw) == 0
+	return i.held == nil
 }
 
 // String implements fmt.Stringer and always redacts, so an identifier never
@@ -139,12 +164,51 @@ func (i ID) IsZero() bool {
 // a cookie, and [ID.Digest] when it is a log line that needs correlation.
 func (i ID) String() string {
 	//: one constant marker regardless of contents — length would leak too.
-	return "<redacted>"
+	return redactedID
 }
 
 // GoString implements fmt.GoStringer so %#v stays redacted: fmt bypasses String
 // for Go-syntax formatting and would otherwise dump the backing slice.
 func (i ID) GoString() string {
 	//: same constant marker as String.
-	return "<redacted>"
+	return redactedID
+}
+
+// Format implements fmt.Formatter, so EVERY verb writes "<redacted>" — %d
+// included, which bypasses String and would otherwise print the struct. %q
+// writes it quoted.
+func (i ID) Format(state fmt.State, verb rune) {
+	//: %q quotes, so a surrounding quoted rendering stays well formed.
+	if verb == 'q' {
+		//: the marker, quoted.
+		writeRendering(state, strconv.Quote(redactedID))
+		//: nothing else to write.
+		return
+	}
+	//: every other verb writes the bare marker.
+	writeRendering(state, redactedID)
+}
+
+// bytes returns the identifier's bytes without copying, for the comparisons
+// and encodings inside this package; nil for the zero ID. It never leaves the
+// package.
+func (i ID) bytes() []byte {
+	//: the zero ID holds nothing.
+	if i.held == nil {
+		//: a nil slice is zero-length to crypto/subtle and to the encoder.
+		return nil
+	}
+	//: the held array, shared and never mutated.
+	return i.held[:]
+}
+
+// writeRendering writes a rendering into the state fmt handed to Format.
+// fmt.Formatter has no error return and fmt discards what a write into its own
+// buffer reports, so the error is read here and dropped as a visible decision.
+func writeRendering(state fmt.State, text string) {
+	//: fmt's buffer is the only destination, and it does not fail.
+	if _, err := io.WriteString(state, text); err != nil {
+		//: nothing to report to — fmt drops the same error.
+		return
+	}
 }

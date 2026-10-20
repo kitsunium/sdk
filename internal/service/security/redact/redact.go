@@ -62,6 +62,7 @@ type Redactor struct {
 	field func(field reflect.StructField) bool
 	error func(err error) string
 	plans sync.Map // reflect.Type → *plan
+	opens sync.Map // reflect.Type → bool: its plan reaches an interface
 	tag   string
 	words []string
 }

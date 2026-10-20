@@ -133,6 +133,9 @@ files:
       - Curve
       - CurveP256
       - KeyValue
+      - privateMember
+      - holdPrivate
+      - KeyValue.secret
       - KeyValue.Kty
       - KeyValue.Crv
       - KeyValue.Kid
@@ -151,6 +154,8 @@ files:
       - KeyValue.equalMaterial
       - KeyValue.String
       - KeyValue.GoString
+      - KeyValue.Format
+      - writeRendering
     name: jwk.go
   - decls:
       - KeyValue.MarshalPublic
@@ -276,6 +281,19 @@ functions:
     params: crv Curve, d, x, y []byte
     results: error
   - doc: |-
+      holdPrivate wraps secret octets for a KeyValue, nil when there are none, so
+      IsPrivate stays the one question "is the pointer set". It does not copy: the
+      callers already hand over octets they own.
+    name: holdPrivate
+    params: raw []byte
+    results: "*privateMember"
+  - doc: |-
+      writeRendering writes a rendering into the state fmt handed to Format.
+      fmt.Formatter has no error return and fmt discards what a write into its own
+      buffer reports, so the error is read here and dropped as a visible decision.
+    name: writeRendering
+    params: state fmt.State, text string
+  - doc: |-
       encodeWire renders a keyJSON. The struct holds only strings and a []string,
       so encoding/json cannot fail here; the error is still surfaced typed rather
       than dropped, because a silently ignored error is how an impossible case
@@ -366,6 +384,8 @@ imports:
   ed25519: crypto/ed25519
   elliptic: crypto/elliptic
   errs: github.com/kitsunium/sdk/internal/kernel/errs
+  fmt: fmt
+  io: io
   json: encoding/json
   sha256: crypto/sha256
   slices: slices
@@ -412,9 +432,10 @@ types:
           priv holds the secret member: the EC "d" scalar, the OKP "d" seed, or the
           oct "k" key. Nil on a public-only key. One field, because exactly one of
           those members can be set and "does this key hold a secret" must be a
-          single question.
+          single question. A pointer rather than a slice, so fmt walking a KeyValue
+          held in an unexported field prints an address, never the octets.
         name: priv
-        type: "[]byte"
+        type: "*privateMember"
     kind: struct
     methods:
       - name: ECDSAPublic
@@ -436,6 +457,12 @@ types:
       - name: Secret
         recv: k KeyValue
         results: secret corecrypto.Key, err error
+      - doc: |-
+          secret returns the secret octets without copying, nil on a public-only key.
+          It never leaves the package; every exported path copies or encodes.
+        name: secret
+        recv: k KeyValue
+        results: "[]byte"
       - name: Kty
         recv: k KeyValue
         results: Type
@@ -499,6 +526,9 @@ types:
       - name: GoString
         recv: k KeyValue
         results: string
+      - name: Format
+        params: state fmt.State, verb rune
+        recv: k KeyValue
       - name: MarshalPublic
         recv: k KeyValue
         results: document []byte, err error
@@ -546,6 +576,16 @@ types:
         recv: k KeyValue
         results: canonical []byte, err error
     name: KeyValue
+  - doc: |-
+      privateMember is the one allocation holding a KeyValue's secret octets. It is
+      a separate type only so that the field a KeyValue carries is a pointer — see
+      the KeyValue doc comment.
+    fields:
+      - doc: "raw is the secret member, never empty: no secret is a nil pointer."
+        name: raw
+        type: "[]byte"
+    kind: struct
+    name: privateMember
   - fields:
       - doc: |-
           keys holds the members in document order, which AllByKid preserves so a

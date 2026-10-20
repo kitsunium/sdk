@@ -485,6 +485,11 @@ packages:
           Every field is unexported so encoding/json cannot reach the material by
           reflection; the only serialisation paths are the named MarshalPublic /
           MarshalPrivate pair and the MarshalJSON delegate.
+
+          Every rendering — String, GoString and Format, so every verb — writes only
+          non-secret metadata. The private member sits behind a pointer, so a struct
+          holding a KeyValue in an UNEXPORTED field, which fmt prints by reflection
+          without calling Format, prints an address rather than the secret octets.
         methods:
           - doc: |-
               ECDSAPublic renders the key as a PKIX DER blob, ready for
@@ -666,6 +671,17 @@ packages:
             name: GoString
             out:
               - type: string
+            recv: value
+          - doc: |-
+              Format implements fmt.Formatter, so EVERY verb writes the same metadata-only
+              rendering as String — %d included, which bypasses String and would
+              otherwise print the octet slices. %q writes it quoted.
+            in:
+              - name: state
+                type: fmt.State
+              - name: verb
+                type: rune
+            name: Format
             recv: value
           - doc: |-
               MarshalPublic renders the public JWK: "kty", "crv", the public members, and

@@ -52,8 +52,8 @@ var shortEscapes = map[rune]byte{
 
 // JSON returns document with its secrets replaced, at most maxBytes long
 // (raised to MinBytes): every member whose name the Redactor recognises has
-// its value, whatever it is, replaced by Placeholder, and every string has
-// the credentials of the URLs in it replaced.
+// its value, whatever it is, replaced by Placeholder, and every string — a
+// member name included — has the credentials of the URLs in it replaced.
 //
 // document is read, never modified. One that is not exactly one JSON value is
 // refused with DocumentInvalid and nothing is returned for it: a partial copy
@@ -70,9 +70,11 @@ func (r *Redactor) JSON(document []byte, maxBytes int) (redacted coreredact.Docu
 // secrets replaced, at most maxBytes long (raised to MinBytes). Beyond what
 // JSON recognises by name, a struct field the Redactor's tag or field rule
 // declares secret is replaced too — found by walking v's type the way
-// encoding/json lays it out, once per type. A type that writes its own JSON
-// (json.Marshaler, encoding.TextMarshaler) is opaque to that walk, and only
-// the names in its output are judged.
+// encoding/json lays it out, once per type. Below a member of interface type
+// — a field of type any, an element of a []any, a value of a map[string]any
+// — the walk follows the type the value holds, for this value. A type that
+// writes its own JSON (json.Marshaler, encoding.TextMarshaler) is opaque to
+// that walk, and only the names in its output are judged.
 //
 // v is encoded, never modified. A value encoding/json refuses — a channel, a
 // function, a cycle — is refused with ValueUnencodable.
@@ -88,6 +90,11 @@ func (r *Redactor) Value(v any, maxBytes int) (redacted coreredact.DocumentValue
 	var declared *plan
 	if v != nil {
 		declared = r.planOf(reflect.TypeOf(v))
+		//: a type with an interface below it is planned against this value:
+		//: what an interface holds is declared by the type it holds (#436).
+		if r.opensAt(reflect.TypeOf(v), declared) {
+			declared = r.resolve(declared, reflect.ValueOf(v))
+		}
 	}
 	//: the wire form, judged by names and by declaration.
 	return r.redact(encoded, declared, maxBytes)
@@ -199,9 +206,13 @@ func (c *copier) object(declared *plan) error {
 			return readErr
 		}
 		name := nameToken.String()
+		//: a member name is a string like any other: the credentials of a URL
+		//: in it are replaced before it is written (#437). The declaration and
+		//: the name rule are still judged on the name as read.
+		shown := c.redactor.scrub(name)
 		//: nothing more is written once something was left out, but the input
 		//: is still read, so a malformed tail is still refused.
-		if c.cut || !c.fitsMember(first, name) {
+		if c.cut || !c.fitsMember(first, shown) {
 			c.cut = true
 			//: read past the value, write nothing.
 			if skipErr := c.decoder.SkipValue(); skipErr != nil {
@@ -210,7 +221,7 @@ func (c *copier) object(declared *plan) error {
 			}
 			continue
 		}
-		c.member(first, name)
+		c.member(first, shown)
 		first = false
 		//: judged by its own name and by what the type declared for it.
 		if copyErr := c.value(declared.member(name), c.redactor.Name(name)); copyErr != nil {
@@ -226,8 +237,8 @@ func (c *copier) object(declared *plan) error {
 func (c *copier) array(declared *plan) error {
 	c.open('[')
 	first := true
-	//: until the closing bracket.
-	for c.decoder.PeekKind() != jsontext.KindEndArray {
+	//: until the closing bracket, counting elements for a per-element plan.
+	for index := 0; c.decoder.PeekKind() != jsontext.KindEndArray; index++ {
 		//: once something was left out, or when not even a truncated value
 		//: fits, the rest is read past.
 		if c.cut || c.room() < c.separator(first)+minValueBytes {
@@ -245,7 +256,7 @@ func (c *copier) array(declared *plan) error {
 		}
 		first = false
 		//: an element has no name to judge; only its declaration.
-		if copyErr := c.value(declared.item(), false); copyErr != nil {
+		if copyErr := c.value(declared.itemAt(index), false); copyErr != nil {
 			//: refused.
 			return copyErr
 		}

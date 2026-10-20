@@ -94,7 +94,9 @@ exactly as trustworthy as the key itself.
   happens here.
 - **Replay.** `jti` is decoded and returned; nothing here remembers it. A
   replay cache is state with a lifetime and an eviction policy, which belongs
-  to whoever owns the store — `pkg/v1/data/cache` is one answer.
+  to whoever owns the store — `pkg/v1/data/cache` is one answer. Key it on
+  `jti`, never on the token string: an ES256 token from another issuer has two
+  valid spellings (see §Do NOT).
 - **Revocation.** Same: this package answers "is this token authentic and
   in-window", never "is it still wanted". `MaxLifetime` is the mitigation it
   CAN offer — a short window is what a recipient has instead of revocation.
@@ -264,7 +266,10 @@ Two more PASETO decisions:
   (1 KiB) as `TOO_LARGE` before reading the signature, so BOTH constructors
   refuse a longer configured footer (`POLICY_MISCONFIGURED`) — an issuer with
   one would mint only tokens the SDK refuses, and a verifier with one could
-  never match anything.
+  never match anything. An empty footer is spelled by OMITTING the fourth
+  segment, as the issuer writes it; a present but empty fourth segment
+  (`<token>.`) is a second spelling of the same token and is `MALFORMED`
+  (#438, `TestPasetoEmptyFooterHasOneSpelling`).
 - **The configs are FLAT, not embedded.** `PasetoIssuerConfig` has no `Type`
   and no `KeyID` because PASETO has no header to put them in. Embedding
   `IssuerConfig` would have published two knobs this format silently ignores.
@@ -283,8 +288,26 @@ Two more PASETO decisions:
   `Private` string here names a CHECK, never a value; `ClaimsValue` renders its
   shape and not its contents.
 - Do not relax the strict base64url decoding, the exact ES256 signature length,
-  or the duplicate-member refusal to accommodate a lenient producer. Each is a
-  test row, and each exists so one token has exactly one spelling.
+  the refusal of an empty PASETO footer segment, or the duplicate-member
+  refusal to accommodate a lenient producer. Each is a test row, and each
+  exists so one token has exactly one spelling.
+- Do not refuse a high-S ES256 signature on VERIFY, and do not key a
+  revocation or replay list on the token string. ECDSA's (r, s) verifies as
+  (r, n−s) does, so anyone holding a token can compute its twin without the
+  key. `es256Signing.sign` writes s ≤ n/2, so a token THIS SDK signs has one
+  spelling; but RFC 7518 §3.4 does not require low S, and most producers —
+  crypto/ecdsa included — emit a high s about half the time, so the verifier,
+  which serves external issuers through JWKS, accepts both. A list of revoked
+  or seen tokens is keyed on `jti`, or on the claims, never on the string
+  (#438, `TestES256SignsLowSAndVerifiesBoth`).
+- Do not let a present time claim decode to the zero `time.Time`: that is
+  "absent" to `ClaimsValue`, and an `exp` at 0001-01-01T00:00:00Z would read as
+  no expiry at all. `decodeTimeClaim` refuses it as `MALFORMED` (#439).
+- Do not let the set verifier reduce a header's fault to `SIGNATURE_INVALID`.
+  `alg: none` is refused before any key is selected, and when no candidate
+  accepts the header the first candidate's header verdict is returned —
+  `ALGORITHM_MISMATCH`, `HEADER_UNSUPPORTED` — as the single-key verifier
+  returns it (#440, `TestSetVerifierNamesTheHeaderVerdict`).
 - Do not reach for `bytes.Equal` on a tag. The only secret comparison in this
   package is `hmacsha2.MAC.Verify`, which is `hmac.Equal`.
 - Do not fetch a JWKS here. Same rule as `service/crypto/key/jwk`: retrieval is a

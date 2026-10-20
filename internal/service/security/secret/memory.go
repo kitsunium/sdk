@@ -138,6 +138,28 @@ func (m *memoryStore) Prune(_ context.Context, name string, keep int) error {
 	return nil
 }
 
+// PruneBelow drops every version of name numbered below floor, except the
+// newest (FloorPruner).
+func (m *memoryStore) PruneBelow(_ context.Context, name string, floor int) error {
+	//: the name, checked as every store checks it.
+	if pruneErr := checkPruneBelow(name); pruneErr != nil {
+		//: InvalidName.
+		return pruneErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	kept := m.secrets[name]
+	//: pruning a secret that does not exist is worth saying, as for Prune.
+	if len(kept) == 0 {
+		//: NotFound.
+		return notFound(name)
+	}
+	//: the versions at or above the floor, and the newest.
+	m.secrets[name], _ = prunedBelow(kept, floor)
+	//: pruned.
+	return nil
+}
+
 // Names lists every name holding a version, sorted.
 func (m *memoryStore) Names(_ context.Context) (names []string, err error) {
 	m.mu.RLock()

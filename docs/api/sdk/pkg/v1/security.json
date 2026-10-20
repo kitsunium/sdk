@@ -1026,6 +1026,19 @@
       "family": "security"
     },
     {
+      "id": "go:github.com/kitsunium/sdk/pkg/v1/security/secret.FloorPruner",
+      "kind": "alias",
+      "package": "github.com/kitsunium/sdk/pkg/v1/security/secret",
+      "name": "FloorPruner",
+      "spelled": "coresecret.FloorPruner",
+      "canonical": "github.com/kitsunium/sdk/internal/core/security/secret.FloorPruner",
+      "owner": "go:github.com/kitsunium/sdk/internal/core/security/secret.FloorPruner",
+      "doc": "FloorPruner is the [Store] sibling that prunes by version number rather\nthan by count, so a version stored concurrently cannot push a kept one\nout; every store this package builds implements it.\n",
+      "file": "secret/gen_facade.go",
+      "layer": "public",
+      "family": "security"
+    },
+    {
       "id": "go:github.com/kitsunium/sdk/pkg/v1/security/secret.FromString",
       "kind": "func",
       "package": "github.com/kitsunium/sdk/pkg/v1/security/secret",
