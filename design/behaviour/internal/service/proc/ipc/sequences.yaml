@@ -492,6 +492,17 @@ sequences:
         kind: actor
       - id: RuntimeDir
         kind: self
+      - id: RuntimeDirOr
+        kind: internal
+    steps:
+      - return: RuntimeDirOr(app, filepath.Join(os.TempDir(), app+"-"+strconv.Itoa(os.Geteuid())))
+        to: RuntimeDirOr
+  - of: RuntimeDirOr
+    participants:
+      - id: caller
+        kind: actor
+      - id: RuntimeDirOr
+        kind: self
       - id: os
         kind: stdlib
       - id: filepath
@@ -526,8 +537,7 @@ sequences:
                   to: os
                 when: d != ""
           when: runtime.GOOS == "windows"
-      - return: filepath.Join(os.TempDir(), app+"-"+strconv.Itoa(os.Geteuid()))
-        to: filepath
+      - return: fallback
   - of: closeBestEffort
     participants:
       - id: caller

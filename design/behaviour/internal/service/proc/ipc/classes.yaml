@@ -104,6 +104,7 @@ files:
       - (*Dialer).Dial
       - Dial
       - RuntimeDir
+      - RuntimeDirOr
       - closeBestEffort
     name: ipc.go
   - decls:
@@ -213,6 +214,9 @@ functions:
     results: "*coreipc.Conn, error"
   - name: RuntimeDir
     params: app string
+    results: string
+  - name: RuntimeDirOr
+    params: app, fallback string
     results: string
   - doc: |-
       closeBestEffort closes a connection this package refuses or no longer
