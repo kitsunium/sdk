@@ -512,9 +512,12 @@ jobs:
           CUT_OUTCOME: ${{ steps.cut.outcome }}
         run: |
           set -uo pipefail
-          # The size line cut-tags.sh wrote, if it got that far. awk reads to
-          # EOF and prints nothing when there is no such line or no file.
-          size="$(awk '/^cut-tags: size / { sub(/^cut-tags: size /, ""); v = $0 } END { print v }' /tmp/cut.err 2>/dev/null)"
+          # The size line cut-tags.sh wrote, if it got that far. awk prints
+          # nothing when there is no such line, but it exits 2 when there is no
+          # file (the cut step was skipped: nothing to publish). The default
+          # shell is `bash -e`, which `set -uo pipefail` does not undo, so that
+          # status would end the step and fail a run whose verdict was right.
+          size="$(awk '/^cut-tags: size / { sub(/^cut-tags: size /, ""); v = $0 } END { print v }' /tmp/cut.err 2>/dev/null || true)"
           {
             echo "## SDK release summary"
             echo
