@@ -92,21 +92,20 @@ func (t *Tracer) Start(ctx context.Context, name string, params coretrace.SpanPa
 // mint builds the new span's context: the trace id, a fresh span id, the
 // sampled bit and the inherited tracestate. It cannot fail: the draws cannot.
 func (t *Tracer) mint(parent coretrace.SpanContextValue, name string, params coretrace.SpanParams) coretrace.SpanContextValue {
-	//: every span has its own id, root or not.
-	spanID := drawSpanID()
 	//: a valid parent hands down the trace id, the flags and the vendor list
 	//: unchanged — that inheritance IS the trace.
 	if parent.IsValid() {
-		//: same trace, same decision, new span.
+		//: same trace, same decision, new span — every span has its own id.
 		return coretrace.SpanContextValue{
 			TraceID: parent.TraceID,
-			SpanID:  spanID,
+			SpanID:  drawSpanID(),
 			Flags:   parent.Flags,
 			State:   parent.State,
 		}
 	}
-	//: no parent: this is a root, so a trace id is minted for it.
-	traceID := drawTraceID()
+	//: no parent: this is a root, so a trace id is minted for it with its
+	//: span id, from one read of the CSPRNG (drawRootIDs).
+	traceID, spanID := drawRootIDs()
 	//: THE decision, taken exactly here and nowhere else in the trace.
 	sampled := t.cfg.Sampler(coretrace.SamplingParams{
 		Parent:  parent,

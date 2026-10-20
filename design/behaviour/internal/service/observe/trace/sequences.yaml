@@ -595,6 +595,40 @@ sequences:
                   - return: drawn
                 when: drawn.IsValid()
           forever: true
+  - of: drawRootIDs
+    participants:
+      - id: caller
+        kind: actor
+      - id: drawRootIDs
+        kind: self
+      - id: rand
+        kind: stdlib
+      - id: drawTraceID
+        kind: internal
+      - id: drawSpanID
+        kind: internal
+    steps:
+      - var:
+          name: drawn
+          type: "[rootIDsLen]byte"
+      - set: _, _
+        to: rand
+        value: rand.Read(drawn[:])
+      - eval: copy(traceID[:], drawn[:coretrace.TraceIDLen])
+      - eval: copy(spanID[:], drawn[coretrace.TraceIDLen:])
+      - opt:
+          do:
+            - set: traceID
+              to: drawTraceID
+              value: drawTraceID()
+          when: "!traceID.IsValid()"
+      - opt:
+          do:
+            - set: spanID
+              to: drawSpanID
+              value: drawSpanID()
+          when: "!spanID.IsValid()"
+      - return: traceID, spanID
   - of: noopSpan.SpanContext
     steps:
       - return: s.context
@@ -1211,27 +1245,22 @@ sequences:
         kind: actor
       - id: (*Tracer).mint
         kind: self
-      - id: drawSpanID
-        kind: internal
-      - id: drawTraceID
+      - id: drawRootIDs
         kind: internal
     steps:
-      - bind: spanID
-        eval: drawSpanID()
-        to: drawSpanID
       - opt:
           do:
             - return: |-
                 coretrace.SpanContextValue{
                 			TraceID: parent.TraceID,
-                			SpanID:  spanID,
+                			SpanID:  drawSpanID(),
                 			Flags:   parent.Flags,
                 			State:   parent.State,
                 		}
           when: parent.IsValid()
-      - bind: traceID
-        eval: drawTraceID()
-        to: drawTraceID
+      - bind: traceID, spanID
+        eval: drawRootIDs()
+        to: drawRootIDs
       - bind: sampled
         eval: |-
           t.cfg.Sampler(coretrace.SamplingParams{
