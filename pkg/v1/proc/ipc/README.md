@@ -31,7 +31,7 @@ Listen dials a socket already at the path first. One that answers is left alone 
 
 ### Where
 
-[RuntimeDir](#RuntimeDir) names an application's directory: $RUNTIME\_DIRECTORY (systemd), $XDG\_RUNTIME\_DIR/\<app>, %LOCALAPPDATA%\\\<app> on Windows, else \<tmp>/\<app>-\<uid>. [RuntimeDirOr](#RuntimeDirOr) ends the same chain on a directory the caller names instead of \<tmp> (ADR 0181). A path is at most the shortest sun\_path any supported kernel has, less its NUL.
+[RuntimeDir](#RuntimeDir) names an application's directory: $RUNTIME\_DIRECTORY (systemd), $XDG\_RUNTIME\_DIR/\<app>, %LOCALAPPDATA%\\\<app> on Windows, else \<tmp>/\<app>-\<uid>. [RuntimeDirOr](#RuntimeDirOr) ends the same chain on a directory the caller names instead of \<tmp> (ADR 0182). A path is at most the shortest sun\_path any supported kernel has, less its NUL.
 
 ### Ports, and the doubles they admit
 
@@ -201,7 +201,7 @@ RuntimeDir is where an application's private sockets belong on this machine. It 
 func RuntimeDirOr(app string, fallback string) string
 ```
 
-RuntimeDirOr is RuntimeDir with fallback in place of \<tmp>/\<app>-\<uid> (ADR 0181). It creates nothing.
+RuntimeDirOr is RuntimeDir with fallback in place of \<tmp>/\<app>-\<uid> (ADR 0182). It creates nothing.
 
 <a name="Config"></a>
 ## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/facade_gen.go>)
