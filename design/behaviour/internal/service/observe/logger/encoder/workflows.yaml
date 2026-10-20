@@ -1,58 +1,27 @@
 # Derived from the code by kit design derive. DO NOT EDIT.
 apiVersion: design/behaviour/v1
 workflows:
-  - of: appendJSONEscaped
-    steps:
-      - loop:
-          do:
-            - bind: c
-              eval: s[i]
-            - switch:
-                cases:
-                  - case: c == '\\' || c == '"'
-                    do:
-                      - set: dst
-                        value: append(dst, '\\', c)
-                  - case: c == '\n'
-                    do:
-                      - set: dst
-                        value: append(dst, '\\', 'n')
-                  - case: c == '\r'
-                    do:
-                      - set: dst
-                        value: append(dst, '\\', 'r')
-                  - case: c == '\t'
-                    do:
-                      - set: dst
-                        value: append(dst, '\\', 't')
-                  - case: c < jsonControlCeiling
-                    do:
-                      - set: dst
-                        value: append(dst, '\\', 'u', '0', '0', jsonHexDigits[c>>jsonNibbleShift], jsonHexDigits[c&jsonNibbleMask])
-                  - default: true
-                    do:
-                      - set: dst
-                        value: append(dst, c)
-          key: i
-          range: len(s)
-      - return: dst
   - of: AppendSanitized
     steps:
+      - bind: start
+        eval: "0"
       - loop:
           do:
             - bind: b
               eval: text[i]
             - opt:
                 do:
-                  - set: dst
-                    value: append(dst, ' ')
                   - continue: true
-                when: b == '\n' || b == '\r' || b == 0
+                when: b != '\n' && b != '\r' && b != 0
             - set: dst
-              value: append(dst, b)
+              value: append(dst, text[start:i]...)
+            - set: dst
+              value: append(dst, ' ')
+            - set: start
+              value: i + 1
           key: i
           range: len(text)
-      - return: dst
+      - return: append(dst, text[start:]...)
   - of: quoteSafe
     steps:
       - loop:

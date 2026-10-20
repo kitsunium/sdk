@@ -83,6 +83,26 @@ constants:
         type: byte
         value: "0x0f"
     name: jsonNibbleMask
+  - doc: |-
+      jsonTimestampOpen opens the object's first member, "ts", up to the opening
+      quote of its value.
+    items:
+      - name: jsonTimestampOpen
+        type: string
+        value: "`\"ts\":\"`"
+    name: jsonTimestampOpen
+  - doc: jsonLevelMember closes the "ts" value and names the "level" member.
+    items:
+      - name: jsonLevelMember
+        type: string
+        value: "`\",\"level\":`"
+    name: jsonLevelMember
+  - doc: jsonMessageMember separates the "level" value from the "msg" member.
+    items:
+      - name: jsonMessageMember
+        type: string
+        value: "`,\"msg\":`"
+    name: jsonMessageMember
   - doc: decimalBase is the radix passed to strconv.Append* for human-readable ints.
     items:
       - name: decimalBase
@@ -230,6 +250,9 @@ files:
       - jsonControlCeiling
       - jsonNibbleShift
       - jsonNibbleMask
+      - jsonTimestampOpen
+      - jsonLevelMember
+      - jsonMessageMember
       - jsonEncoder
       - NewJSON
       - (*jsonEncoder).Name
@@ -241,6 +264,7 @@ files:
       - appendJSONFloat
       - appendJSONString
       - appendJSONEscaped
+      - appendJSONByteEscape
     name: json.go
   - decls:
       - decimalBase
@@ -321,8 +345,19 @@ functions:
   - doc: |-
       appendJSONEscaped writes the JSON-escaped body of s onto dst without the
       surrounding quotes, so callers can compose multi-part keys before quoting.
+
+      The bytes that need no escape are copied in RUNS — one append per stretch
+      between two escapes, one for the whole string in the common case of a key
+      or value with nothing to escape — instead of one append per byte, which
+      paid a capacity check and a store for every byte of every member.
     name: appendJSONEscaped
     params: dst []byte, s string
+    results: "[]byte"
+  - doc: |-
+      appendJSONByteEscape appends the escape of one byte the JSON grammar forbids
+      verbatim inside a string literal: '"', '\\' or a byte below U+0020.
+    name: appendJSONByteEscape
+    params: dst []byte, c byte
     results: "[]byte"
   - name: NewText
     params: clk clock.Clock
@@ -348,7 +383,24 @@ functions:
     name: appendTraceContext
     params: dst []byte, r corelogger.RecordEvent
     results: "[]byte"
-  - name: AppendSanitized
+  - doc: |-
+      AppendSanitized copies text onto dst replacing '\n', '\r', and NUL
+      with a single space so the content can never inject a new frame in a
+      line-framed downstream sink. Other control characters are preserved to
+      keep the rendering faithful; only framing-sensitive bytes are stripped.
+      It scrubs every attacker-influenceable textual field — the Message, group
+      names, and attribute keys — not just the Message (V110).
+
+      It is exported for one caller outside this package: the legacy
+      service/observe/logger.TextHandler, which renders the same line shape without going
+      through an Encoder. That handler once appended all three fields verbatim —
+      the scrub existed, but only here — so a line break in any of them forged a
+      log line. One function shared by both renderers cannot drift from itself.
+
+      The bytes that pass through are copied in RUNS — one append for the whole
+      text when it holds no framing byte, which is every ordinary message — not
+      one append per byte.
+    name: AppendSanitized
     params: dst []byte, text string
     results: "[]byte"
   - doc: |-

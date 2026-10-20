@@ -79,6 +79,17 @@ exports it as a type alias for legacy call sites). This package ships two:
   `TestAppendTimestampMatchesAppendFormat` sweeps four zones × 100 000 instants.
   Change either fast path and those tests are the contract — widen an accepted
   set and they fail before a malformed log line ever reaches a parser.
+- **The two byte scrubs copy runs, not bytes.** `appendJSONEscaped` (json.go)
+  and `AppendSanitized` (text.go) append each stretch of bytes that needs no
+  rewrite in one `append`, and only the escaped or scrubbed byte on its own;
+  the JSON header appends its three member names as constants
+  (`jsonTimestampOpen`, `jsonLevelMember`, `jsonMessageMember`) instead of
+  escaping them per record. Measured (interleaved A/B, n=8): a JSON encode
+  −29 % to −63 % across every benchmark, `AppendSanitized` on a 19-byte
+  message −45 %. Pinned like the fast paths above, by the byte-at-a-time
+  forms they replaced: `Test_appendJSONEscapedRunsMatchBytewise` and
+  `Test_AppendSanitizedRunsMatchBytewise` sweep all 256 byte values alone, at
+  the start, middle and end of a run, and doubled.
 - **One timestamp layout, two encoders.** `timestampLayout` is declared once,
   in `timestamp.go`, and serves both encoders' headers and every `KindTime`
   attribute; `appendTimestamp` renders that layout and no other.

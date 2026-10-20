@@ -10,6 +10,30 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
+// Test_AppendSanitizedRunsMatchBytewise holds the run-copying scrub to the
+// byte-at-a-time form it replaced, for every byte value at every position a
+// run boundary can fall on.
+func Test_AppendSanitizedRunsMatchBytewise(t *testing.T) {
+	t.Parallel()
+	for b := range 256 {
+		c := string([]byte{byte(b)})
+		for _, in := range []string{c, c + "tail", "head" + c, "head" + c + "tail", c + c, "a" + c + "\n" + c + "z"} {
+			want := []byte("pre")
+			for i := range len(in) {
+				switch in[i] {
+				case '\n', '\r', 0:
+					want = append(want, ' ')
+				default:
+					want = append(want, in[i])
+				}
+			}
+			if got := AppendSanitized([]byte("pre"), in); string(got) != string(want) {
+				t.Fatalf("AppendSanitized(%q) = %q, want %q", in, got, want)
+			}
+		}
+	}
+}
+
 func Test_textEncoder_Name(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
