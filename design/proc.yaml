@@ -982,10 +982,16 @@ packages:
                 implicit inheritance, so a spawned service starts from a known state.
               name: Env
               type: "[]string"
-            - doc: User is the name or numeric uid to setuid to; empty leaves the parent's.
+            - doc: |-
+                User is the name or numeric uid to setuid to; empty leaves the parent's.
+                The child takes the user's primary gid unless Group names one. A numeric
+                uid with no passwd entry has no primary gid, so it needs an explicit
+                Group: alone it fails with UnknownUser, never falling back to gid 0.
               name: User
               type: string
-            - doc: Group is the name or numeric gid to setgid to; empty leaves the parent's.
+            - doc: |-
+                Group is the name or numeric gid to setgid to. Empty leaves the user's
+                primary gid when User is set, and the parent's when it is not.
               name: Group
               type: string
             - doc: Groups are supplementary group names or gids (systemd SupplementaryGroups=).
@@ -2293,6 +2299,9 @@ packages:
           Files returns the inherited listening sockets (fd 3..3+LISTEN_FDS) as *os.File,
           gated on LISTEN_PID. When unsetEnv is true the activation env is cleared so a
           grandchild does not re-inherit it. An empty/foreign activation set yields nil.
+          Each socket has FD_CLOEXEC set, as sd_listen_fds(3) sets it, so no process
+          this one spawns inherits a listening socket; handing one on to a re-exec is
+          explicit, through Prepare or the Spec's ExtraFiles.
         in:
           - name: unsetEnv
             type: bool
@@ -2489,8 +2498,11 @@ packages:
           - type: error
       - doc: |-
           WatchdogInterval reports the watchdog ping interval the supervisor configured
-          via $WATCHDOG_USEC. ok is false when the variable is unset or malformed,
-          matching sd_watchdog_enabled's "watchdog disabled" result. It is portable: it
+          via $WATCHDOG_USEC. ok is false — sd_watchdog_enabled's "watchdog disabled"
+          result — when the variable is unset, malformed, not positive, or larger than
+          a time.Duration holds, and when $WATCHDOG_PID is set and does not name this
+          process: a child that inherited its parent's environment is not the process
+          the supervisor watches. When ok is true, d is positive. It is portable: it
           reads only the environment and never touches a socket.
         name: WatchdogInterval
         out:
@@ -3841,7 +3853,9 @@ packages:
             Files returns the inherited listening sockets (fd 3..3+LISTEN_FDS) as *os.File,
             honouring LISTEN_PID. When unsetEnv is true the activation environment is
             cleared so a grandchild does not re-inherit it. An empty or foreign activation
-            set yields nil with no error; off Unix it returns UnsupportedPlatform.
+            set yields nil with no error; off Unix it returns UnsupportedPlatform. Each
+            socket is close-on-exec, as sd_listen_fds(3) leaves it: a spawned child
+            inherits one only when it is passed explicitly, through Prepare or ExtraFiles.
           forward: svclisten.Files
           in:
             - name: unsetEnv
@@ -4050,7 +4064,9 @@ packages:
       - func:
           doc: |-
             WatchdogInterval reports the watchdog ping interval the supervisor configured
-            via $WATCHDOG_USEC; ok is false when the variable is unset or malformed.
+            via $WATCHDOG_USEC; ok is false when the variable is unset, malformed or out
+            of a time.Duration's range, or when $WATCHDOG_PID names another process.
+            When ok is true, d is positive.
           forward: svcnotify.WatchdogInterval
           name: WatchdogInterval
           out:

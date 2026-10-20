@@ -80,6 +80,7 @@ go_test(
         "gen_api_test.go",
         "ipc_external_test.go",
         "pipe_windows_external_test.go",
+        "socket_internal_test.go",
     ],
     embed = [":ipc"],
     deps = [

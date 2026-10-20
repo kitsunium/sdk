@@ -35,7 +35,8 @@ wrapped in a non-nil interface — the trap `if ln != nil` would fall into.
 ## Why-this-shape
 
 The codes are re-exported because the caller's next move depends on them:
-`IN_USE` means another daemon runs (talk to it), `DIAL_FAILED` means nobody
+`IN_USE` means another daemon runs (talk to it) — or may, alive but too busy
+to answer the probe (#452) —, `DIAL_FAILED` means nobody
 answers (start one), `DIRECTORY_UNSAFE` and `ENDPOINT_FOREIGN` mean the
 deployment is wrong (never retry), and `PATH_UNSAFE` means a component ABOVE
 the socket's directory is one another account could have planted or created,

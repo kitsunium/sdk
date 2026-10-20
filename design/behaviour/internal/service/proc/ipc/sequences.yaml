@@ -503,6 +503,8 @@ sequences:
         kind: actor
       - id: RuntimeDirOr
         kind: self
+      - id: strings
+        kind: stdlib
       - id: os
         kind: stdlib
       - id: filepath
@@ -512,9 +514,9 @@ sequences:
           do:
             - return: d
           init:
-            bind: d
-            eval: os.Getenv("RUNTIME_DIRECTORY")
-            to: os
+            bind: d, _, _
+            eval: strings.Cut(os.Getenv("RUNTIME_DIRECTORY"), ":")
+            to: strings
           when: d != "" && filepath.IsAbs(d)
       - opt:
           do:
@@ -722,6 +724,13 @@ sequences:
           when: err == nil
       - opt:
           do:
+            - return: |-
+                errs.Wrap(coreipc.InUse, errs.WrapParams{}, errs.String("path", cfg.Path),
+                			errs.String("cause", "the socket's owner may be alive: "+err.Error()))
+              to: errs
+          when: "!nobodyListens(err)"
+      - opt:
+          do:
             - return: errs.Wrap(coreipc.ListenFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", err.Error()))
               to: errs
           init:
@@ -730,6 +739,9 @@ sequences:
             to: os
           when: err != nil && !errors.Is(err, os.ErrNotExist)
       - return: nil
+  - of: nobodyListens
+    steps:
+      - return: errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT)
   - of: (*Listener).admits
     participants:
       - id: caller

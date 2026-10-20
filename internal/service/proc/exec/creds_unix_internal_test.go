@@ -7,6 +7,7 @@
 package exec
 
 import (
+	"os"
 	"os/user"
 	"strconv"
 	"syscall"
@@ -58,9 +59,11 @@ func Test_wantsIdentity(t *testing.T) {
 //
 // A NUMERIC uid is honoured even with no passwd entry — a container image often
 // has no /etc/passwd at all, and refusing there would make "run as 65534"
-// impossible. A NAME that does not resolve is a hard failure, because there is
-// nothing sensible to fall back to and falling back to the parent would be the
-// privilege escalation.
+// impossible — but only beside an explicit Group (issue #450): with no passwd
+// entry there is no primary gid to take, and the gid 0 it used to resolve to
+// left the child in root's group after the uid drop. A NAME that does not
+// resolve is a hard failure, because there is nothing sensible to fall back to
+// and falling back to the parent would be the privilege escalation.
 func Test_resolveUser(t *testing.T) {
 	t.Parallel()
 	self, err := user.Current()
@@ -69,10 +72,12 @@ func Test_resolveUser(t *testing.T) {
 	}
 
 	type tc struct {
-		name    string
-		in      string
-		wantUID uint32
-		wantErr bool
+		name string
+		in   string
+		// groupGiven reports whether the Spec names a Group beside the User.
+		groupGiven bool
+		wantUID    uint32
+		wantErr    bool
 	}
 	//: a numeric uid nothing will have a passwd entry for.
 	const orphanUID uint32 = 60123
@@ -80,21 +85,26 @@ func Test_resolveUser(t *testing.T) {
 		{name: "the current user by name", in: self.Username, wantUID: parseID(t, self.Uid)},
 		{name: "the current user by numeric id", in: self.Uid, wantUID: parseID(t, self.Uid)},
 		{name: "root by numeric id", in: "0", wantUID: 0},
-		{name: "a numeric uid with no passwd entry", in: strconv.Itoa(int(orphanUID)), wantUID: orphanUID},
+		{name: "a numeric uid with no passwd entry, beside a Group", in: strconv.Itoa(int(orphanUID)), groupGiven: true, wantUID: orphanUID},
+		//: issue #450: refused rather than resolved with root's gid.
+		{name: "a numeric uid with no passwd entry, alone", in: strconv.Itoa(int(orphanUID)), wantErr: true},
+		//: a large uid, but not 4294967294: macOS's passwd names that one nobody.
+		{name: "a large numeric uid with no passwd entry, alone", in: "3999999999", wantErr: true},
 		{name: "a name that does not resolve", in: absentName, wantErr: true},
+		{name: "a name that does not resolve, beside a Group", in: absentName, groupGiven: true, wantErr: true},
 		{name: "an empty name", in: "", wantErr: true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		uid, _, err := resolveUser(c.in)
+		uid, gid, err := resolveUser(c.in, c.groupGiven)
 		if c.wantErr {
 			if !errs.HasCode(err, coreproc.CodeUnknownUser) {
 				t.Fatalf("resolveUser(%q) = %v, want UNKNOWN_USER", c.in, err)
 			}
 			//: a refused resolution must yield no identity, or a caller
 			//: checking only the error could run as uid 0.
-			if uid != 0 {
-				t.Errorf("resolveUser(%q) returned uid %d beside the error", c.in, uid)
+			if uid != 0 || gid != 0 {
+				t.Errorf("resolveUser(%q) returned (%d, %d) beside the error", c.in, uid, gid)
 			}
 			return
 		}
@@ -288,8 +298,14 @@ func Test_resolveGroups(t *testing.T) {
 // Test_applyUserGroup pins the override rule: an explicit Group wins over the
 // login gid the user resolved to. Without it, a unit naming both would silently
 // run under the user's default group, and the configured one would do nothing.
+//
+// It pins the "empty leaves the parent's" half too (issue #450): a Credential
+// has no unset id, so an empty User is the parent's uid written out and an
+// empty Group with no User the parent's gid. A Spec naming only a Group used to
+// ask the kernel for uid 0.
 func Test_applyUserGroup(t *testing.T) {
 	t.Parallel()
+	parentUID, parentGID := uint32(os.Getuid()), uint32(os.Getgid())
 	type tc struct {
 		name     string
 		spec     coreproc.Spec
@@ -298,9 +314,16 @@ func Test_applyUserGroup(t *testing.T) {
 		wantCode errs.Code
 	}
 	tests := []tc{
-		{name: "neither set leaves the zero credential"},
-		{name: "a numeric user", spec: coreproc.Spec{User: "60123"}, wantUID: 60123},
-		{name: "a numeric group", spec: coreproc.Spec{Group: "60124"}, wantGID: 60124},
+		{name: "neither set leaves the parent's ids", wantUID: parentUID, wantGID: parentGID},
+		{name: "a numeric user with a group", spec: coreproc.Spec{User: "60123", Group: "60124"}, wantUID: 60123, wantGID: 60124},
+		{
+			//: no passwd entry, no Group: no gid to take, and never gid 0.
+			name:     "a numeric user with no passwd entry and no group",
+			spec:     coreproc.Spec{User: "60123"},
+			wantCode: coreproc.CodeUnknownUser,
+		},
+		{name: "a numeric group leaves the parent's uid", spec: coreproc.Spec{Group: "60124"}, wantUID: parentUID, wantGID: 60124},
+		{name: "root's group alone leaves the parent's uid", spec: coreproc.Spec{Group: "0"}, wantUID: parentUID, wantGID: 0},
 		{
 			//: the explicit group overrides the login gid; uid 0's login gid is
 			//: 0, so a non-zero result proves the override happened.
@@ -364,16 +387,27 @@ func Test_resolveCredential(t *testing.T) {
 		wantSupp int
 		wantCode errs.Code
 	}
+	parentUID, parentGID := uint32(os.Getuid()), uint32(os.Getgid())
 	tests := []tc{
 		{name: "no identity at all", wantNil: true},
 		{name: "an unrelated field only", spec: coreproc.Spec{Path: "/bin/true"}, wantNil: true},
-		{name: "a numeric user", spec: coreproc.Spec{User: "60123"}, wantUID: 60123},
+		{name: "a numeric user and group", spec: coreproc.Spec{User: "60123", Group: "60124"}, wantUID: 60123, wantGID: 60124},
 		{
 			name:     "a user with supplementary groups",
-			spec:     coreproc.Spec{User: "60123", Groups: []string{"10", "20"}},
+			spec:     coreproc.Spec{User: "60123", Group: "60124", Groups: []string{"10", "20"}},
 			wantUID:  60123,
+			wantGID:  60124,
 			wantSupp: 2,
 		},
+		//: issue #450, the audit's two cases.
+		{
+			name:     "a numeric user with no passwd entry and no group",
+			spec:     coreproc.Spec{User: "54321"},
+			wantCode: coreproc.CodeUnknownUser,
+		},
+		{name: "a group alone", spec: coreproc.Spec{Group: "1001"}, wantUID: parentUID, wantGID: 1001},
+		//: supplementary groups alone change neither id.
+		{name: "supplementary groups alone", spec: coreproc.Spec{Groups: []string{"10"}}, wantUID: parentUID, wantGID: parentGID, wantSupp: 1},
 		{
 			name:     "an unresolvable user",
 			spec:     coreproc.Spec{User: absentName},
@@ -381,7 +415,7 @@ func Test_resolveCredential(t *testing.T) {
 		},
 		{
 			name:     "an unresolvable supplementary group",
-			spec:     coreproc.Spec{User: "60123", Groups: []string{absentName}},
+			spec:     coreproc.Spec{User: "60123", Group: "60124", Groups: []string{absentName}},
 			wantCode: coreproc.CodeUnknownGroup,
 		},
 	}

@@ -38,7 +38,7 @@ files:
       - exitOSErr
       - envFds
       - dropErr
-      - clearCloexec
+      - setCloexec
       - wrapListen
       - fdCount
       - pidMatches
@@ -59,11 +59,17 @@ functions:
     name: dropErr
     params: err error
   - doc: |-
-      clearCloexec clears FD_CLOEXEC on fd via fcntl(F_SETFD, 0) so the inherited
-      socket survives a subsequent re-exec (e.g. a zero-downtime self-restart). A
-      fcntl failure is non-fatal: the fd is still usable for the immediate service,
-      just not guaranteed across a re-exec.
-    name: clearCloexec
+      setCloexec sets FD_CLOEXEC on an inherited activation socket, as
+      sd_listen_fds(3) does.
+
+      The socket arrives without it — the activator cleared it so exec could pass
+      it — and an inherited descriptor left that way is inherited again by every
+      process this one spawns: a helper started under a lowered identity would
+      hold the service's listening socket (:443, say) and could accept on it. The
+      previous behaviour CLEARED the flag "so a re-exec keeps the socket"; a
+      re-exec that wants it passes it explicitly, through Prepare or ExtraFiles,
+      both of which dup it for the child.
+    name: setCloexec
     params: fd int
   - doc: wrapListen wraps an fd/socket cause onto the central ListenFailed sentinel.
     name: wrapListen

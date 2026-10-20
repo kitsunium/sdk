@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -16,6 +17,10 @@ const envNotifySocket = "NOTIFY_SOCKET"
 // envWatchdogUsec is the environment variable carrying the watchdog timeout, in
 // microseconds, that a supervisor sets for its child.
 const envWatchdogUsec = "WATCHDOG_USEC"
+
+// envWatchdogPID is the environment variable naming the one process the
+// watchdog timeout is meant for; a child inheriting the environment is not it.
+const envWatchdogPID = "WATCHDOG_PID"
 
 // exitDataErr mirrors EX_DATAERR (sysexits.h): a received datagram was malformed.
 // It matches the InvalidNotification sentinel's exit code in core/proc.
@@ -35,6 +40,11 @@ const decimalBase int = 10
 
 // int64Bits sizes strconv.ParseInt for the 64-bit WATCHDOG_USEC microsecond count.
 const int64Bits int = 64
+
+// maxWatchdogUsec is the largest $WATCHDOG_USEC a time.Duration can hold: past
+// it, usec * time.Microsecond wraps, and 9223372036854775807 read as -1µs with
+// ok true — a ticker built on half of it panics.
+const maxWatchdogUsec int64 = math.MaxInt64 / int64(time.Microsecond)
 
 // wrapInvalid restates the InvalidNotification sentinel fields around a cause,
 // attaching the offending field for diagnostics.
@@ -161,31 +171,52 @@ func mainPIDFromState(state map[string]string) (pid int, err error) {
 	return parsed, nil
 }
 
-// watchdogInterval parses a $WATCHDOG_USEC value (microseconds) into a duration.
-// ok is false when raw is empty or not a positive base-10 integer, mirroring
-// sd_watchdog_enabled's "watchdog disabled" result.
-func watchdogInterval(raw string) (d time.Duration, ok bool) {
-	//: an unset variable means the watchdog is disabled.
-	if raw == "" {
+// watchdogInterval parses a $WATCHDOG_USEC value (microseconds) into a duration,
+// for the process whose PID is self, given the $WATCHDOG_PID value pidRaw.
+// ok is false when raw is empty, not a positive base-10 integer, or larger than
+// a time.Duration holds, and when pidRaw is set and does not name self —
+// mirroring sd_watchdog_enabled's "watchdog disabled" result.
+func watchdogInterval(raw, pidRaw string, self int) (d time.Duration, ok bool) {
+	//: an unset variable means the watchdog is disabled; a $WATCHDOG_PID that
+	//: does not name this process means the timeout was meant for another — a
+	//: parent whose environment this process inherited.
+	if raw == "" || !watchdogIsOurs(pidRaw, self) {
 		//: signal "no watchdog" with the zero duration.
 		return 0, false
 	}
 	//: the value is an unsigned count of microseconds.
 	usec, err := strconv.ParseInt(raw, decimalBase, int64Bits)
-	//: a non-integer or non-positive value disables the watchdog.
-	if err != nil || usec <= 0 {
+	//: a non-integer, non-positive or unrepresentable value disables the watchdog.
+	if err != nil || usec <= 0 || usec > maxWatchdogUsec {
 		//: treat a malformed timeout as "disabled" rather than erroring.
 		return 0, false
 	}
-	//: scale microseconds to a Duration.
+	//: scale microseconds to a Duration; the bound above keeps it positive.
 	return time.Duration(usec) * time.Microsecond, true
 }
 
+// watchdogIsOurs reports whether a $WATCHDOG_PID value addresses the process
+// self. An unset variable addresses whoever reads $WATCHDOG_USEC, as in
+// sd_watchdog_enabled(3); a value that is not a PID addresses nobody.
+func watchdogIsOurs(pidRaw string, self int) bool {
+	//: systemd sets it only alongside a timeout meant for one process.
+	if pidRaw == "" {
+		//: no addressee named: the timeout is the reader's.
+		return true
+	}
+	pid, err := strconv.Atoi(pidRaw)
+	//: sd_watchdog_enabled refuses a malformed PID rather than guessing.
+	return err == nil && pid == self
+}
+
 // WatchdogInterval reports the watchdog ping interval the supervisor configured
-// via $WATCHDOG_USEC. ok is false when the variable is unset or malformed,
-// matching sd_watchdog_enabled's "watchdog disabled" result. It is portable: it
+// via $WATCHDOG_USEC. ok is false — sd_watchdog_enabled's "watchdog disabled"
+// result — when the variable is unset, malformed, not positive, or larger than
+// a time.Duration holds, and when $WATCHDOG_PID is set and does not name this
+// process: a child that inherited its parent's environment is not the process
+// the supervisor watches. When ok is true, d is positive. It is portable: it
 // reads only the environment and never touches a socket.
 func WatchdogInterval() (d time.Duration, ok bool) {
-	//: delegate the microsecond parsing to the shared helper.
-	return watchdogInterval(os.Getenv(envWatchdogUsec))
+	//: delegate the parsing to the shared helper, addressed to this process.
+	return watchdogInterval(os.Getenv(envWatchdogUsec), os.Getenv(envWatchdogPID), os.Getpid())
 }

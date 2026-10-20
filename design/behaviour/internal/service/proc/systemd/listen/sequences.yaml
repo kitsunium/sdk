@@ -7,22 +7,17 @@ sequences:
           do:
             - return: ""
           when: err == nil
-  - of: clearCloexec
+  - of: setCloexec
     participants:
       - id: caller
         kind: actor
-      - id: clearCloexec
+      - id: setCloexec
         kind: self
       - id: syscall
         kind: stdlib
     steps:
-      - bind: _, _, errno
-        eval: syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), syscall.F_SETFD, 0)
+      - eval: syscall.CloseOnExec(fd)
         to: syscall
-      - opt:
-          do:
-            - return: ""
-          when: errno != 0
   - of: wrapListen
     participants:
       - id: caller
@@ -148,7 +143,7 @@ sequences:
         kind: internal
       - id: splitNames
         kind: internal
-      - id: clearCloexec
+      - id: setCloexec
         kind: internal
     steps:
       - opt:
@@ -176,8 +171,8 @@ sequences:
           do:
             - bind: fd
               eval: listenFdStart + i
-            - eval: clearCloexec(fd)
-              to: clearCloexec
+            - eval: setCloexec(fd)
+              to: setCloexec
             - set: out
               value: append(out, os.NewFile(uintptr(fd), names[i]))
           key: i

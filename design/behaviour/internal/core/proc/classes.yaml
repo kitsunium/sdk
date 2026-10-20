@@ -324,10 +324,16 @@ types:
           implicit inheritance, so a spawned service starts from a known state.
         name: Env
         type: "[]string"
-      - doc: User is the name or numeric uid to setuid to; empty leaves the parent's.
+      - doc: |-
+          User is the name or numeric uid to setuid to; empty leaves the parent's.
+          The child takes the user's primary gid unless Group names one. A numeric
+          uid with no passwd entry has no primary gid, so it needs an explicit
+          Group: alone it fails with UnknownUser, never falling back to gid 0.
         name: User
         type: string
-      - doc: Group is the name or numeric gid to setgid to; empty leaves the parent's.
+      - doc: |-
+          Group is the name or numeric gid to setgid to. Empty leaves the user's
+          primary gid when User is set, and the parent's when it is not.
         name: Group
         type: string
       - doc: Groups are supplementary group names or gids (systemd SupplementaryGroups=).

@@ -42,6 +42,11 @@ func WatchdogInterval() (d time.Duration, ok bool)
 - **Listener is Linux-only.** It depends on `SO_PASSCRED` for the forge-proof
   `SenderPID`; on other platforms `Listen` returns `UNSUPPORTED_PLATFORM`. The
   notifier and `WatchdogInterval` are portable.
+- **`WatchdogInterval` reads `WATCHDOG_PID` and never returns a non-positive
+  `d` with `ok`** (#451): a timeout addressed to another process, or one past a
+  `time.Duration`'s range, reports the watchdog disabled, as
+  `sd_watchdog_enabled(3)` does — so the documented `time.NewTicker(d/2)` is
+  safe whenever `ok` is true.
 
 ## README is generated
 

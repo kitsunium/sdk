@@ -59,7 +59,14 @@ in this module write `notify.ReadyContext` (health) and `notify.Ready`
   line or a non-integer `MAINPID` yields `InvalidNotification`.
 - **`WATCHDOG_USEC`.** Parsed as a base-10 microsecond count into a
   `time.Duration`; unset/garbage/zero ⇒ `ok=false`, mirroring
-  `sd_watchdog_enabled`.
+  `sd_watchdog_enabled`. Two things `sd_watchdog_enabled(3)` does that this
+  once did not (#451): a set **`WATCHDOG_PID`** must name `getpid()` — a child
+  inheriting its parent's environment is not the watched process, and a
+  malformed PID addresses nobody — and a count above `math.MaxInt64 / 1000`
+  (`maxWatchdogUsec`) is refused: `time.Duration(usec) * time.Microsecond`
+  wrapped, `9223372036854775807` read as `-1µs` with `ok=true`, and the
+  package example's `time.NewTicker(d/2)` panicked. `ok=true` now promises a
+  positive `d`.
 
 ## Performance — see `BENCH.md`
 

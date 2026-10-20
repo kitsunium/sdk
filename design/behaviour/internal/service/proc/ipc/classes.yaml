@@ -118,6 +118,7 @@ files:
       - socketAcceptor.accept
       - listen
       - clearStale
+      - nobodyListens
       - (*Listener).admits
       - dial
     name: socket.go
@@ -244,6 +245,14 @@ functions:
     params: cfg *Config
     results: error
   - doc: |-
+      nobodyListens reports whether a failed dial says the socket has no owner:
+      ECONNREFUSED — a socket file no process listens on, what a killed daemon
+      leaves — or ENOENT, the file gone between the Lstat and the dial. Any other
+      failure, EAGAIN and a timeout first, leaves the owner possibly alive.
+    name: nobodyListens
+    params: err error
+    results: bool
+  - doc: |-
       dial connects to the Unix socket at cfg.Path, once the path to its
       directory is known to be steered by nobody else, the directory to be this
       account's and its file this account's (or an allowed one's). A directory
@@ -266,6 +275,7 @@ imports:
   runtime: runtime
   slices: slices
   strconv: strconv
+  strings: strings
   sync: sync
   syscall: syscall
   time: time

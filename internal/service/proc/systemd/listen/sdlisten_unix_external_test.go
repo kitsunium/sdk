@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -42,13 +43,166 @@ func drop(err error) {
 // TestMain dispatches the activated-child role on helperEnv, so the suite can
 // spawn itself as a socket-activated process.
 func TestMain(m *testing.M) {
-	//: the re-exec'd child runs the helper and exits before the suite.
-	if os.Getenv(helperEnv) == "1" {
+	//: the re-exec'd child runs its helper and exits before the suite.
+	switch os.Getenv(helperEnv) {
+	case "1":
 		//: act as the activated service, then exit with its status.
 		os.Exit(runActivatedChild())
+	case helperSpawner:
+		//: act as an activated service that spawns helpers of its own.
+		os.Exit(runSpawningChild())
+	case helperProbe:
+		//: act as the spawned helper, reporting what it inherited.
+		os.Exit(runProbe())
 	}
 	//: the normal path runs the test suite.
 	os.Exit(m.Run())
+}
+
+// The roles and statuses of TestFiles_closeOnExec's two generations.
+const (
+	// helperSpawner is the activated child that spawns helpers.
+	helperSpawner string = "spawner"
+	// helperProbe is the helper that reports whether it holds the socket.
+	helperProbe string = "probe"
+	// addrEnv carries the activated socket's address down both generations.
+	addrEnv string = "SDK_SDLISTEN_TEST_ADDR"
+	// probeHolds is the probe's status when fd 3 is the activated socket.
+	probeHolds int = 10
+	// probeEmpty is the probe's status when fd 3 is not it.
+	probeEmpty int = 11
+	// spawnerLeaked is the spawner's status when a helper it never handed the
+	// socket inherited it all the same — the defect of issue #449.
+	spawnerLeaked int = 5
+	// spawnerLost is the spawner's status when a helper it handed the socket
+	// explicitly did not receive it.
+	spawnerLost int = 6
+	// spawnerNoProbe is the spawner's status when it could not run a probe at
+	// all — told apart from a verdict, so a broken harness never reads as one.
+	spawnerNoProbe int = 7
+	// selfEnv carries the test binary's path to the spawner. os.Executable
+	// resolves argv[0] on OpenBSD, and the spawner's argv[0] is a role name,
+	// not a path.
+	selfEnv string = "SDK_SDLISTEN_TEST_SELF"
+)
+
+// runProbe reports whether fd 3 is a listening socket bound to $addrEnv: the
+// address is what tells the activated socket from any other descriptor the
+// runtime may have opened at 3.
+func runProbe() int {
+	ln, err := net.FileListener(os.NewFile(3, "probe"))
+	//: no descriptor at 3, or not a listener: nothing was inherited.
+	if err != nil {
+		//: the helper holds no listening socket.
+		return probeEmpty
+	}
+	defer func() { drop(ln.Close()) }()
+	//: a listener on another address is not the activated socket.
+	if ln.Addr().String() != os.Getenv(addrEnv) {
+		//: some other listener — not the one under test.
+		return probeEmpty
+	}
+	//: the helper can accept on the service's socket.
+	return probeHolds
+}
+
+// runSpawningChild recovers its activated socket with Files, as a service does,
+// then spawns two helpers: one handed nothing, which must not hold the socket,
+// and one handed it through ExtraFiles, which must.
+func runSpawningChild() int {
+	files, err := listen.Files(true)
+	//: exactly one socket must have been recovered from the activation env.
+	if err != nil || len(files) != 1 {
+		//: a recovery failure is a distinct non-zero status for diagnosis.
+		return 2
+	}
+	//: an unrelated helper must not inherit the listening socket.
+	switch probeStatus(nil) {
+	case probeEmpty:
+	case probeHolds:
+		//: the socket leaked into a child that was never handed it.
+		return spawnerLeaked
+	default:
+		//: no verdict at all.
+		return spawnerNoProbe
+	}
+	//: an explicit hand-on still reaches the helper, at fd 3.
+	switch probeStatus(files) {
+	case probeHolds:
+	case probeEmpty:
+		//: ExtraFiles no longer carries the socket.
+		return spawnerLost
+	default:
+		//: no verdict at all.
+		return spawnerNoProbe
+	}
+	//: close-on-exec, and explicit passing still works.
+	return 0
+}
+
+// probeStatus runs the probe helper with extra as its ExtraFiles and returns
+// its exit status, or -1 when it could not be run.
+func probeStatus(extra []*os.File) int {
+	cmd := exec.Command(os.Getenv(selfEnv), "sdlisten-probe")
+	cmd.Env = append(os.Environ(), helperEnv+"="+helperProbe)
+	cmd.ExtraFiles = extra
+	//: the probe's verdict is its exit status.
+	if rerr := cmd.Run(); rerr != nil && cmd.ProcessState == nil {
+		//: the probe never ran.
+		return -1
+	}
+	//: the probe ran; its status is the answer.
+	return cmd.ProcessState.ExitCode()
+}
+
+// TestFiles_closeOnExec pins issue #449: Files leaves every recovered socket
+// close-on-exec, as sd_listen_fds(3) does, so a helper the service spawns does
+// not inherit its listening socket — and a socket handed on explicitly, through
+// ExtraFiles, still arrives. Files used to CLEAR the flag, and any child the
+// service started, under any identity, could accept on its port.
+func TestFiles_closeOnExec(t *testing.T) {
+	t.Parallel()
+	self, err := os.Executable()
+	//: the test re-execs itself twice; a binary that cannot find itself is a
+	//: broken host, not a pass.
+	if err != nil {
+		t.Fatalf("resolving the test binary: %v", err)
+	}
+	ln, lerr := net.Listen("tcp", "127.0.0.1:0")
+	if lerr != nil {
+		t.Fatalf("Listen: %v", lerr)
+	}
+	defer func() { drop(ln.Close()) }()
+	spec := coreproc.Spec{
+		Path: self,
+		Args: []string{"sdlisten-spawner"},
+		Env:  []string{helperEnv + "=" + helperSpawner, addrEnv + "=" + ln.Addr().String(), selfEnv + "=" + self},
+	}
+	if perr := listen.Prepare(&spec, map[string]net.Listener{"web": ln}); perr != nil {
+		t.Fatalf("Prepare: %v", perr)
+	}
+
+	p, serr := svcexec.Start(t.Context(), spec)
+	closeExtra(t, spec.ExtraFiles)
+	if serr != nil {
+		t.Fatalf("Start child: %v", serr)
+	}
+	exit, werr := p.Wait()
+
+	if werr != nil {
+		t.Fatalf("Wait: %v", werr)
+	}
+	switch exit.Code {
+	case 0:
+	case spawnerLeaked:
+		t.Fatal("a helper the activated service never handed the socket inherited it")
+	case spawnerLost:
+		t.Fatal("a helper handed the socket through ExtraFiles did not receive it")
+	case spawnerNoProbe:
+		t.Fatal("the activated child could not run its probe")
+	default:
+		t.Fatalf("the activated child exited %d", exit.Code)
+	}
 }
 
 // runActivatedChild recovers its inherited listener, accepts one connection,

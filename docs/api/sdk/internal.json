@@ -36431,12 +36431,12 @@
         {
           "name": "User",
           "type": "string",
-          "doc": "User is the name or numeric uid to setuid to; empty leaves the parent's.\n"
+          "doc": "User is the name or numeric uid to setuid to; empty leaves the parent's.\nThe child takes the user's primary gid unless Group names one. A numeric\nuid with no passwd entry has no primary gid, so it needs an explicit\nGroup: alone it fails with UnknownUser, never falling back to gid 0.\n"
         },
         {
           "name": "Group",
           "type": "string",
-          "doc": "Group is the name or numeric gid to setgid to; empty leaves the parent's.\n"
+          "doc": "Group is the name or numeric gid to setgid to. Empty leaves the user's\nprimary gid when User is set, and the parent's when it is not.\n"
         },
         {
           "name": "Groups",
@@ -62477,7 +62477,7 @@
       "name": "NewListener",
       "spelled": "func(cfg *Config) (*Listener, error)",
       "canonical": "func(cfg *github.com/kitsunium/sdk/internal/service/proc/ipc.Config) (*github.com/kitsunium/sdk/internal/service/proc/ipc.Listener, error)",
-      "doc": "NewListener opens the private socket at cfg.Path. A socket already there is\ndialled first: one that answers is refused (IN_USE) and left alone, one\nthat does not is a leftover of a dead process and is removed — provided it\nis a socket this account owns. The socket file is made 0600. On Windows the\nnamed pipe is created with FILE_FLAG_FIRST_PIPE_INSTANCE: a name that\nexists is IN_USE, whoever made it.\n",
+      "doc": "NewListener opens the private socket at cfg.Path. A socket already there is\ndialled first: one that answers is refused (IN_USE) and left alone, and so\nis one whose dial fails any way but a refused connection — a full accept\nqueue, a timeout — since its owner may be alive. One the kernel refuses\nthe connection on (ECONNREFUSED), or that vanished meanwhile, is a\nleftover of a dead process and is removed — provided it is a socket this\naccount owns. The socket file is made 0600. On Windows the\nnamed pipe is created with FILE_FLAG_FIRST_PIPE_INSTANCE: a name that\nexists is IN_USE, whoever made it.\n",
       "file": "service/proc/ipc/ipc.go",
       "layer": "service",
       "family": "proc"
@@ -62489,7 +62489,7 @@
       "name": "RuntimeDir",
       "spelled": "func(app string) string",
       "canonical": "func(app string) string",
-      "doc": "RuntimeDir is where an application's private sockets belong on this\nmachine: $RUNTIME_DIRECTORY (systemd's), then $XDG_RUNTIME_DIR/<app>, then\n%LOCALAPPDATA%\\<app> on Windows, else <tmp>/<app>-<uid>. It creates\nnothing; Listen does, at 0700.\n",
+      "doc": "RuntimeDir is where an application's private sockets belong on this\nmachine: $RUNTIME_DIRECTORY (systemd's — its first entry when several\nRuntimeDirectory= make it a colon-separated list), then\n$XDG_RUNTIME_DIR/<app>, then %LOCALAPPDATA%\\<app> on Windows, else\n<tmp>/<app>-<uid>. It creates nothing; Listen does, at 0700.\n",
       "file": "service/proc/ipc/ipc.go",
       "layer": "service",
       "family": "proc"
@@ -62501,7 +62501,7 @@
       "name": "RuntimeDirOr",
       "spelled": "func(app string, fallback string) string",
       "canonical": "func(app string, fallback string) string",
-      "doc": "RuntimeDirOr is RuntimeDir with fallback in place of <tmp>/<app>-<uid>:\n$RUNTIME_DIRECTORY, then $XDG_RUNTIME_DIR/<app>, then %LOCALAPPDATA%\\<app>\non Windows, else fallback, returned as given. A caller that keeps state\nin a directory of its own names a directory there, and its sockets never\nland in a tree any account can create first (ADR 0182). It creates\nnothing; Listen does, at 0700, and refuses a fallback that is not\nabsolute or not private.\n",
+      "doc": "RuntimeDirOr is RuntimeDir with fallback in place of <tmp>/<app>-<uid>:\n$RUNTIME_DIRECTORY (its first entry), then $XDG_RUNTIME_DIR/<app>, then\n%LOCALAPPDATA%\\<app> on Windows, else fallback, returned as given. A\ncaller that keeps state in a directory of its own names a directory\nthere, and its sockets never land in a tree any account can create\nfirst (ADR 0182). It creates\nnothing; Listen does, at 0700, and refuses a fallback that is not\nabsolute or not private.\n",
       "file": "service/proc/ipc/ipc.go",
       "layer": "service",
       "family": "proc"
@@ -62951,7 +62951,7 @@
       "name": "Files",
       "spelled": "func(unsetEnv bool) (files []*os.File, err error)",
       "canonical": "func(unsetEnv bool) (files []*os.File, err error)",
-      "doc": "Files returns the inherited listening sockets (fd 3..3+LISTEN_FDS) as *os.File,\ngated on LISTEN_PID. When unsetEnv is true the activation env is cleared so a\ngrandchild does not re-inherit it. An empty/foreign activation set yields nil.\n",
+      "doc": "Files returns the inherited listening sockets (fd 3..3+LISTEN_FDS) as *os.File,\ngated on LISTEN_PID. When unsetEnv is true the activation env is cleared so a\ngrandchild does not re-inherit it. An empty/foreign activation set yields nil.\nEach socket has FD_CLOEXEC set, as sd_listen_fds(3) sets it, so no process\nthis one spawns inherits a listening socket; handing one on to a re-exec is\nexplicit, through Prepare or the Spec's ExtraFiles.\n",
       "file": "service/proc/systemd/listen/sdlisten_unix.go",
       "layer": "service",
       "family": "proc",
@@ -63271,7 +63271,7 @@
       "name": "WatchdogInterval",
       "spelled": "func() (d time.Duration, ok bool)",
       "canonical": "func() (d time.Duration, ok bool)",
-      "doc": "WatchdogInterval reports the watchdog ping interval the supervisor configured\nvia $WATCHDOG_USEC. ok is false when the variable is unset or malformed,\nmatching sd_watchdog_enabled's \"watchdog disabled\" result. It is portable: it\nreads only the environment and never touches a socket.\n",
+      "doc": "WatchdogInterval reports the watchdog ping interval the supervisor configured\nvia $WATCHDOG_USEC. ok is false — sd_watchdog_enabled's \"watchdog disabled\"\nresult — when the variable is unset, malformed, not positive, or larger than\na time.Duration holds, and when $WATCHDOG_PID is set and does not name this\nprocess: a child that inherited its parent's environment is not the process\nthe supervisor watches. When ok is true, d is positive. It is portable: it\nreads only the environment and never touches a socket.\n",
       "file": "service/proc/systemd/notify/sdnotify.go",
       "layer": "service",
       "family": "proc"

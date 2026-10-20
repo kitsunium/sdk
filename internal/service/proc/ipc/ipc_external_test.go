@@ -4,12 +4,14 @@ package ipc_test
 
 import (
 	"bufio"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	coreipc "github.com/kitsunium/sdk/internal/core/proc/ipc"
@@ -301,6 +303,104 @@ func TestRuntimeDirPrefersTheServiceManagers(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
 	if got := ipc.RuntimeDir("statusline"); got != "/run/user/1000/statusline" {
 		t.Errorf("RuntimeDir = %q", got)
+	}
+}
+
+// TestRuntimeDirTakesTheFirstOfSeveral pins issue #455: with several
+// RuntimeDirectory= systemd joins their absolute paths with ':' in
+// $RUNTIME_DIRECTORY (systemd.exec(5)), and the list as a whole names no
+// directory. The first entry is taken; one that is empty or not absolute
+// passes the chain on, as an unusable single value does.
+func TestRuntimeDirTakesTheFirstOfSeveral(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+	for _, c := range []struct{ value, want string }{
+		{"/run/app", "/run/app"},
+		{"/run/app:/run/app-extra", "/run/app"},
+		{"/run/app:/run/app-extra:/run/app-third", "/run/app"},
+		{"/run/app:", "/run/app"},
+		{":/run/app", "/run/user/1000/app"},
+		{"relative:/run/app", "/run/user/1000/app"},
+		{":", "/run/user/1000/app"},
+	} {
+		t.Setenv("RUNTIME_DIRECTORY", c.value)
+		if got := ipc.RuntimeDirOr("app", "/fallback"); got != c.want {
+			t.Errorf("RUNTIME_DIRECTORY=%q: RuntimeDirOr = %q, want %q", c.value, got, c.want)
+		}
+		if got := ipc.RuntimeDir("app"); got != c.want {
+			t.Errorf("RUNTIME_DIRECTORY=%q: RuntimeDir = %q, want %q", c.value, got, c.want)
+		}
+	}
+}
+
+// TestABusyLiveSocketIsNeverTakenOver pins issue #452: a live owner whose
+// accept queue is full answers a dial with EAGAIN on Linux, and the stale
+// check read every failed dial as "nobody listens" — it removed the running
+// server's socket and bound over it. Only ECONNREFUSED (or the file gone)
+// makes a socket a leftover now.
+//
+// The BSDs and macOS answer a full backlog with ECONNREFUSED itself, which a
+// dead socket gives too: there the two cannot be told apart, and the case is
+// Linux's.
+func TestABusyLiveSocketIsNeverTakenOver(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skipf("%s answers a full accept queue with ECONNREFUSED, as it answers a dead socket", runtime.GOOS)
+	}
+	cfg := ipc.Config{Path: filepath.Join(socketDir(t), "d.sock")}
+	if err := os.MkdirAll(filepath.Dir(cfg.Path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	//: a live owner that never accepts, its backlog as short as the kernel
+	//: allows, so a handful of dials fill it.
+	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := syscall.Close(fd); err != nil {
+			t.Logf("close: %v", err)
+		}
+	}()
+	if err := syscall.Bind(fd, &syscall.SockaddrUnix{Name: cfg.Path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Listen(fd, 0); err != nil {
+		t.Fatal(err)
+	}
+	full := false
+	for range 64 {
+		c, err := net.Dial("unix", cfg.Path)
+		if err != nil {
+			if !errors.Is(err, syscall.EAGAIN) {
+				t.Fatalf("filling the accept queue: %v, want EAGAIN", err)
+			}
+			full = true
+			break
+		}
+		defer closeOrLog(t, c)
+	}
+	if !full {
+		t.Fatal("64 connections never filled a backlog of 0")
+	}
+	before, err := os.Stat(cfg.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ln, err := ipc.NewListener(&cfg)
+
+	if err == nil {
+		closeOrLog(t, ln)
+		t.Fatal("a busy live socket was taken over")
+	}
+	if !errs.HasCode(err, coreipc.CodeInUse) {
+		t.Fatalf("a listener on a busy live socket: %v, want IN_USE", err)
+	}
+	after, err := os.Stat(cfg.Path)
+	if err != nil {
+		t.Fatalf("the refused listener removed the live socket: %v", err)
+	}
+	if !os.SameFile(before, after) {
+		t.Error("the live socket's file was replaced")
 	}
 }
 

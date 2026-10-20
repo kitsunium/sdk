@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"syscall"
 
 	coreipc "github.com/kitsunium/sdk/internal/core/proc/ipc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -71,10 +72,27 @@ func clearStale(cfg *Config) error {
 		closeBestEffort(c, cfg.Path)
 		return errs.Wrap(coreipc.InUse, errs.WrapParams{}, errs.String("path", cfg.Path))
 	}
+	//: only the kernel's word that nobody listens makes a socket a leftover. A
+	//: live owner whose accept queue is full answers EAGAIN (Linux) or a dial
+	//: that times out; reading that as "dead" removed a running server's socket
+	//: and bound over it, and its clients reached the impostor.
+	if !nobodyListens(err) {
+		return errs.Wrap(coreipc.InUse, errs.WrapParams{}, errs.String("path", cfg.Path),
+			errs.String("cause", "the socket's owner may be alive: "+err.Error()))
+	}
 	if err := os.Remove(cfg.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errs.Wrap(coreipc.ListenFailed, errs.WrapParams{}, errs.String("path", cfg.Path), errs.String("cause", err.Error()))
 	}
 	return nil
+}
+
+// nobodyListens reports whether a failed dial says the socket has no owner:
+// ECONNREFUSED — a socket file no process listens on, what a killed daemon
+// leaves — or ENOENT, the file gone between the Lstat and the dial. Any other
+// failure, EAGAIN and a timeout first, leaves the owner possibly alive.
+func nobodyListens(err error) bool {
+	//: the two answers the kernel gives only when no listener exists.
+	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT)
 }
 
 // admits is the Unix admission: this account, or an allowed user or group,

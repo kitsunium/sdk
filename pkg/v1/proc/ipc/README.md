@@ -27,11 +27,11 @@ Every lookup — the directory's creation, the bind, the connect — follows a l
 
 ### Nothing is taken over
 
-Listen dials a socket already at the path first. One that answers is left alone and refused ([CodeInUse](#CodeInUse)); one that does not — what a killed daemon leaves — is removed and replaced, provided it IS a socket this account owns. A client refuses a socket file another account owns ([CodeEndpointForeign](#CodeEndpointForeign)) before it sends a byte: a request never reaches an impostor.
+Listen dials a socket already at the path first. One that answers is left alone and refused ([CodeInUse](#CodeInUse)), and so is one whose owner is alive but busy — its accept queue full, or the dial out of time; only one the kernel says nobody listens on — what a killed daemon leaves — is removed and replaced, provided it IS a socket this account owns. A client refuses a socket file another account owns ([CodeEndpointForeign](#CodeEndpointForeign)) before it sends a byte: a request never reaches an impostor.
 
 ### Where
 
-[RuntimeDir](#RuntimeDir) names an application's directory: $RUNTIME\_DIRECTORY (systemd), $XDG\_RUNTIME\_DIR/\<app>, %LOCALAPPDATA%\\\<app> on Windows, else \<tmp>/\<app>-\<uid>. [RuntimeDirOr](#RuntimeDirOr) ends the same chain on a directory the caller names instead of \<tmp> (ADR 0182). A path is at most the shortest sun\_path any supported kernel has, less its NUL.
+[RuntimeDir](#RuntimeDir) names an application's directory: $RUNTIME\_DIRECTORY (systemd's, its first entry when it lists several), $XDG\_RUNTIME\_DIR/\<app>, %LOCALAPPDATA%\\\<app> on Windows, else \<tmp>/\<app>-\<uid>. [RuntimeDirOr](#RuntimeDirOr) ends the same chain on a directory the caller names instead of \<tmp> (ADR 0182). A path is at most the shortest sun\_path any supported kernel has, less its NUL.
 
 ### Ports, and the doubles they admit
 
