@@ -69,8 +69,9 @@ func (*ndjsonCodec) Marshal(v any) (encoded []byte, err error) {
 		//: bytes are caller-owned now.
 		return out, nil
 	}
-	//: resolve v to a reflect.Value that is a slice or array.
-	slice, ok := asSlice(v)
+	//: resolve v to a reflect.Value that is a slice or array; pre-encoded
+	//: rows stay JSON on the slow path, compacted.
+	slice, ok := asSlice(asRawMessages(v))
 	//: shape-the-input rejection.
 	if !ok {
 		//: loud failure — caller passed a non-slice.
@@ -172,6 +173,23 @@ func rawMessageView(rows []stdjson.RawMessage) [][]byte {
 	//: element-slice header (ptr, len, cap). The cast preserves
 	//: every element's backing storage by reference.
 	return *(*[][]byte)(unsafe.Pointer(&rows))
+}
+
+// asRawMessages re-types pre-encoded [][]byte rows as []json.RawMessage
+// for the slow path, and returns any other v as it is. A row the fast path
+// refused — one carrying a '\n', any pretty-printed document — reaches
+// encoding/json, which writes a []byte as a base64 STRING but a RawMessage
+// as the JSON it holds, validated and compacted onto one line. Without the
+// re-typing the output's format changed with the rows' content (#462).
+func asRawMessages(v any) any {
+	rows, isRaw := v.([][]byte)
+	//: only the [][]byte shape needs it; []json.RawMessage already is.
+	if !isRaw {
+		//: anything else, unchanged.
+		return v
+	}
+	//: the reverse of rawMessageView: the same bit-identical layout.
+	return *(*[]stdjson.RawMessage)(unsafe.Pointer(&rows))
 }
 
 // appendNDJSONRaw appends rows + '\n' separators onto dst. Refuses any
@@ -335,8 +353,9 @@ func (*ndjsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 		//: bytes appended in place; caller owns the buffer.
 		return out, nil
 	}
-	//: resolve v to a reflect.Value that is a slice or array.
-	slice, ok := asSlice(v)
+	//: resolve v to a reflect.Value that is a slice or array; pre-encoded
+	//: rows stay JSON on the slow path, compacted.
+	slice, ok := asSlice(asRawMessages(v))
 	//: shape-the-input rejection — same sentinel as Marshal for parity.
 	if !ok {
 		//: leave dst untouched and surface the documented sentinel.

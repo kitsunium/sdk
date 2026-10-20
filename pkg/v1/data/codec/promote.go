@@ -49,10 +49,10 @@ const pemPromotionBlockType string = "JSON"
 func promoteMarshal(f Format, c Codec, v any) (encoded []byte, err error) {
 	//: serialise v to a JSON intermediate.
 	inner, jerr := stdjson.Marshal(v)
-	//: surface json failure verbatim — caller sees the originating chain.
+	//: a value encoding/json refuses — a channel, a function, a cycle.
 	if jerr != nil {
-		//: propagate as-is.
-		return nil, jerr
+		//: typed PROMOTE_FAILED, the json error kept as its cause (rule 2).
+		return nil, promoteJSONFailed(f, jerr, "encoding/json refused the value")
 	}
 	//: build the codec-native container for the JSON bytes.
 	container, werr := wrapForFormat(f, inner)
@@ -91,7 +91,12 @@ func promoteUnmarshal(f Format, c Codec, data []byte, v any) error {
 		return cmp.Or(eerr)
 	}
 	//: project the json bytes into the caller's typed target.
-	return stdjson.Unmarshal(inner, v)
+	if jerr := stdjson.Unmarshal(inner, v); jerr != nil {
+		//: typed PROMOTE_FAILED, the json error kept as its cause (rule 2).
+		return promoteJSONFailed(f, jerr, "encoding/json could not decode the payload into the target")
+	}
+	//: decoded.
+	return nil
 }
 
 // wrapForFormat returns the codec-native value that, when Marshal'd
@@ -209,7 +214,14 @@ func extractNDJSON(rows *[]stdjson.RawMessage) func() ([]byte, error) {
 			//: typed sentinel for malformed container.
 			return nil, promoteContainerFailed("empty ndjson promotion container")
 		}
-		//: first record holds the wrapped json.
+		//: the wrap stage writes exactly one record; a stream of several was
+		//: not produced by promotion, and every record past the first would
+		//: be dropped without a word.
+		if len(*rows) != 1 {
+			//: typed sentinel, as csv and form refuse an extra row or key.
+			return nil, promoteContainerFailed("ndjson promotion container holds more than one record")
+		}
+		//: the one record holds the wrapped json.
 		return (*rows)[0], nil
 	}
 }
@@ -307,6 +319,20 @@ func promoteFailedFor(f Format, detail string) error {
 	})
 }
 
+// promoteJSONFailed is the typed error the promotion returns when
+// encoding/json itself fails on the bridge: PROMOTE_FAILED, with the json
+// error kept as its cause so errors.As still reaches it, and a Private that
+// names the format and the step, never the value.
+func promoteJSONFailed(f Format, cause error, detail string) error {
+	//: an untyped cause takes the code given here.
+	return kerrs.Wrap(cause, kerrs.WrapParams{
+		Code:    CodePromoteFailed,
+		Reason:  "PROMOTE_FAILED",
+		Public:  "codec promotion failed",
+		Private: "pkg/v1/data/codec: " + detail + " for format " + string(f),
+	})
+}
+
 // promoteContainerFailed is the typed sentinel returned by extract
 // closures when the codec populated the container with a shape that
 // no longer matches what the wrap stage produced.
@@ -343,12 +369,19 @@ func hasPromotionStrategy(f Format) bool {
 	}
 }
 
-// isValueShapeMismatch reports whether err indicates the underlying
-// codec rejected the caller's value/target shape, which is the only
-// condition that triggers a promotion retry. Detection is by reason
-// because the constrained codecs each emit a stable SCREAMING_SNAKE
-// label across their dotted-quad code ranges.
-func isValueShapeMismatch(err error) bool {
+// isValueShapeMismatch reports whether err, returned by the codec
+// registered under f, indicates the codec rejected the caller's
+// value/target shape, which is the only condition that triggers a
+// promotion retry. Detection is by reason because the constrained codecs
+// each emit a stable SCREAMING_SNAKE label across their dotted-quad code
+// ranges.
+//
+// NDJSON is the exception to UNMARSHAL_FAILED: its codec refuses a target
+// that is not a slice pointer with VALUE_INVALID before it decodes a byte,
+// so an UNMARSHAL_FAILED from it is always a record that failed to decode
+// into a slice target — a malformed stream. Promoting it would decode the
+// first record into the slice and drop the rest without a word (#461).
+func isValueShapeMismatch(f Format, err error) bool {
 	//: defensive nil-guard.
 	if err == nil {
 		//: nothing to retry on.
@@ -367,9 +400,13 @@ func isValueShapeMismatch(err error) bool {
 	//: bytes so the loop is bounded.
 	switch reason {
 	//: known shape-rejection reasons.
-	case "VALUE_INVALID", "FLATBUFFERS_BAD_TYPE", "FLATBUFFERS_BAD_TARGET", "UNMARSHAL_FAILED":
+	case "VALUE_INVALID", "FLATBUFFERS_BAD_TYPE", "FLATBUFFERS_BAD_TARGET":
 		//: shape mismatch — promote.
 		return true
+	//: a shape mismatch for every constrained codec but NDJSON.
+	case "UNMARSHAL_FAILED":
+		//: NDJSON's is a malformed stream, forwarded as it is.
+		return f != NDJSON
 	}
 	//: anything else propagates verbatim.
 	return false

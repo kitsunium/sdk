@@ -273,7 +273,7 @@ Code `1.2.0.2`
 const CodePromoteFailed v1errs.Code = 16908292
 ```
 
-CodePromoteFailed fires when the facade's JSON-bridge promotion path cannot serve the request (unknown Format with no promotion strategy, or a malformed container after the codec populated it).
+CodePromoteFailed fires when the facade's JSON-bridge promotion path cannot serve the request (unknown Format with no promotion strategy, a malformed container after the codec populated it, or encoding/json failing on the bridge itself).
 
 Code `1.2.0.4`
 
@@ -409,7 +409,7 @@ Code `1.2.0.2` · reason `CODEC_UNAVAILABLE` · public "codec is registered but 
 var PromoteFailed *errs.Error
 ```
 
-PromoteFailed is returned when the facade's JSON-bridge promotion cannot serve the request — either the Format has no promotion strategy registered, or the codec populated a container whose shape no longer matches what the wrap stage produced.
+PromoteFailed is returned when the facade's JSON-bridge promotion cannot serve the request — the Format has no promotion strategy registered, the codec populated a container whose shape no longer matches what the wrap stage produced (an NDJSON stream of more than one record included), or encoding/json refused the value or the target on the bridge, its error kept as the cause.
 
 Code `1.2.0.4` · reason `PROMOTE_FAILED` · public "codec promotion failed"
 

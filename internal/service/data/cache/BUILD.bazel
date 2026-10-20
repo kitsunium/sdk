@@ -45,6 +45,7 @@ go_test(
     srcs = [
         "cache_bench_test.go",
         "chain_external_test.go",
+        "chain_race_external_test.go",
         "gen_api_test.go",
         "memory_external_test.go",
         "memory_internal_test.go",

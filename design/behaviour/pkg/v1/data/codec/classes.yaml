@@ -304,6 +304,7 @@ files:
       - extractFlatBuffers
       - extractTLV
       - promoteFailedFor
+      - promoteJSONFailed
       - promoteContainerFailed
       - hasPromotionStrategy
       - isValueShapeMismatch
@@ -475,6 +476,14 @@ functions:
     params: f Format, detail string
     results: error
   - doc: |-
+      promoteJSONFailed is the typed error the promotion returns when
+      encoding/json itself fails on the bridge: PROMOTE_FAILED, with the json
+      error kept as its cause so errors.As still reaches it, and a Private that
+      names the format and the step, never the value.
+    name: promoteJSONFailed
+    params: f Format, cause error, detail string
+    results: error
+  - doc: |-
       promoteContainerFailed is the typed sentinel returned by extract
       closures when the codec populated the container with a shape that
       no longer matches what the wrap stage produced.
@@ -495,13 +504,20 @@ functions:
     params: f Format
     results: bool
   - doc: |-
-      isValueShapeMismatch reports whether err indicates the underlying
-      codec rejected the caller's value/target shape, which is the only
-      condition that triggers a promotion retry. Detection is by reason
-      because the constrained codecs each emit a stable SCREAMING_SNAKE
-      label across their dotted-quad code ranges.
+      isValueShapeMismatch reports whether err, returned by the codec
+      registered under f, indicates the codec rejected the caller's
+      value/target shape, which is the only condition that triggers a
+      promotion retry. Detection is by reason because the constrained codecs
+      each emit a stable SCREAMING_SNAKE label across their dotted-quad code
+      ranges.
+
+      NDJSON is the exception to UNMARSHAL_FAILED: its codec refuses a target
+      that is not a slice pointer with VALUE_INVALID before it decodes a byte,
+      so an UNMARSHAL_FAILED from it is always a record that failed to decode
+      into a slice target — a malformed stream. Promoting it would decode the
+      first record into the slice and drop the rest without a word (#461).
     name: isValueShapeMismatch
-    params: err error
+    params: f Format, err error
     results: bool
 imports:
   binary: encoding/binary

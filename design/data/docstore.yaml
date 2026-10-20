@@ -1046,10 +1046,12 @@ packages:
           - code: CodeDocumentUnencodable
             doc: |-
               DocumentUnencodable refuses a value encoding/json cannot encode — a
-              channel, a function, a cycle. Nothing changed.
+              channel, a function, a cycle — or cannot encode unchanged: a store
+              key or an index key that is not valid UTF-8, which JSON would
+              rewrite into another key. Nothing changed.
             http: 500
             name: DocumentUnencodable
-            private: "service/data/docstore: encoding/json refused the value; the fields name the store and the cause"
+            private: "service/data/docstore: the value cannot be written as JSON unchanged; the fields name the store, the cause and, for an index key, the index"
             public: The document cannot be encoded
             reason: DOCUMENT_UNENCODABLE
           - code: CodePersistFailed
@@ -3039,7 +3041,7 @@ packages:
             name: DocumentUndecodable
             reexport: coredocstore.DocumentUndecodable
             type: "*errs.Error"
-          - doc: DocumentUnencodable refuses a value encoding/json cannot encode.
+          - doc: DocumentUnencodable refuses a value encoding/json cannot encode, or a key that is not valid UTF-8.
             name: DocumentUnencodable
             reexport: coredocstore.DocumentUnencodable
             type: "*errs.Error"

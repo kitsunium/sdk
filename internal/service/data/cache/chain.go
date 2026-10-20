@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
+	"sync/atomic"
 
 	corecache "github.com/kitsunium/sdk/internal/core/data/cache"
 	"github.com/kitsunium/sdk/internal/kernel/concur/singleflight"
@@ -34,10 +36,30 @@ const minChainTiers int = 2
 //     bounds the damage to one near-tier TTL, and the caller has an error.
 //   - Fetch promotes on a far hit and never fails the read because the
 //     promotion failed: the caller already has the value.
+//
+// # A promotion never writes back what a write has replaced (#460)
+//
+// A promotion copies, into the nearer tiers, an entry it read from a farther
+// one — read BEFORE it writes. A Set, Delete or InvalidateTag that ran in
+// between would see its own effect overwritten by that older copy, served
+// from the near tier for its whole TTL, forever under NoExpiry. So every
+// write announces itself first: it counts itself in writing, then moves
+// generation under the promotion lock — which waits for every promotion
+// already past its check to finish writing — and only then touches a tier. A
+// promotion, under the read side of that lock, writes only when no write is
+// running and none began since it read generation, before its far read. A
+// skipped promotion costs one later fall-through, never a stale hit.
 type chainStore[V any] struct {
 	tiers          []tier[V]
 	onPromoteError func(key string, err error)
 	group          singleflight.Group[string, V]
+	// promoting is held for reading by a promotion from its check to its last
+	// write, and taken for writing by a write announcing itself.
+	promoting sync.RWMutex
+	// generation moves once per write, when it announces itself.
+	generation atomic.Uint64
+	// writing counts the writes announced and not finished.
+	writing atomic.Int64
 }
 
 // NewChain puts each store in front of the next: tiers[0] is the nearest and
@@ -124,6 +146,9 @@ func (c *chainStore[V]) Fetch(ctx context.Context, key string) (value V, found b
 
 // FetchEntry is Fetch with the entry, and is where promotion happens.
 func (c *chainStore[V]) FetchEntry(ctx context.Context, key string) (entry corecache.EntryValue[V], found bool, err error) {
+	// read before any tier is: a write announced after this read makes the
+	// promotion of what the walk finds stale.
+	seen := c.generation.Load()
 	//: walk near to far; the first tier that holds the key answers.
 	for position, level := range c.tiers {
 		stored, ok, fetchErr := level.entry.FetchEntry(ctx, key)
@@ -141,7 +166,7 @@ func (c *chainStore[V]) FetchEntry(ctx context.Context, key string) (entry corec
 		//: fill every tier we walked past, with the entry's REMAINING TTL and
 		//: its tags — so the promoted copy expires when the original would and
 		//: stays reachable by InvalidateTag.
-		c.promote(ctx, key, stored, position)
+		c.promote(ctx, key, stored, position, seen)
 		//: the entry as the holding tier had it.
 		return stored, true, nil
 	}
@@ -156,7 +181,17 @@ func (c *chainStore[V]) FetchEntry(ctx context.Context, key string) (entry corec
 // is reported through ChainConfig.OnPromoteError instead — which is nil by
 // default, and a nil hook is exactly how a near tier that rejects everything
 // stays invisible.
-func (c *chainStore[V]) promote(ctx context.Context, key string, entry corecache.EntryValue[V], found int) {
+//
+// It writes nothing when a write is running, or began since seen was read:
+// see the type comment.
+func (c *chainStore[V]) promote(ctx context.Context, key string, entry corecache.EntryValue[V], found int, seen uint64) {
+	c.promoting.RLock()
+	defer c.promoting.RUnlock()
+	//: a write ran or runs since the far read: what was read may be gone.
+	if c.writing.Load() != 0 || c.generation.Load() != seen {
+		//: served, not promoted; the next read falls through.
+		return
+	}
 	//: outward-in, the same direction Set writes: the nearest tier is filled
 	//: LAST, so a reader racing the promotion never finds a near hit backed by
 	//: a tier that has not been written yet.
@@ -181,8 +216,26 @@ func (c *chainStore[V]) reportPromoteError(key string, err error) {
 	c.onPromoteError(key, err)
 }
 
+// announce makes a write visible to every promotion before it touches a tier;
+// the write defers finish. See the type comment.
+func (c *chainStore[V]) announce() {
+	c.writing.Add(1)
+	// the write lock waits out every promotion past its check; the next one
+	// sees writing, then a new generation.
+	c.promoting.Lock()
+	c.generation.Add(1)
+	c.promoting.Unlock()
+}
+
+// finish ends an announced write.
+func (c *chainStore[V]) finish() {
+	c.writing.Add(-1)
+}
+
 // Set writes far-to-near and stops at the first failure. See the type comment.
 func (c *chainStore[V]) Set(ctx context.Context, key string, entry corecache.EntryValue[V]) error {
+	c.announce()
+	defer c.finish()
 	//: the authority first: a near tier holding a value the far tier refused is
 	//: a lie that outlives the error.
 	for position, level := range slices.Backward(c.tiers) {
@@ -199,6 +252,8 @@ func (c *chainStore[V]) Set(ctx context.Context, key string, entry corecache.Ent
 // Delete removes key from EVERY tier, far-to-near, and does not stop at the
 // first failure. See the type comment for why near-first would be worse.
 func (c *chainStore[V]) Delete(ctx context.Context, key string) error {
+	c.announce()
+	defer c.finish()
 	var failures []error
 	//: attempt every tier: skipping the rest after one failure leaves the value
 	//: fetchable from a tier nothing ever tried.
@@ -220,6 +275,8 @@ func (c *chainStore[V]) Delete(ctx context.Context, key string) error {
 // tier dropped, which is a list no tier returns — and a number that is quietly
 // approximate is worse than one whose unit is stated.
 func (c *chainStore[V]) InvalidateTag(ctx context.Context, tag string) (removed int, err error) {
+	c.announce()
+	defer c.finish()
 	var failures []error
 	total := 0
 	//: far first: a near tier cleared before the far one could repopulate itself

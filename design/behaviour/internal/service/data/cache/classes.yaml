@@ -33,6 +33,8 @@ files:
       - (*chainStore).FetchEntry
       - (*chainStore).promote
       - (*chainStore).reportPromoteError
+      - (*chainStore).announce
+      - (*chainStore).finish
       - (*chainStore).Set
       - (*chainStore).Delete
       - (*chainStore).InvalidateTag
@@ -168,6 +170,7 @@ functions:
     name: newTagIndex
     results: "*tagIndex"
 imports:
+  atomic: sync/atomic
   clock: github.com/kitsunium/sdk/internal/kernel/clock
   context: context
   corecache: github.com/kitsunium/sdk/internal/core/data/cache
@@ -205,6 +208,19 @@ types:
           bounds the damage to one near-tier TTL, and the caller has an error.
         - Fetch promotes on a far hit and never fails the read because the
           promotion failed: the caller already has the value.
+
+      # A promotion never writes back what a write has replaced (#460)
+
+      A promotion copies, into the nearer tiers, an entry it read from a farther
+      one — read BEFORE it writes. A Set, Delete or InvalidateTag that ran in
+      between would see its own effect overwritten by that older copy, served
+      from the near tier for its whole TTL, forever under NoExpiry. So every
+      write announces itself first: it counts itself in writing, then moves
+      generation under the promotion lock — which waits for every promotion
+      already past its check to finish writing — and only then touches a tier. A
+      promotion, under the read side of that lock, writes only when no write is
+      running and none began since it read generation, before its far read. A
+      skipped promotion costs one later fall-through, never a stale hit.
     fields:
       - name: tiers
         type: "[]tier[V]"
@@ -212,6 +228,17 @@ types:
         type: func(key string, err error)
       - name: group
         type: singleflight.Group[string, V]
+      - doc: |-
+          promoting is held for reading by a promotion from its check to its last
+          write, and taken for writing by a write announcing itself.
+        name: promoting
+        type: sync.RWMutex
+      - doc: generation moves once per write, when it announces itself.
+        name: generation
+        type: atomic.Uint64
+      - doc: writing counts the writes announced and not finished.
+        name: writing
+        type: atomic.Int64
     kind: struct
     methods:
       - doc: Fetch reads near-to-far and promotes a far hit into every nearer tier.
@@ -232,12 +259,23 @@ types:
           is reported through ChainConfig.OnPromoteError instead — which is nil by
           default, and a nil hook is exactly how a near tier that rejects everything
           stays invisible.
+
+          It writes nothing when a write is running, or began since seen was read:
+          see the type comment.
         name: promote
-        params: ctx context.Context, key string, entry corecache.EntryValue[V], found int
+        params: ctx context.Context, key string, entry corecache.EntryValue[V], found int, seen uint64
         recv: c *chainStore[V]
       - doc: reportPromoteError hands a failed promotion to the configured observer.
         name: reportPromoteError
         params: key string, err error
+        recv: c *chainStore[V]
+      - doc: |-
+          announce makes a write visible to every promotion before it touches a tier;
+          the write defers finish. See the type comment.
+        name: announce
+        recv: c *chainStore[V]
+      - doc: finish ends an announced write.
+        name: finish
         recv: c *chainStore[V]
       - doc: Set writes far-to-near and stops at the first failure. See the type comment.
         name: Set

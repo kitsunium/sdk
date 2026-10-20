@@ -633,7 +633,7 @@ Code `0.3.80.8` · reason `DOCUMENT_UNDECODABLE` · public "A stored document do
 var DocumentUnencodable *errs.Error
 ```
 
-DocumentUnencodable refuses a value encoding/json cannot encode.
+DocumentUnencodable refuses a value encoding/json cannot encode, or a key that is not valid UTF-8.
 
 Initialised with `github.com/kitsunium/sdk/internal/core/data/docstore.DocumentUnencodable`.
 

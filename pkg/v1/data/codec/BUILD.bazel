@@ -68,6 +68,7 @@ go_test(
         "gen_api_test.go",
         "multipart_external_test.go",
         "promote_internal_test.go",
+        "promote_ndjson_external_test.go",
     ],
     embed = [":codec"],
     deps = [

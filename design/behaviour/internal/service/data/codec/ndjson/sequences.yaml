@@ -55,7 +55,7 @@ sequences:
             to: marshalRawSliceTo
           when: ok
       - bind: slice, ok
-        eval: asSlice(v)
+        eval: asSlice(asRawMessages(v))
         to: asSlice
       - opt:
           do:
@@ -145,6 +145,15 @@ sequences:
   - of: rawMessageView
     steps:
       - return: "*(*[][]byte)(unsafe.Pointer(&rows))"
+  - of: asRawMessages
+    steps:
+      - bind: rows, isRaw
+        eval: v.([][]byte)
+      - opt:
+          do:
+            - return: v
+          when: "!isRaw"
+      - return: "*(*[]stdjson.RawMessage)(unsafe.Pointer(&rows))"
   - of: appendNDJSONRaw
     participants:
       - id: caller
@@ -353,7 +362,7 @@ sequences:
             to: marshalRawSliceTo
           when: ok
       - bind: slice, ok
-        eval: asSlice(v)
+        eval: asSlice(asRawMessages(v))
         to: asSlice
       - opt:
           do:

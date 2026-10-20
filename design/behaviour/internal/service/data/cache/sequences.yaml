@@ -93,11 +93,16 @@ sequences:
         kind: actor
       - id: (*chainStore).FetchEntry
         kind: self
+      - id: c.generation.Load
+        kind: value
       - id: level.entry.FetchEntry
         kind: value
       - id: c.promote
         kind: internal
     steps:
+      - bind: seen
+        eval: c.generation.Load()
+        to: c.generation.Load
       - loop:
           do:
             - bind: stored, ok, fetchErr
@@ -111,7 +116,7 @@ sequences:
                 do:
                   - continue: true
                 when: "!ok"
-            - eval: c.promote(ctx, key, stored, position)
+            - eval: c.promote(ctx, key, stored, position, seen)
               to: c.promote
             - return: stored, true, nil
           key: position
@@ -129,6 +134,13 @@ sequences:
       - id: c.reportPromoteError
         kind: internal
     steps:
+      - lock:
+          mutex: c.promoting
+          read: true
+      - opt:
+          do:
+            - return: ""
+          when: c.writing.Load() != 0 || c.generation.Load() != seen
       - loop:
           do:
             - opt:
@@ -150,17 +162,59 @@ sequences:
             - return: ""
           when: c.onPromoteError == nil
       - eval: c.onPromoteError(key, err)
+  - of: (*chainStore).announce
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).announce
+        kind: self
+      - id: c.writing.Add
+        kind: value
+      - id: c.promoting.Lock
+        kind: value
+      - id: c.generation.Add
+        kind: value
+      - id: c.promoting.Unlock
+        kind: value
+    steps:
+      - eval: c.writing.Add(1)
+        to: c.writing.Add
+      - eval: c.promoting.Lock()
+        to: c.promoting.Lock
+      - eval: c.generation.Add(1)
+        to: c.generation.Add
+      - eval: c.promoting.Unlock()
+        to: c.promoting.Unlock
+  - of: (*chainStore).finish
+    participants:
+      - id: caller
+        kind: actor
+      - id: (*chainStore).finish
+        kind: self
+      - id: c.writing.Add
+        kind: value
+    steps:
+      - eval: c.writing.Add(-1)
+        to: c.writing.Add
   - of: (*chainStore).Set
     participants:
       - id: caller
         kind: actor
       - id: (*chainStore).Set
         kind: self
+      - id: c.announce
+        kind: internal
+      - id: c.finish
+        kind: internal
       - id: level.store.Set
         kind: value
       - id: tierFailure
         kind: internal
     steps:
+      - eval: c.announce()
+        to: c.announce
+      - defer: c.finish()
+        to: c.finish
       - loop:
           do:
             - opt:
@@ -182,11 +236,19 @@ sequences:
         kind: actor
       - id: (*chainStore).Delete
         kind: self
+      - id: c.announce
+        kind: internal
+      - id: c.finish
+        kind: internal
       - id: level.store.Delete
         kind: value
       - id: errors
         kind: stdlib
     steps:
+      - eval: c.announce()
+        to: c.announce
+      - defer: c.finish()
+        to: c.finish
       - var:
           name: failures
           type: "[]error"
@@ -212,9 +274,17 @@ sequences:
         kind: actor
       - id: (*chainStore).InvalidateTag
         kind: self
+      - id: c.announce
+        kind: internal
+      - id: c.finish
+        kind: internal
       - id: level.tags.InvalidateTag
         kind: value
     steps:
+      - eval: c.announce()
+        to: c.announce
+      - defer: c.finish()
+        to: c.finish
       - var:
           name: failures
           type: "[]error"

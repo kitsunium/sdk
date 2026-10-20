@@ -1,6 +1,7 @@
 package codec
 
 import (
+	"cmp"
 	"encoding/binary"
 	stdjson "encoding/json"
 	stdpem "encoding/pem"
@@ -145,6 +146,7 @@ func TestIsValueShapeMismatch(t *testing.T) {
 	}
 	type tc struct {
 		name   string
+		format Format
 		err    error
 		expect bool
 	}
@@ -155,11 +157,13 @@ func TestIsValueShapeMismatch(t *testing.T) {
 		{name: "flatbuffers-bad-type", err: mkErr("FLATBUFFERS_BAD_TYPE"), expect: true},
 		{name: "flatbuffers-bad-target", err: mkErr("FLATBUFFERS_BAD_TARGET"), expect: true},
 		{name: "unmarshal-failed", err: mkErr("UNMARSHAL_FAILED"), expect: true},
+		{name: "ndjson-unmarshal-failed", format: NDJSON, err: mkErr("UNMARSHAL_FAILED"), expect: false},
+		{name: "ndjson-value-invalid", format: NDJSON, err: mkErr("VALUE_INVALID"), expect: true},
 		{name: "unrelated", err: mkErr("UNKNOWN_FORMAT"), expect: false},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		got := isValueShapeMismatch(tc.err)
+		got := isValueShapeMismatch(cmp.Or(tc.format, CSV), tc.err)
 		//: bool assertion.
 		if got != tc.expect {
 			t.Errorf("%s: got=%v want=%v err=%v", tc.name, got, tc.expect, tc.err)
@@ -412,6 +416,7 @@ func TestExtractNDJSON(t *testing.T) {
 	tests := []tc{
 		{name: "single-row", rows: []stdjson.RawMessage{inner}, want: inner, wantErr: false},
 		{name: "empty", rows: nil, wantErr: true, wantInPriv: "empty ndjson"},
+		{name: "two-rows", rows: []stdjson.RawMessage{inner, inner}, wantErr: true, wantInPriv: "more than one record"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -718,12 +723,12 @@ func TestPromoteUnmarshal_UnknownFormat(t *testing.T) {
 	}
 }
 
-// TestPromoteMarshal_JSONError asserts promoteMarshal forwards the
-// encoding/json failure verbatim when the value cannot be serialised to
-// the JSON intermediate. A chan can never round-trip through json, so a
+// TestPromoteMarshal_JSONError asserts promoteMarshal returns the
+// encoding/json failure typed — PROMOTE_FAILED, rule 2 — with the json
+// error kept as its cause, when the value cannot be serialised to the JSON
+// intermediate (#461). A chan can never round-trip through json, so a
 // CSV-routed chan reaches the codec's VALUE_INVALID shape-rejection but
-// fails one step earlier at the json.Marshal bridge — exercising the
-// "surface json failure verbatim" arm that no roundtrip fixture hits.
+// fails one step earlier at the json.Marshal bridge.
 func TestPromoteMarshal_JSONError(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -746,14 +751,17 @@ func TestPromoteMarshal_JSONError(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s: want json marshal error, got nil", tc.name)
 		}
-		//: the failure is the raw encoding/json error, NOT a typed
-		//: PromoteFailed sentinel — promoteMarshal forwards it as-is.
-		if _, ok := kerrs.ReasonOf(err); ok {
-			t.Errorf("%s: err=%v unexpectedly carries a typed reason; want raw json error", tc.name, err)
+		//: typed: PROMOTE_FAILED, never the raw encoding/json error.
+		if reason, ok := kerrs.ReasonOf(err); !ok || reason != "PROMOTE_FAILED" {
+			t.Errorf("%s: err=%v reason=%q, want PROMOTE_FAILED", tc.name, err, reason)
 		}
-		//: the json package names itself in the message.
-		if !strings.Contains(err.Error(), "json") {
-			t.Errorf("%s: err=%q does not look like an encoding/json failure", tc.name, err)
+		//: the json error is still the cause.
+		if _, isJSON := errors.AsType[*stdjson.UnsupportedTypeError](err); !isJSON {
+			t.Errorf("%s: err=%v lost its encoding/json cause", tc.name, err)
+		}
+		//: Private names the format and the step.
+		if priv := kerrs.PrivateOf(err); !strings.Contains(priv, "encoding/json") || !strings.Contains(priv, string(tc.format)) {
+			t.Errorf("%s: Private=%q names neither the step nor the format", tc.name, priv)
 		}
 	}
 	for _, tc := range tests {

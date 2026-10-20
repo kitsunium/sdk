@@ -73,6 +73,7 @@ go_test(
         "table_internal_test.go",
         "trash_external_test.go",
         "trash_persist_external_test.go",
+        "utf8_external_test.go",
         "version_external_test.go",
         "version_persist_external_test.go",
         "weight_external_test.go",

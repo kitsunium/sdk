@@ -28,7 +28,7 @@ sequences:
           do:
             - return: promoteMarshal(f, c, v)
               to: promoteMarshal
-          when: err != nil && hasPromotionStrategy(f) && isValueShapeMismatch(err)
+          when: err != nil && hasPromotionStrategy(f) && isValueShapeMismatch(f, err)
       - return: encoded, err
   - of: Unmarshal
     participants:
@@ -60,7 +60,7 @@ sequences:
           do:
             - return: promoteUnmarshal(f, c, data, v)
               to: promoteUnmarshal
-          when: uErr != nil && hasPromotionStrategy(f) && isValueShapeMismatch(uErr)
+          when: uErr != nil && hasPromotionStrategy(f) && isValueShapeMismatch(f, uErr)
       - return: uErr
   - of: MarshalMany
     participants:
@@ -126,7 +126,7 @@ sequences:
           do:
             - return: promoteMarshal(f, c, v)
               to: promoteMarshal
-          when: err != nil && hasPromotionStrategy(f) && isValueShapeMismatch(err)
+          when: err != nil && hasPromotionStrategy(f) && isValueShapeMismatch(f, err)
       - return: encoded, err
   - of: NewEncoder
     participants:
@@ -458,7 +458,7 @@ sequences:
         to: stdjson
       - opt:
           do:
-            - return: nil, jerr
+            - return: nil, promoteJSONFailed(f, jerr, "encoding/json refused the value")
           when: jerr != nil
       - bind: container, werr
         eval: wrapForFormat(f, inner)
@@ -483,6 +483,8 @@ sequences:
         kind: value
       - id: stdjson
         kind: stdlib
+      - id: promoteJSONFailed
+        kind: internal
     steps:
       - bind: containerPtr, extract, perr
         eval: containerForFormat(f)
@@ -508,8 +510,16 @@ sequences:
             - return: cmp.Or(eerr)
               to: cmp
           when: eerr != nil
-      - return: stdjson.Unmarshal(inner, v)
-        to: stdjson
+      - opt:
+          do:
+            - return: promoteJSONFailed(f, jerr, "encoding/json could not decode the payload into the target")
+              to: promoteJSONFailed
+          init:
+            bind: jerr
+            eval: stdjson.Unmarshal(inner, v)
+            to: stdjson
+          when: jerr != nil
+      - return: nil
   - of: wrapForFormat
     participants:
       - id: caller
@@ -598,6 +608,10 @@ sequences:
                   do:
                     - return: nil, promoteContainerFailed("empty ndjson promotion container")
                   when: len(*rows) == 0
+              - opt:
+                  do:
+                    - return: nil, promoteContainerFailed("ndjson promotion container holds more than one record")
+                  when: len(*rows) != 1
               - return: (*rows)[0], nil
   - of: extractCSV
     steps:
@@ -675,6 +689,23 @@ sequences:
           		Private: "pkg/v1/data/codec: " + detail + " for format " + string(f),
           	})
         to: kerrs
+  - of: promoteJSONFailed
+    participants:
+      - id: caller
+        kind: actor
+      - id: promoteJSONFailed
+        kind: self
+      - id: kerrs
+        kind: package
+    steps:
+      - return: |-
+          kerrs.Wrap(cause, kerrs.WrapParams{
+          		Code:    CodePromoteFailed,
+          		Reason:  "PROMOTE_FAILED",
+          		Public:  "codec promotion failed",
+          		Private: "pkg/v1/data/codec: " + detail + " for format " + string(f),
+          	})
+        to: kerrs
   - of: promoteContainerFailed
     participants:
       - id: caller
@@ -725,8 +756,11 @@ sequences:
           when: "!ok"
       - switch:
           cases:
-            - case: "\"VALUE_INVALID\", \"FLATBUFFERS_BAD_TYPE\", \"FLATBUFFERS_BAD_TARGET\", \"UNMARSHAL_FAILED\""
+            - case: "\"VALUE_INVALID\", \"FLATBUFFERS_BAD_TYPE\", \"FLATBUFFERS_BAD_TARGET\""
               do:
                 - return: "true"
+            - case: "\"UNMARSHAL_FAILED\""
+              do:
+                - return: f != NDJSON
           "on": reason
       - return: "false"
