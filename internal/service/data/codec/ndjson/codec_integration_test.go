@@ -69,11 +69,17 @@ func TestAllocBudget(t *testing.T) {
 	//:             to box. Below the go1.26 figure, and identical on go1.26.8
 	//:             and go1.27.0, so these two numbers no longer move with the
 	//:             toolchain.
+	//:   now       marshal 3  append 3   (0 allocs per record) — one
+	//:             json.Encoder for the whole batch writes every record
+	//:             straight into the output buffer and reuses its scratch,
+	//:             where a json.Marshal per record returned a fresh slice only
+	//:             to copy it. What is left is per call: the encoder and its
+	//:             state, and Marshal's detached copy or Append's buffer header.
 	//: Unmarshal is untouched by all of the above (measures 5, ceiling 17).
 	tests := []tc{
-		{"marshal", 6, func() { allocSink = mustMarshal(t, c, recs) }},
+		{"marshal", 3, func() { allocSink = mustMarshal(t, c, recs) }},
 		{"unmarshal", 17, func() { allocSink = mustUnmarshal(t, c, seed) }},
-		{"append", 5, func() { allocSink = mustAppend(t, appender, appendDst[:0], recs) }},
+		{"append", 3, func() { allocSink = mustAppend(t, appender, appendDst[:0], recs) }},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -105,10 +111,12 @@ func TestAllocBudget(t *testing.T) {
 // interface is not addressable, so json/v2's reflect.New copy is unavoidable
 // there). Only a shape-varied table shows that.
 //
-// Per-record figures on go1.27.0, before -> after elemForMarshal:
+// Per-record figures on go1.27.0, before elemForMarshal -> after it -> after
+// one json.Encoder per batch (each record encoded straight into the output,
+// not into a fresh slice of its own):
 //
-//	plain []T      3 -> 1      nested []T   3 -> 1      []string  3 -> 1
-//	[]*T           1 -> 1      []any        2 -> 2
+//	plain []T      3 -> 1 -> 0      nested []T   3 -> 1 -> 0      []string  3 -> 1 -> 0
+//	[]*T           1 -> 1 -> 0      []any        2 -> 2 -> 1
 func TestAllocPerRecord(t *testing.T) {
 	c := ndjson.New()
 	appender, ok := c.(corecodec.Appender)
@@ -125,14 +133,14 @@ func TestAllocPerRecord(t *testing.T) {
 		mk   func(n int) any
 	}
 	tests := []tc{
-		{"plain struct", 1, allocBatchPlain},
-		{"nested + unicode", 1, allocBatchNested},
-		{"strings needing escapes", 1, allocBatchStrings},
-		{"slice of pointers", 1, allocBatchPointers},
+		{"plain struct", 0, allocBatchPlain},
+		{"nested + unicode", 0, allocBatchNested},
+		{"strings needing escapes", 0, allocBatchStrings},
+		{"slice of pointers", 0, allocBatchPointers},
 		//: interface elements keep json/v2's reflect.New copy — see the doc
-		//: comment. Pinned at its measured value so a THIRD allocation would
+		//: comment. Pinned at its measured value so a SECOND allocation would
 		//: still trip the gate.
-		{"interface elements", 2, allocBatchAny},
+		{"interface elements", 1, allocBatchAny},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
