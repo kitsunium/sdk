@@ -85,6 +85,9 @@ GATES=(
   # docs/api, and every link resolves — the `docs-site` job, a sibling of the
   # required ones.
   docs-check
+  # The behaviour models held to the code by the pinned kit — the `models`
+  # job, a sibling of the required ones (kitsunium/studio ADR 0013).
+  models-check
 )
 
 # The job branch protection requires, by its check name. Measured with
@@ -99,6 +102,11 @@ ADVISORY=(
   # the code inside the required job; the deploy runs the same check over every
   # release before it publishes.
   docs-check
+  # models: kit lives in a private repository, installed with the secret
+  # KIT_READ_TOKEN; without it the job warns and passes, and a step a missing
+  # secret can skip is not a gate (#236's rule for lint-ktn-check). `kit
+  # check`'s behaviour rule holds the same models locally.
+  models-check
 )
 
 # Guards that `make lint` runs AND the `bazel` job invokes as a direct

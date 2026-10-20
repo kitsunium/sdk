@@ -34,10 +34,11 @@ What each piece does on a `merge_group` run (there is no `github.event.pull_requ
 
 ## bazel-ci.yml (the SDK lane)
 
-Six jobs: `bazel` (the gate), `shell-gates` (the checks that need neither Bazel
+Seven jobs: `bazel` (the gate), `shell-gates` (the checks that need neither Bazel
 nor Go), `lint-ktn` (ktn-linter, the one job holding an id-token), `cross-build` (every module COMPILES, tests included, on every supported GOOS/GOARCH),
-`test-386` (the 32-bit RUNTIME) and `docs-site` (the docs portal, held to
-`docs/api`). The last two run raw `go` rather than
+`test-386` (the 32-bit RUNTIME), `docs-site` (the docs portal, held to
+`docs/api`) and `models` (the behaviour models, held to the code by the
+pinned kit). The last two run raw `go` rather than
 Bazel, for the reason stated under Do NOT below: Bazel here builds for the host
 only, so a platform it cannot reach is covered by the toolchain that can, or by
 nothing.
@@ -119,8 +120,8 @@ gates block a merge.
 5. **Pre-commit guard regression** — `make pre-commit-check`.
 
 These four, plus `make test-framework`, `make lint-check`, `make vuln-install`,
-`make vuln-check` in the `bazel` job, `make lint-ktn-check` in the `lint-ktn` job and `make docs-check` in the
-`docs-site` job, are the only `make` invocations in this workflow, and that is deliberate:
+`make vuln-check` in the `bazel` job, `make lint-ktn-check` in the `lint-ktn` job, `make docs-check` in the
+`docs-site` job and `make models-check` in the `models` job, are the only `make` invocations in this workflow, and that is deliberate:
 `ci-gates-check` asserts the Makefile↔CI link by target NAME, which only works
 if CI goes through the target. The two lint targets are not in THIS job because
 they need a Go toolchain, and ktn-linter an installed, licensed binary — the
@@ -189,6 +190,22 @@ base, fragments included (`check-links.mjs`). `make api-check`, in the `bazel`
 job, holds `docs/api` to the code; this job holds the portal to `docs/api`. A
 sibling of the required jobs, so it reports without blocking; the deploy runs
 the same check over every release before it publishes.
+
+### models (the behaviour models, held to the code)
+
+`ubuntu-latest`, timeout 20 min, `GOPRIVATE=github.com/kitsunium/studio`.
+It installs kit at the version `design/sdk.yaml` pins (`kit_pin`,
+`scripts/kit-pinned.sh`) with `go install
+github.com/kitsunium/studio/cmd/kit@<pin>`, reading kitsunium/studio, which
+is private, through the repository secret `KIT_READ_TOKEN`. It then runs
+`make models-check`: the pinned kit's `kit design derive -check`, which fails
+on a model of `design/behaviour` that is missing, is not what the current code
+derives, or is left over — a body changed without `make models`
+(kitsunium/studio ADR 0013). Without the secret (a fork's or Dependabot's pull
+request, or the secret not set) the job warns and passes, the models NOT
+checked. A step a missing secret can skip is not a gate, so no required job
+needs it: `models-check` is in `scripts/ci-gates-check.sh`'s GATES and
+ADVISORY, reported, never blocking.
 
 ## Test matrix (rule 12)
 

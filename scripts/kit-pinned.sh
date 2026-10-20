@@ -3,6 +3,8 @@
 # scripts/from-zero.sh, scripts/kit-coverage.sh and scripts/models.sh share
 # (ADR 0169), so the four decide alike. The caller is at the repository root.
 #
+#   - `kit_pin` prints the version design/sdk.yaml pins (project.kit.version),
+#     empty when it pins none — what CI's `models` job installs;
 #   - `kit_pinned NAME` refuses, naming NAME, unless `kit` on PATH is the
 #     version design/sdk.yaml pins (project.kit.version), and sets KIT_PINNED
 #     to it;
@@ -15,15 +17,19 @@
 #
 # Runs under macOS's /bin/bash 3.2 and the BSD tools (scripts/CLAUDE.md).
 
-kit_pinned() {
-  local name="$1" want have
-  want="$(awk '
+kit_pin() {
+  awk '
     /^project:/ { p = 1; next }
     p && /^[^ #]/ { p = 0 }
     p && /^  kit:/ { k = 1; next }
     k && /^  [^ #]/ { k = 0 }
     k && /^    version:/ { print $2; exit }
-  ' design/sdk.yaml)"
+  ' design/sdk.yaml
+}
+
+kit_pinned() {
+  local name="$1" want have
+  want="$(kit_pin)"
   if [ -z "$want" ]; then
     printf '%s: design/sdk.yaml pins no kit (project.kit.version)\n' "$name" >&2
     return 1
